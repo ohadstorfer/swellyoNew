@@ -16,9 +16,12 @@ const C = {
 };
 
 // Deck card geometry — mirrors the constants in TripsScreen's TripDeck so the
-// Explore skeleton lands on the same footprint as the real carousel.
+// Explore skeleton lands on the exact same footprint as the real carousel (same
+// card width/height → no size or position jump when loading → loaded).
 const SCREEN_W = Dimensions.get('window').width;
-const DECK_CARD_W = Math.min(330, SCREEN_W - 64);
+const DECK_GAP = 28;
+const DECK_PEEK = 12;
+const DECK_CARD_W = Math.min(366, SCREEN_W - 2 * (DECK_GAP + DECK_PEEK));
 const DECK_CARD_H = Math.round((DECK_CARD_W * 384) / 328);
 
 // ---------------------------------------------------------------------------
@@ -27,8 +30,9 @@ const DECK_CARD_H = Math.round((DECK_CARD_W * 384) / 328);
 export const TripCardSkeleton: React.FC = () => (
   <View style={styles.card}>
     {/* Photo block (shimmering) with the card's overlaid content as light
-        silhouettes — host row (top-left), title/desc (bottom-left), participant
-        avatar (bottom-right) — mirroring the real TripCard. */}
+        silhouettes — host row (top-left), title/location (bottom-left),
+        participant cluster pill (bottom-right) — mirroring the real TripCard's
+        exact element sizes and positions so loading → loaded never shifts. */}
     <View style={styles.cardImage}>
       <SkeletonBase
         width="100%"
@@ -36,22 +40,30 @@ export const TripCardSkeleton: React.FC = () => (
         borderRadius={24}
         style={StyleSheet.absoluteFill as any}
       />
+      {/* Host row (top-left) — 52px avatar + name, inset 16 (mirrors hostRow) */}
       <View style={styles.ovHostRow}>
         <View style={styles.ovHostAvatar} />
         <View style={styles.ovHostName} />
       </View>
+      {/* Title (25/34) + location (15/20), 24px above the image bottom */}
       <View style={styles.ovTextBlock}>
         <View style={styles.ovTitle} />
         <View style={styles.ovDesc} />
       </View>
-      <View style={styles.ovParticipant} />
+      {/* Participant cluster pill (bottom-right) — two 40px avatars + count */}
+      <View style={styles.ovCluster}>
+        <View style={styles.ovClusterAvatar} />
+        <View style={[styles.ovClusterAvatar, styles.ovClusterAvatarOverlap]} />
+        <View style={styles.ovClusterCount} />
+      </View>
     </View>
-    {/* Status badge row: round icon + two stacked bars */}
+    {/* Status badge: white icon circle + label (left) / date (right) on ONE row,
+        inside a rounded pill — same footprint as the real colored statusBadge. */}
     <View style={styles.badgeRow}>
-      <SkeletonBase width={38} height={38} borderRadius={19} />
-      <View style={styles.badgeText}>
-        <SkeletonBase width={90} height={12} borderRadius={6} />
-        <SkeletonBase width={130} height={12} borderRadius={6} style={{ marginTop: 6 }} />
+      <View style={styles.badgeIcon} />
+      <View style={styles.badgeTextRow}>
+        <SkeletonBase width={64} height={13} borderRadius={6} />
+        <SkeletonBase width={96} height={13} borderRadius={6} />
       </View>
     </View>
   </View>
@@ -59,12 +71,13 @@ export const TripCardSkeleton: React.FC = () => (
 
 export const MyTripsSkeleton: React.FC<{ count?: number }> = ({ count = 3 }) => (
   <View style={styles.myTripsRoot}>
-    {/* Filter pills */}
+    {/* Filter pills — same row layout as TripFilterBar (space-between, 44px tall,
+        marginHorizontal 6) so the chips land exactly where the real ones do. */}
     <View style={styles.filterRow}>
-      <SkeletonBase width={48} height={34} borderRadius={12} />
-      <SkeletonBase width={96} height={34} borderRadius={12} />
-      <SkeletonBase width={104} height={34} borderRadius={12} />
-      <SkeletonBase width={100} height={34} borderRadius={12} />
+      <SkeletonBase width={44} height={44} borderRadius={12} />
+      <SkeletonBase width={96} height={44} borderRadius={12} />
+      <SkeletonBase width={100} height={44} borderRadius={12} />
+      <SkeletonBase width={96} height={44} borderRadius={12} />
     </View>
     {Array.from({ length: count }).map((_, i) => (
       <TripCardSkeleton key={i} />
@@ -75,9 +88,9 @@ export const MyTripsSkeleton: React.FC<{ count?: number }> = ({ count = 3 }) => 
 // ---------------------------------------------------------------------------
 // Explore — a single centered card (the focused card of the swipe deck).
 // ---------------------------------------------------------------------------
-// Center card — mirrors every element of the real ExploreTripCard: host row,
-// trip-type pill, bottom gradient, title (2 lines), location, price + dates,
-// spots-left and the participant cluster pill.
+// Center card — mirrors the real ExploreTripCard: host row, bottom gradient,
+// title (2 lines), location, price + dates, spots-left and the participant
+// cluster pill. (The trip-type pill is intentionally omitted from the skeleton.)
 const ExploreCardSkeleton: React.FC = () => (
   <View style={styles.deckCard}>
     <View style={styles.exPhoto}>
@@ -87,12 +100,6 @@ const ExploreCardSkeleton: React.FC = () => (
       <View style={styles.exHostRow}>
         <View style={styles.exHostAvatar} />
         <View style={styles.exHostName} />
-      </View>
-
-      {/* Trip-type pill (top-right) — white pill with icon + label silhouettes */}
-      <View style={styles.exTypePill}>
-        <View style={styles.exTypeIcon} />
-        <View style={styles.exTypeLabel} />
       </View>
 
       {/* Bottom gradient so the white silhouettes read on the photo */}
@@ -126,8 +133,12 @@ const ExploreCardSkeleton: React.FC = () => (
   </View>
 );
 
+// Explore loading state — ONLY the swipe-deck card is a skeleton (it's the real
+// data). The title, filter chips and "Popular" heading are static and render
+// immediately from TripsScreen, so we don't fake them here. The card lands on
+// the same footprint as the real centered card → no jump when data arrives.
 export const ExploreDeckSkeleton: React.FC = () => (
-  <View style={styles.deckRoot}>
+  <View style={styles.deckRegion}>
     <ExploreCardSkeleton />
   </View>
 );
@@ -172,16 +183,19 @@ export const TripDetailSkeleton: React.FC = () => (
 );
 
 const styles = StyleSheet.create({
-  // My Trips
+  // My Trips — mirrors listContent (paddingHorizontal 16) so cards align with the
+  // real ones; the filter row owns the top gap via marginTop (real list has none).
   myTripsRoot: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingTop: 8,
   },
+  // Matches the real TripFilterBar's filterRow exactly.
   filterRow: {
     flexDirection: 'row',
-    gap: 11,
-    paddingBottom: 12,
+    justifyContent: 'space-between',
+    marginTop: 22,
+    marginBottom: 28,
+    marginHorizontal: 6,
     alignItems: 'center',
   },
   card: {
@@ -204,7 +218,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#E4E4E4',
     position: 'relative',
   },
-  // Overlaid content silhouettes (light patches on the gray photo).
+  // Overlaid content silhouettes (light patches on the gray photo) — each mirrors
+  // the real TripCard element's size and position.
+  // hostRow: padding 16 → top/left 16; gap 10; avatar 52 (hostAvatar).
   ovHostRow: {
     position: 'absolute',
     top: 16,
@@ -214,61 +230,97 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   ovHostAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: 'rgba(255,255,255,0.75)',
   },
   ovHostName: {
-    width: 64,
-    height: 12,
-    borderRadius: 6,
+    width: 72,
+    height: 14,
+    borderRadius: 7,
     backgroundColor: 'rgba(255,255,255,0.65)',
   },
+  // cardTextContent: paddingLeft 16, paddingBottom 24, gap 4.
   ovTextBlock: {
     position: 'absolute',
     left: 16,
-    bottom: 16,
+    bottom: 24,
   },
   ovTitle: {
-    width: 120,
-    height: 18,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.75)',
+    width: 160,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.8)',
   },
   ovDesc: {
-    marginTop: 8,
-    width: 180,
+    marginTop: 4,
+    width: 150,
+    height: 14,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.6)',
+  },
+  // avatarCluster: right 12, bottom 14; clusterAvatar 40, overlap -20; pill bg.
+  ovCluster: {
+    position: 'absolute',
+    right: 12,
+    bottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F7F7',
+    borderRadius: 56,
+    paddingVertical: 0,
+    paddingLeft: 0,
+    paddingRight: 7,
+  },
+  ovClusterAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#DDDDDD',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  ovClusterAvatarOverlap: {
+    marginLeft: -20,
+  },
+  ovClusterCount: {
+    width: 16,
     height: 10,
     borderRadius: 5,
-    backgroundColor: 'rgba(255,255,255,0.55)',
+    marginLeft: 1,
+    backgroundColor: '#CFCFCF',
   },
-  ovParticipant: {
-    position: 'absolute',
-    right: 16,
-    bottom: 16,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-  },
+  // statusBadge: gap 8, paddingH 8, paddingV 7, borderRadius 32; icon 38 white;
+  // statusTextRow: flex 1, space-between, paddingRight 8 (label left / date right).
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 8,
     paddingVertical: 7,
+    borderRadius: 32,
+    backgroundColor: '#EFEFEF',
   },
-  badgeText: {
+  badgeIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FFFFFF',
+  },
+  badgeTextRow: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: 8,
   },
 
-  // Explore deck
-  deckRoot: {
-    flex: 1,
+  // Explore deck region — same height as the real carousel (deckRoot), card
+  // centered horizontally like the focused card.
+  deckRegion: {
+    height: DECK_CARD_H + 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
   },
   deckCard: {
     width: DECK_CARD_W,
@@ -302,30 +354,6 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: 'rgba(255,255,255,0.7)',
-  },
-  exTypePill: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  exTypeIcon: {
-    width: 14,
-    height: 14,
-    borderRadius: 4,
-    backgroundColor: '#D8D8D8',
-  },
-  exTypeLabel: {
-    width: 72,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#D8D8D8',
   },
   exGradient: {
     position: 'absolute',

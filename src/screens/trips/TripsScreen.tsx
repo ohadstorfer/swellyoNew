@@ -816,11 +816,8 @@ const ExploreTripsView: React.FC<{
     [trips, chips, selected],
   );
 
-  if (isLoading) {
-    return <ExploreDeckSkeleton />;
-  }
-
-  if (trips.length === 0) {
+  // Empty only once we actually know there are no trips (not while loading).
+  if (trips.length === 0 && !isLoading) {
     return (
       <FadeInView style={styles.emptyState}>
         <Ionicons name="compass-outline" size={48} color="#B0B0B0" />
@@ -829,8 +826,10 @@ const ExploreTripsView: React.FC<{
     );
   }
 
-  // Vertical scroll of horizontal swipe-deck carousels. "Popular" shows the
-  // filtered set; "Trip Operators" narrows that to operator-run trips (style 'C').
+  // The title, filter chips and "Popular" heading are static (chips come from the
+  // device clock, not the DB) → render them immediately. Only the swipe-deck card
+  // shows a skeleton while trips load. "Trip Operators" narrows to operator-run
+  // trips (style 'C').
   const operatorTrips = filtered.filter(t => t.hosting_style === 'C');
   return (
     <FadeInView style={styles.fillFlex}>
@@ -847,7 +846,12 @@ const ExploreTripsView: React.FC<{
           onToggle={toggleChip}
           onClear={clearChips}
         />
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <>
+            <Text style={styles.exSectionTitle}>Popular</Text>
+            <ExploreDeckSkeleton />
+          </>
+        ) : filtered.length === 0 ? (
           <View style={styles.filterEmpty}>
             <Text style={styles.emptyText}>No trips match these filters.</Text>
           </View>
