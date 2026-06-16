@@ -1,17 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal,
   View,
   TouchableOpacity,
   TextInput,
   ScrollView,
   StyleSheet,
   Platform,
-  Animated,
-  TouchableWithoutFeedback,
   Dimensions,
   ActivityIndicator,
-  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
@@ -19,6 +15,7 @@ import { colors, spacing } from '../styles/theme';
 import { InlineMapView } from './MapPickerModal';
 import { useDebounce } from '../hooks/useDebounce';
 import { getPlacesDestinationRegionCode } from '../utils/placesDestinationRegionCode';
+import { BottomSheetShell } from './BottomSheetShell';
 
 const PLACES_AUTOCOMPLETE_URL = 'https://places.googleapis.com/v1/places:autocomplete';
 const PLACE_DETAILS_URL = 'https://places.googleapis.com/v1/places';
@@ -163,42 +160,12 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
   const [loading, setLoading] = useState(false);
   const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(visible);
   const [pending, setPending] = useState<HomeBreakSelection | null>(null);
 
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const sheetAnim = useRef(new Animated.Value(0)).current;
   const sessionTokenRef = useRef<string>(generateSessionToken());
   const requestSeqRef = useRef(0);
   const isMountedRef = useRef(true);
   const searchInputRef = useRef<TextInput>(null);
-
-  // Swipe-down to dismiss
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) {
-          sheetAnim.setValue(Math.max(0, 1 - gs.dy / SHEET_HEIGHT));
-        }
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > 100 || gs.vy > 0.5) {
-          onCloseRef.current();
-        } else {
-          Animated.spring(sheetAnim, {
-            toValue: 1,
-            tension: 65,
-            friction: 11,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    }),
-  ).current;
 
   const debouncedQuery = useDebounce(query, DEBOUNCE_MS);
 
@@ -209,24 +176,14 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
 
   useEffect(() => {
     if (visible) {
-      setMounted(true);
       setQuery('');
       setSuggestions([]);
       setError(null);
       setPending(null);
       sessionTokenRef.current = generateSessionToken();
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
-      ]).start();
       // Pop the keyboard so the user can start typing immediately. Delayed so
-      // the modal has presented and the input is mounted before we focus.
+      // the sheet has presented and the input is mounted before we focus.
       setTimeout(() => searchInputRef.current?.focus(), 250);
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -356,27 +313,22 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
     setTimeout(() => searchInputRef.current?.focus(), 50);
   };
 
-  if (!mounted) return null;
-
-  const sheetTranslate = sheetAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [SHEET_HEIGHT, 0],
-  });
-
   const previewHtml =
     pending && apiKey && pending.lat != null && pending.lng != null
       ? getPreviewMapHtml(apiKey, pending.lat, pending.lng, pending.name)
       : null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <View style={styles.container}>
-        <TouchableWithoutFeedback onPress={onClose}>
-          <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} />
-        </TouchableWithoutFeedback>
-        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslate }] }]}>
+    <BottomSheetShell
+      visible={visible}
+      onClose={onClose}
+      avoidKeyboard
+      backdropColor="rgba(0, 0, 0, 0.5)"
+    >
+      {({ panHandlers }) => (
+        <View style={styles.sheet}>
           {/* Drag area — swipe down on the handle/header to dismiss */}
-          <View {...pan.panHandlers}>
+          <View {...panHandlers}>
             <View style={styles.handle} />
             <View style={styles.header}>
               <Text style={styles.title}>{pending ? confirmTitle : title}</Text>
@@ -465,15 +417,13 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
               <Text style={styles.attribution}>Powered by Google</Text>
             </>
           )}
-        </Animated.View>
-      </View>
-    </Modal>
+        </View>
+      )}
+    </BottomSheetShell>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'flex-end' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.5)' },
   sheet: {
     backgroundColor: colors.white || '#FFFFFF',
     borderTopLeftRadius: 16,

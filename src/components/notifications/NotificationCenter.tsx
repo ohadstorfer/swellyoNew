@@ -34,9 +34,11 @@ import {
   declineJoinRequest,
   approveGearRequest,
   declineGearRequest,
-  approveCommitment,
-  declineCommitment,
+  listGearRequests,
+  type EnrichedGearRequest,
 } from '../../services/trips/groupTripsService';
+import { messagingService } from '../../services/messaging/messagingService';
+import { GearRequestsSheet } from '../trips/gear/GearRequestsSheet';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
@@ -65,11 +67,13 @@ const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 // iOS-like drawer curve (Ionic) — for the panel sliding in/out from the edge.
 const EASE_DRAWER = Easing.bezier(0.32, 0.72, 0, 1);
 
-// Notifications whose source row is a pending request the admin can act on.
-const ACTIONABLE_TYPES = new Set<NotificationRow['type']>([
+// Request notifications that, once resolved, swap their action controls for an
+// "Approved!/Declined" status line. Join requests carry inline buttons; gear
+// requests resolve via the suggestion sheet. Commit requests open a chat where
+// the decision is made elsewhere, so they have no resolved status here.
+const DECISION_STATUS_TYPES = new Set<NotificationRow['type']>([
   'join_request_received',
   'gear_request_received',
-  'commitment_request_received',
 ]);
 
 type Decision = 'approved' | 'declined';
@@ -154,8 +158,19 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
 
   const [items, setItems] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(false);
-  // Id of the notification whose Approve/Decline is currently in flight.
+  // Id of the notification whose Approve/Decline (or Open chat / See suggestion)
+  // is currently in flight.
   const [acting, setActing] = useState<string | null>(null);
+  // The gear request currently open in the suggestion sheet (+ the notification
+  // it came from, so we can stamp it handled after the decision).
+  const [gearSheet, setGearSheet] = useState<
+    { request: EnrichedGearRequest; notifId: string; tripId: string } | null
+  >(null);
+  // Separate visibility flag so the sheet keeps its content through the
+  // slide-out animation (we drop visibility, not the data).
+  const [gearVisible, setGearVisible] = useState(false);
+  // Gear request id whose approve/decline is in flight inside the sheet.
+  const [gearProcessing, setGearProcessing] = useState<string | null>(null);
 
   // Rows that were unread the moment the panel opened — kept highlighted for the
   // duration of this viewing even after we mark them read.
@@ -214,59 +229,154 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   // returns to it exactly as left.
   const handleRowPress = useCallback(
     (n: NotificationRow) => {
+      // Join request → tap through to the requester's profile, which surfaces
+      // its own Approve/Decline action bar at the top.
+      if (n.type === 'join_request_received' && n.actor_id) {
+        pushRootCard('ProfileCard', { userId: n.actor_id });
+        return;
+      }
       if (!onOpenTrip || !n.trip_id) return;
       onOpenTrip(n.trip_id, tripFocusForNotification(n.type, n.data));
     },
     [onOpenTrip]
   );
 
-  // ── Inline Approve / Decline for actionable requests ───────────────────────
+  // The decision just changed trip state behind react-query's back — refresh any
+  // mounted trip screens (e.g. the host acting from the bell while their own
+  // TripDetailScreen sits underneath).
+  const invalidateTrip = useCallback((tripId?: string | null) => {
+    if (!tripId) return;
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(tripId) });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
+    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+  }, []);
+
+  // Optimistically stamp a request notification handled with its outcome, so the
+  // row swaps its controls for an "Approved!/Declined" status straight away.
+  const stampHandled = useCallback((id: string, decision: Decision) => {
+    const nowIso = new Date().toISOString();
+    setItems((prev) =>
+      prev.map((r) =>
+        r.id === id ? { ...r, handled_at: nowIso, data: { ...(r.data ?? {}), decision } } : r
+      )
+    );
+  }, []);
+
+  // ── Inline Approve / Decline for a JOIN request ────────────────────────────
   const handleDecision = useCallback(
     async (n: NotificationRow, decision: Decision) => {
       if (acting || !n.entity_id) return;
       setActing(n.id);
-      const nowIso = new Date().toISOString();
-      // Optimistic: stamp handled + remember the decision for the status label.
-      setItems((prev) =>
-        prev.map((r) =>
-          r.id === n.id ? { ...r, handled_at: nowIso, data: { ...(r.data ?? {}), decision } } : r
-        )
-      );
-      const approved = decision === 'approved';
+      stampHandled(n.id, decision);
       try {
-        if (n.entity_type === 'join_request') {
-          if (approved) await approveJoinRequest(n.entity_id);
-          else await declineJoinRequest(n.entity_id);
-        } else if (n.entity_type === 'gear_request') {
-          if (approved) await approveGearRequest(n.entity_id, 1);
-          else await declineGearRequest(n.entity_id);
-        } else if (n.entity_type === 'commitment_request') {
-          if (!userId) throw new Error('You are not signed in.');
-          if (approved) await approveCommitment(n.entity_id, userId);
-          else await declineCommitment(n.entity_id, userId);
-        }
+        if (decision === 'approved') await approveJoinRequest(n.entity_id);
+        else await declineJoinRequest(n.entity_id);
         notificationsService.markHandled(n.id);
-        // The decision just changed trip state behind react-query's back —
-        // refresh any mounted trip screens (e.g. the host approving from the
-        // bell while their own TripDetailScreen sits underneath).
-        if (n.trip_id) {
-          queryClient.invalidateQueries({ queryKey: tripsKeys.detail(n.trip_id) });
-          queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(n.trip_id) });
-          queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(n.trip_id) });
-          queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(n.trip_id) });
-          queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
-        }
+        invalidateTrip(n.trip_id);
       } catch (e: any) {
         // Revert the optimistic stamp so the buttons come back.
-        setItems((prev) =>
-          prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r))
-        );
+        setItems((prev) => prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r)));
         Alert.alert('Could not complete', e?.message || 'Please try again.');
       } finally {
         setActing(null);
       }
     },
-    [acting, userId]
+    [acting, stampHandled, invalidateTrip]
+  );
+
+  // ── Commit request → open the 1:1 chat (the reason + approve/decline live
+  //    in the commitment bubble there). ───────────────────────────────────────
+  const handleOpenChat = useCallback(
+    async (n: NotificationRow) => {
+      if (acting || !n.actor_id) return;
+      setActing(n.id);
+      try {
+        const conv = await messagingService.createDirectConversation(n.actor_id, false);
+        pushRootCard('ChatCard', {
+          conversationId: conv.id,
+          otherUserId: n.actor_id,
+          otherUserName: (n.data?.actor_name as string) ?? '',
+          otherUserAvatar: (n.data?.actor_avatar_url as string) ?? null,
+          isDirect: true,
+          tripId: n.trip_id ?? undefined,
+        });
+      } catch (e: any) {
+        Alert.alert('Could not open chat', e?.message || 'Please try again.');
+      } finally {
+        setActing(null);
+      }
+    },
+    [acting]
+  );
+
+  // ── Gear request → load it and open the suggestion sheet (host can set the
+  //    quantity before approving). ─────────────────────────────────────────────
+  const handleSeeSuggestion = useCallback(
+    async (n: NotificationRow) => {
+      if (acting || !n.trip_id || !n.entity_id) return;
+      setActing(n.id);
+      try {
+        const reqs = await listGearRequests(n.trip_id, 'pending');
+        const found = reqs.find((r) => r.id === n.entity_id) ?? null;
+        if (!found) {
+          // Already resolved elsewhere (or withdrawn). Mark handled so the button
+          // clears — but don't fake a decision label we don't actually know.
+          setItems((prev) =>
+            prev.map((r) => (r.id === n.id ? { ...r, handled_at: new Date().toISOString() } : r))
+          );
+          notificationsService.markHandled(n.id);
+          Alert.alert('Already handled', 'This request was already resolved.');
+          return;
+        }
+        setGearSheet({ request: found, notifId: n.id, tripId: n.trip_id });
+        setGearVisible(true);
+      } catch (e: any) {
+        Alert.alert('Could not load request', e?.message || 'Please try again.');
+      } finally {
+        setActing(null);
+      }
+    },
+    [acting, stampHandled]
+  );
+
+  const handleGearApprove = useCallback(
+    async (request: EnrichedGearRequest, neededQty: number) => {
+      if (!gearSheet) return;
+      setGearProcessing(request.id);
+      try {
+        await approveGearRequest(request.id, neededQty);
+        stampHandled(gearSheet.notifId, 'approved');
+        notificationsService.markHandled(gearSheet.notifId);
+        invalidateTrip(gearSheet.tripId);
+        setGearVisible(false);
+      } catch (e: any) {
+        Alert.alert('Could not approve', e?.message || 'Please try again.');
+      } finally {
+        setGearProcessing(null);
+      }
+    },
+    [gearSheet, stampHandled, invalidateTrip]
+  );
+
+  const handleGearDecline = useCallback(
+    async (request: EnrichedGearRequest) => {
+      if (!gearSheet) return;
+      setGearProcessing(request.id);
+      try {
+        await declineGearRequest(request.id);
+        stampHandled(gearSheet.notifId, 'declined');
+        notificationsService.markHandled(gearSheet.notifId);
+        invalidateTrip(gearSheet.tripId);
+        setGearVisible(false);
+      } catch (e: any) {
+        Alert.alert('Could not decline', e?.message || 'Please try again.');
+      } finally {
+        setGearProcessing(null);
+      }
+    },
+    [gearSheet, stampHandled, invalidateTrip]
   );
 
   return (
@@ -313,11 +423,25 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                     acting={acting === n.id}
                     disabled={!!acting && acting !== n.id}
                     onDecision={handleDecision}
+                    onOpenChat={handleOpenChat}
+                    onSeeSuggestion={handleSeeSuggestion}
                     onPress={onOpenTrip && n.trip_id ? handleRowPress : undefined}
                   />
                 ))}
               </ScrollView>
             )}
+
+            {/* Gear suggestion review — opened from a gear_request_received row.
+                Reuses the same sheet the trip screen uses, so the host can set the
+                quantity before approving (no more hardcoded qty=1). */}
+            <GearRequestsSheet
+              visible={gearVisible}
+              requests={gearSheet ? [gearSheet.request] : []}
+              processingId={gearProcessing}
+              onClose={() => setGearVisible(false)}
+              onApprove={handleGearApprove}
+              onDecline={handleGearDecline}
+            />
     </View>
   );
 };
@@ -411,24 +535,46 @@ interface ItemProps {
   acting: boolean;
   disabled: boolean;
   onDecision: (n: NotificationRow, decision: Decision) => void;
-  /** When set, the whole row is tappable and deep-links to its trip. */
+  /** Commit request → open the 1:1 chat with the requester. */
+  onOpenChat: (n: NotificationRow) => void;
+  /** Gear request → open the suggestion review sheet. */
+  onSeeSuggestion: (n: NotificationRow) => void;
+  /** When set, the whole row is tappable (deep-links to trip, or to the
+   *  requester profile for a join request). */
   onPress?: (n: NotificationRow) => void;
 }
 
-const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, onDecision, onPress }) => {
+const NotificationItem: React.FC<ItemProps> = ({
+  n,
+  isUnread,
+  acting,
+  disabled,
+  onDecision,
+  onOpenChat,
+  onSeeSuggestion,
+  onPress,
+}) => {
   const r = renderNotification(n);
   const d = n.data ?? {};
   const initial = String(d.actor_name ?? '').trim().charAt(0).toUpperCase();
-  const isActionable = ACTIONABLE_TYPES.has(n.type) && !n.handled_at;
-  // A request notification that's been resolved shows its outcome instead of buttons.
+
+  // Per-type action controls (only while still pending).
+  const pending = !n.handled_at;
+  const isJoinAction = n.type === 'join_request_received' && pending;
+  const isCommitAction = n.type === 'commitment_request_received' && pending;
+  const isGearAction = n.type === 'gear_request_received' && pending;
+
+  // A join/gear request that's been resolved shows its outcome instead of controls.
   const resolvedDecision: Decision | null =
-    ACTIONABLE_TYPES.has(n.type) && n.handled_at
+    DECISION_STATUS_TYPES.has(n.type) && n.handled_at
       ? d.decision === 'approved'
         ? 'approved'
         : d.decision === 'declined'
         ? 'declined'
         : null
       : null;
+
+  const isJoin = n.type === 'join_request_received';
 
   return (
     <Pressable
@@ -440,7 +586,9 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
         pressed && !!onPress && styles.rowPressed,
       ]}
       accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityLabel={onPress ? `Open trip — ${r.title}` : undefined}
+      accessibilityLabel={
+        onPress ? `${isJoin ? 'Open requester profile' : 'Open trip'} — ${r.title}` : undefined
+      }
     >
       <NotificationAvatar
         actorUrl={d.actor_avatar_url}
@@ -464,7 +612,8 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
           </Text>
         )}
 
-        {isActionable && (
+        {/* Join request → inline Approve / Decline. */}
+        {isJoinAction && (
           <View style={styles.actions}>
             <Pressable
               onPress={() => onDecision(n, 'approved')}
@@ -497,6 +646,60 @@ const NotificationItem: React.FC<ItemProps> = ({ n, isUnread, acting, disabled, 
               accessibilityLabel="Decline"
             >
               <Text style={styles.declineText}>Decline</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Commit request → open the chat where the reason + approve/decline live. */}
+        {isCommitAction && (
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => onOpenChat(n)}
+              disabled={disabled || acting}
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.approveBtn,
+                pressed && styles.btnPressed,
+                (disabled || acting) && styles.btnDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Open chat"
+            >
+              {acting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <View style={styles.btnRow}>
+                  <Ionicons name="chatbubble-outline" size={16} color="#FFFFFF" />
+                  <Text style={styles.approveText}>Open chat</Text>
+                </View>
+              )}
+            </Pressable>
+          </View>
+        )}
+
+        {/* Gear request → open the suggestion sheet (host sets qty, then decides). */}
+        {isGearAction && (
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => onSeeSuggestion(n)}
+              disabled={disabled || acting}
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.declineBtn,
+                pressed && styles.btnPressed,
+                (disabled || acting) && styles.btnDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="See suggestion"
+            >
+              {acting ? (
+                <ActivityIndicator size="small" color="#333333" />
+              ) : (
+                <View style={styles.btnRow}>
+                  <Ionicons name="eye-outline" size={16} color="#333333" />
+                  <Text style={styles.declineText}>See suggestion</Text>
+                </View>
+              )}
             </Pressable>
           </View>
         )}
@@ -725,6 +928,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Icon + label inside a single-action button (Open chat / See suggestion).
+  btnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   approveBtn: {
     backgroundColor: '#212121',

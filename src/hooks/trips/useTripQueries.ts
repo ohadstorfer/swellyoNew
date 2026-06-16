@@ -9,25 +9,22 @@
  * Each hook returns { trips/buckets, meta } where meta is the batched
  * Map<tripId, TripCardMeta> (2 queries for the whole list, same as before).
  */
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import {
   GroupTrip,
   MyTripsBuckets,
   TripCardMeta,
+  ExploreFeedRow,
   getTripCardMeta,
-  listExploreTrips,
   listMyTripsByBucket,
+  exploreFeed,
 } from '../../services/trips/groupTripsService';
 
 /** Query-key factory — keep keys in one place so invalidation can't drift. */
 export const tripsKeys = {
   all: ['trips'] as const,
   explore: ['trips', 'explore'] as const,
-  // Nested UNDER explore so any invalidateQueries({ queryKey: tripsKeys.explore })
-  // (realtime, post-edit, etc.) also invalidates the meta query — no extra call
-  // sites to keep in sync. Parameterised by trip ids so it auto-refetches when
-  // the trip set changes.
-  exploreMeta: (ids: string[]) => ['trips', 'explore', 'meta', ids.join(',')] as const,
   my: (userId: string) => ['trips', 'my', userId] as const,
   detail: (id: string) => ['trips', 'detail', id] as const,
   detailUpdates: (id: string) => ['trips', 'detail-updates', id] as const,
@@ -38,32 +35,57 @@ export const tripsKeys = {
 
 export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };
 
-const EMPTY_TRIPS: GroupTrip[] = [];
+const EXPLORE_PAGE_LIMIT = 10;
 const EMPTY_META: Map<string, TripCardMeta> = new Map();
 
 /**
- * Explore deck. Split into two queries so the deck paints from the trips query
- * alone (1 round-trip); avatars/host names load via the nested meta query and
- * fill in progressively. `isLoading` gates the skeleton on TRIPS only.
+ * Explore deck: one `explore_feed` RPC per page via useInfiniteQuery. Host name/
+ * avatar/count come in each row (no separate meta query → no avatar pop-in).
+ * Freshness comes from realtime invalidation, so we disable refetch-on-mount/
+ * focus (avoids refetching all loaded pages when returning to the screen).
  */
 export function useExploreTrips() {
-  const tripsQuery = useQuery<GroupTrip[]>({
+  const q = useInfiniteQuery({
     queryKey: tripsKeys.explore,
-    queryFn: () => listExploreTrips(),
+    queryFn: ({ pageParam, signal }) =>
+      exploreFeed(EXPLORE_PAGE_LIMIT + 1, pageParam?.created_at ?? null, pageParam?.id ?? null, signal),
+    initialPageParam: null as { created_at: string; id: string } | null,
+    getNextPageParam: (last: ExploreFeedRow[]) =>
+      last.length > EXPLORE_PAGE_LIMIT
+        ? { created_at: last[EXPLORE_PAGE_LIMIT - 1].created_at, id: last[EXPLORE_PAGE_LIMIT - 1].id }
+        : undefined,
+    maxPages: 10,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
-  const trips = tripsQuery.data ?? EMPTY_TRIPS;
 
-  const metaQuery = useQuery<Map<string, TripCardMeta>>({
-    queryKey: tripsKeys.exploreMeta(trips.map(t => t.id)),
-    enabled: trips.length > 0,
-    queryFn: () => getTripCardMeta(trips),
-  });
+  const trips = useMemo(
+    () => q.data?.pages.flatMap(p => p.slice(0, EXPLORE_PAGE_LIMIT)) ?? [],
+    [q.data],
+  );
+  const meta = useMemo(() => {
+    if (trips.length === 0) return EMPTY_META;
+    const m = new Map<string, TripCardMeta>();
+    for (const t of trips) {
+      m.set(t.id, {
+        hostName: t.host_name ?? null,
+        hostAvatar: t.host_avatar ?? null,
+        memberAvatars: [],
+        totalCount: t.participant_count ?? 0,
+      });
+    }
+    return m;
+  }, [trips]);
 
   return {
-    trips,
-    meta: metaQuery.data ?? EMPTY_META,
-    isLoading: tripsQuery.isLoading,
-    isMetaLoading: metaQuery.isLoading,
+    trips, meta,
+    isLoading: q.isLoading,
+    isError: q.isError,
+    refetch: q.refetch,
+    isRefetching: q.isRefetching,
+    hasNextPage: q.hasNextPage,
+    fetchNextPage: q.fetchNextPage,
+    isFetchingNextPage: q.isFetchingNextPage,
   };
 }
 

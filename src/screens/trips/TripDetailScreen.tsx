@@ -89,6 +89,7 @@ import type { TripDetailFocus } from '../../services/notifications/notifications
 import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
+import { ReportTripSheet } from '../../components/ReportTripSheet';
 import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
@@ -353,6 +354,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const trip = coreQuery.data?.trip ?? null;
   const participants = coreQuery.data?.participants ?? [];
   const myRequest = coreQuery.data?.myRequest ?? null;
+
+  // Discreet "report this whole trip" flow — available to members and non-members alike.
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
   // placeholderData seeds the trip from the list cache with participants: []
   // and myRequest: null, so until the real fetch lands we DON'T know whether
   // the viewer is a member. Member-dependent chrome (join CTA, deep-link
@@ -730,7 +734,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               await cancelTrip(tripId);
               queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
                 tripsKeys.detail(tripId),
-                prev => (prev ? { ...prev, trip: { ...prev.trip, status: 'cancelled' } } : prev)
+                prev => (prev && prev.trip ? { ...prev, trip: { ...prev.trip, status: 'cancelled' } } : prev)
               );
               queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
               queryClient.invalidateQueries({ queryKey: tripsKeys.explore });
@@ -760,7 +764,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               await completeTrip(tripId);
               queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
                 tripsKeys.detail(tripId),
-                prev => (prev ? { ...prev, trip: { ...prev.trip, status: 'completed' } } : prev)
+                prev => (prev && prev.trip ? { ...prev, trip: { ...prev.trip, status: 'completed' } } : prev)
               );
               queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
               setActiveTab('overview');
@@ -813,7 +817,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const patchTripCache = (patch: Partial<GroupTrip>) => {
     queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
       tripsKeys.detail(tripId),
-      prev => (prev ? { ...prev, trip: { ...prev.trip, ...patch } } : prev)
+      prev => (prev && prev.trip ? { ...prev, trip: { ...prev.trip, ...patch } } : prev)
     );
     queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
   };
@@ -1207,13 +1211,25 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     );
   }
 
-  if (!trip) {
+  // Once the core query has actually resolved (not loading, not placeholder-seeded)
+  // and trip is still null, the trip was deleted/not found — show a minimal fallback.
+  if (!trip && !coreQuery.isLoading && !coreQuery.isPlaceholderData) {
     return (
       <SafeAreaView style={styles.root} edges={['top']}>
         <Header onBack={onBack} />
         <View style={styles.centered}>
-          <Text style={styles.errorText}>Trip not found.</Text>
+          <Text style={styles.errorText}>This trip is no longer available.</Text>
         </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Still in-flight but trip is null (no placeholder seed available) — show skeleton.
+  if (!trip) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <Header onBack={onBack} />
+        <TripDetailSkeleton />
       </SafeAreaView>
     );
   }
@@ -1613,6 +1629,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
         </View>
 
+        {/* Discreet report entry — small faint link, available to everyone
+            (members and non-members). Intentionally low-prominence. */}
+        <TouchableOpacity
+          onPress={() => setReportSheetVisible(true)}
+          activeOpacity={0.6}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.reportTripLink}
+        >
+          <Text style={styles.reportTripLinkText}>Report this trip</Text>
+        </TouchableOpacity>
+
         {/* Clearance for the floating sticky footer (Trip Chat / Join a Trip)
             so the last content isn't hidden behind it; smaller otherwise. */}
         <View style={{ height: hasStickyFooter ? insets.bottom + 96 : 40 }} />
@@ -1862,6 +1889,16 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onClose={() => setEditSheet(null)}
         onSave={handleSaveAccommodation}
       />
+
+      {/* Report this whole trip */}
+      <ReportTripSheet
+        visible={reportSheetVisible}
+        tripId={tripId}
+        tripTitle={trip.title ?? ''}
+        hostId={trip.host_id}
+        hostName={participants.find(p => p.role === 'host')?.name ?? ''}
+        onClose={() => setReportSheetVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -2051,6 +2088,17 @@ const styles = StyleSheet.create({
   },
   actionBtn: { flex: 1, alignItems: 'center' },
   actionBtnDisabled: { opacity: 0.5 },
+  reportTripLink: {
+    alignSelf: 'center',
+    marginTop: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  reportTripLinkText: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    color: '#B0B0B0',
+  },
   actionIconCircle: {
     width: 48,
     height: 48,

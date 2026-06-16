@@ -61,7 +61,8 @@ import { useChatKeyboardScroll } from '../hooks/useChatKeyboardScroll';
 import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { logEventThrottled } from '../services/analytics/eventLogger';
-import { ReportUserScreen } from './ReportUserScreen';
+import { ReportUserScreen, ReportedMessageContext } from './ReportUserScreen';
+import { ReportMessageSheet } from '../components/ReportMessageSheet';
 
 // WhatsApp-style read receipts for own messages.
 // - 'pending'   → no tick (upload in flight / failed; existing UI shows "Sending…" / "Tap to retry")
@@ -308,6 +309,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
   const [showReportUser, setShowReportUser] = useState(false);
+  // When reporting a specific message, target that message's sender (groups can
+  // have many senders) and carry the message details into the report flow.
+  const [reportMessageContext, setReportMessageContext] = useState<ReportedMessageContext | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
+  // Message reports use an in-chat bottom sheet (the whole-user report still uses the full ReportUserScreen).
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [showMuteModal, setShowMuteModal] = useState(false);
   // Composer (input bar) height — measured via onLayout. Passed to
   // KeyboardGestureArea's `offset` prop so the interactive-dismiss zone
@@ -2647,6 +2654,24 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     });
   }, [resolvingReplyJumpId]);
 
+  // Build the report context for a message: a stable id/type plus a
+  // human-readable snippet (text body, or a media label + storage path so a
+  // reviewer can locate the file).
+  const describeMessageForReport = (message: Message): ReportedMessageContext => {
+    const type = message.type || 'text';
+    let snippet: string | undefined;
+    if (type === 'image') {
+      snippet = `[Image]${message.image_metadata?.storage_path ? ` (${message.image_metadata.storage_path})` : ''}`;
+    } else if (type === 'video') {
+      snippet = `[Video]${message.video_metadata?.storage_path ? ` (${message.video_metadata.storage_path})` : ''}`;
+    } else if (type === 'audio') {
+      snippet = `[Voice message]${message.audio_metadata?.storage_path ? ` (${message.audio_metadata.storage_path})` : ''}`;
+    } else {
+      snippet = message.body || undefined;
+    }
+    return { id: message.id, type, snippet };
+  };
+
   // Handle long press on message
   const handleMessageLongPress = (message: Message, event: any) => {
     console.log('[DirectMessageScreen] handleMessageLongPress called', {
@@ -2670,14 +2695,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     }
 
     const isOwnMessage = message.sender_id === currentUserId;
-    const hasCopyableText = !!message.body && message.body.trim().length > 0;
-    const isMedia = message.type === 'image' || message.type === 'video';
 
-    // For other users' messages, only open the menu if there's something to
-    // act on: copyable text OR media (which can be replied to).
-    if (!isOwnMessage && !hasCopyableText && !isMedia) {
-      return;
-    }
+    // For other users' messages we always open the menu — at minimum the
+    // "Report" action is available, plus Reply/Copy when there's text or media.
 
     // Failed messages have no server row yet — edit/delete-via-server would
     // fail. Offer Retry / Delete (local) / Copy instead.
@@ -3135,6 +3155,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   <TouchableOpacity
                     activeOpacity={0.9}
                     onPress={openVideo}
+                    onLongPress={(e) => handleMessageLongPress(message, e)}
                     disabled={!videoReady || isUploading || isFailed || isSigning}
                     style={styles.imageTouchable}
                   >
@@ -3229,6 +3250,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                         setFullscreenThumbnailUrl(message.image_metadata.thumbnail_url || null);
                       }
                     }}
+                    onLongPress={(e) => handleMessageLongPress(message, e)}
                     disabled={message.upload_state === 'uploading' || message.upload_state === 'failed'}
                     style={styles.imageTouchable}
                   >
@@ -3595,6 +3617,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     );
   };
 
+  // The header "report user" action still uses the full-screen flow. Message
+  // reports use the in-chat ReportMessageSheet (rendered below) instead.
   if (showReportUser) {
     return (
       <ReportUserScreen
@@ -3994,6 +4018,26 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             chatInputRef.current?.focus?.();
           }
         }}
+        onReport={() => {
+          if (selectedMessage) {
+            const senderName =
+              selectedMessage.sender_name ||
+              selectedMessage.sender?.name ||
+              senderNamesById.get(selectedMessage.sender_id) ||
+              'this user';
+            setReportTarget({ userId: selectedMessage.sender_id, name: senderName });
+            setReportMessageContext(describeMessageForReport(selectedMessage));
+            setReportSheetVisible(true);
+          }
+        }}
+        canReport={(() => {
+          if (!selectedMessage) return false;
+          // You can't report your own messages.
+          if (selectedMessage.sender_id === currentUserId) return false;
+          if (selectedMessage.deleted || selectedMessage.is_system) return false;
+          if (selectedMessage.upload_state === 'failed') return false;
+          return true;
+        })()}
         canReply={(() => {
           if (!selectedMessage) return false;
           if (selectedMessage.deleted || selectedMessage.is_system) return false;
@@ -4039,6 +4083,25 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           } else {
             setReaction(selectedMessage.id, emoji);
           }
+        }}
+      />
+
+      {/* In-chat "report this message" bottom sheet */}
+      <ReportMessageSheet
+        visible={reportSheetVisible}
+        reportedUserId={reportTarget?.userId ?? otherUserId}
+        reportedUserName={reportTarget?.name ?? otherUserName}
+        reportedMessage={reportMessageContext}
+        onClose={() => {
+          setReportSheetVisible(false);
+          setReportMessageContext(null);
+          setReportTarget(null);
+        }}
+        onBlocked={() => {
+          setReportSheetVisible(false);
+          setReportMessageContext(null);
+          setReportTarget(null);
+          onBack?.();
         }}
       />
 

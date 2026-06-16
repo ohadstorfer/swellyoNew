@@ -74,10 +74,12 @@ interface MessageActionsMenuProps {
   onDelete: () => void;
   onCopy?: () => void;
   onReply?: () => void;
+  onReport?: () => void;
   canEdit: boolean; // Whether message is within edit window
   canDelete: boolean; // Whether message can be deleted
   canCopy?: boolean; // Whether message has text that can be copied
   canReply?: boolean; // Whether the message can be replied to
+  canReport?: boolean; // Whether the message can be reported (other people's messages)
   messagePosition: { x: number; y: number }; // Touch point in page coords
   // Bubble bounds in page coords. When provided, the dim overlay carves a
   // tight rounded-rect hole around the bubble (WhatsApp-style "lift") and the
@@ -109,10 +111,12 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   onDelete,
   onCopy,
   onReply,
+  onReport,
   canEdit,
   canDelete,
   canCopy,
   canReply,
+  canReport,
   messagePosition,
   bubbleRect,
   isOwnSelected,
@@ -140,6 +144,12 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   const handleCopy = () => {
     console.log('[MessageActionsMenu] handleCopy called');
     if (onCopy) onCopy();
+    onClose();
+  };
+
+  const handleReport = () => {
+    console.log('[MessageActionsMenu] handleReport called');
+    if (onReport) onReport();
     onClose();
   };
 
@@ -176,7 +186,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   // needed below the bubble and pushed the menu far above when the bubble
   // sat near the bottom of the screen.
   const visibleItemCount =
-    (canReply ? 1 : 0) + (canEdit ? 1 : 0) + (canCopy ? 1 : 0) + (canDelete ? 1 : 0);
+    (canReply ? 1 : 0) + (canEdit ? 1 : 0) + (canCopy ? 1 : 0) + (canDelete ? 1 : 0) + (canReport ? 1 : 0);
   const MENU_ITEM_H = 36;
   const MENU_PADDING_V = 8;
   const MENU_H_EST = Math.max(1, visibleItemCount) * MENU_ITEM_H + MENU_PADDING_V;
@@ -403,6 +413,17 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
               <Ionicons name="trash-outline" size={20} color="#FF3B30" />
             </TouchableOpacity>
           )}
+
+          {canReport && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={handleReport}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.menuItemText, styles.reportText]}>Report</Text>
+              <Ionicons name="flag-outline" size={20} color="#FF3B30" />
+            </TouchableOpacity>
+          )}
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
@@ -449,6 +470,9 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   deleteText: {
+    color: '#FF3B30',
+  },
+  reportText: {
     color: '#FF3B30',
   },
 });

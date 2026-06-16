@@ -54,7 +54,7 @@ function ReportConfirmation({ onDone }: { onDone: () => void }) {
   );
 }
 
-const REASONS = [
+export const REPORT_REASONS = [
   'Spam or scam',
   'Harassment or bullying',
   'Inappropriate content',
@@ -62,15 +62,33 @@ const REASONS = [
   'Other',
 ];
 
+const REASONS = REPORT_REASONS;
+
+// Optional context describing a single message being reported. When present,
+// the screen switches from "report this user" to "report this message" copy
+// and forwards the message details to the review pipeline.
+export interface ReportedMessageContext {
+  id: string;
+  type: string; // 'text' | 'image' | 'video' | 'audio'
+  snippet?: string; // text body, or a media label/URL for non-text messages
+}
+
 interface ReportUserScreenProps {
   reportedUserId: string;
   reportedUserName: string;
   onBack: () => void;
   onReturnHome: () => void;
   onBlocked?: () => void;
+  reportedMessage?: ReportedMessageContext;
 }
 
-async function sendUserReport(reportedUserId: string, reportedUserName: string, reason: string, alsoBlocked: boolean): Promise<void> {
+export async function sendUserReport(
+  reportedUserId: string,
+  reportedUserName: string,
+  reason: string,
+  alsoBlocked: boolean,
+  reportedMessage?: ReportedMessageContext,
+): Promise<void> {
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !anonKey) throw new Error('Supabase not configured');
@@ -81,6 +99,17 @@ async function sendUserReport(reportedUserId: string, reportedUserName: string, 
   const { data: { user } } = await supabase.auth.getUser();
   const reporterEmail = user?.email || 'Unknown';
   const reporterName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'Unknown';
+
+  // When a specific message is being reported, append its details so the
+  // reviewer can find the offending content (id lets them look up the row).
+  let details = `Reason: ${reason}`;
+  if (reportedMessage) {
+    details +=
+      `\nReported message:` +
+      `\n- id: ${reportedMessage.id}` +
+      `\n- type: ${reportedMessage.type}` +
+      (reportedMessage.snippet ? `\n- content: ${reportedMessage.snippet}` : '');
+  }
 
   const response = await fetch(`${supabaseUrl}/functions/v1/report-user`, {
     method: 'POST',
@@ -95,7 +124,9 @@ async function sendUserReport(reportedUserId: string, reportedUserName: string, 
       reportedName: reportedUserName,
       reportedId: reportedUserId,
       alsoBlocked,
-      details: `Reason: ${reason}`,
+      reportedMessageId: reportedMessage?.id,
+      reportedMessageType: reportedMessage?.type,
+      details,
     }),
   });
 
@@ -105,8 +136,73 @@ async function sendUserReport(reportedUserId: string, reportedUserName: string, 
   }
 }
 
-export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onReturnHome, onBlocked }: ReportUserScreenProps) {
+// Reasons tailored to reporting a whole group trip (vs a single user/message).
+export const TRIP_REPORT_REASONS = [
+  'Spam or scam',
+  'Inappropriate content',
+  'Misleading or fake trip',
+  'Harassment or bullying',
+  'Other',
+];
+
+/**
+ * Report an entire group trip. Reuses the same `report-user` edge function as
+ * user/message reports (so no new backend), framing the trip's host as the
+ * actionable subject and carrying the trip id/title in the details.
+ */
+export async function sendTripReport(
+  tripId: string,
+  tripTitle: string,
+  hostId: string,
+  hostName: string,
+  reason: string,
+): Promise<void> {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase not configured');
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || anonKey;
+
+  const { data: { user } } = await supabase.auth.getUser();
+  const reporterEmail = user?.email || 'Unknown';
+  const reporterName = user?.user_metadata?.full_name || user?.user_metadata?.name || 'Unknown';
+
+  const details =
+    `Reason: ${reason}` +
+    `\nReported group trip:` +
+    `\n- id: ${tripId}` +
+    `\n- title: ${tripTitle || '(untitled)'}` +
+    `\n- host: ${hostName || 'Unknown'} (${hostId})`;
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/report-user`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'apikey': anonKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      reporterName,
+      reporterEmail,
+      reportedName: tripTitle || 'Group trip',
+      reportedId: hostId,
+      alsoBlocked: false,
+      reportedTripId: tripId,
+      reportedTripTitle: tripTitle,
+      details,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(errorData.error || `Request failed (${response.status})`);
+  }
+}
+
+export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onReturnHome, onBlocked, reportedMessage }: ReportUserScreenProps) {
   const insets = useSafeAreaInsets();
+  const isMessageReport = !!reportedMessage;
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
   const [blockUser, setBlockUser] = useState(false);
@@ -117,7 +213,7 @@ export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onR
     if (!selectedReason || isSending) return;
     setIsSending(true);
     try {
-      await sendUserReport(reportedUserId, reportedUserName, selectedReason, blockUser);
+      await sendUserReport(reportedUserId, reportedUserName, selectedReason, blockUser, reportedMessage);
       if (blockUser) {
         await blockingService.blockUser(reportedUserId);
       }
@@ -155,11 +251,13 @@ export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onR
         <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scrollContentInner}>
           {/* Report section */}
           <View style={styles.sectionContent}>
-            <Text style={styles.sectionTitle}>Report this user</Text>
+            <Text style={styles.sectionTitle}>{isMessageReport ? 'Report this message' : 'Report this user'}</Text>
 
             <View style={styles.descriptionRow}>
               <Text style={styles.descriptionText}>
-                We may review recent messages in this chat to understand what happened. Don't worry they won't know you reported them.
+                {isMessageReport
+                  ? "We may review this message and the surrounding chat to understand what happened. Don't worry they won't know you reported them."
+                  : "We may review recent messages in this chat to understand what happened. Don't worry they won't know you reported them."}
               </Text>
             </View>
 
@@ -170,7 +268,7 @@ export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onR
               activeOpacity={0.7}
             >
               <Text style={[styles.dropdownText, selectedReason && styles.dropdownTextSelected]}>
-                {selectedReason || 'Why are you reporting this user?'}
+                {selectedReason || (isMessageReport ? 'Why are you reporting this message?' : 'Why are you reporting this user?')}
               </Text>
               <Ionicons
                 name={dropdownOpen ? 'chevron-up' : 'chevron-down'}
@@ -241,7 +339,7 @@ export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onR
             {isSending ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
-              <Text style={styles.reportButtonText}>Report User</Text>
+              <Text style={styles.reportButtonText}>{isMessageReport ? 'Report Message' : 'Report User'}</Text>
             )}
           </TouchableOpacity>
           {!selectedReason && (

@@ -15,6 +15,7 @@ import {
   Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 // Remote user-content images (trip covers, avatars) render through expo-image
@@ -38,6 +39,7 @@ import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_GRADIENT } from '../../services
 import { COUNTRY_NAMES } from '../../data/countryNames';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys } from '../../hooks/trips/useTripQueries';
+import { fetchTripCore } from '../../hooks/trips/useTripDetail';
 import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
@@ -55,6 +57,7 @@ import { NotificationCenter } from '../../components/notifications/NotificationC
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { neighbourHeroUrls } from './deckPrefetch';
+import { isNearEnd, isAppend } from './exploreDeckPagination';
 import Reanimated, {
   Easing,
   Extrapolation,
@@ -362,7 +365,8 @@ const ExploreTripCard: React.FC<{
   trip: GroupTrip;
   meta?: TripCardMeta;
   onPress?: () => void;
-}> = ({ trip, meta, onPress }) => {
+  userId?: string | null;
+}> = ({ trip, meta, onPress, userId }) => {
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
   const typeGradient = TRIP_TYPE_GRADIENT[trip.hosting_style] ?? TRIP_TYPE_GRADIENT.A;
   const avatars = meta?.memberAvatars ?? [];
@@ -385,11 +389,20 @@ const ExploreTripCard: React.FC<{
   const location = formatDestination(trip);
   const showLocation = !!trip.title && !!location && location !== headline;
 
+  const queryClient = useQueryClient();
+  const reduceMotion = useReducedMotion();
+
   return (
     <TouchableOpacity
       style={styles.exCard}
       activeOpacity={onPress ? 0.9 : 1}
       onPress={onPress}
+      onPressIn={() => queryClient.prefetchQuery({
+        queryKey: tripsKeys.detail(trip.id),
+        queryFn: ({ signal }) => fetchTripCore(trip.id, userId ?? null, signal),
+      })}
+      accessibilityRole="button"
+      accessibilityLabel={`${headline}${showLocation ? ', ' + location : ''}, ${formatTripDates(trip)}${spotsLeft != null ? `, ${spotsLeft} spots left` : ''}`}
       disabled={!onPress}
     >
       {trip.hero_image_url ? (
@@ -400,7 +413,8 @@ const ExploreTripCard: React.FC<{
           style={styles.cardImageBg}
           contentFit="cover"
           cachePolicy="memory-disk"
-          transition={150}
+          recyclingKey={trip.id}
+          transition={reduceMotion ? 0 : 150}
         />
       ) : (
         <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
@@ -542,7 +556,13 @@ const TripDeck: React.FC<{
   onOpenTrip: (tripId: string) => void;
   /** Fires (throttled) while the user swipes the deck sideways. */
   onUserScroll?: () => void;
-}> = ({ trips, meta, onOpenTrip, onUserScroll }) => {
+  onEndReachedNearby?: () => void;
+  loadingMore?: boolean;
+  userId?: string | null;
+  /** True when the raw (unfiltered) trip list just grew by a page append —
+   *  the deck keeps its scroll position instead of snapping back to card 0. */
+  isAppendingPage?: boolean;
+}> = ({ trips, meta, onOpenTrip, onUserScroll, onEndReachedNearby, loadingMore, userId, isAppendingPage }) => {
   const listRef = useRef<FlatList<GroupTrip>>(null);
   // Drives the per-card scale/opacity interpolation.
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -550,11 +570,45 @@ const TripDeck: React.FC<{
   // the per-frame scroll path (we only re-fire every 24px of travel).
   const lastReportedX = useRef(0);
 
-  // Reset to the first card if the deck contents change (e.g. after a reload).
+  const queryClient = useQueryClient();
+  const prefetchDetail = useCallback((id: string) => {
+    // Skip while userId is unknown (e.g. mid session-restore): a userId-less
+    // prefetch would cache a detail with myRequest=null that the real open
+    // would then consume, showing a wrong CTA. onPressIn covers that window.
+    if (!userId) return;
+    InteractionManager.runAfterInteractions(() => {
+      queryClient.prefetchQuery({
+        queryKey: tripsKeys.detail(id),
+        queryFn: ({ signal }) => fetchTripCore(id, userId ?? null, signal),
+      });
+    });
+  }, [queryClient, userId]);
+
+  const liveRef = useRef({ trips, prefetchDetail });
+  liveRef.current = { trips, prefetchDetail };
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 150 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+    const { trips: liveTrips, prefetchDetail: livePrefetch } = liveRef.current;
+    for (const v of viewableItems) {
+      const i = v.index;
+      if (i == null) continue;
+      for (let k = i; k <= i + 2; k++) {
+        const t = liveTrips[k];
+        if (t) { livePrefetch(t.id); if (t.hero_image_url) CachedImage.prefetch(t.hero_image_url); }
+      }
+    }
+  }).current;
+
+  // Reset to the first card when the deck contents are REPLACED (filter change,
+  // realtime reload), but NOT when a page is appended (preserve scroll position).
+  // `isAppendingPage` is computed from the raw list in the parent, so it's correct
+  // even for the filtered Popular deck and the operator subset.
   useEffect(() => {
+    if (isAppendingPage) return;
     scrollX.setValue(0);
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, [trips, scrollX]);
+  }, [trips, scrollX, isAppendingPage]);
 
   // Warm the first card + right neighbours as soon as the deck mounts/changes.
   useEffect(() => {
@@ -608,12 +662,13 @@ const TripDeck: React.FC<{
               trip={item}
               meta={meta.get(item.id)}
               onPress={() => onOpenTrip(item.id)}
+              userId={userId}
             />
           </Animated.View>
         </View>
       );
     },
-    [scrollX, meta, onOpenTrip],
+    [scrollX, meta, onOpenTrip, userId],
   );
 
   return (
@@ -652,8 +707,14 @@ const TripDeck: React.FC<{
         onMomentumScrollEnd={e => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / DECK_ITEM_W);
           neighbourHeroUrls(trips, idx).forEach(u => { CachedImage.prefetch(u); });
+          if (isNearEnd(idx, trips.length)) onEndReachedNearby?.();
         }}
+        ListFooterComponent={loadingMore ? (
+          <ExploreDeckSkeleton />
+        ) : null}
         contentContainerStyle={[styles.deckContent, { paddingHorizontal: DECK_SIDE_PAD }]}
+        viewabilityConfig={viewabilityConfig}
+        onViewableItemsChanged={onViewableItemsChanged}
         {...(Platform.OS === 'web' && {
           style: {
             overflowX: 'auto' as any,
@@ -813,11 +874,12 @@ const ExploreTripsView: React.FC<{
   onOpenTrip: (tripId: string) => void;
   onNavScroll?: NavScrollHandler;
   onDeckScroll?: () => void;
-}> = ({ onOpenTrip, onNavScroll, onDeckScroll }) => {
+  userId: string | null;
+}> = ({ onOpenTrip, onNavScroll, onDeckScroll, userId }) => {
   // Cached + stale-while-revalidate. The data survives tab switches and
   // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
   // revalidates silently in the background when stale.
-  const { trips, meta, isLoading } = useExploreTrips();
+  const { trips, meta, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useExploreTrips();
 
   // Month chips roll off the device clock; built once per mount.
   const chips = useMemo(() => buildExploreChips(new Date()), []);
@@ -831,10 +893,34 @@ const ExploreTripsView: React.FC<{
   }, []);
   const clearChips = useCallback(() => setSelected(new Set()), []);
 
+  // Pull-to-refresh: drive the spinner ONLY from the user's pull — NOT from
+  // background refetches (the realtime catch-up that fires on first focus,
+  // stale-while-revalidate, etc.). Those must stay silent so we don't flash a
+  // spinner over already-loaded cards on first entry.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const onPullRefresh = useCallback(async () => {
+    setPullRefreshing(true);
+    try { await refetch(); } finally { setPullRefreshing(false); }
+  }, [refetch]);
+
   const filtered = useMemo(
     () => applyExploreFilters(trips, chips, selected),
     [trips, chips, selected],
   );
+
+  // Error on cold load (no cached data) — show retry instead of falling through
+  // to the "No trips yet" empty state, which would mislead the user.
+  if (isError && trips.length === 0) {
+    return (
+      <FadeInView style={styles.emptyState}>
+        <Ionicons name="cloud-offline-outline" size={48} color="#B0B0B0" />
+        <Text style={styles.emptyText}>Couldn't load trips. Check your connection.</Text>
+        <TouchableOpacity style={styles.emptyCta} onPress={() => refetch()}>
+          <Text style={styles.emptyCtaText}>Retry</Text>
+        </TouchableOpacity>
+      </FadeInView>
+    );
+  }
 
   // Empty only once we actually know there are no trips (not while loading).
   if (trips.length === 0 && !isLoading) {
@@ -850,14 +936,31 @@ const ExploreTripsView: React.FC<{
   // device clock, not the DB) → render them immediately. Only the swipe-deck card
   // shows a skeleton while trips load. "Trip Operators" narrows to operator-run
   // trips (style 'C').
-  const operatorTrips = filtered.filter(t => t.hosting_style === 'C');
+  //
+  // FadeInView wraps ONLY the skeleton branch so the 280ms entry animation plays
+  // during the initial cold load. When cache is warm (!isLoading on first render),
+  // we use a plain View — the cards' own image transitions cover the visual.
+  // Detect a page APPEND on the RAW (unfiltered) list — passed to both decks so
+  // a background page load preserves scroll even on the filtered/operator subset.
+  const rawTripsRef = useRef<GroupTrip[]>([]);
+  const isAppendingPage = isAppend(rawTripsRef.current, trips);
+  rawTripsRef.current = trips;
+
+  // Stable load-more handler shared by both decks (avoids inline-closure churn and
+  // keeps the !isFetchingNextPage guard consistent across the two decks).
+  const handleLoadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const operatorTrips = useMemo(() => filtered.filter(t => t.hosting_style === 'C'), [filtered]);
   return (
-    <FadeInView style={styles.fillFlex}>
+    <View style={styles.fillFlex}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.exScrollContent}
         onScroll={onNavScroll}
         scrollEventThrottle={16}
+        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} />}
       >
         <Text style={styles.exploreTitle}>Discover the world{'\n'}with Swellyo</Text>
         <ExploreHeader
@@ -867,28 +970,50 @@ const ExploreTripsView: React.FC<{
           onClear={clearChips}
         />
         {isLoading ? (
-          <>
+          <FadeInView>
             <Text style={styles.exSectionTitle}>Popular</Text>
             <ExploreDeckSkeleton />
-          </>
-        ) : filtered.length === 0 ? (
-          <View style={styles.filterEmpty}>
-            <Text style={styles.emptyText}>No trips match these filters.</Text>
-          </View>
+          </FadeInView>
         ) : (
           <>
             <Text style={styles.exSectionTitle}>Popular</Text>
-            <TripDeck trips={filtered} meta={meta} onOpenTrip={onOpenTrip} onUserScroll={onDeckScroll} />
-            {operatorTrips.length > 0 && (
+            {filtered.length === 0 ? (
+              <View style={styles.filterEmpty}>
+                <Text style={styles.emptyText}>No trips match these filters.</Text>
+              </View>
+            ) : (
               <>
-                <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
-                <TripDeck trips={operatorTrips} meta={meta} onOpenTrip={onOpenTrip} onUserScroll={onDeckScroll} />
+                <TripDeck
+                  trips={filtered}
+                  meta={meta}
+                  onOpenTrip={onOpenTrip}
+                  onUserScroll={onDeckScroll}
+                  onEndReachedNearby={handleLoadMore}
+                  loadingMore={isFetchingNextPage}
+                  userId={userId}
+                  isAppendingPage={isAppendingPage}
+                />
+                {operatorTrips.length > 0 && (
+                  <>
+                    <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
+                    <TripDeck
+                      trips={operatorTrips}
+                      meta={meta}
+                      onOpenTrip={onOpenTrip}
+                      onUserScroll={onDeckScroll}
+                      onEndReachedNearby={handleLoadMore}
+                      loadingMore={isFetchingNextPage}
+                      userId={userId}
+                      isAppendingPage={isAppendingPage}
+                    />
+                  </>
+                )}
               </>
             )}
           </>
         )}
       </ScrollView>
-    </FadeInView>
+    </View>
   );
 };
 
@@ -1261,6 +1386,7 @@ export default function TripsScreen({ onBack, navControl: navControlProp }: Trip
                 onOpenTrip={openTrip}
                 onNavScroll={handleExploreNavScroll}
                 onDeckScroll={navControl.collapse}
+                userId={currentUserId}
               />
             ) : null}
           </TabPane>

@@ -496,19 +496,31 @@ export async function getTripDestination(
   return (data as TripDestinationGeo) ?? null;
 }
 
-export async function listExploreTrips(limit = 50, offset = 0): Promise<GroupTrip[]> {
-  const { data, error } = await supabase
-    .from('group_trips')
-    .select(EXPLORE_TRIP_SELECT)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+/** A normalized explore trip row PLUS the host fields the RPC joins in. */
+export type ExploreFeedRow = GroupTrip & { host_name: string | null; host_avatar: string | null };
 
+/**
+ * Explore list via the explore_feed RPC: trips + host name/avatar + count in ONE
+ * round-trip, keyset-paginated. `signal` cancels the request when react-query
+ * aborts (scroll-past / unmount).
+ */
+export async function exploreFeed(
+  limit = 10,
+  cursorCreatedAt: string | null = null,
+  cursorId: string | null = null,
+  signal?: AbortSignal,
+): Promise<ExploreFeedRow[]> {
+  let q = supabase.rpc('explore_feed', {
+    p_limit: limit, p_cursor: cursorCreatedAt, p_cursor_id: cursorId,
+  });
+  if (signal) q = q.abortSignal(signal);
+  const { data, error } = await q;
   if (error) {
-    console.error('[groupTripsService] listExploreTrips error:', error);
-    return [];
+    if (isAbortError(error, signal)) throw error; // expected cancel — let React Query handle it, don't log
+    console.error('[groupTripsService] exploreFeed error:', error);
+    throw error;
   }
-  return (data || []).map(normalizeTrip);
+  return (data || []).map((row: any) => normalizeTrip(row) as ExploreFeedRow);
 }
 
 export type MyTripBucket = 'approved' | 'pending' | 'past';
@@ -1359,15 +1371,27 @@ export async function removeParticipant(
 const PARTICIPANT_PROFILE_FIELDS =
   'user_id, name, age, country_from, travel_experience, surfboard_type, surf_level_category, profile_image_url, lifestyle_keywords';
 
-export async function getTripById(tripId: string): Promise<GroupTrip | null> {
-  const { data, error } = await supabase
-    .from('group_trips')
-    .select(`*, ${TRIP_DEST_EMBED}`)
-    .eq('id', tripId)
-    .single();
+/**
+ * True when a Supabase query error is just an aborted request — e.g. React Query
+ * cancelling a superseded/unmounted fetch (it passes an AbortSignal to queryFn).
+ * Marking gear, refetching, or navigating away triggers these mid-flight aborts;
+ * they're expected races, not failures, so signal-aware fetchers must not log them
+ * as errors (which would pop the dev red-screen overlay). Hoisted, so callers
+ * defined earlier in this file (e.g. exploreFeed) can use it too.
+ */
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  const e = error as { name?: string; message?: string } | null;
+  return e?.name === 'AbortError' || /abort/i.test(e?.message ?? '');
+}
 
+export async function getTripById(tripId: string, signal?: AbortSignal): Promise<GroupTrip | null> {
+  let q = supabase.from('group_trips').select(`*, ${TRIP_DEST_EMBED}`).eq('id', tripId);
+  if (signal) q = q.abortSignal(signal);
+  const { data, error } = await q.single();
   if (error) {
-    if ((error as any).code === 'PGRST116') return null; // no rows
+    if ((error as any).code === 'PGRST116') return null;
+    if (isAbortError(error, signal)) return null;
     console.error('[groupTripsService] getTripById error:', error);
     return null;
   }
@@ -1380,25 +1404,31 @@ export async function getTripById(tripId: string): Promise<GroupTrip | null> {
  * the two tables — both reference auth.users separately, so PostgREST can't auto-join.
  */
 export async function getTripParticipants(
-  tripId: string
+  tripId: string,
+  signal?: AbortSignal,
 ): Promise<EnrichedParticipant[]> {
-  const { data: rows, error } = await supabase
+  let q1 = supabase
     .from('group_trip_participants')
     .select('role, joined_at, user_id, committed, commitment_status, commitment_items, commitment_note, personal_gear_by_host, personal_gear_by_me')
     .eq('trip_id', tripId)
     .order('joined_at', { ascending: true });
+  if (signal) q1 = q1.abortSignal(signal);
+  const { data: rows, error } = await q1;
 
   if (error) {
+    if (isAbortError(error, signal)) return [];
     console.error('[groupTripsService] getTripParticipants error:', error);
     return [];
   }
   if (!rows || rows.length === 0) return [];
 
   const userIds = rows.map((r: any) => r.user_id);
-  const { data: surfers } = await supabase
+  let q2 = supabase
     .from('surfers')
     .select(PARTICIPANT_PROFILE_FIELDS)
     .in('user_id', userIds);
+  if (signal) q2 = q2.abortSignal(signal);
+  const { data: surfers } = await q2;
 
   const byId = new Map<string, ParticipantProfile>();
   (surfers || []).forEach((s: any) => {
@@ -1490,16 +1520,19 @@ export async function requestToJoinTrip(
  */
 export async function getMyJoinRequest(
   tripId: string,
-  userId: string
+  userId: string,
+  signal?: AbortSignal,
 ): Promise<GroupTripJoinRequest | null> {
-  const { data, error } = await supabase
+  let q = supabase
     .from('group_trip_join_requests')
     .select('*')
     .eq('trip_id', tripId)
-    .eq('requester_id', userId)
-    .maybeSingle();
+    .eq('requester_id', userId);
+  if (signal) q = q.abortSignal(signal);
+  const { data, error } = await q.maybeSingle();
 
   if (error) {
+    if (isAbortError(error, signal)) return null;
     console.error('[groupTripsService] getMyJoinRequest error:', error);
     return null;
   }

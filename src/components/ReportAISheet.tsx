@@ -67,6 +67,10 @@ async function sendAIReport(messageText: string, reason: string, chatType: strin
 
 export function ReportAISheet({ visible, messageText, messageTimestamp, messageX, messageY, chatType, onClose, onReported }: ReportAISheetProps) {
   const slideAnim = useRef(new Animated.Value(300)).current;
+  // Scrim fades in/out (matches the global bottom-sheet effect). This sheet keeps
+  // its own structure rather than BottomSheetShell because of the floating
+  // highlighted-message layer positioned at the original message's coordinates.
+  const backdropFade = useRef(new Animated.Value(0)).current;
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const confirmFade = useRef(new Animated.Value(0)).current;
@@ -75,16 +79,20 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
   useEffect(() => {
     if (visible) {
       slideAnim.setValue(300);
+      backdropFade.setValue(0);
       setShowConfirmation(false);
       setIsSending(false);
       confirmFade.setValue(0);
       confirmScale.setValue(0.9);
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        tension: 65,
-        friction: 11,
-        useNativeDriver: true,
-      }).start();
+      Animated.parallel([
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          tension: 65,
+          friction: 11,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropFade, { toValue: 1, duration: 240, useNativeDriver: true }),
+      ]).start();
     }
   }, [visible]);
 
@@ -113,11 +121,10 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
   };
 
   const handleClose = () => {
-    Animated.timing(slideAnim, {
-      toValue: 300,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => onClose());
+    Animated.parallel([
+      Animated.timing(slideAnim, { toValue: 300, duration: 200, useNativeDriver: true }),
+      Animated.timing(backdropFade, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ]).start(() => onClose());
   };
 
   // Swipe the handle/sheet down to dismiss — drives the same slideAnim.
@@ -155,8 +162,9 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
     <>
       {!showConfirmation ? (
         <>
-          {/* Dark backdrop — absolute positioned, zIndex 5 */}
-          <Pressable style={styles.backdrop} onPress={handleClose} />
+          {/* Dark backdrop — tap layer + a separately-fading dim (zIndex 5) */}
+          <Pressable style={styles.backdropTouch} onPress={handleClose} />
+          <Animated.View pointerEvents="none" style={[styles.backdrop, { opacity: backdropFade }]} />
 
           {/* Highlighted message — positioned at exact original location, zIndex 10 */}
           {messageText && messageY != null ? (
@@ -231,6 +239,14 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
 }
 
 const styles = StyleSheet.create({
+  backdropTouch: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
+  },
   backdrop: {
     position: 'absolute',
     top: 0,

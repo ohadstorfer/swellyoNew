@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
 import {
   View,
-  Modal,
   StyleSheet,
   TextInput,
   TouchableOpacity,
   FlatList,
   Image,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { supabase } from '../config/supabase';
 import { ProfileImage } from './ProfileImage';
+import { BottomSheetShell } from './BottomSheetShell';
+
+const SCREEN_H = Dimensions.get('window').height;
 
 interface User {
   user_id: string;
@@ -157,13 +160,13 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
   };
 
   return (
-    <Modal
+    <BottomSheetShell
       visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
+      onClose={onClose}
+      avoidKeyboard
+      swipeToDismiss={false}
+      backdropColor="rgba(0, 0, 0, 0.5)"
     >
-      <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           {/* Header */}
           <View style={styles.header}>
@@ -227,22 +230,16 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
             />
           )}
         </View>
-      </View>
-    </Modal>
+    </BottomSheetShell>
   );
 };
 
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
   modalContent: {
     backgroundColor: colors.white,
     borderTopLeftRadius: borderRadius.large,
     borderTopRightRadius: borderRadius.large,
-    height: '80%',
+    height: SCREEN_H * 0.8,
     paddingTop: spacing.md,
   },
   header: {

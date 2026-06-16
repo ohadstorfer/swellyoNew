@@ -23,6 +23,12 @@ import { supabase } from '../../config/supabase';
 import { tripsKeys } from './useTripQueries';
 import { TRIPS_LIST_TOPIC } from '../../services/trips/tripsRealtime';
 
+// Survives remounts within a session — throttles the focus catch-up so that
+// returning to Trips within 5 minutes of the last refresh does not re-fetch
+// all loaded infinite-query pages. Real broadcast events bypass this gate.
+let lastListInvalidateAt = 0;
+const FOCUS_CATCHUP_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+
 export function useTripsListRealtime() {
   const queryClient = useQueryClient();
 
@@ -34,13 +40,17 @@ export function useTripsListRealtime() {
       if (timer) return;
       timer = setTimeout(() => {
         timer = null;
+        lastListInvalidateAt = Date.now();
         queryClient.invalidateQueries({ queryKey: [...tripsKeys.explore] });
         queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
       }, 300);
     };
 
-    // Catch up on list changes missed while this screen was blurred.
-    invalidateSoon();
+    // Catch up on list changes missed while this screen was blurred —
+    // throttled to avoid re-fetching all infinite-query pages on every return.
+    if (Date.now() - lastListInvalidateAt > FOCUS_CATCHUP_INTERVAL_MS) {
+      invalidateSoon();
+    }
 
     const channel = supabase
       .channel(TRIPS_LIST_TOPIC, { config: { private: true } })

@@ -1,1 +1,2 @@
 - [Nav-migration perf findings](perf_nav_migration_findings.md) — ranked root causes of the June 2026 UI freeze; #1 is mainNavValue object recreated every render (no useMemo).
+- [Explore instant-loading audit](perf_explore_instant_loading_audit.md) — June 2026 audit of useInfiniteQuery + prefetch machinery; 2 IMPORTANT issues (double fetchNextPage, inline onEndReachedNearby closures), 1 FadeInView reduce-motion race, 2 NITs.

@@ -1,19 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import {
-  Modal,
   View,
   TouchableOpacity,
   StyleSheet,
   Platform,
-  Animated,
-  TouchableWithoutFeedback,
   Dimensions,
-  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { InlineMapView } from './MapPickerModal';
+import { BottomSheetShell } from './BottomSheetShell';
 
 const SHEET_HEIGHT = Math.round(Dimensions.get('window').height * 0.55);
 const PREVIEW_MAP_HEIGHT = 240;
@@ -75,52 +72,6 @@ function getPreviewMapHtml(apiKey: string, lat: number, lng: number, label: stri
 
 export const HomeBreakViewSheet: React.FC<Props> = ({ visible, onClose, name, full, lat, lng }) => {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
-  const [mounted, setMounted] = useState(visible);
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const sheetAnim = useRef(new Animated.Value(0)).current;
-
-  // Swipe-down to dismiss
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) sheetAnim.setValue(Math.max(0, 1 - gs.dy / SHEET_HEIGHT));
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > 100 || gs.vy > 0.5) {
-          onCloseRef.current();
-        } else {
-          Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }).start();
-        }
-      },
-    }),
-  ).current;
-
-  useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
-      ]).start();
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
-
-  if (!mounted) return null;
-
-  const sheetTranslate = sheetAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [SHEET_HEIGHT, 0],
-  });
 
   const previewHtml =
     apiKey && typeof lat === 'number' && typeof lng === 'number'
@@ -128,13 +79,10 @@ export const HomeBreakViewSheet: React.FC<Props> = ({ visible, onClose, name, fu
       : null;
 
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <View style={styles.container}>
-        <TouchableWithoutFeedback onPress={onClose}>
-          <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} />
-        </TouchableWithoutFeedback>
-        <Animated.View style={[styles.sheet, { transform: [{ translateY: sheetTranslate }] }]}>
-          <View {...pan.panHandlers}>
+    <BottomSheetShell visible={visible} onClose={onClose} backdropColor="rgba(0,0,0,0.5)">
+      {({ panHandlers }) => (
+        <View style={styles.sheet}>
+          <View {...panHandlers}>
             <View style={styles.handle} />
             <View style={styles.header}>
               <Text style={styles.title}>Home Break</Text>
@@ -165,15 +113,13 @@ export const HomeBreakViewSheet: React.FC<Props> = ({ visible, onClose, name, fu
               {full ? <Text style={styles.full} numberOfLines={2}>{full}</Text> : null}
             </View>
           </View>
-        </Animated.View>
-      </View>
-    </Modal>
+        </View>
+      )}
+    </BottomSheetShell>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'flex-end' },
-  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.5)' },
   sheet: {
     backgroundColor: colors.white || '#FFFFFF',
     borderTopLeftRadius: 16,

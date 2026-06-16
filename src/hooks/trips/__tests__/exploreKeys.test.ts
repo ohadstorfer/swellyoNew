@@ -1,7 +1,7 @@
 // Mock the entire groupTripsService (and its native-module deps) so this unit
 // test only validates key shapes — no network or native bindings needed.
 jest.mock('../../../services/trips/groupTripsService', () => ({
-  listExploreTrips: jest.fn(),
+  exploreFeed: jest.fn(),
   getTripCardMeta: jest.fn(),
   listMyTripsByBucket: jest.fn(),
 }));
@@ -9,19 +9,15 @@ jest.mock('../../../services/trips/groupTripsService', () => ({
 import { QueryClient } from '@tanstack/react-query';
 import { tripsKeys } from '../useTripQueries';
 
-describe('exploreMeta key nesting', () => {
-  it('builds a key nested under explore', () => {
-    expect(tripsKeys.exploreMeta(['x', 'y'])).toEqual(['trips', 'explore', 'meta', 'x,y']);
+describe('explore keys', () => {
+  it('exploreMeta is removed', () => {
+    expect((tripsKeys as any).exploreMeta).toBeUndefined();
   });
 
-  it('invalidating explore also invalidates the nested meta query', () => {
+  it('invalidating explore (prefix) covers the infinite query cache entry', () => {
     const qc = new QueryClient();
-    qc.setQueryData(tripsKeys.explore, []);
-    qc.setQueryData(tripsKeys.exploreMeta(['x']), new Map());
-
+    qc.setQueryData(tripsKeys.explore, { pages: [[]], pageParams: [null] });
     qc.invalidateQueries({ queryKey: tripsKeys.explore });
-
     expect(qc.getQueryState(tripsKeys.explore)?.isInvalidated).toBe(true);
-    expect(qc.getQueryState(tripsKeys.exploreMeta(['x']))?.isInvalidated).toBe(true);
   });
 });

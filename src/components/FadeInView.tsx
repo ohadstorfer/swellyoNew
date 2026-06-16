@@ -10,14 +10,14 @@
 //   • never from scale(0) — a small translateY(8) reads more naturally.
 //   • respects reduce-motion — keeps the opacity fade, drops the movement.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   Animated,
   Easing,
-  AccessibilityInfo,
   StyleProp,
   ViewStyle,
 } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
 // Strong ease-out (easing.dev "out-quint"-ish). Built-in Easing.out(Easing.cubic)
 // is too gentle for a reveal to feel intentional.
@@ -42,37 +42,18 @@ export const FadeInView: React.FC<FadeInViewProps> = ({
   delay = 0,
 }) => {
   const progress = useRef(new Animated.Value(0)).current;
-  const [reduceMotion, setReduceMotion] = useState(false);
+  // useReducedMotion() is synchronous — reads the OS setting before first render,
+  // so the transform is correct from frame 0 with no async Promise race.
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
-    let mounted = true;
-    // Resolve reduce-motion first so the transform is correct from frame 1
-    // (no mid-animation jump for users who disabled motion).
-    AccessibilityInfo.isReduceMotionEnabled()
-      .then(reduce => {
-        if (!mounted) return;
-        setReduceMotion(reduce);
-        Animated.timing(progress, {
-          toValue: 1,
-          duration,
-          delay,
-          easing: EASE_OUT,
-          useNativeDriver: true,
-        }).start();
-      })
-      .catch(() => {
-        if (!mounted) return;
-        Animated.timing(progress, {
-          toValue: 1,
-          duration,
-          delay,
-          easing: EASE_OUT,
-          useNativeDriver: true,
-        }).start();
-      });
-    return () => {
-      mounted = false;
-    };
+    Animated.timing(progress, {
+      toValue: 1,
+      duration,
+      delay,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    }).start();
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

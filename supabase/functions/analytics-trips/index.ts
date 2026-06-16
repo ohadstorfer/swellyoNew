@@ -159,11 +159,15 @@ async function fetchExcludedUserIds(userIds: string[]): Promise<Set<string>> {
   if (adminErr) throw adminErr
 
   for (const row of (surferRows ?? []) as Array<{ user_id: string; is_demo_user: boolean | null; is_admin: boolean | null }>) {
-    if (row.is_demo_user || row.is_admin) excluded.add(row.user_id)
+    // TEMP DEBUG (analytics group-trips testing): admin exclusion disabled so tester
+    // accounts (Ohad/Eyal) show up. Demo exclusion kept. RESTORE `|| row.is_admin` before prod.
+    if (row.is_demo_user) excluded.add(row.user_id)
   }
-  for (const row of (adminRows ?? []) as Array<{ id: string }>) {
-    excluded.add(row.id)
-  }
+  // TEMP DEBUG: admins intentionally NOT excluded. RESTORE this loop before prod.
+  // for (const row of (adminRows ?? []) as Array<{ id: string }>) {
+  //   excluded.add(row.id)
+  // }
+  void adminRows
   return excluded
 }
 
@@ -177,7 +181,8 @@ async function fetchEvents(
     .select('event_name, user_id, trip_id, occurred_at')
     .in('event_name', names as string[])
     .eq('is_demo_user', false)
-    .eq('is_admin', false)
+    // TEMP DEBUG (analytics group-trips testing): admin events included so tester
+    // accounts (Ohad/Eyal) show up. RESTORE `.eq('is_admin', false)` before prod.
     .limit(ROW_LIMIT)
   if (opts.from) q = q.gte('occurred_at', opts.from)
   if (opts.to) q = q.lt('occurred_at', opts.to)
@@ -322,13 +327,29 @@ interface TripHealthRow {
 
 function computeHealth(
   trips: TripRow[],
+  participants: ParticipantRow[],
+  excluded: Set<string>,
   tripActivityEvents: EventRow[],
   todayMs: number,
 ): { buckets: number[]; trips: TripHealthRow[] } {
-  // trip_id -> (UTC day -> set of distinct active users that day)
+  // Crew = each trip's current participants minus excluded (demo/admin) users.
+  // The numerator (active) and denominator (crew) both come from this same set,
+  // so "% of crew active" can never exceed 100%, and non-participant viewers
+  // (people who opened the trip but never joined) don't inflate it.
+  const crewByTrip = new Map<string, Set<string>>()
+  for (const p of participants) {
+    if (excluded.has(p.user_id)) continue
+    let s = crewByTrip.get(p.trip_id)
+    if (!s) { s = new Set(); crewByTrip.set(p.trip_id, s) }
+    s.add(p.user_id)
+  }
+
+  // trip_id -> (UTC day -> set of distinct active CREW users that day)
   const activityByTrip = new Map<string, Map<number, Set<string>>>()
   for (const e of tripActivityEvents) {
     if (!e.trip_id || !e.user_id) continue
+    const crew = crewByTrip.get(e.trip_id)
+    if (!crew || !crew.has(e.user_id)) continue // only members of this trip's crew count
     const t = parseMs(e.occurred_at)
     if (t === null) continue
     const day = utcDay(t)
@@ -342,7 +363,7 @@ function computeHealth(
   const last7CutoffMs = todayMs - 6 * DAY_MS // last 7 calendar days, inclusive of today
 
   const rows: TripHealthRow[] = trips.map((trip) => {
-    const crew = trip.participant_count ?? 0
+    const crew = crewByTrip.get(trip.id)?.size ?? 0
     const createdDay = utcDay(parseMs(trip.created_at) ?? 0)
     const byDay = activityByTrip.get(trip.id)
 
@@ -437,7 +458,7 @@ serve(async (req) => {
     const payload = {
       retention: computeRetention(participants, excluded, appOpenedEvents, todayMs),
       adoption: computeAdoption(participants, excluded, featureEvents, from, to),
-      health: computeHealth(trips, tripActivityEvents, todayMs),
+      health: computeHealth(trips, participants, excluded, tripActivityEvents, todayMs),
     }
 
     return new Response(JSON.stringify(payload), { status: 200, headers: jsonHeaders })

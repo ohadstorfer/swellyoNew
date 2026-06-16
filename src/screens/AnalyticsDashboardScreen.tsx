@@ -28,6 +28,7 @@ import {
 } from '../services/analytics/analyticsTripsService';
 import { RetentionCurveCard } from '../components/analytics/RetentionCurveCard';
 import { FeatureAdoptionCard } from '../components/analytics/FeatureAdoptionCard';
+import { BottomSheetShell } from '../components/BottomSheetShell';
 import { TripHealthCard } from '../components/analytics/TripHealthCard';
 
 const SCREEN_H = Dimensions.get('window').height;
@@ -482,14 +483,12 @@ function BottomSheet({
   children: React.ReactNode;
 }) {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
-          <View style={styles.sheetHandle} />
-          {children}
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <BottomSheetShell visible={visible} onClose={onClose}>
+      <View style={styles.sheet}>
+        <View style={styles.sheetHandle} />
+        {children}
+      </View>
+    </BottomSheetShell>
   );
 }
 

@@ -1,19 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Modal,
   View,
   TouchableOpacity,
   TextInput,
   ScrollView,
   StyleSheet,
   Platform,
-  Animated,
-  TouchableWithoutFeedback,
   Dimensions,
-  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
+import { BottomSheetShell } from './BottomSheetShell';
 import { ONBOARDING_COUNTRIES } from '../data/onboardingCountries';
 import { colors, spacing } from '../styles/theme';
 
@@ -36,59 +33,16 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
   onClose,
 }) => {
   const [query, setQuery] = useState('');
-  const [mounted, setMounted] = useState(visible);
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const sheetAnim = useRef(new Animated.Value(0)).current;
   const searchRef = useRef<TextInput>(null);
-
-  // Swipe-down to dismiss
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) {
-          sheetAnim.setValue(Math.max(0, 1 - gs.dy / SHEET_HEIGHT));
-        }
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > 100 || gs.vy > 0.5) {
-          onCloseRef.current();
-        } else {
-          Animated.spring(sheetAnim, {
-            toValue: 1,
-            tension: 65,
-            friction: 11,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    }),
-  ).current;
 
   useEffect(() => {
     if (visible) {
-      setMounted(true);
       setQuery('');
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
-      ]).start();
       // Raise the keyboard as the sheet slides in.
       const focusTimer = setTimeout(() => searchRef.current?.focus(), 350);
       return () => clearTimeout(focusTimer);
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-
-  if (!mounted) return null;
 
   // "USA" is surfaced as a convenience alias; picking it saves "United States"
   // so the value never diverges from the canonical country name.
@@ -96,22 +50,17 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
     c.toLowerCase().includes(query.toLowerCase()),
   );
 
-  const sheetTranslate = sheetAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [SHEET_HEIGHT, 0],
-  });
-
   return (
-    <Modal visible transparent animationType="none" onRequestClose={onClose}>
-      <View style={styles.container}>
-        <TouchableWithoutFeedback onPress={onClose}>
-          <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} />
-        </TouchableWithoutFeedback>
-        <Animated.View
-          style={[styles.sheet, { transform: [{ translateY: sheetTranslate }] }]}
-        >
+    <BottomSheetShell
+      visible={visible}
+      onClose={onClose}
+      avoidKeyboard
+      backdropColor="rgba(0,0,0,0.5)"
+    >
+      {({ panHandlers }) => (
+        <View style={styles.sheet}>
           {/* Drag area — swipe down on the handle/header to dismiss */}
-          <View {...pan.panHandlers}>
+          <View {...panHandlers}>
             <View style={styles.handle} />
             <View style={styles.header}>
               <Text style={styles.title}>Select Country / State</Text>
@@ -153,21 +102,13 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
               <Text style={styles.noResults}>No countries found</Text>
             )}
           </ScrollView>
-        </Animated.View>
-      </View>
-    </Modal>
+        </View>
+      )}
+    </BottomSheetShell>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
   sheet: {
     backgroundColor: colors.white || '#FFFFFF',
     borderTopLeftRadius: 16,

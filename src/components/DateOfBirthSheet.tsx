@@ -3,15 +3,12 @@ import {
   View,
   ScrollView,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   Text as RNText,
-  Animated,
   StyleSheet,
   Platform,
   ActivityIndicator,
-  PanResponder,
-  Dimensions,
 } from 'react-native';
+import { BottomSheetShell } from './BottomSheetShell';
 
 const ITEM_HEIGHT = 50;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -62,42 +59,11 @@ export const DateOfBirthSheet: React.FC<Props> = ({
   const defaultDate = parseISOOrDefault(initialDOB, new Date(currentYear - 18, 0, 1));
 
   const [pickerDate, setPickerDate] = useState<Date>(defaultDate);
-  const overlayAnim = useRef(new Animated.Value(0)).current;
-  const sheetAnim = useRef(new Animated.Value(0)).current;
-  const [mounted, setMounted] = useState(visible);
 
   const monthScrollRef = useRef<ScrollView>(null);
   const dayScrollRef = useRef<ScrollView>(null);
   const yearScrollRef = useRef<ScrollView>(null);
 
-  // Swipe-down to dismiss. Drag the handle/title area; sheet follows the
-  // finger and snaps closed past a velocity/distance threshold.
-  const onCloseRef = useRef(onClose);
-  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
-  const pan = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 4,
-      onPanResponderMove: (_, gs) => {
-        if (gs.dy > 0) {
-          const sheetH = Math.round(Dimensions.get('window').height * 0.65);
-          sheetAnim.setValue(Math.max(0, 1 - gs.dy / sheetH));
-        }
-      },
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dy > 100 || gs.vy > 0.5) {
-          onCloseRef.current();
-        } else {
-          Animated.spring(sheetAnim, {
-            toValue: 1,
-            tension: 65,
-            friction: 11,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    }),
-  ).current;
   const isSnapping = useRef(false);
   const monthScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dayScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -107,11 +73,6 @@ export const DateOfBirthSheet: React.FC<Props> = ({
     if (visible) {
       const fresh = parseISOOrDefault(initialDOB, new Date(currentYear - 18, 0, 1));
       setPickerDate(fresh);
-      setMounted(true);
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 1, duration: 250, useNativeDriver: true }),
-        Animated.spring(sheetAnim, { toValue: 1, tension: 65, friction: 11, useNativeDriver: true }),
-      ]).start();
       // Scroll wheels to fresh values once mounted
       setTimeout(() => {
         const monthIndex = fresh.getMonth();
@@ -123,11 +84,6 @@ export const DateOfBirthSheet: React.FC<Props> = ({
         yearScrollRef.current?.scrollTo({ y: yearIndex * ITEM_HEIGHT, animated: false });
         setTimeout(() => { isSnapping.current = false; }, 100);
       }, 300);
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(overlayAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.timing(sheetAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
-      ]).start(() => setMounted(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -169,35 +125,17 @@ export const DateOfBirthSheet: React.FC<Props> = ({
     }, 80);
   };
 
-  if (!mounted) return null;
-
   return (
-    <View style={styles.absoluteFill} pointerEvents="box-none">
-      <TouchableWithoutFeedback onPress={onClose}>
-        <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} />
-      </TouchableWithoutFeedback>
-      <Animated.View
-        style={[
-          styles.sheet,
-          {
-            transform: [
-              {
-                translateY: sheetAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [600, 0],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        {/* Drag area — swipe down on the handle/title to dismiss */}
-        <View {...pan.panHandlers}>
-          <View style={styles.handle} />
-          <RNText style={styles.title}>{title}</RNText>
-          {subtitle ? <RNText style={styles.subtitle}>{subtitle}</RNText> : null}
-        </View>
-        <View style={styles.divider} />
+    <BottomSheetShell visible={visible} onClose={onClose} backdropColor="rgba(0,0,0,0.4)">
+      {({ panHandlers }) => (
+        <View style={styles.sheet}>
+          {/* Drag area — swipe down on the handle/title to dismiss */}
+          <View {...panHandlers}>
+            <View style={styles.handle} />
+            <RNText style={styles.title}>{title}</RNText>
+            {subtitle ? <RNText style={styles.subtitle}>{subtitle}</RNText> : null}
+          </View>
+          <View style={styles.divider} />
         <RNText style={styles.pickerLabel}>What's your date of birth?</RNText>
 
         <View style={styles.pickerContainer}>
@@ -270,42 +208,32 @@ export const DateOfBirthSheet: React.FC<Props> = ({
           <View style={styles.pickerHighlight} pointerEvents="none" />
         </View>
 
-        <TouchableOpacity
-          style={styles.continueButton}
-          activeOpacity={0.8}
-          onPress={() => onSave(isoFromDate(pickerDate))}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <RNText style={styles.continueButtonText}>{saveLabel}</RNText>
-          )}
-        </TouchableOpacity>
-      </Animated.View>
-    </View>
+          <TouchableOpacity
+            style={styles.continueButton}
+            activeOpacity={0.8}
+            onPress={() => onSave(isoFromDate(pickerDate))}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <RNText style={styles.continueButtonText}>{saveLabel}</RNText>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+    </BottomSheetShell>
   );
 };
 
 const styles = StyleSheet.create({
-  absoluteFill: { ...StyleSheet.absoluteFillObject, zIndex: 1000 },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    zIndex: 50,
-  },
   sheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
     paddingBottom: 40,
     paddingTop: 12,
-    zIndex: 60,
   },
   handle: {
     width: 40,

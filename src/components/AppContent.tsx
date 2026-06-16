@@ -29,15 +29,18 @@ import {
   listUnseenJoinDecisions,
   markJoinDecisionSeen,
   destinationLabel,
-  listExploreTrips,
-  getTripCardMeta,
+  exploreFeed,
   type UnseenJoinDecision,
-  type GroupTrip,
 } from '../services/trips/groupTripsService';
 import { supabase } from '../config/supabase';
 import { queryClient } from '../lib/queryClient';
 import { tripsKeys } from '../hooks/trips/useTripQueries';
+import { fetchTripCore } from '../hooks/trips/useTripDetail';
 import { userTripsTopic } from '../services/trips/tripsRealtime';
+
+// How many of the first Explore trips to warm the DETAIL for on app entry, so
+// opening one of them is instant before the user scrolls. Critical query only.
+const EXPLORE_DETAIL_PREFETCH_COUNT = 3;
 import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
@@ -1610,19 +1613,32 @@ export const AppContent: React.FC = () => {
   useEffect(() => {
     if (!shouldShowConversations || exploreWarmedRef.current) return;
     exploreWarmedRef.current = true;
+    const userId = user?.id ? user.id.toString() : null;
     queryClient
-      .prefetchQuery({ queryKey: tripsKeys.explore, queryFn: () => listExploreTrips() })
+      .prefetchInfiniteQuery({
+        queryKey: tripsKeys.explore,
+        queryFn: ({ pageParam, signal }: any) =>
+          exploreFeed(11, pageParam?.created_at ?? null, pageParam?.id ?? null, signal), // 11 = EXPLORE_PAGE_LIMIT(10) + 1 probe row, matches useExploreTrips
+        initialPageParam: null,
+      })
       .then(() => {
-        const trips = queryClient.getQueryData<GroupTrip[]>(tripsKeys.explore) ?? [];
-        if (trips.length > 0) {
+        // Also warm the DETAIL of the first few trips so opening one of them is
+        // instant before the user scrolls. Critical query only (trip + members +
+        // my request), gated on a known userId — a userId-less prefetch would
+        // cache a detail with myRequest=null that the real open would consume.
+        if (!userId) return;
+        const data = queryClient.getQueryData<{ pages: Array<Array<{ id: string }>> }>(tripsKeys.explore);
+        const firstTrips = (data?.pages?.flat() ?? []).slice(0, EXPLORE_DETAIL_PREFETCH_COUNT);
+        for (const t of firstTrips) {
+          if (!t?.id) continue;
           queryClient.prefetchQuery({
-            queryKey: tripsKeys.exploreMeta(trips.map(t => t.id)),
-            queryFn: () => getTripCardMeta(trips),
+            queryKey: tripsKeys.detail(t.id),
+            queryFn: ({ signal }) => fetchTripCore(t.id, userId, signal),
           });
         }
       })
-      .catch(() => { /* prefetch is best-effort */ });
-  }, [shouldShowConversations, queryClient]);
+      .catch(() => { /* best-effort */ });
+  }, [shouldShowConversations]);
 
   // Age block overlay — shown when device flag is set (underage user)
   const handleAgeBlockOK = async () => {
