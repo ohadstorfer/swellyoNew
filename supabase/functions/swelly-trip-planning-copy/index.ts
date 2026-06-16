@@ -479,172 +479,68 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
   console.log('[find-matches] Match path:', pathName)
   console.log('[find-matches] Search spec:', buildSearchSpecInline(request, queryFilters, hasDestination))
 
-  // General match path: no destination, filter by queryFilters only
-  if (!hasDestination) {
-    if (!hasMeaningfulQueryFiltersInline(queryFilters)) {
-      throw new Error('Either destination_country or at least one query filter (e.g. country_from, age_min/age_max, surfboard_type, surf_level_category) is required for matching.')
-    }
-    const excludedUserIds = excludePrevious ? await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin) : []
-    console.log('[find-matches] General match (no destination). Excluded user IDs:', excludedUserIds?.length ?? 0)
-    const query = buildSurferQueryInline(request, requestingUserId, excludedUserIds, supabaseAdmin)
-    const { data: allSurfers, error: queryErr } = await query
-    if (queryErr) throw new Error('Error querying surfers: ' + queryErr.message)
-    console.log('[find-matches] General: surfers from DB =', allSurfers?.length ?? 0)
-    if (!allSurfers?.length) {
-      console.log('[find-matches] 0 matches: no surfers from DB')
-      return { results: [], totalCount: 0 }
-    }
-    const filteredSurfers = filterExcludedInMemoryInline(allSurfers, excludedUserIds)
-    console.log('[find-matches] General: after excluding previously matched =', filteredSurfers.length)
-    if (filteredSurfers.length === 0) {
-      console.log('[find-matches] 0 matches: no surfers left after exclusions')
-      return { results: [], totalCount: 0 }
-    }
-    if (filteredSurfers.length > 0) {
-      const sample = filteredSurfers.slice(0, 3).map((s: any) => ({
-        user_id: s.user_id,
-        country_from: s.country_from,
-        surfboard_type: s.surfboard_type,
-        surf_level_category: s.surf_level_category,
-        surf_level: s.surf_level,
-        age: s.age,
-      }))
-      console.log('[find-matches] General: sample of DB surfers (first 3):', JSON.stringify(sample))
-    }
-    const candidates = filteredSurfers.filter((s: any) => passesCriteriaInline({ surfer: s }, queryFilters))
-    console.log('[find-matches] General match: after criteria filter:', candidates.length)
-    if (candidates.length === 0 && filteredSurfers.length > 0) {
-      console.log('[find-matches] 0 matches after criteria. Sample failure reasons (first 5 surfers):')
-      for (let i = 0; i < Math.min(5, filteredSurfers.length); i++) {
-        const s = filteredSurfers[i]
-        const reason = getCriteriaFailureReasonInline(s, queryFilters)
-        console.log('[find-matches]   user_id=' + (s.user_id || '?') + ':', reason ?? 'passed')
-      }
-    }
-    if (candidates.length > 0 && queryFilters?.surf_level_category != null) {
-      const sample = candidates[0]
-      console.log('[find-matches] surf_level filter applied; sample passed surfer: user_id=' + (sample.user_id || '?') + ' surf_level_category=' + (sample.surf_level_category ?? 'null') + ' surf_level=' + (sample.surf_level ?? 'null'))
-    }
-    candidates.sort((a: any, b: any) => totalDaysInDestinationsInline(b.destinations_array) - totalDaysInDestinationsInline(a.destinations_array))
-    const generalResults = candidates.map((userSurfer: any) => {
-      const totalDays = totalDaysInDestinationsInline(userSurfer.destinations_array)
-      return {
-        user_id: userSurfer.user_id,
-        name: userSurfer.name || 'User',
-        profile_image_url: userSurfer.profile_image_url ?? null,
-        match_score: totalDays,
-        priority_score: 0,
-        general_score: undefined as number | undefined,
-        matched_areas: [],
-        matched_towns: [],
-        common_lifestyle_keywords: [],
-        common_wave_keywords: [],
-        surfboard_type: userSurfer.surfboard_type,
-        surf_level: userSurfer.surf_level,
-        travel_experience: userSurfer.travel_experience?.toString(),
-        country_from: userSurfer.country_from,
-        age: userSurfer.age,
-        days_in_destination: totalDays,
-        destinations_array: userSurfer.destinations_array,
-        match_quality: { matchCount: 1, countryMatch: false, areaMatch: false, townMatch: false },
-      }
-    })
-    const limited = generalResults.slice(0, MATCHES_PAGE_SIZE)
-    console.log('[find-matches] Result:', limited.length, `matches (path=general, max per page=${MATCHES_PAGE_SIZE}, totalCount=${generalResults.length})`)
-    return { results: limited, totalCount: generalResults.length }
+  // General path requires at least one meaningful query filter (same guard as the old in-memory path).
+  if (!hasDestination && !hasMeaningfulQueryFiltersInline(queryFilters)) {
+    throw new Error('Either destination_country or at least one query filter (e.g. country_from, age_min/age_max, surfboard_type, surf_level_category) is required for matching.')
   }
 
-  // Destination path: country match + raw area match only (no cardinal/town normalization)
   const excludedUserIds = excludePrevious ? await getPreviouslyMatchedUserIdsInline(chatId, supabaseAdmin) : []
-  console.log('[find-matches] Destination: excluded user IDs (previously matched):', excludedUserIds?.length ?? 0, 'excludePrevious:', excludePrevious)
-  const query = buildSurferQueryInline(request, requestingUserId, excludedUserIds, supabaseAdmin)
-  const { data: allSurfers, error: queryErr } = await query
-  if (queryErr) throw new Error('Error querying surfers: ' + queryErr.message)
-  console.log('[find-matches] Destination: surfers from DB (before exclusions):', allSurfers?.length ?? 0)
-  if (!allSurfers?.length) {
-    console.log('[find-matches] 0 matches: no surfers from DB')
-    return { results: [], totalCount: 0 }
+  console.log('[find-matches] Excluded user IDs (previously matched):', excludedUserIds?.length ?? 0, 'excludePrevious:', excludePrevious)
+
+  // In-DB matching: the match_surfers RPC is a faithful port of the old in-memory
+  // criteria/scoring/ranking (filter + score + rank + limit in one query). It returns the
+  // same top-3 (+ total_count) WITHOUT shipping every surfer row to this isolate — the full
+  // surfers table is no longer fetched per match request. Parity ref: supabase/migrations/20260605120000_match_surfers.sql.
+  const asArray = (v: any): string[] | null =>
+    v == null ? null : (Array.isArray(v) ? (v.length ? v : null) : [v])
+
+  const rpcParams = {
+    p_requesting_user_id: requestingUserId,
+    p_excluded_ids: excludedUserIds && excludedUserIds.length ? excludedUserIds : [],
+    p_destination_country: hasDestination ? request.destination_country : null,
+    p_area: request.area || null,
+    p_country_from: asArray(queryFilters?.country_from),
+    p_surfboard_type: asArray(queryFilters?.surfboard_type),
+    p_surf_level_category: asArray(queryFilters?.surf_level_category),
+    p_age_min: typeof queryFilters?.age_min === 'number' ? queryFilters.age_min : null,
+    p_age_max: typeof queryFilters?.age_max === 'number' ? queryFilters.age_max : null,
+    p_limit: MATCHES_PAGE_SIZE,
   }
-  const filteredSurfers = filterExcludedInMemoryInline(allSurfers, excludedUserIds)
-  console.log('[find-matches] Destination: after excluding previously matched:', filteredSurfers.length)
-  const requestedArea = request.area || null
-  const countryMatched: Array<{ surfer: any; hasAreaMatch: boolean; daysInDestination: number; bestMatch: { countryMatch: boolean; areaMatch: boolean; townMatch: boolean; matchedAreas: string[]; matchedTowns: string[] } }> = []
-  for (const userSurfer of filteredSurfers) {
-    let days = 0
-    let hasAreaMatch = false
-    if (userSurfer.destinations_array?.length) {
-      for (const dest of userSurfer.destinations_array) {
-        const userCountry = getCountryFromUserDestInline(dest)
-        const userState = typeof dest === 'object' && dest !== null && 'state' in dest ? (dest as any).state : undefined
-        if (!countryMatchesRequestInline(request.destination_country, userCountry, userState)) continue
-        days += dest.time_in_days || 0
-        if (requestedArea && hasRequestedAreaInArrayInline(dest, requestedArea)) hasAreaMatch = true
-      }
-    }
-    if (days === 0) continue
-    const bestMatch = {
-      countryMatch: true,
-      areaMatch: hasAreaMatch,
-      townMatch: false,
-      matchedAreas: hasAreaMatch && requestedArea ? [requestedArea] : [] as string[],
-      matchedTowns: [] as string[],
-    }
-    countryMatched.push({ surfer: userSurfer, hasAreaMatch, daysInDestination: days, bestMatch })
-  }
-  console.log('[find-matches] Destination: after country match (destinations_array + time_in_days > 0):', countryMatched.length)
-  if (countryMatched.length === 0) {
-    console.log('[find-matches] 0 matches: no surfers with destination country match')
+
+  const { data: rows, error: rpcErr } = await supabaseAdmin.rpc('match_surfers', rpcParams)
+  if (rpcErr) throw new Error('Error in match_surfers RPC: ' + rpcErr.message)
+
+  if (!rows?.length) {
+    console.log('[find-matches] 0 matches (path=' + pathName + ')')
     return { results: [], totalCount: 0 }
   }
 
-  let afterCriteria = countryMatched
-  if (queryFilters && typeof queryFilters === 'object') {
-    afterCriteria = countryMatched.filter((entry) => passesCriteriaInline(entry, queryFilters))
-    console.log('[find-matches] Destination: after criteria filter (country_from/surfboard_type/surf_level/age):', afterCriteria.length)
-    if (afterCriteria.length === 0 && countryMatched.length > 0) {
-      console.log('[find-matches] 0 matches after criteria. Sample failure reasons (first 5 surfers):')
-      for (let i = 0; i < Math.min(5, countryMatched.length); i++) {
-        const entry = countryMatched[i]
-        const reason = getCriteriaFailureReasonInline(entry.surfer, queryFilters)
-        console.log('[find-matches]   user_id=' + (entry.surfer?.user_id || '?') + ':', reason ?? 'passed')
-      }
-    }
-    if (afterCriteria.length > 0 && queryFilters?.surf_level_category != null) {
-      const sampleSurfer = afterCriteria[0].surfer
-      console.log('[find-matches] surf_level filter applied; sample passed surfer: user_id=' + (sampleSurfer?.user_id || '?') + ' surf_level_category=' + (sampleSurfer?.surf_level_category ?? 'null') + ' surf_level=' + (sampleSurfer?.surf_level ?? 'null'))
-    }
-  }
+  // total_count (count(*) over the full filtered set) is identical on every row.
+  const totalCount = Number(rows[0].total_count ?? rows.length)
 
-  afterCriteria.sort((a, b) => {
-    if (requestedArea) {
-      if (a.hasAreaMatch && !b.hasAreaMatch) return -1
-      if (!a.hasAreaMatch && b.hasAreaMatch) return 1
-    }
-    return b.daysInDestination - a.daysInDestination
-  })
-  const destResults = afterCriteria.map(({ surfer: userSurfer, hasAreaMatch, daysInDestination, bestMatch }) => ({
-    user_id: userSurfer.user_id,
-    name: userSurfer.name || 'User',
-    profile_image_url: userSurfer.profile_image_url ?? null,
-    match_score: daysInDestination,
+  const results: MatchResultInline[] = rows.map((r: any) => ({
+    user_id: r.user_id,
+    name: r.name || 'User',
+    profile_image_url: r.profile_image_url ?? null,
+    match_score: r.match_score ?? 0,
     priority_score: 0,
     general_score: undefined as number | undefined,
-    matched_areas: bestMatch.matchedAreas ?? [],
-    matched_towns: bestMatch.matchedTowns ?? [],
+    matched_areas: r.matched_areas ?? [],
+    matched_towns: [],
     common_lifestyle_keywords: [],
     common_wave_keywords: [],
-    surfboard_type: userSurfer.surfboard_type,
-    surf_level: userSurfer.surf_level,
-    travel_experience: userSurfer.travel_experience?.toString(),
-    country_from: userSurfer.country_from,
-    age: userSurfer.age,
-    days_in_destination: daysInDestination,
-    destinations_array: userSurfer.destinations_array,
-    match_quality: { matchCount: 1, countryMatch: bestMatch.countryMatch, areaMatch: bestMatch.areaMatch, townMatch: bestMatch.townMatch },
+    surfboard_type: r.surfboard_type,
+    surf_level: r.surf_level,
+    travel_experience: r.travel_experience?.toString(),
+    country_from: r.country_from,
+    age: r.age,
+    days_in_destination: r.days_in_destination ?? r.match_score ?? 0,
+    destinations_array: r.destinations_array,
+    match_quality: { matchCount: 1, countryMatch: !!r.country_match, areaMatch: !!r.area_match, townMatch: false },
   }))
-  const destLimited = destResults.slice(0, MATCHES_PAGE_SIZE)
-  console.log('[find-matches] Result:', destLimited.length, `matches (path=destination, max per page=${MATCHES_PAGE_SIZE}, totalCount=${destResults.length})`)
-  return { results: destLimited, totalCount: destResults.length }
+
+  console.log('[find-matches] Result:', results.length, `matches (path=${pathName}, max per page=${MATCHES_PAGE_SIZE}, totalCount=${totalCount})`)
+  return { results, totalCount }
 }
 // === END INLINED find-matches ===
 
