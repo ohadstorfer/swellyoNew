@@ -4027,7 +4027,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               'this user';
             setReportTarget({ userId: selectedMessage.sender_id, name: senderName });
             setReportMessageContext(describeMessageForReport(selectedMessage));
-            setReportSheetVisible(true);
+            // The actions menu is a Modal and the report sheet is a Modal too
+            // (BottomSheetShell). Opening the second in the same frame the first
+            // dismisses makes iOS drop the presentation, so the sheet never shows.
+            // Wait for the menu's fade-out to finish, then present the sheet.
+            setTimeout(() => setReportSheetVisible(true), 320);
           }
         }}
         canReport={(() => {

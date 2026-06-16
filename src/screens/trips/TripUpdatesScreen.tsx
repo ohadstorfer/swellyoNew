@@ -175,7 +175,6 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
                   update={u}
                   expanded
                   formatTime={formatRelativeTime}
-                  onOpenDetail={() => {}}
                   right={
                     isHost ? (
                       <Pressable onPress={() => setEditingUpdateId(u.id)} hitSlop={8}>

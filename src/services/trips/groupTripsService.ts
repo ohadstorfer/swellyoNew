@@ -497,7 +497,11 @@ export async function getTripDestination(
 }
 
 /** A normalized explore trip row PLUS the host fields the RPC joins in. */
-export type ExploreFeedRow = GroupTrip & { host_name: string | null; host_avatar: string | null };
+export type ExploreFeedRow = GroupTrip & {
+  host_name: string | null;
+  host_avatar: string | null;
+  member_avatars: string[] | null; // up to 4 participant avatars (host first) for the card cluster
+};
 
 /**
  * Explore list via the explore_feed RPC: trips + host name/avatar + count in ONE
@@ -627,6 +631,86 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
   past.sort(byEndDesc);
 
   return { approved, pending, past };
+}
+
+/** A My Trips feed row: a normalized trip + the host/member fields the RPC joins
+ *  in, plus which relationship put it in the list (participant vs pending request). */
+export type MyTripsFeedRow = ExploreFeedRow & {
+  membership: 'participant' | 'pending_request';
+};
+
+/**
+ * My Trips in ONE round-trip via the `my_trips_feed` RPC — replaces the old
+ * 4-query path (listMyTripsByBucket ×2 + getTripCardMeta ×2). The RPC returns
+ * every relevant trip (participant + pending-request) already enriched with host
+ * name/avatar, member avatars and count, tagged with `membership`.
+ *
+ * Bucketing (approved / pending / past) stays here in JS because it depends on
+ * date_months month-arithmetic — identical rules to the old listMyTripsByBucket.
+ * `signal` cancels the request when react-query aborts (unmount).
+ */
+export async function fetchMyTripsFeed(
+  signal?: AbortSignal,
+): Promise<{ buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> }> {
+  let q = supabase.rpc('my_trips_feed');
+  if (signal) q = q.abortSignal(signal);
+  const { data, error } = await q;
+  if (error) {
+    if (isAbortError(error, signal)) throw error; // expected cancel — let React Query handle it
+    console.error('[groupTripsService] fetchMyTripsFeed error:', error);
+    throw error;
+  }
+
+  const rows: MyTripsFeedRow[] = (data || []).map((r: any) => {
+    const trip = normalizeTrip(r) as MyTripsFeedRow;
+    trip.membership = r.membership;
+    return trip;
+  });
+
+  // Card meta comes straight off each row — no second query, no avatar pop-in.
+  const meta = new Map<string, TripCardMeta>();
+  for (const t of rows) {
+    meta.set(t.id, {
+      hostName: t.host_name ?? null,
+      hostAvatar: t.host_avatar ?? null,
+      memberAvatars: t.member_avatars ?? [],
+      totalCount: t.participant_count ?? 0,
+    });
+  }
+
+  const approved: GroupTrip[] = [];
+  const past: GroupTrip[] = [];
+  const pending: GroupTrip[] = [];
+  const seen = new Set<string>();
+  const today = new Date();
+
+  // Participant rows first so an approved/past bucket always wins over a stale
+  // pending request for the same trip (mirrors listMyTripsByBucket's `seen`).
+  for (const trip of rows.filter(t => t.membership === 'participant')) {
+    if (seen.has(trip.id)) continue;
+    seen.add(trip.id);
+    if (trip.status === 'cancelled') continue; // cancelled trips vanish from My Trips
+    if (trip.status === 'completed' || isTripPast(trip, today)) past.push(trip);
+    else approved.push(trip);
+  }
+
+  for (const trip of rows.filter(t => t.membership === 'pending_request')) {
+    if (seen.has(trip.id)) continue; // already a participant → that bucket wins
+    if (trip.status !== 'active') continue;
+    if (isTripPast(trip, today)) continue;
+    pending.push(trip);
+  }
+
+  // Same ordering as listMyTripsByBucket: upcoming/pending soonest-first, past most-recent-first.
+  const byStartAsc = (a: GroupTrip, b: GroupTrip) =>
+    (a.start_date || '9999').localeCompare(b.start_date || '9999');
+  const byEndDesc = (a: GroupTrip, b: GroupTrip) =>
+    (b.end_date || b.start_date || '').localeCompare(a.end_date || a.start_date || '');
+  approved.sort(byStartAsc);
+  pending.sort(byStartAsc);
+  past.sort(byEndDesc);
+
+  return { buckets: { approved, pending, past }, meta };
 }
 
 /** Social-proof data the redesigned trip card needs but the list rows don't

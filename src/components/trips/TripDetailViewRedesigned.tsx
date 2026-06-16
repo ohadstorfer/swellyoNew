@@ -256,6 +256,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onLeaderPress,
   afterHeroSlot,
   bodyHidden,
+  onShare,
   isHost = false,
   aboutHost = null,
   onEditCover,
@@ -476,6 +477,18 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             <Ionicons name="image-outline" size={40} color="#B0B0B0" />
           </View>
         )}
+        {onShare ? (
+          <TouchableOpacity
+            style={styles.shareFab}
+            onPress={onShare}
+            activeOpacity={0.8}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Share trip"
+          >
+            <Ionicons name="share-social-outline" size={22} color={C.ink} />
+          </TouchableOpacity>
+        ) : null}
         {isHost ? (
           <View style={styles.editCoverPill}>
             <EditPill label="Edit cover" onPress={onEditCover} />
@@ -1303,6 +1316,24 @@ const styles = StyleSheet.create({
     top: 12,
     right: 12,
     zIndex: 2,
+  },
+  // Floating circular share button, top-left over the hero image.
+  shareFab: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    zIndex: 2,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: C.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   // "About <host>" header — avatar + name + Edit Profile pill.
   aboutHostHeader: {

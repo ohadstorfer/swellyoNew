@@ -189,7 +189,8 @@ const TripCard: React.FC<{
   status: TripCardStatus;
   meta?: TripCardMeta;
   onPress?: () => void;
-}> = ({ trip, status, meta, onPress }) => {
+  onPressIn?: () => void;
+}> = ({ trip, status, meta, onPress, onPressIn }) => {
   const badge = STATUS_BADGE[status];
   const avatars = meta?.memberAvatars ?? [];
   const total = meta?.totalCount ?? trip.participant_count ?? 0;
@@ -200,6 +201,7 @@ const TripCard: React.FC<{
       style={styles.card}
       activeOpacity={onPress ? 0.9 : 1}
       onPress={onPress}
+      onPressIn={onPressIn}
       disabled={!onPress}
     >
       <View style={styles.cardImageWrap}>
@@ -329,6 +331,8 @@ const TripFilterBar: React.FC<{
           >
             <Text
               numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
               style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}
             >
               {it.label}
@@ -1046,6 +1050,19 @@ const MyTripsView: React.FC<{
   const buckets = data?.buckets ?? EMPTY_BUCKETS;
   const meta = data?.meta ?? EMPTY_META;
   const [filter, setFilter] = useState<TripFilter>('all');
+
+  // Warm the detail query on press-in so the trip opens instantly (header is
+  // already seeded from this list cache; this primes participants + myRequest).
+  // Mirrors ExploreTripCard's onPressIn. Skip while userId is unknown — a
+  // userId-less prefetch would cache myRequest=null and show a wrong CTA.
+  const queryClient = useQueryClient();
+  const prefetchDetail = useCallback((id: string) => {
+    if (!userId) return;
+    queryClient.prefetchQuery({
+      queryKey: tripsKeys.detail(id),
+      queryFn: ({ signal }) => fetchTripCore(id, userId, signal),
+    });
+  }, [queryClient, userId]);
   // Flips true once the initial stagger window has elapsed, so scrolling /
   // recycling never re-triggers the reveal. (A per-render mutation would
   // misbehave under StrictMode's double render, so we use a post-load timer.)
@@ -1108,6 +1125,7 @@ const MyTripsView: React.FC<{
             status={item.status}
             meta={meta.get(item.trip.id)}
             onPress={() => onOpenTrip(item.trip.id)}
+            onPressIn={() => prefetchDetail(item.trip.id)}
           />
         );
         // Stagger only the first few cards during the initial reveal window;
@@ -1615,19 +1633,23 @@ const styles = StyleSheet.create({
   // paddingBottom clears the floating nav bar (see exScrollContent)
   listContent: { paddingHorizontal: 16, paddingBottom: 150, flexGrow: 1 },
 
-  // Filter pills (My Trips).
+  // Filter pills (My Trips). All four must fit on one row without scrolling:
+  // chips shrink (flexShrink) and the label auto-fits its font (adjustsFontSizeToFit)
+  // on narrow screens, so nothing overflows or truncates.
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginTop: 22,
     marginBottom: 28,
     marginHorizontal: 6,
-    alignItems: 'center',
+    gap: 6,
   },
   filterPill: {
+    flexShrink: 1,
     borderRadius: 12,
-    paddingHorizontal: 11,
-    paddingVertical: 13,
+    paddingHorizontal: 9,
+    paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1637,7 +1659,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  filterText: { fontFamily: FONT_INTER, fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  filterText: { fontFamily: FONT_INTER, fontSize: 12, lineHeight: 16, textAlign: 'center' },
   filterTextActive: { color: '#FFFFFF' },
   filterTextInactive: { color: '#333333' },
   filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },

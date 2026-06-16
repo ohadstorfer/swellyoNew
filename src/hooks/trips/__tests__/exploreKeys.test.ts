@@ -2,8 +2,7 @@
 // test only validates key shapes — no network or native bindings needed.
 jest.mock('../../../services/trips/groupTripsService', () => ({
   exploreFeed: jest.fn(),
-  getTripCardMeta: jest.fn(),
-  listMyTripsByBucket: jest.fn(),
+  fetchMyTripsFeed: jest.fn(),
 }));
 
 import { QueryClient } from '@tanstack/react-query';

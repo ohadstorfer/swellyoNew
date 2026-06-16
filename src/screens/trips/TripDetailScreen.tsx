@@ -16,7 +16,7 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Reanimated, { FadeInUp } from 'react-native-reanimated';
+import Reanimated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -293,31 +293,6 @@ const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) =
   </View>
 );
 
-const ActionButton: React.FC<{
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
-  loading?: boolean;
-  disabled?: boolean;
-}> = ({ icon, label, onPress, loading, disabled }) => (
-  <TouchableOpacity
-    style={[styles.actionBtn, disabled && styles.actionBtnDisabled]}
-    onPress={onPress}
-    disabled={disabled || loading}
-    activeOpacity={0.7}
-    accessibilityLabel={label}
-  >
-    <View style={styles.actionIconCircle}>
-      {loading ? (
-        <ActivityIndicator size="small" color="#0788B0" />
-      ) : (
-        <Ionicons name={icon} size={20} color="#0788B0" />
-      )}
-    </View>
-    <Text style={styles.actionLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
 const DangerRow: React.FC<{
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -357,6 +332,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // Discreet "report this whole trip" flow — available to members and non-members alike.
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  // Header kebab (⋮) overflow menu: Chat / Report / Share for everyone, plus
+  // Complete / Cancel for the host.
+  const [menuVisible, setMenuVisible] = useState(false);
   // placeholderData seeds the trip from the list cache with participants: []
   // and myRequest: null, so until the real fetch lands we DON'T know whether
   // the viewer is a member. Member-dependent chrome (join CTA, deep-link
@@ -1281,6 +1259,48 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Alias for the bottom-spacer below; kept identical to stickyCtaVisible.
   const hasStickyFooter = stickyCtaVisible;
 
+  // Header kebab menu. `group` drives the dividers (chat / report+share /
+  // host actions) so they collapse cleanly when a section isn't shown.
+  type TripMenuEntry = {
+    key: string;
+    icon: React.ComponentProps<typeof Ionicons>['name'];
+    label: string;
+    group: number;
+    onPress: () => void;
+  };
+  const menuItems: TripMenuEntry[] = (
+    [
+      // Chat — members + host, while the trip isn't cancelled (chat lives on
+      // even once a trip is completed).
+      ((isHost || isApprovedMember) && !isCancelled) && {
+        key: 'chat',
+        icon: 'chatbubble-outline',
+        label: 'Chat Trip',
+        group: 0,
+        onPress: handleOpenGroupChat,
+      },
+      // Report + Share — everyone, members and non-members alike.
+      { key: 'report', icon: 'warning-outline', label: 'Report Trip', group: 1, onPress: () => setReportSheetVisible(true) },
+      { key: 'share', icon: 'paper-plane-outline', label: 'Share Trip', group: 1, onPress: handleShare },
+      // Complete — host only, once the trip is underway and still live.
+      (isHost && tripHasStarted && !isLocked) && {
+        key: 'complete',
+        icon: 'checkmark-circle-outline',
+        label: 'Complete trip',
+        group: 2,
+        onPress: handleCompleteTrip,
+      },
+      // Cancel — host only, while the trip is still live.
+      (isHost && !isLocked) && {
+        key: 'cancel',
+        icon: 'ban-outline',
+        label: 'Cancel trip',
+        group: 2,
+        onPress: handleCancelTrip,
+      },
+    ] as (TripMenuEntry | false)[]
+  ).filter(Boolean) as TripMenuEntry[];
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
       <Header
@@ -1288,27 +1308,24 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         title={trip.title || 'Trip'}
         rightAction={
           <View style={styles.headerActions}>
-            {/* Group chat — members only. Stays available even when the trip is
-                completed / ended (plan is locked, but chat lives on). */}
-            {(isHost || isApprovedMember) && !isCancelled ? (
-              <TouchableOpacity
-                onPress={handleOpenGroupChat}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityLabel="Open group chat"
-                disabled={openingChat}
-              >
-                {openingChat ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="chatbubble-outline" size={24} color="#FFFFFF" />
-                )}
-              </TouchableOpacity>
-            ) : null}
             {/* Notifications — self-contained bell + unread badge; opens the
                 panel ROUTE (same component the other headers use). */}
             {currentUserId ? (
               <NotificationCenter userId={currentUserId} bare />
             ) : null}
+            {/* Overflow (⋮) — Chat / Report / Share for everyone, plus
+                Complete / Cancel for the host. */}
+            <TouchableOpacity
+              onPress={() => setMenuVisible(true)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Trip options"
+            >
+              {cancelling || completing || openingChat ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Ionicons name="ellipsis-vertical" size={22} color="#FFFFFF" />
+              )}
+            </TouchableOpacity>
           </View>
         }
       />
@@ -1426,6 +1443,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 : null,
             };
           })()}
+          onShare={handleShare}
           onEditCover={() => setEditSheet('cover')}
           onEditAboutHost={() => setEditSheet('about')}
           onEditDescription={() => setEditSheet('description')}
@@ -1587,58 +1605,24 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* Bottom destructive — Exit (member) / Cancel (host), WhatsApp-style red rows */}
-        {(isApprovedMember || isHost) && (
+        {/* Bottom destructive — Exit (member only). Host's Cancel / Complete
+            now live in the header overflow (⋮) menu. */}
+        {isApprovedMember && !isHost && (
           <View style={styles.destructiveCard}>
-            {isApprovedMember && !isHost && (
-              <DangerRow
-                icon="exit-outline"
-                label="Exit trip"
-                onPress={handleLeaveTrip}
-                loading={leaving}
-              />
-            )}
-            {isHost && (
-              <DangerRow
-                icon="close-circle-outline"
-                label="Cancel trip"
-                onPress={handleCancelTrip}
-                loading={cancelling}
-              />
-            )}
-            {/* Mark completed — host only, once the trip is underway. Closes the
-                trip: it moves to "Past trips" and the plan locks (overview +
-                chat stay). Hidden for upcoming trips. */}
-            {isHost && tripHasStarted && (
-              <DangerRow
-                icon="checkmark-done-outline"
-                label="Mark trip as completed"
-                onPress={handleCompleteTrip}
-                loading={completing}
-                showDivider
-              />
-            )}
+            <DangerRow
+              icon="exit-outline"
+              label="Exit trip"
+              onPress={handleLeaveTrip}
+              loading={leaving}
+            />
           </View>
         )}
         </>
         )}
 
-        {/* Share — bottom of the page, both tabs (restored from the
-            pre-PlanSections layout). */}
-        <View style={[styles.actionRow, { marginTop: 20, paddingHorizontal: 16 }]}>
-          <ActionButton icon="share-outline" label="Share" onPress={handleShare} />
-        </View>
-
-        {/* Discreet report entry — small faint link, available to everyone
-            (members and non-members). Intentionally low-prominence. */}
-        <TouchableOpacity
-          onPress={() => setReportSheetVisible(true)}
-          activeOpacity={0.6}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.reportTripLink}
-        >
-          <Text style={styles.reportTripLinkText}>Report this trip</Text>
-        </TouchableOpacity>
+        {/* Share + Report now live in the header overflow (⋮) menu; Share also
+            keeps its floating button on the hero cover (TripDetailViewRedesigned
+            `onShare`). */}
 
         {/* Clearance for the floating sticky footer (Trip Chat / Join a Trip)
             so the last content isn't hidden behind it; smaller otherwise. */}
@@ -1899,6 +1883,40 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         hostName={participants.find(p => p.role === 'host')?.name ?? ''}
         onClose={() => setReportSheetVisible(false)}
       />
+
+      {/* Header overflow (⋮) menu. Rendered at the SafeAreaView root (not inside
+          the header) so it isn't clipped, and above everything via zIndex. A
+          full-screen transparent backdrop dismisses it on any outside tap. */}
+      {menuVisible && (
+        <>
+          <TouchableOpacity
+            style={styles.menuBackdrop}
+            activeOpacity={1}
+            onPress={() => setMenuVisible(false)}
+          />
+          <Reanimated.View entering={FadeInDown.duration(160)} style={styles.menuDropdown}>
+            {menuItems.map((item, i) => {
+              const showDivider = i > 0 && item.group !== menuItems[i - 1].group;
+              return (
+                <React.Fragment key={item.key}>
+                  {showDivider && <View style={styles.menuDivider} />}
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    activeOpacity={0.6}
+                    onPress={() => {
+                      setMenuVisible(false);
+                      item.onPress();
+                    }}
+                  >
+                    <Ionicons name={item.icon} size={22} color="#222B30" />
+                    <Text style={styles.menuItemText}>{item.label}</Text>
+                  </TouchableOpacity>
+                </React.Fragment>
+              );
+            })}
+          </Reanimated.View>
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -2010,6 +2028,38 @@ const styles = StyleSheet.create({
   },
   headerRight: { minWidth: 28, alignItems: 'flex-end' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  // Header overflow (⋮) menu — anchored under the kebab, top-right.
+  menuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 9998 },
+  menuDropdown: {
+    position: 'absolute',
+    top: 52,
+    right: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    minWidth: 224,
+    paddingVertical: 8,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 999,
+    zIndex: 9999,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 18,
+    paddingRight: 28,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  menuItemText: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 16,
+    color: '#222B30',
+    flex: 1,
+  },
+  menuDivider: { height: 1, backgroundColor: '#ECECEC', marginVertical: 4 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },
 

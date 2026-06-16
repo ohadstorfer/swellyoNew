@@ -6,7 +6,7 @@
 // in isolation. Operational sections (join requests, breakdown, destructive
 // actions) stay in TripDetailScreen below these blocks.
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AdminUpdateRow, UpdateDetailModal, AnnouncementIcon } from '../AdminUpdateUI';
+import { AdminUpdateRow, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import type {
@@ -235,8 +235,18 @@ export const AdminUpdatesCard: React.FC<{
   onViewAll?: () => void;
 }> = ({ updates, isHost, formatTime, onAddUpdate, onViewAll }) => {
   const [expanded, setExpanded] = useState(false);
-  // Full text of a tapped (truncated) update — drives the detail overlay.
-  const [detail, setDetail] = useState<AdminUpdate | null>(null);
+  // Inline accordion: which update ids are expanded (tap a card to reveal its
+  // body in place instead of opening an overlay). Rows toggle independently.
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set());
+  // The open/close animation itself lives in AdminUpdateRow (Reanimated, UI
+  // thread); here we just flip which ids are open.
+  const toggleOpen = useCallback((id: string) => {
+    setOpenIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
   const PREVIEW = 3;
   // When "View all" navigates to a dedicated screen we always show the 3-item
   // preview here; inline expand is the fallback when no navigation is wired.
@@ -278,15 +288,16 @@ export const AdminUpdatesCard: React.FC<{
             </View>
           ) : null}
           {visible.map((u, i) => (
-            // Plan preview is read-only — tap opens the detail overlay; editing /
-            // deleting happens only on the "View all" Updates screen.
+            // Plan preview — tap a card with a body to expand it inline
+            // (accordion); editing / deleting happens on the "View all" screen.
             <AdminUpdateRow
               key={u.id}
               update={u}
               connected
               showDivider={isHost || i < visible.length - 1}
               formatTime={formatTime}
-              onOpenDetail={setDetail}
+              open={openIds.has(u.id)}
+              onToggle={() => toggleOpen(u.id)}
             />
           ))}
           {isHost ? (
@@ -296,8 +307,6 @@ export const AdminUpdatesCard: React.FC<{
           ) : null}
         </View>
       )}
-
-      <UpdateDetailModal update={detail} formatTime={formatTime} onClose={() => setDetail(null)} />
     </View>
   );
 };

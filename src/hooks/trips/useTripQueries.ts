@@ -16,8 +16,7 @@ import {
   MyTripsBuckets,
   TripCardMeta,
   ExploreFeedRow,
-  getTripCardMeta,
-  listMyTripsByBucket,
+  fetchMyTripsFeed,
   exploreFeed,
 } from '../../services/trips/groupTripsService';
 
@@ -70,7 +69,7 @@ export function useExploreTrips() {
       m.set(t.id, {
         hostName: t.host_name ?? null,
         hostAvatar: t.host_avatar ?? null,
-        memberAvatars: [],
+        memberAvatars: t.member_avatars ?? [],
         totalCount: t.participant_count ?? 0,
       });
     }
@@ -90,21 +89,20 @@ export function useExploreTrips() {
 }
 
 /**
- * My Trips, bucketed (approved / pending / past) + batched card meta.
- * Disabled until a userId is known (mirrors the old `if (!userId)` guard).
+ * My Trips, bucketed (approved / pending / past) + card meta — now ONE
+ * `my_trips_feed` RPC (host name/avatar/count + member avatars come in each row,
+ * no separate meta query). Disabled until a userId is known. Freshness comes from
+ * realtime invalidation (useTripsListRealtime) + post-create/edit invalidation,
+ * so — like Explore — we skip refetch-on-mount/focus (no re-running the RPC on
+ * every tab switch / screen re-entry). The RPC reads auth.uid() itself; userId
+ * stays in the query key only for cache identity + invalidation + list-seeding.
  */
 export function useMyTrips(userId: string | null) {
   return useQuery<MyTripsData>({
     queryKey: userId ? tripsKeys.my(userId) : ['trips', 'my', 'anon'],
     enabled: !!userId,
-    queryFn: async () => {
-      const buckets = await listMyTripsByBucket(userId as string);
-      const meta = await getTripCardMeta([
-        ...buckets.approved,
-        ...buckets.pending,
-        ...buckets.past,
-      ]);
-      return { buckets, meta };
-    },
+    queryFn: ({ signal }) => fetchMyTripsFeed(signal),
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }

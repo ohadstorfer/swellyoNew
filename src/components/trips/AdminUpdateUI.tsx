@@ -2,24 +2,34 @@
 // (PlanSections) and the full Updates page (TripUpdatesScreen) so the two stay
 // visually and behaviourally identical (Figma node 12933-38204):
 //   • AnnouncementIcon — the exact "announcement-02" bullhorn vector.
-//   • AdminUpdateRow   — a single-line update card. When the body overflows one
-//     line the whole card becomes tappable and surfaces a chevron affordance;
-//     tapping asks the parent to open the detail overlay.
-//   • UpdateDetailModal — the centered overlay showing the full update text.
-import React from 'react';
+//   • AdminUpdateRow   — a single-line update card. In the Plan-tab preview a
+//     card with a body becomes tappable and expands inline (accordion): the body
+//     slides open on a Reanimated height/opacity timing and the chevron rotates
+//     forward → up. No overlay.
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { ff } from '../../theme/fonts';
 import type { AdminUpdate } from '../../services/trips/groupTripsService';
+
+// iOS-drawer easing (Ionic curve): fast, then a soft settle — reads as smooth
+// for an open/close reveal. Single duration; close just runs the same in
+// reverse so an interrupted tap retargets cleanly.
+const ACCORDION_EASE = Easing.bezier(0.32, 0.72, 0, 1);
+const ACCORDION_MS = 260;
 
 // Tokens mirror the Figma frame (white card, #EEEEEE border, #F7F7F7 icon box).
 const C = {
@@ -30,7 +40,6 @@ const C = {
   title: '#333333',
   time: '#6A7282',
   muted: '#7B7B7B',
-  scrim: 'rgba(17, 24, 28, 0.45)',
 } as const;
 
 // Exact "announcement-02" glyph from Figma (node 12933:38205 / 2007:2108).
@@ -48,39 +57,90 @@ export const AnnouncementIcon: React.FC<{ size?: number; color?: string }> = ({
   </Svg>
 );
 
+// The collapsible body. The text is measured once (absolutely positioned so its
+// natural height is independent of the clip), then the clip's real height is
+// driven from `progress` — animating actual layout height means the rows below
+// slide down with it instead of being overlapped.
+const AccordionBody: React.FC<{ text: string; progress: SharedValue<number> }> = ({
+  text,
+  progress,
+}) => {
+  const [height, setHeight] = useState(0);
+  const style = useAnimatedStyle(
+    () => ({ height: progress.value * height, opacity: progress.value }),
+    [height],
+  );
+  return (
+    <Animated.View style={[styles.bodyClip, style]}>
+      <View
+        style={styles.bodyMeasure}
+        onLayout={e => {
+          const next = e.nativeEvent.layout.height;
+          if (next && Math.abs(next - height) > 0.5) setHeight(next);
+        }}
+      >
+        <Text style={styles.bodyText}>{text}</Text>
+      </View>
+    </Animated.View>
+  );
+};
+
 export const AdminUpdateRow: React.FC<{
   update: AdminUpdate;
   formatTime: (iso: string) => string;
-  /** Called when a truncated card is tapped — parent opens the detail overlay. */
-  onOpenDetail: (u: AdminUpdate) => void;
   /** Host long-press → Edit/Delete menu (Plan tab only). */
   onLongPress?: () => void;
   /** Trailing slot, e.g. the host "Edit" link (Plan tab only). */
   right?: React.ReactNode;
   /** Connected-list mode (Plan card, Figma 12716:6935): no own border/radius,
-   *  larger type, hairline divider instead of a gap, and no chevron — the parent
-   *  wraps the rows in one rounded card. */
+   *  larger type, hairline divider instead of a gap — the parent wraps the rows
+   *  in one rounded card. A row with a body becomes a tappable accordion. */
   connected?: boolean;
   /** Connected mode only — draw a bottom hairline (between consecutive rows). */
   showDivider?: boolean;
+  /** Connected mode only — this row is expanded inline (accordion open). */
+  open?: boolean;
+  /** Connected mode only — toggle the inline expansion. */
+  onToggle?: () => void;
   /** Full Updates page (Figma 13179:8792): render the whole body inline — no
-   *  one-line clamp, no chevron, no detail overlay. The icon top-aligns to the
-   *  first line so tall cards read like the Figma frame. */
+   *  one-line clamp, no chevron. The icon top-aligns to the first line so tall
+   *  cards read like the Figma frame. */
   expanded?: boolean;
-}> = ({ update, formatTime, onOpenDetail, onLongPress, right, connected, showDivider, expanded }) => {
-  // Plan preview shows only the title; tapping always opens the detail overlay
-  // (where the description lives). The full Updates page (expanded) renders the
-  // title + description inline, so it isn't tappable.
-  const titleStyle = expanded ? styles.titleExpanded : connected ? styles.titleLg : styles.title;
+}> = ({ update, formatTime, onLongPress, right, connected, showDivider, open, onToggle, expanded }) => {
   const hasDescription = !!update.body?.trim();
+  // Three modes:
+  //   • expanded (full Updates page)  → body always inline, not tappable.
+  //   • connected (Plan preview)      → accordion: tap a card with a body to
+  //     slide it open inline; chevron rotates forward → up.
+  //   • default card                  → unused legacy path, kept for safety.
+  const isAccordion = !!connected && !expanded;
+  const titleStyle = expanded ? styles.titleExpanded : connected ? styles.titleLg : styles.title;
+
+  // One timing value drives both the body height and the chevron rotation so
+  // they stay perfectly in sync (and retarget together if tapped mid-animation).
+  const progress = useSharedValue(open ? 1 : 0);
+  useEffect(() => {
+    progress.value = withTiming(open ? 1 : 0, {
+      duration: ACCORDION_MS,
+      easing: ACCORDION_EASE,
+    });
+  }, [open, progress]);
+  const chevronStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${-90 * progress.value}deg` }],
+  }));
+
+  const handlePress = isAccordion && hasDescription ? onToggle : undefined;
 
   return (
     <Pressable
-      onPress={!expanded ? () => onOpenDetail(update) : undefined}
+      onPress={handlePress}
       onLongPress={onLongPress}
       style={[
         connected ? styles.row : styles.card,
-        expanded ? styles.cardExpanded : null,
+        // Top-align the icon whenever a body can appear. In accordion mode the
+        // collapsed row is ~icon-height so this also looks right closed — and
+        // keeping it constant avoids an icon jump when toggling.
+        expanded || isAccordion ? styles.cardExpanded : null,
         connected && showDivider ? styles.rowDivider : null,
       ]}
     >
@@ -88,61 +148,27 @@ export const AdminUpdateRow: React.FC<{
         <AnnouncementIcon size={18} color={C.ink} />
       </View>
       <View style={styles.textCol}>
-        <Text style={titleStyle} numberOfLines={expanded ? undefined : 1}>
+        <Text style={titleStyle} numberOfLines={expanded || (isAccordion && open) ? undefined : 1}>
           {update.title}
         </Text>
         {expanded && hasDescription ? (
           <Text style={styles.bodyText}>{update.body}</Text>
+        ) : isAccordion && hasDescription ? (
+          <AccordionBody text={update.body!} progress={progress} />
         ) : null}
         <Text style={connected ? styles.timeLg : styles.time}>{formatTime(update.created_at)}</Text>
       </View>
       {right}
-      {!connected && !expanded ? (
+      {isAccordion && hasDescription ? (
+        <Animated.View style={chevronStyle}>
+          <Ionicons name="chevron-forward" size={16} color={C.muted} />
+        </Animated.View>
+      ) : !connected && !expanded ? (
         <Ionicons name="chevron-forward" size={16} color={C.muted} />
       ) : null}
     </Pressable>
   );
 };
-
-export const UpdateDetailModal: React.FC<{
-  update: AdminUpdate | null;
-  formatTime: (iso: string) => string;
-  onClose: () => void;
-}> = ({ update, formatTime, onClose }) => (
-  <Modal
-    visible={!!update}
-    transparent
-    animationType="fade"
-    statusBarTranslucent
-    onRequestClose={onClose}
-  >
-    {/* Backdrop tap closes; inner press is swallowed so the card stays open. */}
-    <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={onClose}>
-      <TouchableOpacity activeOpacity={1} style={styles.sheet} onPress={() => {}}>
-        <View style={styles.sheetHeader}>
-          <View style={styles.iconBox}>
-            <AnnouncementIcon size={18} color={C.ink} />
-          </View>
-          <Text style={styles.sheetTime}>{update ? formatTime(update.created_at) : ''}</Text>
-          <TouchableOpacity
-            onPress={onClose}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="close" size={22} color={C.ink} />
-          </TouchableOpacity>
-        </View>
-        <ScrollView
-          style={styles.sheetScroll}
-          contentContainerStyle={styles.sheetScrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {update?.title ? <Text style={styles.sheetTitle}>{update.title}</Text> : null}
-          {update?.body?.trim() ? <Text style={styles.sheetBody}>{update.body}</Text> : null}
-        </ScrollView>
-      </TouchableOpacity>
-    </TouchableOpacity>
-  </Modal>
-);
 
 const styles = StyleSheet.create({
   card: {
@@ -172,6 +198,10 @@ const styles = StyleSheet.create({
   // Full Updates page (expanded): bold title above the description (Figma 13179:8792).
   titleExpanded: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 20, fontWeight: '700', color: C.title },
   bodyText: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, color: C.ink, marginTop: 2, marginBottom: 2 },
+  // Accordion: the clip's height is animated; the measure view is absolute so
+  // its natural height is read regardless of the clip's current height.
+  bodyClip: { overflow: 'hidden', width: '100%' },
+  bodyMeasure: { position: 'absolute', top: 0, left: 0, right: 0 },
   time: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.time, marginTop: 2 },
 
   // Connected-list mode (Plan card) — rows share one rounded card with hairline
@@ -190,29 +220,4 @@ const styles = StyleSheet.create({
   // lineHeight 18 (bold); time Body/B-4 = Size/xs 10 / lineHeight 20.
   titleLg: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 20, fontWeight: '700', color: C.title, marginBottom: -2 },
   timeLg: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.time },
-
-  // Detail overlay
-  scrim: {
-    flex: 1,
-    backgroundColor: C.scrim,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  sheet: {
-    width: '100%',
-    maxWidth: 420,
-    maxHeight: '70%',
-    backgroundColor: C.surface,
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 24,
-  },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
-  sheetTime: { flex: 1, fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: C.time },
-  sheetScroll: { flexGrow: 0 },
-  sheetScrollContent: { paddingBottom: 4 },
-  sheetTitle: { fontFamily: ff('Inter', '700'), fontSize: 18, lineHeight: 24, fontWeight: '700', color: C.title, marginBottom: 8 },
-  sheetBody: { fontFamily: ff('Inter', '400'), fontSize: 15, lineHeight: 22, color: C.title },
 });

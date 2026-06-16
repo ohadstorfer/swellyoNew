@@ -473,6 +473,9 @@ export interface TripDetailViewProps {
   /** When true, render only the hero + afterHeroSlot and hide the read-only
    *  overview body (used when the Plan tab is active). */
   bodyHidden?: boolean;
+  /** Tap the floating share button (top-left over the hero) → share the trip.
+   *  When provided, a circular share FAB is rendered on the cover image. */
+  onShare?: () => void;
 
   // ---- Admin (host) edit affordances — only used by TripDetailViewRedesigned.
   /** When true, the viewer is the trip host: inline "Edit" pills are shown on the
