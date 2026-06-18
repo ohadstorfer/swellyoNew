@@ -1613,14 +1613,13 @@ export const AppContent: React.FC = () => {
   // every render, so this lives ABOVE the conditional returns below even
   // though it is only consumed by the main-app branch). ----
 
-  // True only when the conversations list is the topmost visible layer. Used to
-  // gate the welcome-guide tutorial trigger inside ConversationsScreen.
-  const isListFrontmost =
-    activeTab === 'lineup' &&
-    !showConversationLoading &&
-    !showProfile &&
-    !showSwellyShaper &&
-    !showProfileEditor;
+  // NOTE: the old `isListFrontmost` (activeTab === 'lineup' && !overlays) used to
+  // be computed here and threaded into lineupProps. Because it changed on every
+  // Lineup-involving tab switch and is a dependency of the mainNavValue memo, it
+  // rebuilt the whole nav context and re-rendered all three mounted roots — the
+  // tab-switch lag. ConversationsScreen now derives "frontmost" itself from
+  // useIsFocused (stackScreenFocused) + the overlay flag below, which is stable
+  // across tab switches.
 
   // The floating bottom nav lives INSIDE the tab navigator (custom tabBar).
   // Cards cover it natively; this list is the legacy overlays that render ABOVE
@@ -1755,7 +1754,9 @@ export const AppContent: React.FC = () => {
       onStartConversation: stableHandlers.onStartConversation,
     },
     lineupProps: {
-      isListFrontmost,
+      // Overlay state only (NOT the active tab). barSuppressed is stable across
+      // tab switches, so this no longer rebuilds the context on every switch.
+      overlayActive: barSuppressed,
       onConversationPress: stableHandlers.onConversationPress,
       onSwellyPress: stableHandlers.onSwellyPress,
       onSwellyPressCopy: stableHandlers.onSwellyPressCopy,
@@ -1801,7 +1802,6 @@ export const AppContent: React.FC = () => {
     tripPlanningChatId,
     tripPlanningMatchedUsers,
     tripPlanningDestination,
-    isListFrontmost,
     pendingNotificationConversationId,
     requestTab,
   ]);

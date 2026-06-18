@@ -59,14 +59,16 @@ interface ConversationsScreenProps {
   onOpenSurftripDetail?: (surftripId: string) => void;
   pendingNotificationConversationId?: string | null;
   onPendingNotificationHandled?: () => void;
-  // True when the conversations list is the topmost visible layer (no DM,
-  // overlay, or full-screen panel covering it). Gates the welcome-guide tutorial
-  // trigger so it doesn't fire while the user is inside a DM rendered as an
-  // overlay above this still-focused screen.
-  isListFrontmost?: boolean;
-  // Native only: false while a DM / SurftripDetail is pushed over the list in
-  // the inner ConversationsStack (those don't change isListFrontmost). Web
-  // always passes true. Combined with isListFrontmost for the surftrips tip.
+  // True while a legacy full-screen overlay (own-profile, Swelly shaper,
+  // conversation-loading, profile editor) covers the navigator. Gates the
+  // welcome-guide tutorial so it doesn't fire under an overlay. Decoupled from
+  // the active tab ON PURPOSE: tab focus is read via stackScreenFocused
+  // (useIsFocused), so switching tabs no longer rebuilds the nav context and
+  // re-renders every mounted root (the tab-switch lag fix).
+  overlayActive?: boolean;
+  // Native only: false while a DM / SurftripDetail card is pushed over the list
+  // (a pushed card blurs the Lineup tab, so useIsFocused goes false). Web always
+  // passes true. Together with !overlayActive this gives "list is frontmost".
   stackScreenFocused?: boolean;
 }
 
@@ -161,9 +163,14 @@ export default function ConversationsScreen({
   onOpenSurftripDetail,
   pendingNotificationConversationId,
   onPendingNotificationHandled,
-  isListFrontmost = true,
+  overlayActive = false,
   stackScreenFocused = true,
 }: ConversationsScreenProps) {
+  // Frontmost = the Lineup tab is focused (no card pushed over it) AND no legacy
+  // overlay covers it. Previously threaded from AppContent as `isListFrontmost`,
+  // which depended on activeTab and rebuilt the nav context on every tab switch
+  // — re-rendering all three mounted roots. Derived locally now.
+  const isListFrontmost = stackScreenFocused && !overlayActive;
   const insets = useSafeAreaInsets();
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser, user: contextUser } = useOnboarding();
   const posthog = usePostHog();

@@ -4451,7 +4451,43 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               />
             )}
             <View style={styles.inputWrapper}>
-              {editingMessageId ? (
+              {/* Keep the composer's ChatTextInput MOUNTED while editing (hidden,
+                  out of flow) so its native input stays alive. When the edit bar
+                  autofocuses, iOS moves first responder input → input with BOTH
+                  alive, so the keyboard never dismisses. Unmounting it on the swap
+                  made the keyboard close then reopen. */}
+              <View
+                style={editingMessageId ? styles.composerKeepAliveHidden : styles.composerFill}
+                pointerEvents={editingMessageId ? 'none' : 'auto'}
+              >
+                <ChatTextInput
+                  ref={chatInputRef}
+                  testID="group-chat-input"
+                  nativeID={editingMessageId ? undefined : composerNativeID}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  onSend={sendMessage}
+                  disabled={isLoading}
+                  placeholder="Type your message.."
+                  maxLength={500}
+                  // Send button tracks the other user's advice-role bubble color so
+                  // the composer feels "themed" per chat: teal for seekers, beige
+                  // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
+                  primaryColor={composerPrimaryColor}
+                  onVoiceMessage={handleVoiceMessage}
+                  onCameraPress={handleCameraCapture}
+                  leftAccessory={
+                    <TouchableOpacity
+                      style={styles.attachButton}
+                      onPress={handleImagePicker}
+                      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                    >
+                      <Ionicons name="add" size={28} color="#222B30" />
+                    </TouchableOpacity>
+                  }
+                />
+              </View>
+              {editingMessageId && (
                 <MessageEditBar
                   value={editingText}
                   onChangeText={setEditingText}
@@ -4460,33 +4496,6 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   primaryColor={composerPrimaryColor}
                   nativeID={composerNativeID}
                 />
-              ) : (
-              <ChatTextInput
-                ref={chatInputRef}
-                testID="group-chat-input"
-                nativeID={composerNativeID}
-                value={inputText}
-                onChangeText={setInputText}
-                onSend={sendMessage}
-                disabled={isLoading}
-                placeholder="Type your message.."
-                maxLength={500}
-                // Send button tracks the other user's advice-role bubble color so
-                // the composer feels "themed" per chat: teal for seekers, beige
-                // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
-                primaryColor={composerPrimaryColor}
-                onVoiceMessage={handleVoiceMessage}
-                onCameraPress={handleCameraCapture}
-                leftAccessory={
-                  <TouchableOpacity
-                    style={styles.attachButton}
-                    onPress={handleImagePicker}
-                    hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
-                  >
-                    <Ionicons name="add" size={28} color="#222B30" />
-                  </TouchableOpacity>
-                }
-              />
               )}
             </View>
             </View>
@@ -4546,17 +4555,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         }}
         onEdit={() => {
           if (selectedMessage && canEditMessage(selectedMessage)) {
-            // The menu is in-tree now (no Modal), so the keyboard no longer drops
-            // when it closes — we only need a short defer for the overlay to
-            // unmount before the composer swaps to the edit bar (which autofocuses
-            // and keeps the keyboard up). Capture id/body first since onClose
-            // clears selectedMessage.
-            const id = selectedMessage.id;
-            const body = selectedMessage.body || '';
-            setTimeout(() => {
-              setEditingText(body);
-              setEditingMessageId(id);
-            }, 120);
+            // Swap composer → edit bar IMMEDIATELY (same commit the menu closes).
+            // The menu is in-tree (no Modal) so the keyboard is already up; doing
+            // the swap in one render lets the edit input's autoFocus take over the
+            // keyboard from the composer with no dismiss/reopen dip. Read body/id
+            // now — handleEdit calls onClose() right after, which clears selection.
+            setEditingText(selectedMessage.body || '');
+            setEditingMessageId(selectedMessage.id);
           }
         }}
         onDelete={() => {
@@ -5320,6 +5325,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
    // paddingBottom: Platform.OS === 'android' ? 50 : 35,
     paddingTop: 10,
+  },
+  // Composer fills the row normally.
+  composerFill: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  // While editing, the composer is kept mounted (native input alive for the
+  // first-responder handoff) but out of flow and invisible. Kept FULL-SIZE and
+  // in-window (only opacity 0) — clipping it to 1×1 made iOS treat the focused
+  // input as offscreen and briefly resign first responder, flickering the kb.
+  composerKeepAliveHidden: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    opacity: 0,
   },
   attachButtonWrapper: {
     paddingBottom: 15,

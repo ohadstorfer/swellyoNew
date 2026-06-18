@@ -36,12 +36,14 @@ export function MessageEditBar({
 }: Props) {
   const inputRef = useRef<TextInput>(null);
 
-  // This bar is mounted only AFTER the long-press menu Modal has fully dismissed
-  // (the screen defers it), so the `autoFocus` prop reliably brings the keyboard
-  // up with no Modal to fight it. A single short fallback covers slow mounts.
+  // The screen swaps the composer → this bar in the SAME commit it closes the
+  // in-tree menu, while the composer still holds the keyboard. `autoFocus` moves
+  // first responder straight from the composer's input to this one (input → input,
+  // never to nothing) so the keyboard never dips. The next-frame focus is just a
+  // fallback for a slow mount — kept immediate so it can't cause a visible reopen.
   useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 120);
-    return () => clearTimeout(t);
+    const raf = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   const canSave = value.trim().length > 0;

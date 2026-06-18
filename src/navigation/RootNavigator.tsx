@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, InteractionManager } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions } from '@react-navigation/native';
@@ -45,21 +45,48 @@ import type { MainTabsParamList, RootStackParamList } from './navigationRef';
 const Tab = createBottomTabNavigator<MainTabsParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
+// ⏱ TEMP perf instrumentation (dev only). Profiler.onRender fires on every
+// commit with phase = 'mount' | 'update' and actualDuration = render+commit ms
+// for that subtree. This tells us, on a tab switch, whether a screen REMOUNTS
+// (phase 'mount' = the expensive case) or just re-renders, and how long its JS
+// work takes. Remove once the tab-switch lag is diagnosed.
+const onTabRender = (
+  id: string,
+  phase: 'mount' | 'update' | 'nested-update',
+  actualDuration: number,
+) => {
+  if (__DEV__ && actualDuration > 30) {
+    console.log(`[TAB-PERF] ${id} ${phase} ${Math.round(actualDuration)}ms`);
+  }
+};
+
 // Screen wrappers are module-level (a navigator remounts inline components on
 // every render). They pull their props from MainNavContext.
 function LineupTabScreen() {
   const { lineupProps } = useMainNav();
-  return <ConversationsStack {...lineupProps} />;
+  return (
+    <React.Profiler id="Lineup" onRender={onTabRender}>
+      <ConversationsStack {...lineupProps} />
+    </React.Profiler>
+  );
 }
 
 function TripsTabScreen() {
   const { tripsProps, navControl } = useMainNav();
-  return <TripsScreen {...tripsProps} navControl={navControl} />;
+  return (
+    <React.Profiler id="Trips" onRender={onTabRender}>
+      <TripsScreen {...tripsProps} navControl={navControl} />
+    </React.Profiler>
+  );
 }
 
 function ProfileTabScreen() {
   const { profileProps } = useMainNav();
-  return <ProfileScreen {...profileProps} />;
+  return (
+    <React.Profiler id="Profile" onRender={onTabRender}>
+      <ProfileScreen {...profileProps} />
+    </React.Profiler>
+  );
 }
 
 // --- Cards (Phase 2) --------------------------------------------------------
@@ -354,6 +381,21 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
       canPreventDefault: true,
     });
     if (state.index !== index && !event.defaultPrevented) {
+      // ⏱ TEMP perf instrumentation (dev only). t0 = tap. "first frame" =
+      // when the JS thread freed up enough to paint once; "interactions done"
+      // = when all scheduled work (animations, runAfterInteractions tasks,
+      // refetches that use it) settled. A big gap to "interactions done" with
+      // a small Profiler duration => the cost is async loading, not rendering.
+      if (__DEV__) {
+        const t0 = Date.now();
+        console.log(`[TAB-PERF] press ${key}`);
+        requestAnimationFrame(() => {
+          console.log(`[TAB-PERF] first frame ${key}: ${Date.now() - t0}ms`);
+        });
+        InteractionManager.runAfterInteractions(() => {
+          console.log(`[TAB-PERF] interactions done ${key}: ${Date.now() - t0}ms`);
+        });
+      }
       navigation.navigate(route.name);
     }
   };
