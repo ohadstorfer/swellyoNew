@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -208,19 +208,33 @@ export default function TripsBottomNav({
 }: TripsBottomNavProps) {
   const { width } = useWindowDimensions();
   const { progress, expand } = control;
-  // One activeness driver per item; withTiming retargets when `active` flips,
-  // so the outgoing pill shrinks while the incoming one grows in sync.
+  // The pill is driven by a shared value we flip ON PRESS (UI thread), NOT by
+  // the `active` prop. `active` only updates after react-navigation re-renders
+  // (~140ms later), which made the slide wait for the page swap. activeKey lets
+  // the animation start the instant you tap — no re-render required.
+  const activeKey = useSharedValue<NavKey>(active);
+  // Sync with navigation-driven changes that DON'T come from a tap on the bar
+  // (deep links, join-decision overlay, group-chat exit, programmatic switches).
+  // GUARD: only write when the value actually differs. On a normal tap the press
+  // handler already set activeKey, and `active` catches up ~140ms later (mid-
+  // animation for Lineup/Trips, which do focus work). Re-writing the same value
+  // restarts the withTiming from its current position → the visible hitch. The
+  // guard skips that no-op write so the slide stays smooth.
+  useEffect(() => {
+    if (activeKey.value !== active) {
+      activeKey.value = active;
+    }
+  }, [active, activeKey]);
+  // withTiming retargets whenever activeKey flips, so the outgoing pill shrinks
+  // while the incoming one grows in sync.
   const lineupP = useDerivedValue<number>(
-    () => withTiming(active === 'lineup' ? 1 : 0, ITEM_TIMING),
-    [active],
+    () => withTiming(activeKey.value === 'lineup' ? 1 : 0, ITEM_TIMING),
   );
   const tripsP = useDerivedValue<number>(
-    () => withTiming(active === 'trips' ? 1 : 0, ITEM_TIMING),
-    [active],
+    () => withTiming(activeKey.value === 'trips' ? 1 : 0, ITEM_TIMING),
   );
   const profileP = useDerivedValue<number>(
-    () => withTiming(active === 'profile' ? 1 : 0, ITEM_TIMING),
-    [active],
+    () => withTiming(activeKey.value === 'profile' ? 1 : 0, ITEM_TIMING),
   );
   const itemProgress: Record<NavKey, DerivedValue<number>> = {
     lineup: lineupP,
@@ -235,6 +249,10 @@ export default function TripsBottomNav({
   const handleItemPress = useCallback(
     (key: NavKey) => {
       expand();
+      // Flip the pill NOW on the UI thread so the slide starts on touch, before
+      // navigation re-renders the page underneath. The sync effect above keeps
+      // it correct if navigation later settles on a different tab.
+      activeKey.value = key;
       // Navigate immediately — the app state change flips `active`, and the
       // pill slides while the page underneath swaps (the bar itself persists
       // above the screens, so the animation is never cut off).
@@ -246,7 +264,7 @@ export default function TripsBottomNav({
         onTripsPress();
       }
     },
-    [expand, onProfilePress, onLineupPress, onTripsPress],
+    [expand, activeKey, onProfilePress, onLineupPress, onTripsPress],
   );
 
   const barAnimStyle = useAnimatedStyle(() => ({

@@ -161,27 +161,47 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
     });
   };
 
-  // Quick ease-out fade-in for the dim + menu (replaces the old Modal's
-  // animationType="fade"). Opacity-only so it runs on the native driver.
+  // Enter/exit animation (Emil: enter ease-out ~150ms; exit faster ~110ms;
+  // transform+opacity only → native driver). The popover also scales for a subtle
+  // "pop". On EXIT we animate first and only THEN call the parent callbacks, so
+  // the menu's data stays alive during the fade-out (no position jump).
   const fade = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.96)).current;
+  const closingRef = useRef(false);
   useEffect(() => {
     if (visible) {
+      closingRef.current = false;
       fade.setValue(0);
-      Animated.timing(fade, {
-        toValue: 1,
-        duration: 160,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: true,
-      }).start();
+      scale.setValue(0.96);
+      Animated.parallel([
+        Animated.timing(fade, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(scale, { toValue: 1, duration: 150, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      ]).start();
     }
-  }, [visible, fade]);
+  }, [visible, fade, scale]);
+
+  // Play the exit animation, then run the parent callback(s). Guarded so a double
+  // tap doesn't fire twice.
+  const requestClose = (after?: () => void) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    Animated.parallel([
+      Animated.timing(fade, { toValue: 0, duration: 110, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(scale, { toValue: 0.96, duration: 110, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        after?.();
+        onClose();
+      }
+    });
+  };
 
   // The old Modal intercepted the Android hardware back button (onRequestClose).
   // In-tree we restore that so back closes the menu instead of popping the chat.
   useEffect(() => {
     if (!visible || Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      onClose();
+      requestClose();
       return true;
     });
     return () => sub.remove();
@@ -193,40 +213,32 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   }
 
   const handleReply = () => {
-    console.log('[MessageActionsMenu] handleReply called');
-    if (onReply) onReply();
-    onClose();
+    requestClose(() => { if (onReply) onReply(); });
   };
 
   const handleEdit = () => {
-    console.log('[MessageActionsMenu] handleEdit called');
+    // Fire onEdit NOW so the edit bar opens while the menu fades out (the in-tree
+    // dim is shared, so it stays put). The menu's own close is animated.
     onEdit();
-    onClose();
+    requestClose();
   };
 
   const handleCopy = () => {
-    console.log('[MessageActionsMenu] handleCopy called');
-    if (onCopy) onCopy();
-    onClose();
+    requestClose(() => { if (onCopy) onCopy(); });
   };
 
   const handleReport = () => {
-    console.log('[MessageActionsMenu] handleReport called');
-    if (onReport) onReport();
-    onClose();
+    requestClose(() => { if (onReport) onReport(); });
   };
 
   const handleDelete = () => {
-    console.log('[MessageActionsMenu] handleDelete called', { canDelete });
-    // Don't close menu immediately - let the delete handler manage it
-    // The menu will close after user confirms/cancels the delete dialog
-    try {
-      console.log('[MessageActionsMenu] Calling onDelete callback');
-      onDelete();
-      console.log('[MessageActionsMenu] onDelete callback executed');
-    } catch (error) {
-      console.error('[MessageActionsMenu] Error in onDelete callback:', error);
-    }
+    requestClose(() => {
+      try {
+        onDelete();
+      } catch (error) {
+        console.error('[MessageActionsMenu] Error in onDelete callback:', error);
+      }
+    });
   };
 
   if (!visible) return null;
@@ -356,66 +368,25 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
       ref={rootRef}
       onLayout={measureRoot}
       pointerEvents="box-none"
-      style={[styles.root, { opacity: fade }]}
+      style={[styles.root, { opacity: fade, transform: [{ scale }] }]}
     >
       <TouchableOpacity
         style={{ position: 'absolute', left: -origin.x, top: -origin.y, width: screenW, height: screenH }}
         activeOpacity={1}
-        onPress={onClose}
+        onPress={() => requestClose()}
       >
-        {/* Dim layer with a rounded-rect hole over the selected bubble.
-            Built as a single SVG path: outer screen rect + inner rounded-rect
-            sub-path with fill-rule=evenodd → the inside of the inner rect is
-            the only un-filled region, so the bubble stays fully visible while
-            everything around it is dimmed. Falls back to two horizontal
-            strips while measureInWindow hasn't returned bubbleRect yet. */}
-        {bubbleRect ? (
-          <Svg
-            pointerEvents="none"
-            width={screenW}
-            height={screenH}
-            style={StyleSheet.absoluteFill}
-          >
-            <Path
-              d={buildDimPathD(
-                screenW,
-                screenH,
-                bubbleRect.x,
-                bubbleRect.y,
-                bubbleRect.width,
-                bubbleRect.height,
-                bubbleRect.radii ?? DEFAULT_RADII,
-              )}
-              fill="rgba(0, 0, 0, 0.3)"
-              fillRule="evenodd"
-            />
-          </Svg>
-        ) : (
-          <>
-            <View
-              pointerEvents="none"
-              style={[
-                styles.dimStrip,
-                { top: 0, left: 0, right: 0, height: Math.max(0, bubbleTop) },
-              ]}
-            />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.dimStrip,
-                { top: bubbleBottom, left: 0, right: 0, bottom: 0 },
-              ]}
-            />
-          </>
-        )}
+        {/* The dim layer is no longer drawn here — the screen renders ONE in-tree
+            BubbleSpotlightDim (below the composer) shared by the menu AND edit
+            mode, so tapping Edit only removes these items while the dim stays put
+            (no close/redraw). This overlay is just the transparent tap-catcher +
+            the reactions bar + the actions list. */}
         {showReactionsBar && onReact ? (
           <MessageReactionsBar
             top={barTop}
             left={barLeft}
             currentReaction={currentReaction}
             onReact={(emoji) => {
-              onReact(emoji);
-              onClose();
+              requestClose(() => onReact(emoji));
             }}
           />
         ) : null}

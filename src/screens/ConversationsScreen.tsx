@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   Image,
   Platform,
@@ -245,7 +245,7 @@ export default function ConversationsScreen({
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<FlatList<Conversation>>(null);
   const loadMoreDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Welcome guide now lives entirely inside Swelly chat; only the replay
@@ -1056,7 +1056,29 @@ export default function ConversationsScreen({
   // Swelly is now a floating circular avatar button (see styles.swellyFloating)
   // anchored bottom-right above the nav bar — no longer a card in the list.
 
-  const filteredConversations = getFilteredConversations();
+  // Memoized so a re-render that does NOT change the conversation data (e.g. the
+  // tab-focus toggle on every Lineup switch) reuses the same array instead of
+  // re-filtering. Feeds the FlatList below (stable identity → no full re-render).
+  const filteredConversations = useMemo(
+    () => getFilteredConversations(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conversations, filter, loading],
+  );
+  // FlatList renderItem. Virtualized: only the ~10 visible rows render instead of
+  // mounting all ~50+ (hundreds of native views) at once — that bulk native draw
+  // on tab activation was what froze the bottom-bar pill animation mid-slide.
+  // Stable across a focus toggle (deps are data-only), so switching tabs doesn't
+  // re-run rows. Stale-closure-safe: currentUserId/surftripHeroImages are in the
+  // deps; the row handlers (openConversation, onConversationPress) are stable.
+  const renderConversationRow = useCallback(
+    ({ item }: { item: Conversation }) => renderConversationItem(item),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentUserId, surftripHeroImages],
+  );
+  const keyExtractorConv = useCallback(
+    (item: Conversation, index: number) => item.id ?? `conv-${index}`,
+    [],
+  );
   // Count of visible group-trip chats, surfaced as "Trips (N)" on the chip.
   const tripsCount = conversations.filter(
     c => c.is_direct === false && isConversationVisible(c),
@@ -1185,19 +1207,24 @@ export default function ConversationsScreen({
             {renderFilterButton('trips', tripsCount > 0 ? `Trips (${tripsCount})` : 'Trips', '#05BCD3')}
           </View>
 
-          {/* Conversations list */}
-          <ScrollView
+          {/* Conversations list — virtualized FlatList (was a ScrollView that
+              rendered every row at once; that bulk native draw on tab activation
+              froze the bottom-bar animation). */}
+          <FlatList
             ref={scrollViewRef}
             style={styles.conversationsList}
             contentContainerStyle={styles.conversationsListContent}
             showsVerticalScrollIndicator={false}
-            onScroll={(event) => {
-              const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
-              const paddingToBottom = 200; // Trigger when 200px from bottom
-              const isNearBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
-              
-              if (isNearBottom && hasMoreConversations && !isLoadingMoreConversations && !loading) {
-                // Debounce to prevent multiple simultaneous loads
+            data={loading ? [] : filteredConversations}
+            keyExtractor={keyExtractorConv}
+            renderItem={renderConversationRow}
+            initialNumToRender={10}
+            maxToRenderPerBatch={8}
+            windowSize={9}
+            removeClippedSubviews
+            onEndReachedThreshold={0.4}
+            onEndReached={() => {
+              if (hasMoreConversations && !isLoadingMoreConversations && !loading) {
                 if (loadMoreDebounceRef.current) {
                   clearTimeout(loadMoreDebounceRef.current);
                 }
@@ -1206,14 +1233,9 @@ export default function ConversationsScreen({
                 }, 300);
               }
             }}
-            scrollEventThrottle={400}
-          >
-            {loading ? (
-              <ConversationListSkeleton count={5} />
-            ) : (
+            ListEmptyComponent={loading ? <ConversationListSkeleton count={5} /> : null}
+            ListFooterComponent={
               <>
-                {filteredConversations.map((conv) => renderConversationItem(conv))}
-                
                 {/* Loading indicator for pagination */}
                 {isLoadingMoreConversations && (
                   <View style={styles.loadMoreContainer}>
@@ -1221,11 +1243,11 @@ export default function ConversationsScreen({
                     <Text style={styles.loadMoreText}>Loading more conversations...</Text>
                   </View>
                 )}
-                
+
                 {/* Welcome message instructional text - only show when welcome conversation is displayed, or in dev mode for testing */}
                 {!loading && (conversations.length === 0 || isDevMode) && filter === 'all' && (
                   <View style={styles.welcomeInstructionContainer}>
-                    <Animated.Text 
+                    <Animated.Text
                       style={[
                         styles.welcomeInstructionText,
                         Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any,
@@ -1256,11 +1278,11 @@ export default function ConversationsScreen({
                       {'\n'}
                       Looking for advice about a destination? {'\n'}
                       Swelly can introduce you to surfers{'\n'}
-                      who know it best. 
+                      who know it best.
                       {'\n'}
                       Just ask Swelly!
                     </Animated.Text>
-                    <Animated.View 
+                    <Animated.View
                       style={[
                         styles.welcomeArrowContainer,
                         {
@@ -1298,8 +1320,8 @@ export default function ConversationsScreen({
                   </View>
                 )}
               </>
-            )}
-          </ScrollView>
+            }
+          />
         </View>
       </View>
       </View>

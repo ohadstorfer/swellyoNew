@@ -22,6 +22,7 @@
  * blur and re-opens + refetches the list on return.
  */
 import { useCallback } from 'react';
+import { InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../config/supabase';
@@ -40,11 +41,14 @@ export function useTripsListRealtime(userId: string | undefined) {
   const queryClient = useQueryClient();
 
   useFocusEffect(useCallback(() => {
-    // Each topic coalesces its own bursts (e.g. several participant rows in one
-    // transaction) into a single invalidation pass instead of one refetch per
-    // event. Explore and My Trips invalidate independently.
+    // DEFERRED: channel setup + the focus catch-up refetch run AFTER the tab
+    // transition/animation settles (InteractionManager), not synchronously on
+    // focus. Doing them on focus committed new native views mid-slide and froze
+    // the bottom-bar pill animation. Realtime is best-effort, so a few hundred ms
+    // later is fine. Cleanup cancels the task if we blur before it runs.
     let exploreTimer: ReturnType<typeof setTimeout> | null = null;
     let mineTimer: ReturnType<typeof setTimeout> | null = null;
+    let teardown: (() => void) | null = null;
 
     const invalidateExploreSoon = () => {
       if (exploreTimer) return;
@@ -65,33 +69,40 @@ export function useTripsListRealtime(userId: string | undefined) {
       }, COALESCE_MS);
     };
 
-    // Catch up on changes missed while this screen was blurred — throttled to
-    // avoid re-fetching all infinite-query pages on every return. Refresh both
-    // feeds, since either could have changed while away.
-    if (Date.now() - lastListInvalidateAt > FOCUS_CATCHUP_INTERVAL_MS) {
-      invalidateExploreSoon();
-      invalidateMineSoon();
-    }
+    const task = InteractionManager.runAfterInteractions(() => {
+      // Catch up on changes missed while this screen was blurred — throttled to
+      // avoid re-fetching all infinite-query pages on every return. Refresh both
+      // feeds, since either could have changed while away.
+      if (Date.now() - lastListInvalidateAt > FOCUS_CATCHUP_INTERVAL_MS) {
+        invalidateExploreSoon();
+        invalidateMineSoon();
+      }
 
-    const exploreChannel = supabase
-      .channel(TRIPS_LIST_TOPIC, { config: { private: true } })
-      .on('broadcast', { event: 'trips_list_changed' }, invalidateExploreSoon)
-      .subscribe();
+      const exploreChannel = supabase
+        .channel(TRIPS_LIST_TOPIC, { config: { private: true } })
+        .on('broadcast', { event: 'trips_list_changed' }, invalidateExploreSoon)
+        .subscribe();
 
-    const mineChannel = userId
-      ? supabase
-          .channel(tripsMineTopic(userId), { config: { private: true } })
-          .on('broadcast', { event: 'trips_mine_changed' }, invalidateMineSoon)
-          .subscribe()
-      : null;
+      const mineChannel = userId
+        ? supabase
+            .channel(tripsMineTopic(userId), { config: { private: true } })
+            .on('broadcast', { event: 'trips_mine_changed' }, invalidateMineSoon)
+            .subscribe()
+        : null;
+
+      teardown = () => {
+        try { supabase.removeChannel(exploreChannel); } catch { /* noop */ }
+        if (mineChannel) {
+          try { supabase.removeChannel(mineChannel); } catch { /* noop */ }
+        }
+      };
+    });
 
     return () => {
+      task.cancel();
       if (exploreTimer) clearTimeout(exploreTimer);
       if (mineTimer) clearTimeout(mineTimer);
-      try { supabase.removeChannel(exploreChannel); } catch { /* noop */ }
-      if (mineChannel) {
-        try { supabase.removeChannel(mineChannel); } catch { /* noop */ }
-      }
+      if (teardown) teardown();
     };
   }, [queryClient, userId]));
 }

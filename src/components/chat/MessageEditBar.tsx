@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { View, TextInput, Pressable, StyleSheet, Platform } from 'react-native';
+import { View, TextInput, Pressable, StyleSheet, Platform, Animated, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ff } from '../../theme/fonts';
 
@@ -36,6 +36,19 @@ export function MessageEditBar({
 }: Props) {
   const inputRef = useRef<TextInput>(null);
 
+  // Entrance animation: fade + slight slide-up as the bar replaces the composer
+  // (Emil: enter ease-out, transform+opacity on the native driver, <300ms).
+  const enter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(enter, {
+      toValue: 1,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [enter]);
+  const enterTranslateY = enter.interpolate({ inputRange: [0, 1], outputRange: [8, 0] });
+
   // The screen swaps the composer → this bar in the SAME commit it closes the
   // in-tree menu, while the composer still holds the keyboard. `autoFocus` moves
   // first responder straight from the composer's input to this one (input → input,
@@ -49,7 +62,7 @@ export function MessageEditBar({
   const canSave = value.trim().length > 0;
 
   return (
-    <View style={styles.row}>
+    <Animated.View style={[styles.row, { opacity: enter, transform: [{ translateY: enterTranslateY }] }]}>
       {/* Cancel — outline circle. Instant press feedback (scale + dim). */}
       <Pressable
         onPress={onCancel}
@@ -92,7 +105,7 @@ export function MessageEditBar({
       >
         <Ionicons name="checkmark" size={24} color="#FFFFFF" />
       </Pressable>
-    </View>
+    </Animated.View>
   );
 }
 

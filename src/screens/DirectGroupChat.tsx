@@ -67,7 +67,6 @@ import { ReportMessageSheet } from '../components/ReportMessageSheet';
 import { withTimeout } from '../services/messaging/withTimeout';
 import { sanitizeMessage } from '../services/messaging/messageSanitizer';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
-import { MessageEditBar } from '../components/chat/MessageEditBar';
 import { BubbleSpotlightDim, type SpotlightRect } from '../components/chat/BubbleSpotlightDim';
 import { SafeMessageBubble } from '../components/chat/SafeMessageBubble';
 
@@ -584,8 +583,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // spot. The keyboard now STAYS open through long-press → Edit, so the list
   // doesn't reflow and we can measure quickly: once right after the edit bar
   // mounts, and once more to catch the small composer→edit-bar height swap.
+  // Auto-clear the shared spotlight dim once neither the menu nor edit needs it.
   useEffect(() => {
-    if (!editingMessageId) { setEditDimRect(null); return; }
+    if (!menuVisible && !editingMessageId) setEditDimRect(null);
+  }, [menuVisible, editingMessageId]);
+
+  useEffect(() => {
+    // Don't clear here — the menu also uses editDimRect; the effect above clears
+    // it. While editing, re-measure to refine after the composer→edit-bar swap.
+    if (!editingMessageId) return;
     let cancelled = false;
     const measure = () => {
       const host = dimHostRef.current;
@@ -3224,15 +3230,24 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     const radii = isOwnMessage
       ? { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 }
       : { topLeft: 16, topRight: 16, bottomLeft: 2, bottomRight: 16 };
-    // Measure ONCE, synchronously, while the long-pressed row's ref is guaranteed
-    // correct — re-measuring later read a recycled FlatList ref and carved the
-    // hole over the wrong message. The keyboard stays up so layout doesn't move.
+    // Measure the bubble ONCE while the long-pressed row's ref is correct.
+    // - Window coords (bubbleRect) feed the menu items' placement.
+    // - Host-local coords (editDimRect = bubble − dim-host origin) feed the SINGLE
+    //   in-tree BubbleSpotlightDim shared by the menu AND edit mode, so tapping
+    //   Edit only removes the menu items while the dim stays put (no redraw).
     setBubbleRect(null);
+    setEditDimRect(null);
     const bubbleRef = bubbleRefsRef.current.get(message.id);
+    const dimHost = dimHostRef.current;
     if (bubbleRef && typeof bubbleRef.measureInWindow === 'function') {
       bubbleRef.measureInWindow((x: number, y: number, width: number, height: number) => {
         if (width > 0 && height > 0) {
           setBubbleRect({ x, y, width, height, radii, isOwn: isOwnMessage });
+          if (dimHost && typeof dimHost.measureInWindow === 'function') {
+            dimHost.measureInWindow((hx: number, hy: number) => {
+              setEditDimRect({ x: x - hx, y: y - hy, width, height, radii });
+            });
+          }
         }
       });
     }
@@ -4451,32 +4466,38 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               />
             )}
             <View style={styles.inputWrapper}>
-              {/* Keep the composer's ChatTextInput MOUNTED while editing (hidden,
-                  out of flow) so its native input stays alive. When the edit bar
-                  autofocuses, iOS moves first responder input → input with BOTH
-                  alive, so the keyboard never dismisses. Unmounting it on the swap
-                  made the keyboard close then reopen. */}
-              <View
-                style={editingMessageId ? styles.composerKeepAliveHidden : styles.composerFill}
-                pointerEvents={editingMessageId ? 'none' : 'auto'}
-              >
-                <ChatTextInput
-                  ref={chatInputRef}
-                  testID="group-chat-input"
-                  nativeID={editingMessageId ? undefined : composerNativeID}
-                  value={inputText}
-                  onChangeText={setInputText}
-                  onSend={sendMessage}
-                  disabled={isLoading}
-                  placeholder="Type your message.."
-                  maxLength={500}
-                  // Send button tracks the other user's advice-role bubble color so
-                  // the composer feels "themed" per chat: teal for seekers, beige
-                  // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
-                  primaryColor={composerPrimaryColor}
-                  onVoiceMessage={handleVoiceMessage}
-                  onCameraPress={handleCameraCapture}
-                  leftAccessory={
+              {/* ONE input for composing AND editing. Editing flips ChatTextInput to
+                  editMode (⊗ cancel + ✓ save, message body as value) — the SAME
+                  native input is reused, so the keyboard never dismisses/reopens on
+                  Edit (swapping to a separate editor did). */}
+              <ChatTextInput
+                ref={chatInputRef}
+                testID="group-chat-input"
+                nativeID={composerNativeID}
+                editMode={!!editingMessageId}
+                value={editingMessageId ? editingText : inputText}
+                onChangeText={editingMessageId ? setEditingText : setInputText}
+                onSend={sendMessage}
+                onSaveEdit={() => { if (editingMessageId) handleEditMessage(editingMessageId, editingText); }}
+                disabled={isLoading}
+                placeholder={editingMessageId ? 'Edit message' : 'Type your message..'}
+                maxLength={500}
+                // Send button tracks the other user's advice-role bubble color so
+                // the composer feels "themed" per chat: teal for seekers, beige
+                // for givers, Swelly purple (same as Swelly chat user bubbles) otherwise.
+                primaryColor={composerPrimaryColor}
+                onVoiceMessage={handleVoiceMessage}
+                onCameraPress={handleCameraCapture}
+                leftAccessory={
+                  editingMessageId ? (
+                    <TouchableOpacity
+                      style={styles.editCancelButton}
+                      onPress={() => { setEditingMessageId(null); setEditingText(''); }}
+                      hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                    >
+                      <Ionicons name="close" size={22} color="#3A3A3A" />
+                    </TouchableOpacity>
+                  ) : (
                     <TouchableOpacity
                       style={styles.attachButton}
                       onPress={handleImagePicker}
@@ -4484,19 +4505,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     >
                       <Ionicons name="add" size={28} color="#222B30" />
                     </TouchableOpacity>
-                  }
-                />
-              </View>
-              {editingMessageId && (
-                <MessageEditBar
-                  value={editingText}
-                  onChangeText={setEditingText}
-                  onCancel={() => { setEditingMessageId(null); setEditingText(''); }}
-                  onSave={() => handleEditMessage(editingMessageId, editingText)}
-                  primaryColor={composerPrimaryColor}
-                  nativeID={composerNativeID}
-                />
-              )}
+                  )
+                }
+              />
             </View>
             </View>
           </Reanimated.View>
@@ -4516,7 +4527,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   <Text style={styles.returnToLatestText}>Return to latest ↓</Text>
                 </TouchableOpacity>
               )}
-              {editingMessageId && editDimRect && (
+              {editDimRect && (menuVisible || editingMessageId) && (
                 <BubbleSpotlightDim
                   rect={editDimRect}
                   onPress={() => { setEditingMessageId(null); setEditingText(''); }}
@@ -4555,13 +4566,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         }}
         onEdit={() => {
           if (selectedMessage && canEditMessage(selectedMessage)) {
-            // Swap composer → edit bar IMMEDIATELY (same commit the menu closes).
-            // The menu is in-tree (no Modal) so the keyboard is already up; doing
-            // the swap in one render lets the edit input's autoFocus take over the
-            // keyboard from the composer with no dismiss/reopen dip. Read body/id
-            // now — handleEdit calls onClose() right after, which clears selection.
+            // Flip the SAME composer input into edit mode — no input swap, so the
+            // keyboard never moves. Focus it so the keyboard is up for editing
+            // (no-op/seamless if it's already up from the menu re-focus).
             setEditingText(selectedMessage.body || '');
             setEditingMessageId(selectedMessage.id);
+            chatInputRef.current?.focus?.();
           }
         }}
         onDelete={() => {
@@ -5326,22 +5336,16 @@ const styles = StyleSheet.create({
    // paddingBottom: Platform.OS === 'android' ? 50 : 35,
     paddingTop: 10,
   },
-  // Composer fills the row normally.
-  composerFill: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  // While editing, the composer is kept mounted (native input alive for the
-  // first-responder handoff) but out of flow and invisible. Kept FULL-SIZE and
-  // in-window (only opacity 0) — clipping it to 1×1 made iOS treat the focused
-  // input as offscreen and briefly resign first responder, flickering the kb.
-  composerKeepAliveHidden: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    opacity: 0,
+  // Edit-mode ⊗ cancel circle (replaces the + accessory while editing).
+  editCancelButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D9DCE1',
   },
   attachButtonWrapper: {
     paddingBottom: 15,

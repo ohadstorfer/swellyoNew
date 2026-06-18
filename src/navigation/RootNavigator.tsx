@@ -358,6 +358,24 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
     onRequestedTabConsumed();
   }, [requestedTab, active, navigation, onRequestedTabConsumed]);
 
+  // Pre-warm the OTHER tabs in the background so the FIRST switch to them is
+  // instant (no lazy mount blocking the tap — that was the `Trips mount 270ms` /
+  // `Profile mount` in the perf logs). preload() (react-navigation v7) renders a
+  // lazy screen without focusing it; deferred via InteractionManager so it never
+  // competes with the initial Lineup paint. detachInactiveScreens={false} keeps
+  // them mounted afterwards, so every later switch stays instant.
+  useEffect(() => {
+    const nav = navigation as unknown as { preload?: (name: string) => void };
+    if (typeof nav.preload !== 'function') return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      try {
+        nav.preload?.('Trips');
+        nav.preload?.('Profile');
+      } catch { /* noop */ }
+    });
+    return () => task.cancel();
+  }, [navigation]);
+
   // Programmatic trip-card opens (deep links). Pushed on the PARENT root
   // stack — the card covers the tabs and the bar.
   useEffect(() => {

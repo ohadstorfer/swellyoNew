@@ -925,7 +925,13 @@ export const AppContent: React.FC = () => {
   // state for the legacy reads that still branch on "which page is showing"
   // (deleted in Phase 5). requestedTab is the mount-safe programmatic switch:
   // set here, consumed by the tab bar adapter once the navigator exists.
-  const [activeTab, setActiveTab] = useState<NavKey>('lineup');
+  // activeTab/prevTab are REFS, not state, on purpose: nothing in AppContent's
+  // render reads the active tab anymore (the navigator owns it via react-
+  // navigation), so a setState here would re-render this giant root component on
+  // EVERY tab switch for nothing — that was the ~200ms first-frame delay left
+  // after the context fix. prevTabRef feeds the Profile back button (return to
+  // the tab you came from).
+  const activeTabRef = useRef<NavKey>('lineup');
   const prevTabRef = useRef<NavKey>('lineup');
   const [requestedTab, setRequestedTab] = useState<NavKey | null>(null);
   // Programmatic "take the user to tab X" (deep links, join decisions,
@@ -941,10 +947,11 @@ export const AppContent: React.FC = () => {
   }, []);
   const handleRequestedTripCardConsumed = useCallback(() => setRequestedTripCard(null), []);
   const handleTabChange = useCallback((tab: NavKey) => {
-    setActiveTab(prev => {
-      if (prev !== tab) prevTabRef.current = prev;
-      return tab;
-    });
+    // Ref-only: update bookkeeping without re-rendering AppContent.
+    if (activeTabRef.current !== tab) {
+      prevTabRef.current = activeTabRef.current;
+      activeTabRef.current = tab;
+    }
   }, []);
   const handleRequestedTabConsumed = useCallback(() => setRequestedTab(null), []);
   // Surftrip detail + all chats are root-stack CARDS now (nav migration B1).
@@ -1515,7 +1522,7 @@ export const AppContent: React.FC = () => {
   // unmounts with this branch and remounts fresh on Lineup at next login.
   useEffect(() => {
     if (!shouldShowConversations) {
-      setActiveTab('lineup');
+      activeTabRef.current = 'lineup';
       prevTabRef.current = 'lineup';
       setRequestedTab(null);
     }

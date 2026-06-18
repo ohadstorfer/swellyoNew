@@ -117,6 +117,12 @@ export interface ChatTextInputProps {
    * camera icon appears just left of the mic. Hidden on web (the leftAccessory's
    * file picker covers web). Fades out while a voice recording is in flight. */
   onCameraPress?: () => void;
+  /** Edit mode — reuses this SAME input to edit a message (no swap to a separate
+   * editor), so the keyboard never dismisses/reopens. Hides camera/mic and turns
+   * the send button into a ✓ "save". The screen passes the ⊗ cancel as
+   * `leftAccessory`, the message body as `value`, and `onSaveEdit` to commit. */
+  editMode?: boolean;
+  onSaveEdit?: () => void;
 }
 
 export interface ChatTextInputRef {
@@ -142,6 +148,8 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     nativeID,
     onVoiceMessage,
     onCameraPress,
+    editMode = false,
+    onSaveEdit,
   },
   ref
 ) {
@@ -280,13 +288,13 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   // Hide the mic button (and force the locked bar to take over) once locked.
   // typing in the input also kicks us back to the send button.
   const showMic =
-    !!onVoiceMessage && !disabled && !value && Platform.OS !== 'web' && !isLocked;
+    !editMode && !!onVoiceMessage && !disabled && !value && Platform.OS !== 'web' && !isLocked;
   // Camera affordance follows the same visibility rules as the mic: native
   // only, no text, not disabled, not locked. When the user starts holding the
   // mic to record, the camera fades out — animating width + marginRight too so
   // the space collapses and the RecordingOverlay can expand into it.
   const showCamera =
-    !!onCameraPress && !disabled && !value && Platform.OS !== 'web' && !isLocked;
+    !editMode && !!onCameraPress && !disabled && !value && Platform.OS !== 'web' && !isLocked;
   const cameraVisibleSv = useSharedValue<number>(1);
   useEffect(() => {
     cameraVisibleSv.value = withTiming(isRecording ? 0 : 1, { duration: 120 });
@@ -534,7 +542,29 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
           </Animated.View>
         )}
 
-        {showMic ? (
+        {editMode ? (
+          // Edit-mode confirm (✓). Reuses the send button styling/size + the same
+          // focus-keeping trick on press-in so committing an edit never drops the
+          // keyboard. Disabled when the edited text is empty.
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              { backgroundColor: primaryColor },
+              !value.trim() && styles.sendButtonDisabled,
+            ]}
+            onPressIn={() => {
+              if (!value.trim()) return;
+              justSentRef.current = true;
+              inputRef.current?.focus();
+            }}
+            onPress={() => { if (value.trim()) onSaveEdit?.(); }}
+            activeOpacity={0.7}
+            disabled={!value.trim()}
+            testID={testID ? `${testID}-save-edit` : undefined}
+          >
+            <Ionicons name="checkmark" size={26} color="#FFFFFF" />
+          </TouchableOpacity>
+        ) : showMic ? (
           // Push-to-talk mic button. We use the React Native responder system
           // directly (not Pressable / TouchableOpacity) because we need pan
           // tracking on BOTH axes (left = cancel, up = lock) — the responder
