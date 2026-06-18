@@ -16,14 +16,34 @@ import {
   MyTripsBuckets,
   TripCardMeta,
   ExploreFeedRow,
+  ExploreFeedFilters,
   fetchMyTripsFeed,
   exploreFeed,
 } from '../../services/trips/groupTripsService';
 
+/** Stable, JSON-serialisable shape of the active Explore filters for the query
+ *  key. Months are sorted so two equivalent selections produce the same key
+ *  (react-query keys are structurally compared, but sorting keeps it canonical). */
+export type ExploreFilterKey = {
+  months: string[];
+  budgetMin: number | null;
+  budgetMax: number | null;
+};
+
+export const EMPTY_EXPLORE_FILTER_KEY: ExploreFilterKey = {
+  months: [],
+  budgetMin: null,
+  budgetMax: null,
+};
+
 /** Query-key factory — keep keys in one place so invalidation can't drift. */
 export const tripsKeys = {
   all: ['trips'] as const,
+  /** Prefix used for broad invalidation (covers every filtered variant). */
   explore: ['trips', 'explore'] as const,
+  /** Per-filter key: changing a chip re-queries the server. Invalidating the
+   *  `explore` prefix still covers all of these. */
+  exploreFiltered: (f: ExploreFilterKey) => ['trips', 'explore', f] as const,
   my: (userId: string) => ['trips', 'my', userId] as const,
   detail: (id: string) => ['trips', 'detail', id] as const,
   detailUpdates: (id: string) => ['trips', 'detail-updates', id] as const,
@@ -43,11 +63,18 @@ const EMPTY_META: Map<string, TripCardMeta> = new Map();
  * Freshness comes from realtime invalidation, so we disable refetch-on-mount/
  * focus (avoids refetching all loaded pages when returning to the screen).
  */
-export function useExploreTrips() {
+export function useExploreTrips(filterKey: ExploreFilterKey = EMPTY_EXPLORE_FILTER_KEY) {
+  // The RPC filter args are derived directly from the key, so the cache entry and
+  // the request that fills it can never disagree about which filters are applied.
+  const rpcFilters: ExploreFeedFilters = {
+    months: filterKey.months.length > 0 ? filterKey.months : null,
+    budgetMin: filterKey.budgetMin,
+    budgetMax: filterKey.budgetMax,
+  };
   const q = useInfiniteQuery({
-    queryKey: tripsKeys.explore,
+    queryKey: tripsKeys.exploreFiltered(filterKey),
     queryFn: ({ pageParam, signal }) =>
-      exploreFeed(EXPLORE_PAGE_LIMIT + 1, pageParam?.created_at ?? null, pageParam?.id ?? null, signal),
+      exploreFeed(EXPLORE_PAGE_LIMIT + 1, pageParam?.created_at ?? null, pageParam?.id ?? null, signal, rpcFilters),
     initialPageParam: null as { created_at: string; id: string } | null,
     getNextPageParam: (last: ExploreFeedRow[]) =>
       last.length > EXPLORE_PAGE_LIMIT

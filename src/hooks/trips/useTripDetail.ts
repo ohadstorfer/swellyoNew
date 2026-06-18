@@ -24,7 +24,7 @@ import {
   listDeclinedRequests,
   listGearRequests,
 } from '../../services/trips/groupTripsService';
-import { tripsKeys } from './useTripQueries';
+import { tripsKeys, EMPTY_EXPLORE_FILTER_KEY } from './useTripQueries';
 import type { MyTripsData } from './useTripQueries';
 
 // ---------------------------------------------------------------------------
@@ -49,7 +49,11 @@ function seedFromListCache(
   queryClient: ReturnType<typeof useQueryClient>,
   tripId: string,
 ): TripCoreData | undefined {
-  const infinite = queryClient.getQueryData<InfiniteData<GroupTrip[]>>(tripsKeys.explore);
+  // Seed from the no-filter Explore page (the default deck). Filtered explore
+  // variants live under different keys; the unfiltered page is the common case.
+  const infinite = queryClient.getQueryData<InfiniteData<GroupTrip[]>>(
+    tripsKeys.exploreFiltered(EMPTY_EXPLORE_FILTER_KEY),
+  );
   const exploreTrips = infinite?.pages.flat() ?? [];
   const exploreTrip = exploreTrips.find(t => t.id === tripId);
   if (exploreTrip) return { trip: exploreTrip, participants: [], myRequest: null };

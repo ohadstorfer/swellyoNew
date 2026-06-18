@@ -23,7 +23,6 @@ import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
-import { WelcomeToLineupOverlay } from '../components/WelcomeToLineupOverlay';
 import { JoinDecisionOverlay } from '../components/trips/joinRequest/JoinDecisionOverlay';
 import {
   listUnseenJoinDecisions,
@@ -34,7 +33,7 @@ import {
 } from '../services/trips/groupTripsService';
 import { supabase } from '../config/supabase';
 import { queryClient } from '../lib/queryClient';
-import { tripsKeys } from '../hooks/trips/useTripQueries';
+import { tripsKeys, EMPTY_EXPLORE_FILTER_KEY } from '../hooks/trips/useTripQueries';
 import { fetchTripCore } from '../hooks/trips/useTripDetail';
 import { userTripsTopic } from '../services/trips/tripsRealtime';
 
@@ -59,7 +58,6 @@ import { isFirstVideoReadyForBoardType } from '../services/media/videoPreloadSer
 import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
 import { ageGateService } from '../services/ageGate/ageGateService';
 import { swellyServiceCopy } from '../services/swelly/swellyServiceCopy';
-import { findAndConnectMatches, OnboardingMatchResult } from '../services/matching/onboardingMatchingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
 import {
   tripFocusForNotification,
@@ -71,7 +69,7 @@ import { useMessaging } from '../context/MessagingProvider';
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession, isLoaded: isOnboardingLoaded, completionCheckedForUserId } = useOnboarding();
   const onboardingCheckedForCurrentUser = user !== null && completionCheckedForUserId === user.id;
-  const { markWelcomeLineupDismissed, setSeenFromProfile: setTutorialSeenFromProfile, setSurftripsTipSeenFromProfile } = useTutorial();
+  const { setSeenFromProfile: setTutorialSeenFromProfile, setSurftripsTipSeenFromProfile } = useTutorial();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
   useAuthGuard();
@@ -953,7 +951,6 @@ export const AppContent: React.FC = () => {
   // The legacy ProfileScreen overlay is OWN-PROFILE ONLY now (post-onboarding
   // + SwellyShaper flows) — other users' profiles are ProfileCard routes.
   const [profileFromOnboardingChat, setProfileFromOnboardingChat] = useState(false); // Track if profile was opened right after Swelly onboarding chat (special header)
-  const [profileFromWelcomeOverlay, setProfileFromWelcomeOverlay] = useState(false); // Track if profile was opened from WelcomeToLineupOverlay
 
   // Trip planning chat state - persisted between navigations
   const [tripPlanningChatId, setTripPlanningChatId] = useState<string | null>(null);
@@ -966,15 +963,10 @@ export const AppContent: React.FC = () => {
     otherUserId: string;
     otherUserName: string;
     otherUserAvatar: string | null;
-    fromWelcomeOverlay?: boolean;
     conversationId?: string;
   } | null>(null);
   const [currentUserAvatar, setCurrentUserAvatar] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('User');
-  const [showWelcomeToLineupOverlay, setShowWelcomeToLineupOverlay] = useState(false);
-  const [welcomeOverlayHiddenByProfile, setWelcomeOverlayHiddenByProfile] = useState(false);
-  const [onboardingMatchResult, setOnboardingMatchResult] = useState<OnboardingMatchResult | null>(null);
-  const [pendingOnboardingMatches, setPendingOnboardingMatches] = useState<OnboardingMatchResult['matches'] | null>(null);
   // Queue of unseen host decisions on the user's join requests. We pop the
   // front item as the active overlay; closing it advances to the next one.
   const [joinDecisionQueue, setJoinDecisionQueue] = useState<UnseenJoinDecision[]>([]);
@@ -1106,40 +1098,15 @@ export const AppContent: React.FC = () => {
   const handleProfileBack = () => {
     console.log('[AppContent] handleProfileBack called');
 
-    // If profile was opened from WelcomeToLineupOverlay, return to overlay.
-    // Start the modal fade-in immediately, but keep the profile mounted under it
-    // until the fade completes — otherwise the home screen flashes through the
-    // semi-transparent backdrop during the fade.
-    if (profileFromWelcomeOverlay) {
-      console.log('[AppContent] Returning to WelcomeToLineupOverlay');
-      setProfileFromWelcomeOverlay(false);
-      setWelcomeOverlayHiddenByProfile(false); // overlay starts fading back in
-      setTimeout(() => {
-        setShowProfile(false);
-      }, 350); // matches RN Modal fade duration
-      return;
-    }
-
-    // Otherwise, navigate back to conversations/home (homepage)
+    // Navigate back to conversations/home (homepage)
     console.log('[AppContent] Navigating to conversations/home');
     setShowProfile(false);
     setProfileFromOnboardingChat(false); // Reset so next profile open uses normal header
   };
 
   const handleSaveAndGoToConversations = useCallback(() => {
-    // "Got it!" on the post-onboarding profile: go to the homepage, then
-    // celebrate matches with the WelcomeToLineupOverlay if any were found.
+    // "Got it!" on the post-onboarding profile: go to the homepage.
     handleProfileBack();
-    findAndConnectMatches()
-      .then((result) => {
-        if (result && result.match_count > 0) {
-          setOnboardingMatchResult(result);
-          setShowWelcomeToLineupOverlay(true);
-        }
-      })
-      .catch((err) => {
-        console.warn('[AppContent] Background matching failed (non-blocking):', err);
-      });
   }, []);
 
 
@@ -1400,7 +1367,6 @@ export const AppContent: React.FC = () => {
           otherUserId: userId,
           otherUserName: otherUserName || 'User',
           otherUserAvatar: otherUserAvatar || null,
-          fromWelcomeOverlay: profileFromWelcomeOverlay || false,
         });
         console.log('[AppContent] pendingConversation state updated');
         // Show the loading screen in the same render cycle that closes the
@@ -1412,25 +1378,6 @@ export const AppContent: React.FC = () => {
         // overlay slot the same frame Profile closes.
         setShowConversationLoading(true);
         console.log('[AppContent] ✓ showConversationLoading set to true');
-
-        // Create conversation immediately in background (same as WelcomeToLineupOverlay connect flow)
-        if (profileFromWelcomeOverlay) {
-          messagingService.createDirectConversation(userId, false).then((conversation) => {
-            console.log('[AppContent] Conversation created/found for welcome overlay profile connect:', conversation.id);
-            setPendingConversation(prev => prev ? { ...prev, conversationId: conversation.id } : null);
-            refreshConversations().catch((err) => {
-              console.warn('[AppContent] refreshConversations after profile connect failed:', err);
-            });
-          }).catch((error) => {
-            console.error('[AppContent] Error creating conversation from profile:', error);
-          });
-        }
-      }
-      
-      // If profile was opened from the WelcomeToLineupOverlay, dismiss the overlay
-      if (profileFromWelcomeOverlay) {
-        setShowWelcomeToLineupOverlay(false);
-        setProfileFromWelcomeOverlay(false);
       }
 
       // Close the legacy profile overlay if it's the caller (post-onboarding
@@ -1616,7 +1563,10 @@ export const AppContent: React.FC = () => {
     const userId = user?.id ? user.id.toString() : null;
     queryClient
       .prefetchInfiniteQuery({
-        queryKey: tripsKeys.explore,
+        // Must match useExploreTrips' no-filter key so the first mount consumes
+        // this warmed cache instead of re-fetching (the hook reads from
+        // exploreFiltered(EMPTY_EXPLORE_FILTER_KEY), not the bare `explore` prefix).
+        queryKey: tripsKeys.exploreFiltered(EMPTY_EXPLORE_FILTER_KEY),
         queryFn: ({ pageParam, signal }: any) =>
           exploreFeed(11, pageParam?.created_at ?? null, pageParam?.id ?? null, signal), // 11 = EXPLORE_PAGE_LIMIT(10) + 1 probe row, matches useExploreTrips
         initialPageParam: null,
@@ -1627,7 +1577,7 @@ export const AppContent: React.FC = () => {
         // my request), gated on a known userId — a userId-less prefetch would
         // cache a detail with myRequest=null that the real open would consume.
         if (!userId) return;
-        const data = queryClient.getQueryData<{ pages: Array<Array<{ id: string }>> }>(tripsKeys.explore);
+        const data = queryClient.getQueryData<{ pages: Array<Array<{ id: string }>> }>(tripsKeys.exploreFiltered(EMPTY_EXPLORE_FILTER_KEY));
         const firstTrips = (data?.pages?.flat() ?? []).slice(0, EXPLORE_DETAIL_PREFETCH_COUNT);
         for (const t of firstTrips) {
           if (!t?.id) continue;
@@ -1670,7 +1620,6 @@ export const AppContent: React.FC = () => {
     !showConversationLoading &&
     !showProfile &&
     !showSwellyShaper &&
-    !showWelcomeToLineupOverlay &&
     !showProfileEditor;
 
   // The floating bottom nav lives INSIDE the tab navigator (custom tabBar).
@@ -1680,8 +1629,7 @@ export const AppContent: React.FC = () => {
     showConversationLoading ||
     showSwellyShaper ||
     showProfile ||
-    showProfileEditor ||
-    showWelcomeToLineupOverlay;
+    showProfileEditor;
 
   // Dev-only perf watchdog. SILENT when healthy — only logs when the JS thread
   // actually freezes (a 2s timer that fires >1s late = the thread was blocked).
@@ -1792,11 +1740,6 @@ export const AppContent: React.FC = () => {
     },
     profileCard: {
       onMessage: stableHandlers.onStartConversation,
-      onWelcomeOverlayProfileClosed: () => {
-        // Un-hide the celebration overlay as the profile card slides away.
-        setWelcomeOverlayHiddenByProfile(false);
-        setProfileFromWelcomeOverlay(false);
-      },
     },
     settings: {
       userName: currentUserName,
@@ -1810,8 +1753,6 @@ export const AppContent: React.FC = () => {
       onChatStateChange: handleSwellyChatStateChange,
       onViewUserProfile: stableHandlers.onViewUserProfile,
       onStartConversation: stableHandlers.onStartConversation,
-      onboardingMatches: pendingOnboardingMatches,
-      onChatComplete: () => setPendingOnboardingMatches(null),
     },
     lineupProps: {
       isListFrontmost,
@@ -1860,7 +1801,6 @@ export const AppContent: React.FC = () => {
     tripPlanningChatId,
     tripPlanningMatchedUsers,
     tripPlanningDestination,
-    pendingOnboardingMatches,
     isListFrontmost,
     pendingNotificationConversationId,
     requestTab,
@@ -1926,8 +1866,6 @@ export const AppContent: React.FC = () => {
           onMessage={handleStartConversation}
           fromOnboardingChat={profileFromOnboardingChat}
           onSaveAndGoToConversations={handleSaveAndGoToConversations}
-          noTransition={profileFromWelcomeOverlay}
-          suppressConnectAnalytics={profileFromWelcomeOverlay}
           onEdit={() => {
             setShowProfileEditor(true);
           }}
@@ -1966,102 +1904,6 @@ export const AppContent: React.FC = () => {
         {/* The floating bottom nav renders INSIDE RootNavigator as the
             custom tabBar (one persistent instance — pill animation plays
             across tab switches). barSuppressed hides it under overlays. */}
-        {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
-          <TouchableOpacity
-            style={{ position: 'absolute', top: 60, right: 10, backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, zIndex: 999, opacity: 0.7, display: 'none' }}
-            onPress={async () => {
-              try {
-                const { conversations } = await messagingService.getConversations(3, 0);
-                const matches = conversations
-                  .filter(c => c.other_user)
-                  .slice(0, 3)
-                  .map(c => ({
-                    user_id: c.other_user!.user_id,
-                    conversation_id: c.id,
-                    total_score: 90,
-                    name: c.other_user!.name || 'User',
-                    age: null,
-                    country_from: null,
-                    profile_image_url: c.other_user!.profile_image_url || null,
-                    scores: { age: 0, country: 0, surf_level: 0, board_type: 0 },
-                  }));
-                setOnboardingMatchResult({ matches, match_count: matches.length, swelly_chat_id: null });
-                setShowWelcomeToLineupOverlay(true);
-              } catch (err) {
-                console.warn('[Debug] Failed to load conversations:', err);
-              }
-            }}
-          >
-            <RNText style={{ color: '#fff', fontSize: 11 }}>Debug Overlay</RNText>
-          </TouchableOpacity>
-        )}
-        <WelcomeToLineupOverlay
-          visible={showWelcomeToLineupOverlay && !welcomeOverlayHiddenByProfile && onboardingMatchResult != null && onboardingMatchResult.match_count > 0}
-          matches={onboardingMatchResult?.matches || []}
-          onClose={() => {
-            markWelcomeLineupDismissed();
-            setShowWelcomeToLineupOverlay(false);
-            setWelcomeOverlayHiddenByProfile(false);
-          }}
-          onConnect={(match) => {
-            // Drop rapid repeat taps (frozen-UI mash) so we don't fire several
-            // createDirectConversation + refreshConversations cascades at once.
-            const nowTs = Date.now();
-            if (nowTs - startConvoGuardRef.current < 1500) return;
-            startConvoGuardRef.current = nowTs;
-            markWelcomeLineupDismissed();
-            setShowWelcomeToLineupOverlay(false);
-            // Show loading screen immediately
-            setPendingConversation({
-              otherUserId: match.user_id,
-              otherUserName: match.name || 'User',
-              otherUserAvatar: match.profile_image_url || null,
-              fromWelcomeOverlay: true,
-            });
-            setShowConversationLoading(true);
-            // Create conversation and load current user data in background (animation takes ~4.6s)
-            messagingService.createDirectConversation(match.user_id, false).then((conversation) => {
-              console.log('[AppContent] Conversation created/found for welcome overlay match:', conversation.id);
-              // Update pendingConversation with the real conversation ID
-              setPendingConversation(prev => prev ? { ...prev, conversationId: conversation.id } : null);
-              // Pull the new conversation into the messaging list so it shows on
-              // the home screen even if the user backs out before sending a message.
-              // Realtime can miss this one because the row is created before the
-              // current user is added as a member (RLS hides it from the realtime payload).
-              refreshConversations().catch((err) => {
-                console.warn('[AppContent] refreshConversations after connect failed:', err);
-              });
-            }).catch((error) => {
-              console.error('[AppContent] Error creating conversation:', error);
-            });
-            supabaseAuthService.getCurrentUser().then((currentUser) => {
-              if (currentUser) {
-                setCurrentUserAvatar(currentUser.photo || null);
-                setCurrentUserName(currentUser.nickname || currentUser.email?.split('@')[0] || 'User');
-              }
-            }).catch((error) => {
-              console.error('[AppContent] Error loading current user data:', error);
-            });
-          }}
-          onViewProfile={(userId) => {
-            // Keep overlay state so it re-appears on back; hide it so the
-            // profile CARD shows in front (back un-hides via the card route).
-            setProfileFromWelcomeOverlay(true);
-            setWelcomeOverlayHiddenByProfile(true);
-            pushRootCard('ProfileCard', {
-              userId,
-              suppressConnectAnalytics: true,
-              fromWelcomeOverlay: true,
-            });
-          }}
-          onMoreMatches={() => {
-            markWelcomeLineupDismissed();
-            setShowWelcomeToLineupOverlay(false);
-            setPendingOnboardingMatches(onboardingMatchResult?.matches || null);
-            setTripPlanningChatId(null); // Start fresh chat, not restore
-            pushRootCard('SwellyChat', { service: 'copy' });
-          }}
-        />
         <ProfileEditPanel
           visible={showProfileEditor}
           onClose={() => setShowProfileEditor(false)}

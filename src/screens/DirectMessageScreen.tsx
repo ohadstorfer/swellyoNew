@@ -28,6 +28,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember } from '../services/messaging/messagingService';
+import { capMessages, MAX_IN_MEMORY_MESSAGES } from '../services/messaging/messageWindow';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
@@ -70,6 +71,10 @@ import {
   declineCommitment,
   type PendingCommitmentToReview,
 } from '../services/trips/groupTripsService';
+import { withTimeout } from '../services/messaging/withTimeout';
+import { sanitizeMessage } from '../services/messaging/messageSanitizer';
+import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
+import { SafeMessageBubble } from '../components/chat/SafeMessageBubble';
 
 // WhatsApp-style read receipts for own messages.
 // - 'pending'   → no tick (upload in flight / failed; existing UI shows "Sending…" / "Tap to retry")
@@ -120,6 +125,10 @@ const SEND_SLIDE_DURATION_MS = 280;
 // TOP edge at the same visual position relative to the bar, regardless of
 // whether the composer is one line or stretched.
 const SEND_SLIDE_TOP_PEEK_DP = 8;
+
+// Module-scoped so an in-flight upload survives a screen unmount/remount
+// (navigate away & back) — prevents the zombie-heal from failing a still-uploading message.
+const inFlightUploads = new Set<string>();
 
 const messageSlideUpFromComposer = (values: { targetHeight: number }) => {
   'worklet';
@@ -309,7 +318,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   onOpenTripDetail,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
-  const { markAsRead, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
+  const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
   
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showDmMenu, setShowDmMenu] = useState(false);
@@ -337,6 +346,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const oldestMessageIdRef = useRef<string | null>(null);
   const isLoadingOlderRef = useRef<boolean>(false); // Ref-based lock to prevent race conditions
+  // Whether the user is near the visual bottom (inverted list → small contentOffset.y).
+  // Used to decide whether to cap-on-append (trim oldest) vs leave history alone.
+  const isNearBottomRef = useRef(true);
+  // True once we've trimmed the NEWEST messages off the in-memory window (because
+  // the user scrolled far up). "Scroll to bottom" must reload the latest window.
+  const hasNewerTrimmedRef = useRef(false);
+  // Image message ids whose upload is genuinely in-flight, so the zombie-heal
+  // effect doesn't mark an active upload as failed. Module-scoped (see
+  // `inFlightUploads` above) so it survives unmount/remount mid-upload.
   // Seed from the synchronous auth cache so own messages render on the right
   // from the very first paint — otherwise messages briefly appear on the left
   // and drift right once the async session fetch resolves.
@@ -369,6 +387,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const bubbleRefsRef = useRef<Map<string, any>>(new Map());
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [resolvingReplyJumpId, setResolvingReplyJumpId] = useState<string | null>(null);
+  const [showReturnToLatest, setShowReturnToLatest] = useState(false);
   const messagesRef = useRef<Message[]>([]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const { setReaction, removeReaction } = useMessageReactions(
@@ -419,7 +438,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   });
   const composerPrimaryColor = '#05BCD3';
   const flatListRef = useRef<FlatList<Message>>(null);
-  const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom } = useChatKeyboardScroll(flatListRef, { inverted: true });
+  const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom: scrollToBottomBase } = useChatKeyboardScroll(flatListRef, { inverted: true });
+  // Wrap the hook's scrollToBottom so "go to bottom" reloads the latest window
+  // when we've trimmed the newest messages out of memory (user was scrolled up).
+  // Kept synchronous (same signature as the hook's) so existing callers — and the
+  // hook's own internal scrollToBottom usage — are unaffected; the reload runs as
+  // a fire-and-forget IIFE before the actual scroll.
+  const reloadLatestWindow = useCallback(async () => {
+    if (!hasNewerTrimmedRef.current || !currentConversationId) return;
+    try {
+      const result = await messagingService.getMessages(currentConversationId, 30);
+      setMessages(result.messages);
+      setHasMoreMessages(result.hasMore);
+      oldestMessageIdRef.current = result.messages[0]?.id ?? null;
+      hasNewerTrimmedRef.current = false;
+      setShowReturnToLatest(false);
+    } catch (e) {
+      console.warn('[reloadLatestWindow] failed:', e);
+    }
+  }, [currentConversationId]);
+  // Internal callers (post-send, layout) keep the sync signature; reload is fire-and-forget.
+  const scrollToBottom = useCallback((animated = true) => {
+    void reloadLatestWindow();
+    scrollToBottomBase(animated);
+  }, [reloadLatestWindow, scrollToBottomBase]);
+  // The "Return to latest" pill awaits the reload THEN scrolls, so it lands on the
+  // fresh window instead of the stale one.
+  const handleReturnToLatest = useCallback(async () => {
+    await reloadLatestWindow();
+    requestAnimationFrame(() => scrollToBottomBase(true));
+  }, [reloadLatestWindow, scrollToBottomBase]);
   useDismissKeyboardOnBlur();
 
   // Track which message IDs have already been rendered, so the slide-up
@@ -514,9 +562,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Mark conversation as read (can handle currentUserId being null initially)
       // Will be called again when currentUserId becomes available
       if (currentUserId) {
-        markAsRead(currentConversationId).catch(err => {
-          console.error('Error marking as read:', err);
-        });
+        markAsRead(currentConversationId, true);
       }
 
       // Fetch the other user's last_read_at to seed receipt state before the first Realtime UPDATE.
@@ -594,7 +640,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               wasDisconnectedRef.current = true;
             }
           },
-          onNewMessage: (newMessage) => {
+          onNewMessage: (rawMessage) => {
+            const newMessage = sanitizeMessage(rawMessage);
+            if (!newMessage) { console.warn('[DirectMessageScreen] dropped malformed realtime message'); return; }
             setRealtimeHealthy(true);
             lastRealtimeEventAtRef.current = Date.now();
             const convId = currentConversationIdRef.current;
@@ -654,7 +702,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 }
                 return prev;
               }
-              const updated = [...prev, newMessage];
+              const appended = [...prev, newMessage];
+              // At the bottom: cap by dropping the OLDEST (off-screen top). If the
+              // user is scrolled up reading history, leave the array untrimmed.
+              const updated = isNearBottomRef.current
+                ? capMessages(appended, MAX_IN_MEMORY_MESSAGES, 'head')
+                : appended;
               if (convId) {
                 chatHistoryCache.saveMessages(convId, updated).catch(err => {
                   console.error('Error updating cache:', err);
@@ -663,9 +716,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               return updated;
             });
             if (me && convId) {
-              markAsRead(convId).catch(err => {
-                console.error('Error marking message as read:', err);
-              });
+              markReadRealtime(convId, newMessage.id, true);
             }
             // Piggyback to the provider: the filtered channel is reliable, the unfiltered
             // conversations_list channel often drops INSERT events due to the RLS quirk
@@ -674,7 +725,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             if (convId) {
               messagingDispatch({ type: 'NEW_MESSAGE', payload: { conversationId: convId, message: newMessage } });
             }
-            scrollToBottom();
+            // Only auto-scroll if the user is already near the bottom. When they're
+            // scrolled up reading history, an incoming message must not yank them
+            // down (and scrollToBottom now reloads the latest window if trimmed).
+            // Sending a message keeps you at the bottom, so this still scrolls then.
+            if (isNearBottomRef.current) scrollToBottom();
           },
           onMessageUpdated: (updatedMessage) => {
             lastRealtimeEventAtRef.current = Date.now();
@@ -791,10 +846,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               }
               if (isTyping) {
                 setIsTyping(true);
+                // Receiver-side 6s auto-expiry (stop events are best-effort).
+                // Must exceed the 3s sender keepalive so it never flickers off.
                 typingFailsafeRef.current = setTimeout(() => {
                   typingFailsafeRef.current = null;
                   setIsTyping(false);
-                }, 4000);
+                }, 6000);
               } else {
                 setIsTyping(false);
               }
@@ -818,7 +875,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = null;
         }
-        messagingService.stopTyping(currentConversationId).catch(() => {});
+        messagingService.stopTyping(currentConversationId, currentUserIdRef.current ?? undefined).catch(() => {});
       };
     } else {
       // No conversation yet - clear messages and stop loading
@@ -840,11 +897,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Separate useEffect to mark as read when currentUserId becomes available
   useEffect(() => {
     if (currentConversationId && currentUserId) {
-      markAsRead(currentConversationId).catch(err => {
-        console.error('Error marking as read:', err);
-      });
+      markAsRead(currentConversationId, true);
     }
   }, [currentConversationId, currentUserId, markAsRead]);
+
+  // Flush the pending read watermark when the screen unmounts or the conversation changes.
+  useEffect(() => {
+    return () => {
+      if (currentConversationId) flushReadWatermark(currentConversationId);
+    };
+  }, [currentConversationId, flushReadWatermark]);
 
   // Reconcile UI with outbox on conversation open. Covers the zombie case:
   // an optimistic row with upload_state='failed' persisted in cache, but the
@@ -914,6 +976,59 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       clearTimeout(t);
     };
   }, [currentConversationId]);
+
+  // Heal stuck image uploads left over from a previous session: a cached image
+  // still in 'uploading' with no real URL can never resume → flip it to 'failed'
+  // so it shows Retry/Remove instead of a permanent spinner ghost. Skips uploads
+  // that are genuinely in-flight in THIS session.
+  useEffect(() => {
+    const convId = currentConversationId;
+    if (!convId) return;
+    const t = setTimeout(() => {
+      setMessages((prev) => {
+        let changed = false;
+        const next = prev.map(m => {
+          // Catch the user's OWN images that have no usable image and aren't
+          // actively uploading — covers both leftover 'uploading' rows from a
+          // killed session AND old pre-fix ghosts (real server rows with null
+          // metadata, upload_state undefined). Never touch received messages,
+          // genuinely in-flight uploads, or already-sent rows.
+          const mine = m.sender_id === currentUserId;
+          const isMedia = m.type === 'image' || m.type === 'video' || m.type === 'audio';
+          // "Has real uploaded media" per type. Video's video_url stays '' until
+          // the MediaConvert Lambda finishes, so its success signal is storage_path
+          // (set the moment the S3 upload + create succeed), NOT video_url.
+          const hasRealMedia =
+            m.type === 'image' ? !!m.image_metadata?.image_url :
+            m.type === 'video' ? !!m.video_metadata?.storage_path :
+            m.type === 'audio' ? !!m.audio_metadata?.audio_url :
+            true;
+          // A dead upload from a previous session (still 'uploading' but not in
+          // this session's in-flight set — the local preview may still be cached),
+          // or an old pre-fix ghost (real server row with null metadata,
+          // upload_state undefined). Flip to 'failed' so it shows Retry/Remove;
+          // keep _localPreviewUri so Retry can re-upload. Never touch received,
+          // in-flight, sent, or already-failed rows.
+          if (
+            isMedia &&
+            mine &&
+            !hasRealMedia &&
+            !inFlightUploads.has(m.id) &&
+            m.upload_state !== 'sent' &&
+            m.upload_state !== 'failed'
+          ) {
+            changed = true;
+            return { ...m, upload_state: 'failed' as const, upload_error: 'Upload interrupted' };
+          }
+          return m;
+        });
+        if (!changed) return prev;
+        chatHistoryCache.saveMessages(convId, next).catch(() => {});
+        return next;
+      });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [currentConversationId, currentUserId]);
 
   // Mute state derived synchronously from the provider so the menu opens with the
   // correct Mute/Unmute label immediately — no async fetch on mount.
@@ -1348,8 +1463,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           // Avoid duplicates
           const existingIds = new Set(prev.map(m => m.id));
           const uniqueNew = result.messages.filter(m => !existingIds.has(m.id));
-          const merged = [...uniqueNew, ...prev];
-          
+          // Scrolling UP: keep the OLDEST window, drop the newest (visual-bottom) end.
+          const merged = capMessages([...uniqueNew, ...prev], MAX_IN_MEMORY_MESSAGES, 'tail');
+          if (merged.length === MAX_IN_MEMORY_MESSAGES && (uniqueNew.length + prev.length) > MAX_IN_MEMORY_MESSAGES) {
+            hasNewerTrimmedRef.current = true;
+          }
+
           // Update cache
           chatHistoryCache.saveMessages(currentConversationId, merged).catch(err => {
             console.error('Error saving merged messages:', err);
@@ -1708,35 +1827,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         typingTimeoutRef.current = null;
       }
       lastTypingSentAtRef.current = 0;
-      messagingService.stopTyping(currentConversationId!).catch(() => {});
+      messagingService.stopTyping(currentConversationId!, currentUserIdRef.current ?? undefined).catch(() => {});
       return;
     }
 
     const now = Date.now();
     const timeSinceLastSent = lastTypingSentAtRef.current ? now - lastTypingSentAtRef.current : Infinity;
-    // Send startTyping 100ms after they start (or after throttle interval): leading + throttle ~500ms
-    if (timeSinceLastSent >= 500) {
+    // Keepalive cadence: re-send "typing" at most once every 3s while composing
+    // (WhatsApp-style). First event still fires ~100ms after the first keystroke.
+    if (timeSinceLastSent >= 3000) {
       if (typingDebounceRef.current) {
         clearTimeout(typingDebounceRef.current);
       }
       typingDebounceRef.current = setTimeout(() => {
         typingDebounceRef.current = null;
         if (currentConversationId && inputText.trim()) {
-          messagingService.startTyping(currentConversationId).catch(() => {});
+          messagingService.startTyping(currentConversationId, currentUserIdRef.current ?? undefined).catch(() => {});
           lastTypingSentAtRef.current = Date.now();
         }
       }, 100) as ReturnType<typeof setTimeout>;
     }
 
-    // Trailing: clear typing indicator after 3 seconds of no typing
+    // Trailing: clear typing indicator after 5 seconds of no typing (WhatsApp ~5s idle stop)
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     typingTimeoutRef.current = setTimeout(() => {
       if (currentConversationId) {
-        messagingService.stopTyping(currentConversationId).catch(() => {});
+        messagingService.stopTyping(currentConversationId, currentUserIdRef.current ?? undefined).catch(() => {});
       }
-    }, 3000) as ReturnType<typeof setTimeout>;
+    }, 5000) as ReturnType<typeof setTimeout>;
 
     return () => {
       if (typingDebounceRef.current) {
@@ -2279,6 +2399,47 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Handle image send. `overrideImageUri` is no longer used by the picker
   // (which now always routes through ImagePreviewModal) but is kept for the
   // recovery path that re-uploads pending messages with the cached local URI.
+  // Shared upload-first helper used by both the initial send and retry. Processes
+  // the local image, uploads original + thumbnail, then creates the message row
+  // WITH metadata (idempotent via clientId). Throws on any failure — the caller is
+  // responsible for marking the optimistic row failed. Nothing is written to the
+  // server unless the upload fully succeeded (WhatsApp model).
+  const uploadAndCreateImage = async (
+    convId: string,
+    clientId: string,
+    localUri: string,
+    caption: string | undefined
+  ): Promise<{ created: Message; imageMetadata: any }> => {
+    const { processImage, uploadImageToStorage } = await import('../services/messaging/imageUploadService');
+    const processed = await processImage(localUri);
+    const imageUrl = await withTimeout(
+      uploadImageToStorage(processed.originalUri, convId, clientId, false),
+      60000,
+      'media-upload'
+    );
+    const thumbnailUrl = await withTimeout(
+      uploadImageToStorage(processed.thumbnailUri, convId, clientId, true),
+      60000,
+      'media-upload'
+    );
+    const imageMetadata = {
+      image_url: imageUrl,
+      thumbnail_url: thumbnailUrl,
+      width: processed.width,
+      height: processed.height,
+      file_size: processed.fileSize,
+      mime_type: processed.mimeType,
+      storage_path: `${convId}/${clientId}/original.jpg`,
+    };
+    const created = await messagingService.createImageMessageWithMetadata(
+      convId,
+      caption,
+      imageMetadata,
+      clientId
+    );
+    return { created, imageMetadata };
+  };
+
   const handleImageSend = async (caption?: string, overrideImageUri?: string) => {
     const uriToUse = overrideImageUri ?? selectedImageUriForUploadRef.current ?? selectedImageUri;
     if (!uriToUse || !currentConversationId || !currentUserId) {
@@ -2286,94 +2447,123 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
 
     const conversationId = currentConversationId;
-    let messageId: string | null = null;
+    // Client-generated UUID. Acts as the optimistic row's id (so we can locate it
+    // later) AND the server-side idempotency key (client_id) used at create time.
+    const clientId = Crypto.randomUUID();
+
+    // Optimistic LOCAL row — id = clientId, NOT a server id. Upload-first means no
+    // server row exists yet; if the upload fails this never touches the server.
+    const optimistic: Message = {
+      id: clientId,
+      client_id: clientId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: caption ?? '',
+      type: 'image',
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      upload_state: 'uploading',
+      _localPreviewUri: uriToUse,
+    } as Message;
+
+    inFlightUploads.add(clientId);
+
+    // Close preview modal immediately — upload continues in background
+    selectedImageUriForUploadRef.current = null;
+    setImagePreviewVisible(false);
+    setSelectedImageUri(null);
+    setIsProcessingImage(false);
+
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+      return next;
+    });
+    scrollToBottom();
 
     try {
-      // Step 1: Create message record in DB first (to get real message ID)
-      const messageRecord = await messagingService.createImageMessage(conversationId, caption);
-      messageId = messageRecord.id;
+      // Upload FIRST; only create the message row if the upload succeeded.
+      const { created, imageMetadata } = await uploadAndCreateImage(conversationId, clientId, uriToUse, caption);
 
-      // Close preview modal immediately — upload continues in background
-      selectedImageUriForUploadRef.current = null;
-      setImagePreviewVisible(false);
-      setSelectedImageUri(null);
-      setIsProcessingImage(false);
-
-      // Inject message into local state with uploading flag + local preview
+      // Success — swap the optimistic row (id === clientId) for the server row.
+      // The Realtime INSERT carrying client_id will be deduped by onNewMessage.
       setMessages((prev) => {
-        const existingIdx = prev.findIndex(m => m.id === messageRecord.id);
-        if (existingIdx !== -1) {
-          return prev.map(m =>
-            m.id === messageRecord.id
-              ? { ...m, upload_state: 'uploading', _localPreviewUri: uriToUse }
-              : m
-          );
-        }
-        return [...prev, { ...messageRecord, upload_state: 'uploading', _localPreviewUri: uriToUse }];
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...created, image_metadata: created.image_metadata ?? imageMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined }
+            : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
       });
-      scrollToBottom();
-
-      // Import image upload service functions
-      const { processImage, uploadImageToStorage } = await import('../services/messaging/imageUploadService');
-
-      // Step 2: Process image (compress and generate thumbnail)
-      const processed = await processImage(uriToUse);
-
-      // Step 3: Upload original image
-      const imageUrl = await uploadImageToStorage(
-        processed.originalUri,
-        conversationId,
-        messageRecord.id,
-        false
-      );
-
-      // Step 4: Upload thumbnail
-      const thumbnailUrl = await uploadImageToStorage(
-        processed.thumbnailUri,
-        conversationId,
-        messageRecord.id,
-        true
-      );
-
-      // Step 5: Update message with image metadata
-      const imageMetadata = {
-        image_url: imageUrl,
-        thumbnail_url: thumbnailUrl,
-        width: processed.width,
-        height: processed.height,
-        file_size: processed.fileSize,
-        mime_type: processed.mimeType,
-        storage_path: `${conversationId}/${messageRecord.id}/original.jpg`,
-      };
-
-      await messagingService.updateImageMessageMetadata(messageRecord.id, imageMetadata);
-
-      // Upload succeeded — mark message as sent and drop the local preview
-      setMessages((prev) => prev.map(m =>
-        m.id === messageRecord.id
-          ? { ...m, image_metadata: imageMetadata, upload_state: 'sent', _localPreviewUri: undefined }
-          : m
-      ));
     } catch (error: any) {
       console.error('Error sending image:', error);
-      if (messageId) {
-        setMessages((prev) => prev.map(m =>
-          m.id === messageId
-            ? { ...m, upload_state: 'failed', upload_error: error?.message }
+      // Nothing was created on the server — just mark the optimistic row failed so
+      // the user can Retry/Remove. No ghost row is left for the recipient.
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...m, upload_state: 'failed' as const, upload_error: error?.message }
             : m
-        ));
-      } else {
-        // Failed before we even got a message ID — make sure the modal closes so the user isn't stuck
-        selectedImageUriForUploadRef.current = null;
-        setImagePreviewVisible(false);
-        setSelectedImageUri(null);
-        setIsProcessingImage(false);
-      }
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
       Alert.alert('Error', error?.message || 'Failed to send image');
+    } finally {
+      inFlightUploads.delete(clientId);
     }
   };
 
-  // Handle video send
+  // Upload-first video helper (mirrors uploadAndCreateImage). Processes + uploads
+  // the video and thumbnail, then creates the message row ONLY on success. Returns
+  // the created server row, the built metadata, the local thumbnail poster, and the
+  // processedKey so the caller can kick off the background MediaConvert poll using
+  // the real server id. Storage paths key off clientId (stable across retries).
+  const uploadAndCreateVideo = async (
+    convId: string,
+    clientId: string,
+    localUri: string,
+    caption: string | undefined,
+    videoHints?: any
+  ): Promise<{ created: Message; videoMetadata: any; thumbnailUri: string; processedKey: string }> => {
+    const { processVideo, uploadVideoToS3, uploadThumbnailToStorage } = await import('../services/messaging/videoUploadService');
+    const processed = await processVideo(localUri, videoHints);
+    const [uploadResult, thumbnailUrl] = await withTimeout(Promise.all([
+      uploadVideoToS3(localUri, convId, clientId),
+      uploadThumbnailToStorage(processed.thumbnailUri, convId, clientId),
+    ]), 60000, 'media-upload');
+    const { s3Key, processedKey, originalUrl } = uploadResult;
+    // `original_url` is playable immediately; `video_url` is filled by the
+    // server-side Lambda once MediaConvert writes the compressed output.
+    const videoMetadata = {
+      video_url: '',
+      original_url: originalUrl,
+      thumbnail_url: thumbnailUrl,
+      duration: processed.duration,
+      width: processed.width,
+      height: processed.height,
+      file_size: processed.fileSize,
+      mime_type: processed.mimeType,
+      storage_path: s3Key,
+    };
+    const created = await messagingService.createVideoMessageWithMetadata(
+      convId,
+      caption,
+      videoMetadata,
+      clientId
+    );
+    return { created, videoMetadata, thumbnailUri: processed.thumbnailUri, processedKey };
+  };
+
+  // Handle video send (upload-first, mirrors handleImageSend). The message row is
+  // only created AFTER the upload succeeds, so a failed send leaves nothing on the
+  // server. Because <Image> can't render a raw video URI, we generate a thumbnail
+  // poster up front and show it on the optimistic bubble during upload.
   const handleVideoSend = async (caption?: string, overrideVideoUri?: string) => {
     // Prefer a trimmed URI from the preview modal when the user cut the clip;
     // otherwise fall back to the originally-picked URI.
@@ -2383,119 +2573,155 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
 
     const conversationId = currentConversationId;
-    let messageId: string | null = null;
+    // Client-generated UUID — optimistic row id AND server idempotency key.
+    const clientId = Crypto.randomUUID();
     // Picker hints describe the ORIGINAL file. If the user trimmed, the file
     // changed — let `processVideo` re-read metadata from disk rather than trust
     // stale hints for duration/size.
     const videoHints = overrideVideoUri ? undefined : (selectedVideoMetadataRef.current ?? undefined);
 
+    // Close preview immediately — upload continues in background
+    setVideoPreviewVisible(false);
+    setSelectedVideoUri(null);
+    selectedVideoMetadataRef.current = null;
+    setIsProcessingVideo(false);
+
+    inFlightUploads.add(clientId);
+
+    // Generate the thumbnail BEFORE injecting the bubble so the poster renders
+    // with the correct aspect ratio (no black box / stretched portrait).
+    let processed: any;
     try {
-      // Close preview immediately — upload continues in background
-      setVideoPreviewVisible(false);
-      setSelectedVideoUri(null);
-      selectedVideoMetadataRef.current = null;
-      setIsProcessingVideo(false);
+      const { processVideo } = await import('../services/messaging/videoUploadService');
+      processed = await processVideo(videoUri, videoHints);
+    } catch (error: any) {
+      console.error('Error processing video:', error);
+      inFlightUploads.delete(clientId);
+      Alert.alert('Error', error?.message || 'Failed to send video');
+      return;
+    }
 
-      const { processVideo, uploadVideoToS3, uploadThumbnailToStorage, pollForProcessedDmVideo } = await import('../services/messaging/videoUploadService');
+    const posterMetadata = {
+      video_url: '',
+      thumbnail_url: '',
+      duration: processed.duration,
+      width: processed.width,
+      height: processed.height,
+      file_size: processed.fileSize,
+      mime_type: processed.mimeType,
+      storage_path: '',
+    };
 
-      // Generate the thumbnail BEFORE injecting the bubble. <Image> can't render a raw
-      // video URI, so without a real poster the bubble would be a black box during
-      // upload. Paralleled with createVideoMessage to avoid adding latency.
-      const [messageRecord, processed] = await Promise.all([
-        messagingService.createVideoMessage(conversationId, caption),
-        processVideo(videoUri, videoHints),
-      ]);
-      messageId = messageRecord.id;
+    // Optimistic LOCAL row — id = clientId, no server row exists yet.
+    const optimistic: Message = {
+      id: clientId,
+      client_id: clientId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: caption ?? '',
+      type: 'video',
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      upload_state: 'uploading',
+      _localPreviewUri: processed.thumbnailUri,
+      video_metadata: posterMetadata,
+    } as Message;
 
-      // Inject dimensions so the poster renders with the correct aspect ratio
-      // during the upload phase (prevents portrait videos getting stretched to 16/9).
-      const posterMetadata = {
-        video_url: '',
-        thumbnail_url: '',
-        duration: processed.duration,
-        width: processed.width,
-        height: processed.height,
-        file_size: processed.fileSize,
-        mime_type: processed.mimeType,
-        storage_path: '',
-      };
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+      return next;
+    });
+    scrollToBottom();
 
-      // Inject message locally with uploading flag + local thumbnail poster
+    try {
+      // Upload FIRST; only create the message row if the upload succeeded.
+      const { created, videoMetadata, processedKey } = await uploadAndCreateVideo(
+        conversationId, clientId, videoUri, caption, videoHints
+      );
+
+      // Success — swap the optimistic row (id === clientId) for the server row.
       setMessages((prev) => {
-        const existingIdx = prev.findIndex(m => m.id === messageRecord.id);
-        if (existingIdx !== -1) {
-          return prev.map(m =>
-            m.id === messageRecord.id
-              ? { ...m, upload_state: 'uploading', _localPreviewUri: processed.thumbnailUri, video_metadata: posterMetadata }
-              : m
-          );
-        }
-        return [...prev, { ...messageRecord, upload_state: 'uploading', _localPreviewUri: processed.thumbnailUri, video_metadata: posterMetadata }];
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...created, video_metadata: created.video_metadata ?? videoMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined }
+            : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
       });
-      scrollToBottom();
 
-      // Step 3: Upload video + thumbnail in parallel
-      const [uploadResult, thumbnailUrl] = await Promise.all([
-        uploadVideoToS3(videoUri, conversationId, messageRecord.id),
-        uploadThumbnailToStorage(processed.thumbnailUri, conversationId, messageRecord.id),
-      ]);
-      const { s3Key, processedKey, originalUrl } = uploadResult;
-
-      // Step 5: Update message with initial video metadata.
-      // `original_url` is playable immediately; `video_url` is filled by the
-      // server-side Lambda once MediaConvert writes the compressed output.
-      const videoMetadata = {
-        video_url: '',
-        original_url: originalUrl,
-        thumbnail_url: thumbnailUrl,
-        duration: processed.duration,
-        width: processed.width,
-        height: processed.height,
-        file_size: processed.fileSize,
-        mime_type: processed.mimeType,
-        storage_path: s3Key,
-      };
-
-      await messagingService.updateVideoMessageMetadata(messageRecord.id, videoMetadata);
-
-      // Upload phase done. Receiver can already play the original_url; the compressed
-      // video_url will be swapped in via Realtime when the Lambda finishes.
-      setMessages((prev) => prev.map(m =>
-        m.id === messageRecord.id
-          ? { ...m, video_metadata: videoMetadata, upload_state: 'sent', _localPreviewUri: undefined }
-          : m
-      ));
-
-      // Step 6: Poll for processed video in background
-      pollForProcessedDmVideo(messageRecord.id, processedKey, videoMetadata)
+      // Poll for the processed (compressed) video in the background using the REAL
+      // server id; the compressed video_url is swapped in via Realtime when ready.
+      const { pollForProcessedDmVideo } = await import('../services/messaging/videoUploadService');
+      pollForProcessedDmVideo(created.id, processedKey, videoMetadata)
         .catch(err => console.error('Background video poll error:', err));
-
     } catch (error: any) {
       console.error('Error sending video:', error);
-      if (messageId) {
-        setMessages((prev) => prev.map(m =>
-          m.id === messageId
-            ? { ...m, upload_state: 'failed', upload_error: error?.message }
+      // Nothing was created on the server — just mark the optimistic row failed.
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...m, upload_state: 'failed' as const, upload_error: error?.message }
             : m
-        ));
-      } else {
-        setVideoPreviewVisible(false);
-        setSelectedVideoUri(null);
-        selectedVideoMetadataRef.current = null;
-        setIsProcessingVideo(false);
-      }
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
       Alert.alert('Error', error?.message || 'Failed to send video');
+    } finally {
+      inFlightUploads.delete(clientId);
     }
   };
 
-  // Handle voice message send. Mirrors the image flow: DB-first row creation,
-  // optimistic insert with the local file as a preview, upload to storage,
-  // then patch the row with audio_metadata. The receiver picks it up via the
-  // existing realtime UPDATE handler.
+  // Upload-first voice helper (mirrors uploadAndCreateImage). Uploads the
+  // recording, then creates the message row ONLY on success. Storage path keys
+  // off clientId (stable across retries). `recording` carries the locally-known
+  // duration/waveform/mime/size so the row can render its waveform immediately.
+  const uploadAndCreateVoice = async (
+    convId: string,
+    clientId: string,
+    localUri: string,
+    recording: { durationMs: number; waveform: number[]; mimeType: string; sizeBytes: number },
+    replyTo: ReplyToSnapshot | null
+  ): Promise<{ created: Message; audioMetadata: any }> => {
+    const { uploadAudioToStorage } = await import('../services/messaging/audioUploadService');
+    const { audio_url, storage_path } = await withTimeout(uploadAudioToStorage(
+      localUri,
+      convId,
+      clientId,
+      recording.mimeType
+    ), 60000, 'media-upload');
+    const audioMetadata = {
+      audio_url,
+      storage_path,
+      duration_ms: recording.durationMs,
+      waveform: recording.waveform,
+      mime_type: recording.mimeType,
+      size_bytes: recording.sizeBytes,
+    };
+    const created = await messagingService.createAudioMessageWithMetadata(
+      convId,
+      audioMetadata,
+      clientId,
+      replyTo
+    );
+    return { created, audioMetadata };
+  };
+
+  // Handle voice message send (upload-first, mirrors handleImageSend). The row is
+  // only created AFTER the upload succeeds, so a failed send leaves nothing on the
+  // server. We seed the optimistic row's audio_metadata with the locally-known
+  // waveform/duration so the bubble renders immediately and stays playable
+  // (via _localPreviewUri) during upload.
   const handleVoiceMessage = async (audio: import('../components/ChatTextInput').VoiceRecording) => {
     if (!currentConversationId || !currentUserId) return;
     const conversationId = currentConversationId;
-    const replyTo = replyingTo
+    const replyTo: ReplyToSnapshot | null = replyingTo
       ? {
           message_id: replyingTo.id,
           sender_id: replyingTo.sender_id,
@@ -2504,85 +2730,214 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           body: replyingTo.body,
         }
       : null;
-    let messageRecord: Message | null = null;
+
+    // Client-generated UUID — optimistic row id AND server idempotency key.
+    const clientId = Crypto.randomUUID();
+
+    // Clear the reply banner immediately — match the image/text flow.
+    if (replyingTo) setReplyingTo(null);
+
+    const recording = {
+      durationMs: audio.durationMs,
+      waveform: audio.waveform,
+      mimeType: audio.mimeType,
+      sizeBytes: audio.sizeBytes,
+    };
+
+    const optimisticMetadata = {
+      audio_url: '',
+      storage_path: '',
+      duration_ms: audio.durationMs,
+      waveform: audio.waveform,
+      mime_type: audio.mimeType,
+      size_bytes: audio.sizeBytes,
+    };
+
+    // Optimistic LOCAL row — id = clientId, no server row exists yet.
+    const optimistic: Message = {
+      id: clientId,
+      client_id: clientId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: '',
+      type: 'audio',
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      upload_state: 'uploading',
+      _localPreviewUri: audio.uri,
+      audio_metadata: optimisticMetadata,
+      reply_to_message_id: replyTo?.message_id ?? null,
+      reply_to_snapshot: replyTo,
+    } as Message;
+
+    inFlightUploads.add(clientId);
+
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+      return next;
+    });
+    scrollToBottom();
 
     try {
-      // Clear the reply banner immediately — match the image/text flow.
-      if (replyingTo) setReplyingTo(null);
-
-      messageRecord = await messagingService.createAudioMessage(conversationId, replyTo);
-
-      // Optimistic insert with the local file as the playable source until the
-      // upload finishes. We seed audio_metadata with the locally-known waveform
-      // and duration so the bubble can render the waveform during upload.
-      const optimisticMetadata = {
-        audio_url: '',
-        storage_path: '',
-        duration_ms: audio.durationMs,
-        waveform: audio.waveform,
-        mime_type: audio.mimeType,
-        size_bytes: audio.sizeBytes,
-      };
-
-      setMessages((prev) => {
-        const idx = prev.findIndex(m => m.id === messageRecord!.id);
-        const optimistic: Message = {
-          ...messageRecord!,
-          upload_state: 'uploading',
-          _localPreviewUri: audio.uri,
-          audio_metadata: optimisticMetadata,
-        };
-        if (idx !== -1) {
-          return prev.map(m => (m.id === messageRecord!.id ? optimistic : m));
-        }
-        return [...prev, optimistic];
-      });
-      scrollToBottom();
-
-      const { uploadAudioToStorage } = await import('../services/messaging/audioUploadService');
-      const { audio_url, storage_path } = await uploadAudioToStorage(
-        audio.uri,
-        conversationId,
-        messageRecord.id,
-        audio.mimeType
+      // Upload FIRST; only create the message row if the upload succeeded.
+      const { created, audioMetadata } = await uploadAndCreateVoice(
+        conversationId, clientId, audio.uri, recording, replyTo
       );
 
-      const audioMetadata = {
-        audio_url,
-        storage_path,
-        duration_ms: audio.durationMs,
-        waveform: audio.waveform,
-        mime_type: audio.mimeType,
-        size_bytes: audio.sizeBytes,
-      };
-
-      await messagingService.updateAudioMessageMetadata(messageRecord.id, audioMetadata);
-
-      setMessages((prev) => prev.map(m =>
-        m.id === messageRecord!.id
-          ? { ...m, audio_metadata: audioMetadata, upload_state: 'sent', _localPreviewUri: undefined }
-          : m
-      ));
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...created, audio_metadata: created.audio_metadata ?? audioMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined }
+            : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
     } catch (error: any) {
       console.error('Error sending voice message:', error);
-      if (messageRecord?.id) {
-        setMessages((prev) => prev.map(m =>
-          m.id === messageRecord!.id
-            ? { ...m, upload_state: 'failed', upload_error: error?.message }
+      // Nothing was created on the server — just mark the optimistic row failed.
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...m, upload_state: 'failed' as const, upload_error: error?.message }
             : m
-        ));
-      }
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
       Alert.alert('Error', error?.message || 'Failed to send voice message');
+    } finally {
+      inFlightUploads.delete(clientId);
     }
   };
 
-  // Handle retry upload for failed image messages
+  // Re-upload a failed media message (image/video/audio) using the locally-kept
+  // original. Branches on message.type and calls the matching upload-first helper.
+  // If the local file is gone (e.g. app was restarted), offer to remove the broken
+  // message. Upload-first: nothing on the server until the re-upload succeeds.
   const handleRetryUpload = async (message: Message) => {
-    if (!message.image_metadata || !currentConversationId) return;
+    const convId = currentConversationId;
+    if (!convId) return;
+    const localUri = message._localPreviewUri;
+    const mediaType = message.type === 'video' || message.video_metadata
+      ? 'video'
+      : message.type === 'audio'
+        ? 'audio'
+        : 'image';
+    if (!localUri) {
+      const label = mediaType === 'video' ? 'video' : mediaType === 'audio' ? 'voice message' : 'photo';
+      Alert.alert(
+        `${mediaType === 'audio' ? 'Voice message' : mediaType === 'video' ? 'Video' : 'Photo'} unavailable`,
+        `The original ${label} is no longer available on this device. Remove this message?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: () => handleRemoveFailedMedia(message) },
+        ]
+      );
+      return;
+    }
+    const mid = message.id;
+    // The optimistic/failed row id IS the clientId. Reuse it (or message.client_id)
+    // so the re-create stays idempotent against any prior partial attempt.
+    const clientId = message.client_id ?? mid;
+    inFlightUploads.add(mid);
+    setMessages((prev) => prev.map(m =>
+      m.id === mid ? { ...m, upload_state: 'uploading' as const, upload_error: undefined } : m
+    ));
+    try {
+      if (mediaType === 'video') {
+        const { created, videoMetadata, processedKey } = await uploadAndCreateVideo(
+          convId, clientId, localUri, message.body || undefined
+        );
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === mid ? { ...created, video_metadata: created.video_metadata ?? videoMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
+          );
+          chatHistoryCache.saveMessages(convId, next).catch(() => {});
+          return next;
+        });
+        const { pollForProcessedDmVideo } = await import('../services/messaging/videoUploadService');
+        pollForProcessedDmVideo(created.id, processedKey, videoMetadata)
+          .catch(err => console.error('Background video poll error:', err));
+      } else if (mediaType === 'audio') {
+        const md = message.audio_metadata;
+        const recording = {
+          durationMs: md?.duration_ms ?? 0,
+          waveform: md?.waveform ?? [],
+          mimeType: md?.mime_type ?? 'audio/m4a',
+          sizeBytes: md?.size_bytes ?? 0,
+        };
+        const { created, audioMetadata } = await uploadAndCreateVoice(
+          convId, clientId, localUri, recording, message.reply_to_snapshot ?? null
+        );
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === mid ? { ...created, audio_metadata: created.audio_metadata ?? audioMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
+          );
+          chatHistoryCache.saveMessages(convId, next).catch(() => {});
+          return next;
+        });
+      } else {
+        const { created, imageMetadata } = await uploadAndCreateImage(convId, clientId, localUri, message.body || undefined);
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === mid ? { ...created, image_metadata: created.image_metadata ?? imageMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
+          );
+          chatHistoryCache.saveMessages(convId, next).catch(() => {});
+          return next;
+        });
+      }
+    } catch (error: any) {
+      console.error('[retryUpload] failed:', error);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === mid ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
+        );
+        chatHistoryCache.saveMessages(convId, next).catch(() => {});
+        return next;
+      });
+      Alert.alert('Error', error?.message || 'Failed to send media');
+    } finally {
+      inFlightUploads.delete(mid);
+    }
+  };
 
-    // TODO: Implement retry logic
-    // This should re-upload the image and update the message
-    Alert.alert('Info', 'Retry upload functionality will be implemented in Phase 3');
+  // Remove a failed media message: drop it locally + from cache. Upload-first means
+  // there's usually NO server row, but a stale/pre-fix ghost might exist, so we
+  // best-effort delete the server row too (no-op if it never existed).
+  const handleRemoveFailedMedia = async (message: Message) => {
+    const convId = currentConversationId;
+    setMessages((prev) => {
+      const next = prev.filter(m => m.id !== message.id);
+      if (convId) chatHistoryCache.saveMessages(convId, next).catch(() => {});
+      return next;
+    });
+    try {
+      if (convId) await messagingService.deleteMessage(convId, message.id);
+    } catch (e) {
+      console.warn('[removeFailedMedia] server delete failed:', e);
+    }
+  };
+
+  // Remove a failed image: drop it locally + from cache, and delete the empty
+  // server row so it doesn't linger as a broken message for the other person.
+  const handleRemoveFailedImage = async (message: Message) => {
+    const convId = currentConversationId;
+    setMessages((prev) => {
+      const next = prev.filter(m => m.id !== message.id);
+      if (convId) chatHistoryCache.saveMessages(convId, next).catch(() => {});
+      return next;
+    });
+    try {
+      if (convId) await messagingService.deleteMessage(convId, message.id);
+    } catch (e) {
+      console.warn('[removeFailedImage] server delete failed:', e);
+    }
   };
 
   const handleRetryTextMessage = async (message: Message) => {
@@ -2683,8 +3038,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // then briefly flash it. If the parent is older than what's loaded, page in
   // older messages until found (capped to avoid infinite loops).
   const handleReplyPreviewPress = useCallback(async (parentMessageId: string) => {
-    console.log('[reply-jump] tap', { parentMessageId, resolvingReplyJumpId });
-    if (resolvingReplyJumpId) return;
+    if (resolvingReplyJumpId || !currentConversationId) return;
 
     const findInvertedIndex = (id: string): number => {
       const arr = messagesRef.current;
@@ -2693,38 +3047,36 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
 
     let invertedIndex = findInvertedIndex(parentMessageId);
-    console.log('[reply-jump] initial lookup', { invertedIndex, total: messagesRef.current.length });
+
     if (invertedIndex === -1) {
+      // Not in the current window: re-anchor via a centered fetch instead of
+      // paging through history (keeps memory bounded).
       setResolvingReplyJumpId(parentMessageId);
-      let attempts = 0;
-      while (
-        invertedIndex === -1 &&
-        attempts < 5 &&
-        hasMoreMessagesRef.current &&
-        !isLoadingOlderRef.current
-      ) {
-        await loadOlderMessages();
+      try {
+        const result = await messagingService.getMessagesAround(currentConversationId, parentMessageId, 20);
+        if (result.messages.length === 0) {
+          Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
+          return;
+        }
+        setMessages(result.messages);
+        setHasMoreMessages(result.hasMoreOlder);
+        oldestMessageIdRef.current = result.messages[0]?.id ?? null;
+        hasNewerTrimmedRef.current = true;       // window no longer ends at latest
+        setShowReturnToLatest(true);
+        await new Promise<void>((r) => setTimeout(r, 0)); // let the new window lay out
         invertedIndex = findInvertedIndex(parentMessageId);
-        attempts++;
-        console.log('[reply-jump] paginated', { attempts, invertedIndex });
+      } catch {
+        Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
+        return;
+      } finally {
+        setResolvingReplyJumpId(null);
       }
-      setResolvingReplyJumpId(null);
     }
 
-    if (invertedIndex === -1) {
-      console.log('[reply-jump] not found after pagination');
-      Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
-      return;
-    }
-
-    console.log('[reply-jump] scrolling to', invertedIndex);
+    if (invertedIndex === -1) return;
     setHighlightedMessageId(parentMessageId);
-    flatListRef.current?.scrollToIndex({
-      index: invertedIndex,
-      viewPosition: 0.5,
-      animated: true,
-    });
-  }, [resolvingReplyJumpId]);
+    flatListRef.current?.scrollToIndex({ index: invertedIndex, viewPosition: 0.5, animated: true });
+  }, [resolvingReplyJumpId, currentConversationId]);
 
   // Handle long press on message
   // Build the report context for a message: a stable id/type plus a
@@ -2981,7 +3333,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         entering={enteringAnim}
         style={{ marginBottom: messageGap }}
       >
-        {renderMessage(item, isLastInRun)}
+        <SafeMessageBubble messageId={item.id}>
+          {renderMessage(item, isLastInRun)}
+        </SafeMessageBubble>
       </Reanimated.View>
     );
   }, [currentUserId, editingMessageId, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages, highlightedMessageId, resolvingReplyJumpId]);
@@ -3149,8 +3503,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           style={[
             styles.messageBubble,
             isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
-            // Conditionally apply padding: 0 for images/videos/audio, normal for text
-            (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata || message.type === 'audio') && styles.imageMessageBubble,
+            // Conditionally apply padding: 0 for images/videos/audio, normal for text.
+            // `!message.deleted &&`: a deleted media message renders the text-style
+            // placeholder, so it must NOT get the media-frame styling.
+            !message.deleted && (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata || message.type === 'audio') && styles.imageMessageBubble,
+            // Photo/video: thin bubble frame visible around the media (WhatsApp-style)
+            !message.deleted && (message.type === 'image' || message.image_metadata || message.type === 'video' || message.video_metadata) && styles.mediaFrameBubble,
             // Remove maxWidth constraint for deleted messages from other user
             message.deleted && !isOwnMessage && {
               maxWidth: Dimensions.get('window').width - 120, // Screen width minus padding
@@ -3189,13 +3547,33 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               />
             </View>
           )}
-          {message.type === 'audio' ? (
-            <AudioMessageBubble
-              message={message}
-              isOwn={isOwnMessage}
-              onLongPress={(e) => handleMessageLongPress(message, e)}
-            />
-          ) : message.type === 'video' || message.video_metadata ? (
+          {/* Deleted check FIRST: a deleted media message (type still
+              'image'/'video'/'audio', metadata cleared) must NOT hit the media
+              branches and render a blank frame — fall through to the text
+              branch which renders the deleted placeholder. */}
+          {!message.deleted && message.type === 'audio' ? (
+            <View>
+              <AudioMessageBubble
+                message={message}
+                isOwn={isOwnMessage}
+                onLongPress={(e) => handleMessageLongPress(message, e)}
+              />
+              {isOwnMessage && message.upload_state === 'failed' && !message.deleted && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 12, paddingHorizontal: 10, paddingBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Ionicons name="alert-circle" size={14} color="#E53935" />
+                    <Text style={{ fontSize: 12, color: '#E53935' }}>Failed to send</Text>
+                  </View>
+                  <TouchableOpacity onPress={() => handleRetryUpload(message)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: colors.brandTeal }}>Retry</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleRemoveFailedMedia(message)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#E53935' }}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : !message.deleted && (message.type === 'video' || message.video_metadata) ? (
             // Video message
             (() => {
               const thumbnailUri = message.video_metadata?.thumbnail_url || message._localPreviewUri || '';
@@ -3264,6 +3642,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       <View style={styles.failedOverlay}>
                         <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
                         <Text style={styles.failedText}>Failed to send</Text>
+                        <TouchableOpacity
+                          style={styles.retryButton}
+                          onPress={() => handleRetryUpload(message)}
+                        >
+                          <Text style={styles.retryButtonText}>Retry</Text>
+                        </TouchableOpacity>
                       </View>
                     ) : (
                       <View style={styles.uploadOverlay}>
@@ -3296,7 +3680,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 </View>
               );
             })()
-          ) : message.type === 'image' || message.image_metadata ? (
+          ) : !message.deleted && (message.type === 'image' || message.image_metadata) ? (
             // Image message - redesigned layout
             (() => {
               const fullImageUri = message.image_metadata?.image_url
@@ -3707,17 +4091,18 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         onBack={() => setShowReportUser(false)}
         onReturnHome={() => {
           setShowReportUser(false);
-          onBack();
+          onBack?.();
         }}
         onBlocked={() => {
           setShowReportUser(false);
-          onBack();
+          onBack?.();
         }}
       />
     );
   }
 
   return (
+    <ChatErrorBoundary resetKeys={[currentConversationId]} onGoBack={onBack}>
     <>
     <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
       {/* Header */}
@@ -3732,7 +4117,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             >
               <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={styles.avatar}
               onPress={() => {
@@ -3922,15 +4307,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
               const maxOffset = contentSize.height - layoutMeasurement.height;
               const distanceFromTop = maxOffset - contentOffset.y;
+              // Inverted list → small contentOffset.y means at the visual bottom.
+              isNearBottomRef.current = contentOffset.y < 200;
               if (distanceFromTop < 200 && hasMoreMessagesRef.current && !isLoadingOlderRef.current) {
                 loadOlderMessages();
               }
             }}
             scrollEventThrottle={16}
             onLayout={handleLayout}
-            initialNumToRender={50}
-            maxToRenderPerBatch={50}
-            windowSize={21}
+            initialNumToRender={20}
+            maxToRenderPerBatch={15}
+            windowSize={7}
+            // iOS-native scroll anchoring so prepend/trim don't jump the viewport.
+            // Android anchoring (via @stream-io/flat-list-mvcp) is a deferred follow-up.
+            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
             ListHeaderComponent={listHeaderComponent}
             ListFooterComponent={listFooterComponent}
             ListEmptyComponent={listEmptyComponent}
@@ -4026,6 +4416,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             />
             <Reanimated.View style={[{ flex: 1 }, animatedKeyboardPadding]}>
               {messageList}
+              {showReturnToLatest && (
+                <TouchableOpacity style={styles.returnToLatestPill} onPress={handleReturnToLatest}>
+                  <Text style={styles.returnToLatestText}>Return to latest ↓</Text>
+                </TouchableOpacity>
+              )}
               {composer}
             </Reanimated.View>
           </View>
@@ -4300,7 +4695,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         onClose={() => setShowBlockOverlay(false)}
         onBlocked={() => {
           setShowBlockOverlay(false);
-          onBack();
+          onBack?.();
         }}
       />
     </SafeAreaView>
@@ -4320,6 +4715,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       />
     )}
     </>
+    </ChatErrorBoundary>
   );
 };
 
@@ -4342,6 +4738,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F5F5',
   },
+  returnToLatestPill: { position: 'absolute', alignSelf: 'center', bottom: 90, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#111' },
+  returnToLatestText: { fontWeight: '600', color: '#fff', fontSize: 13 },
   headerContainer: {
     backgroundColor: '#212121',
     paddingTop: Platform.OS === 'web' ? 24 : 12,
@@ -4716,6 +5114,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     overflow: 'hidden', // Ensure image respects border radius
   },
+  // Photo/video: thin uniform inset so a sliver of the bubble shows around the
+  // media (WhatsApp-style). Pairs with messageImage's borderRadius for concentric
+  // rounded corners.
+  mediaFrameBubble: {
+    // Must use per-edge props: imageMessageBubble sets paddingLeft/Right/etc to 0,
+    // and those specific props beat a `padding` shorthand regardless of array order.
+    paddingTop: 3,
+    paddingRight: 3,
+    paddingBottom: 3,
+    paddingLeft: 3,
+  },
   quotedPreviewMediaWrap: {
     paddingHorizontal: 6,
     paddingTop: 6,
@@ -4860,6 +5269,8 @@ const styles = StyleSheet.create({
     minHeight: 200,
     maxHeight: 500,
     backgroundColor: colors.backgroundGray,
+    // Concentric with the bubble's 16px radius minus the 3px frame inset.
+    borderRadius: 13,
     // aspectRatio will be set dynamically from image metadata
   },
   imageTimestampOverlay: {

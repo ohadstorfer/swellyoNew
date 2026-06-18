@@ -5,15 +5,20 @@
  * while TripsScreen is mounted — new trips appearing in Explore, card details
  * changing (title/cover/dates/cancelled), member counts moving.
  *
- * Subscribes to the private shared Broadcast topic 'trips-list', fed by the
- * broadcast_trip_change DB trigger (only group_trips + participants changes —
- * the tables that affect what cards show). One pub/sub topic regardless of
- * user count, auth checked once per subscription: scale-proof, unlike the
- * unfiltered postgres_changes subscription this replaced.
+ * SCOPED into TWO private Broadcast topics, both fed by broadcast_trip_change:
+ *   - 'trips-list'        (event 'trips_list_changed'): the public Explore
+ *      catalogue only — a trip is created / its status changes / it is removed.
+ *      Invalidates ONLY the Explore feed. One shared topic, auth checked once.
+ *   - 'trips-mine:{uid}'  (event 'trips_mine_changed'): per-member fan-out for
+ *      trip / participant changes on trips this user belongs to. Invalidates
+ *      ONLY this user's My Trips — not every client on the screen.
+ *
+ * This replaces the earlier single global 'trips-list' topic that re-fetched
+ * BOTH feeds on EVERY participant join/leave for EVERY connected client.
  *
  * FOCUS-GATED (see useTripRealtime): the card stack keeps TripsScreen mounted
- * behind whatever you open on top of it, so a plain useEffect would keep this
- * channel open while you're deep in a trip/chat. useFocusEffect closes it on
+ * behind whatever you open on top of it, so a plain useEffect would keep these
+ * channels open while you're deep in a trip/chat. useFocusEffect closes them on
  * blur and re-opens + refetches the list on return.
  */
 import { useCallback } from 'react';
@@ -21,7 +26,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../config/supabase';
 import { tripsKeys } from './useTripQueries';
-import { TRIPS_LIST_TOPIC } from '../../services/trips/tripsRealtime';
+import { TRIPS_LIST_TOPIC, tripsMineTopic } from '../../services/trips/tripsRealtime';
 
 // Survives remounts within a session — throttles the focus catch-up so that
 // returning to Trips within 5 minutes of the last refresh does not re-fetch
@@ -29,37 +34,64 @@ import { TRIPS_LIST_TOPIC } from '../../services/trips/tripsRealtime';
 let lastListInvalidateAt = 0;
 const FOCUS_CATCHUP_INTERVAL_MS = 5 * 60 * 1000; // 5 min
 
-export function useTripsListRealtime() {
+const COALESCE_MS = 300;
+
+export function useTripsListRealtime(userId: string | undefined) {
   const queryClient = useQueryClient();
 
   useFocusEffect(useCallback(() => {
-    // Coalesce bursts (e.g. several participant rows in one transaction) into
-    // a single invalidation pass instead of one refetch per event.
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const invalidateSoon = () => {
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = null;
+    // Each topic coalesces its own bursts (e.g. several participant rows in one
+    // transaction) into a single invalidation pass instead of one refetch per
+    // event. Explore and My Trips invalidate independently.
+    let exploreTimer: ReturnType<typeof setTimeout> | null = null;
+    let mineTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const invalidateExploreSoon = () => {
+      if (exploreTimer) return;
+      exploreTimer = setTimeout(() => {
+        exploreTimer = null;
         lastListInvalidateAt = Date.now();
         queryClient.invalidateQueries({ queryKey: [...tripsKeys.explore] });
-        queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
-      }, 300);
+      }, COALESCE_MS);
     };
 
-    // Catch up on list changes missed while this screen was blurred —
-    // throttled to avoid re-fetching all infinite-query pages on every return.
+    const invalidateMineSoon = () => {
+      if (!userId) return;
+      if (mineTimer) return;
+      mineTimer = setTimeout(() => {
+        mineTimer = null;
+        lastListInvalidateAt = Date.now();
+        queryClient.invalidateQueries({ queryKey: [...tripsKeys.my(userId)] });
+      }, COALESCE_MS);
+    };
+
+    // Catch up on changes missed while this screen was blurred — throttled to
+    // avoid re-fetching all infinite-query pages on every return. Refresh both
+    // feeds, since either could have changed while away.
     if (Date.now() - lastListInvalidateAt > FOCUS_CATCHUP_INTERVAL_MS) {
-      invalidateSoon();
+      invalidateExploreSoon();
+      invalidateMineSoon();
     }
 
-    const channel = supabase
+    const exploreChannel = supabase
       .channel(TRIPS_LIST_TOPIC, { config: { private: true } })
-      .on('broadcast', { event: 'trips_list_changed' }, invalidateSoon)
+      .on('broadcast', { event: 'trips_list_changed' }, invalidateExploreSoon)
       .subscribe();
 
+    const mineChannel = userId
+      ? supabase
+          .channel(tripsMineTopic(userId), { config: { private: true } })
+          .on('broadcast', { event: 'trips_mine_changed' }, invalidateMineSoon)
+          .subscribe()
+      : null;
+
     return () => {
-      if (timer) clearTimeout(timer);
-      try { supabase.removeChannel(channel); } catch { /* noop */ }
+      if (exploreTimer) clearTimeout(exploreTimer);
+      if (mineTimer) clearTimeout(mineTimer);
+      try { supabase.removeChannel(exploreChannel); } catch { /* noop */ }
+      if (mineChannel) {
+        try { supabase.removeChannel(mineChannel); } catch { /* noop */ }
+      }
     };
-  }, [queryClient]));
+  }, [queryClient, userId]));
 }

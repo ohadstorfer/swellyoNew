@@ -1227,6 +1227,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const showJoinCta =
     membershipKnown &&
     !isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved';
+  // Trip full = a cap is set and it's reached. participant_count is the
+  // trigger-maintained denormalized count (incl. host) shown as "X/Y going" —
+  // reliable even for non-members whose `participants` array is RLS-trimmed.
+  const isFull =
+    trip?.max_participants != null &&
+    (trip?.participant_count ?? 0) >= trip.max_participants;
   // isHost derives from trip.host_id, which the placeholder DOES carry — hosts
   // get their chat CTA immediately; members wait one fetch.
   const showChatCta = (isHost || (membershipKnown && isApprovedMember)) && !isCancelled;
@@ -1675,6 +1681,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         >
           <CtaButton
             myRequest={myRequest}
+            isFull={isFull}
             submitting={submitting}
             onRequest={handleOpenJoinSheet}
             onWithdraw={handleWithdraw}
@@ -1938,10 +1945,22 @@ const Header: React.FC<{ onBack: () => void; title?: string; rightAction?: React
 
 const CtaButton: React.FC<{
   myRequest: GroupTripJoinRequest | null;
+  isFull: boolean;
   submitting: boolean;
   onRequest: () => void;
   onWithdraw: () => void;
-}> = ({ myRequest, submitting, onRequest, onWithdraw }) => {
+}> = ({ myRequest, isFull, submitting, onRequest, onWithdraw }) => {
+  // Trip is full and the user hasn't already got a request in flight → show a
+  // non-pressable "Trip full" state instead of letting them request a spot that
+  // can't be granted. Pending requesters keep their pending/withdraw row.
+  if (isFull && myRequest?.status !== 'pending') {
+    return (
+      <View style={[styles.ctaBtn, styles.ctaPending]}>
+        <Ionicons name="people" size={18} color="#555" />
+        <Text style={styles.ctaPendingText}>Trip full</Text>
+      </View>
+    );
+  }
   if (myRequest?.status === 'pending') {
     return (
       <View style={styles.ctaPendingRow}>

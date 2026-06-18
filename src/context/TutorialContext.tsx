@@ -13,7 +13,6 @@ export const WELCOME_GUIDE_COMPLETED_KEY = '@swellyo_welcome_guide_completed';
 // truth lives in surfers.welcome_guide_seen_at (DB) and is reconciled via
 // setSeenFromProfile when the user profile loads.
 export const WELCOME_GUIDE_SEEN_KEY = '@swellyo_welcome_guide_seen_v2';
-export const WELCOME_LINEUP_DISMISSED_AT_KEY = '@swellyo_welcome_lineup_dismissed_at';
 // One-time "Surf Trips tab" coach-mark seen flag. Same pattern as
 // WELCOME_GUIDE_SEEN_KEY — AsyncStorage is a fast-path cache, the DB column
 // surfers.surftrips_tip_seen_at is the source of truth.
@@ -27,8 +26,6 @@ interface TutorialContextValue {
   isSeen: boolean;
   /** True if the user explicitly completed/skipped the guide. Kept for UI parity; not used by the trigger. */
   isCompleted: boolean;
-  welcomeLineupDismissedAt: string | null;
-  markWelcomeLineupDismissed: () => Promise<void>;
   start: () => void;
   advance: () => void;
   goTo: (step: TutorialStep) => void;
@@ -58,7 +55,6 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [isSeen, setIsSeen] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
   const [surftripsTipSeen, setSurftripsTipSeen] = useState(false);
-  const [welcomeLineupDismissedAt, setWelcomeLineupDismissedAt] = useState<string | null>(null);
   // Tracks whether the DB has been reconciled at least once. Until then, the
   // value of `isSeen` comes from AsyncStorage and may be stale.
   const reconciledFromProfileRef = useRef(false);
@@ -66,16 +62,14 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     (async () => {
       try {
-        const [completed, seen, dismissedAt, surftripsTip] = await Promise.all([
+        const [completed, seen, surftripsTip] = await Promise.all([
           AsyncStorage.getItem(WELCOME_GUIDE_COMPLETED_KEY),
           AsyncStorage.getItem(WELCOME_GUIDE_SEEN_KEY),
-          AsyncStorage.getItem(WELCOME_LINEUP_DISMISSED_AT_KEY),
           AsyncStorage.getItem(SURFTRIPS_TIP_SEEN_KEY),
         ]);
-        console.log('[Tutorial hydrate]', { completed, seen, dismissedAt, surftripsTip });
+        console.log('[Tutorial hydrate]', { completed, seen, surftripsTip });
         setIsCompleted(completed === 'true');
         setIsSeen(seen === 'true');
-        setWelcomeLineupDismissedAt(dismissedAt);
         setSurftripsTipSeen(surftripsTip === 'true');
       } catch (err) {
         console.warn('[TutorialContext] Hydration failed', err);
@@ -83,16 +77,6 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setIsHydrated(true);
       }
     })();
-  }, []);
-
-  const markWelcomeLineupDismissed = useCallback(async () => {
-    const ts = new Date().toISOString();
-    setWelcomeLineupDismissedAt(ts);
-    try {
-      await AsyncStorage.setItem(WELCOME_LINEUP_DISMISSED_AT_KEY, ts);
-    } catch (err) {
-      console.warn('[TutorialContext] Failed to persist welcome-lineup dismissed timestamp', err);
-    }
   }, []);
 
   const start = useCallback(() => {
@@ -229,8 +213,6 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     isHydrated,
     isSeen,
     isCompleted,
-    welcomeLineupDismissedAt,
-    markWelcomeLineupDismissed,
     start,
     advance,
     goTo,
@@ -243,7 +225,7 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     markSurftripsTipSeen,
     setSurftripsTipSeenFromProfile,
     resetSurftripsTip,
-  }), [currentStep, isHydrated, isSeen, isCompleted, welcomeLineupDismissedAt, markWelcomeLineupDismissed, start, advance, goTo, complete, skip, markSeen, setSeenFromProfile, resetForReplay, surftripsTipSeen, markSurftripsTipSeen, setSurftripsTipSeenFromProfile, resetSurftripsTip]);
+  }), [currentStep, isHydrated, isSeen, isCompleted, start, advance, goTo, complete, skip, markSeen, setSeenFromProfile, resetForReplay, surftripsTipSeen, markSurftripsTipSeen, setSurftripsTipSeenFromProfile, resetSurftripsTip]);
 
   return <TutorialContext.Provider value={value}>{children}</TutorialContext.Provider>;
 };

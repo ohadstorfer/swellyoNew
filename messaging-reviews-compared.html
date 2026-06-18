@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Messaging Reviews — Compared</title>
+<style>
+  :root{
+    --bg:#0f1720; --card:#18222e; --line:#26323f; --text:#e7edf3; --muted:#9fb0c0;
+    --a:#2dd4bf; --b:#b78bff; --high:#ff5d5d; --med:#ffb84d; --good:#41d693;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);line-height:1.55;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:920px;margin:0 auto;padding:40px 22px 80px}
+  h1{font-size:30px;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 30px;font-size:15px}
+  h2{font-size:21px;margin:38px 0 14px}
+
+  /* two intro cards */
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px}
+  @media(max-width:640px){.pair{grid-template-columns:1fr}}
+  .who{background:var(--card);border:1px solid var(--line);border-top-width:4px;border-radius:12px;padding:16px 18px}
+  .who.a{border-top-color:var(--a)}
+  .who.b{border-top-color:var(--b)}
+  .who .name{font-weight:700;font-size:16px;display:flex;align-items:center;gap:8px}
+  .who .file{color:var(--muted);font-size:12.5px;font-family:ui-monospace,Menlo,monospace;margin:3px 0 10px}
+  .who p{margin:0;font-size:14px;color:var(--text)}
+  .chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px}
+  .chip.a{background:rgba(45,212,191,.15);color:var(--a)}
+  .chip.b{background:rgba(183,139,255,.15);color:var(--b)}
+
+  .verdict{background:rgba(65,214,147,.07);border:1px solid rgba(65,214,147,.25);
+    border-radius:12px;padding:16px 18px;margin:8px 0 0}
+  .verdict b{color:var(--good)}
+
+  /* agree list */
+  .agree{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 20px;margin:0}
+  .agree li{margin:9px 0;font-size:14.5px}
+  .sev{font-size:10.5px;font-weight:700;text-transform:uppercase;padding:1px 7px;border-radius:20px;margin-left:6px}
+  .sev.high{background:rgba(255,93,93,.15);color:var(--high)}
+  .sev.med{background:rgba(255,184,77,.15);color:var(--med)}
+  .sev.good{background:rgba(65,214,147,.15);color:var(--good)}
+
+  /* only-in columns */
+  .only{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:640px){.only{grid-template-columns:1fr}}
+  .col{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px}
+  .col h3{font-size:15px;margin:16px 0 4px;display:flex;align-items:center;gap:8px}
+  .col.a h3{color:var(--a)}
+  .col.b h3{color:var(--b)}
+  .col ul{margin:0;padding-left:18px}
+  .col li{margin:8px 0;font-size:14px}
+  .col li small{color:var(--muted);display:block;font-size:12.5px}
+
+  .diffnote{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 20px;font-size:14px}
+  .diffnote li{margin:7px 0}
+
+  footer{color:var(--muted);font-size:12.5px;margin-top:48px;text-align:center}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-bottom:24px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Two Messaging Reviews — Side by Side</h1>
+  <p class="sub">Two separate health checks of the chat system. They mostly agree, but each caught things the other missed. This page explains both and the difference.</p>
+
+  <div class="legend">
+    <span><span class="dot" style="background:var(--high)"></span> Fix soon</span>
+    <span><span class="dot" style="background:var(--med)"></span> Worth improving</span>
+    <span><span class="dot" style="background:var(--good)"></span> Working well</span>
+  </div>
+
+  <!-- WHO -->
+  <div class="pair">
+    <div class="who a">
+      <div class="name"><span class="chip a">Review A</span> The earlier one</div>
+      <div class="file">messaging-review.html</div>
+      <p>Leads with a "Top 3 to fix" box. Strong on day-to-day efficiency — extra database work, group-send cost, redrawing. Every point was double-checked against the code.</p>
+    </div>
+    <div class="who b">
+      <div class="name"><span class="chip b">Review B</span> The new deep one</div>
+      <div class="file">messaging-deep-review.html</div>
+      <p>Five agents, one per area. Strong on real bugs and stability — a send that can freeze the chat, errors that aren't caught, a fix that's built but not shipped.</p>
+    </div>
+  </div>
+
+  <div class="verdict">
+    <b>Bottom line:</b> Both say the same big thing — <b>the system is in good shape and the hard parts are already done</b>. They're complementary, not contradictory: A is about <i>making it leaner</i>, B is about <i>making it safer</i>.
+  </div>
+
+  <!-- AGREE -->
+  <h2>✅ What both agree on</h2>
+  <ul class="agree">
+    <li>No safety net around the chat screens — one broken message can blank the whole app <span class="sev high">Fix soon</span></li>
+    <li>The chat list draws every chat at once instead of only the visible ones <span class="sev high">Fix soon</span></li>
+    <li>Long chats never free memory as you scroll up <span class="sev med">Worth improving</span></li>
+    <li>The whole message list redraws on small changes (a "seen", a reaction) <span class="sev med">Worth improving</span></li>
+    <li>Each incoming message triggers a burst of database work <span class="sev med">Worth improving</span></li>
+    <li>Opening is instant, one connection per chat, no duplicate sends, typing is throttled <span class="sev good">Working well</span></li>
+  </ul>
+
+  <!-- ONLY IN -->
+  <h2>🔍 What only one of them caught</h2>
+  <div class="only">
+    <div class="col b">
+      <h3><span class="chip b">Only Review B</span></h3>
+      <ul>
+        <li>Send timeout can <b>freeze the chat</b> — spinner spins forever until you reopen it <small>Fix soon · real bug</small></li>
+        <li>Trip "approve / decline" errors aren't caught <small>Fix soon</small></li>
+        <li>The "lost connection" fix is built but <b>not shipped yet</b> <small>Fix soon</small></li>
+        <li>No pull-to-refresh on the chat list <small>Worth improving</small></li>
+        <li>Coming back to the app resets your scroll spot <small>Worth improving</small></li>
+        <li>Double login check; new-chat reloads everything; stop-typing not throttled <small>Minor polish</small></li>
+      </ul>
+    </div>
+    <div class="col a">
+      <h3><span class="chip a">Only Review A</span></h3>
+      <ul>
+        <li>A keyboard feature isn't guarded for the team's test setup (Expo Go) <small>Worth improving</small></li>
+        <li>Sender's name/photo is looked up fresh for every message <small>Worth improving</small></li>
+        <li>Big groups notify members one-by-one — cost grows with group size <small>Worth improving</small></li>
+        <li>An extra "last updated" write on every send causes contention <small>Worth improving</small></li>
+        <li>Tapping an old quoted reply loads a lot at once <small>Worth improving</small></li>
+        <li>Camera / photo / video degrade gracefully instead of crashing <small>Working well</small></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- DIFFERENCE -->
+  <h2>🤔 So what's the difference?</h2>
+  <div class="diffnote">
+    <ul>
+      <li><b>Focus.</b> Review A hunts <i>waste</i> (do less work). Review B hunts <i>breakage</i> (don't crash or freeze).</li>
+      <li><b>Severity calls.</b> The "chat list draws everything" issue is "fix soon" in B but "worth improving" in A. The "long chats eat memory" issue is top-3 in A but mid in B.</li>
+      <li><b>Style.</b> A opens with a clear "Top 3 to fix". B walks area by area with a short summary up top.</li>
+      <li><b>Best move.</b> Take B's three real bugs first (freeze, uncaught errors, ship the connection fix), then A's efficiency list. Together they're the full picture.</li>
+    </ul>
+  </div>
+
+  <footer>
+    Review A = messaging-review.html · Review B = messaging-deep-review.html · both reviewed: load times, crashes, refresh, heavy traffic, long conversations.
+  </footer>
+
+</div>
+</body>
+</html>

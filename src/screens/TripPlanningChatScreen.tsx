@@ -262,8 +262,6 @@ interface TripPlanningChatScreenProps {
   onChatStateChange?: (chatId: string | null, matchedUsers: any[], destination: string) => void;
   /** Optional: override the swelly service instance (e.g. to target a different edge function). */
   service?: SwellyServiceType;
-  /** Optional: onboarding matches to display before starting a new conversation. */
-  onboardingMatches?: import('../services/matching/onboardingMatchingService').OnboardingMatch[];
   /** Legacy prop from the display:'none' keep-alive era — gated the entry
    *  animation and tutorial trigger. As a native-stack card the screen mounts
    *  when shown, so it defaults to true. Kept for compatibility. */
@@ -283,7 +281,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   persistedDestination,
   onChatStateChange,
   service,
-  onboardingMatches,
   visible = true,
   noTransition = false,
 }) => {
@@ -1015,67 +1012,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         // Start new conversation — show the fixed first message instantly, create backend chat in background
         console.log('Initializing surfer connection conversation...');
 
-        const nowTs = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-
-        if (onboardingMatches && onboardingMatches.length > 0) {
-          // Coming from WelcomeToLineupOverlay: show onboarding matches first, then start conversation
-          const matchedUsersForDisplay = onboardingMatches.map(m => ({
-            user_id: m.user_id,
-            name: m.name || 'User',
-            age: m.age ?? undefined,
-            country_from: m.country_from ?? undefined,
-            profile_image_url: m.profile_image_url ?? undefined,
-            match_score: m.total_score,
-          }));
-
-          const matchMessage: Message = {
-            id: 'onboarding-matches',
-            text: `Found ${onboardingMatches.length} awesome match${onboardingMatches.length > 1 ? 'es' : ''} for you!`,
-            isUser: false,
-            timestamp: nowTs,
-            isMatchedUsers: true,
-            matchedUsers: matchedUsersForDisplay,
-            destinationCountry: '',
-            // No actionRow → display-only cards, no action buttons
-          };
-
-          Keyboard.dismiss();
-          setMessages([matchMessage]);
-          setIsInitializing(false);
-          setIsLoading(true); // Show typing indicator
-          setTimeout(() => scrollToBottom(), 100);
-
-          // After 2 seconds, show the greeting + info message
-          setTimeout(() => {
-            setIsLoading(false);
-            setMessages(prev => [
-              ...prev,
-              {
-                id: 'greeting',
-                text: TRIP_PLANNING_FIRST_QUESTION,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-              },
-              {
-                id: 'info',
-                text: TRIP_PLANNING_SECOND_MESSAGE,
-                isUser: false,
-                timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
-              },
-            ]);
-            setTimeout(() => scrollToBottom(), 100);
-          }, 2000);
-        } else {
-          // Normal new chat: start with an empty chat behind the topic-selection overlay. The
-          // greeting + info messages are appended locally after the user picks a topic (see
-          // handleTopicSelected). No backend traffic is triggered by the selection itself —
-          // the backend chat is created in the background below.
-          setMessages([]);
-          setIsInitializing(false);
-          setIsLoading(false);
-          setShowTopicOverlay(true);
-          console.log('[Swelly init] new chat → topic overlay ON');
-        }
+        // Normal new chat: start with an empty chat behind the topic-selection overlay. The
+        // greeting + info messages are appended locally after the user picks a topic (see
+        // handleTopicSelected). No backend traffic is triggered by the selection itself —
+        // the backend chat is created in the background below.
+        setMessages([]);
+        setIsInitializing(false);
+        setIsLoading(false);
+        setShowTopicOverlay(true);
+        console.log('[Swelly init] new chat → topic overlay ON');
 
         // Create the backend chat in background
         const contextMessage = "Hi! I'm looking to connect with surfers.";

@@ -58,6 +58,10 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
           'x-client-info': `swellyo@1.0.0`,
         },
       },
+      realtime: {
+        params: { eventsPerSecond: 10 },   // pin the client→server event rate (10 = current default)
+        heartbeatIntervalMs: 45000,        // lengthen socket keepalive (default 30s) to trim traffic at scale
+      },
     });
 
     // Dev-only: log WebSocket lifecycle so channel-level cascades are

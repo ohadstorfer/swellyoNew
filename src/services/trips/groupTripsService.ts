@@ -273,6 +273,36 @@ export type CreateGroupTripInput = Omit<
 >;
 
 /**
+ * Hero (cover) images for GROUP TRIP conversations, keyed by conversation_id.
+ * Group trip conversations carry their trip id in conversations.metadata.trip_id,
+ * so we resolve each to group_trips.hero_image_url to use as the group-chat
+ * avatar (mirrors surftripsService.getSurftripHeroImagesByConversation).
+ */
+export async function getGroupTripHeroImagesByConversation(
+  items: { conversationId: string; tripId: string }[]
+): Promise<Record<string, string | null>> {
+  if (items.length === 0) return {};
+  const tripIds = Array.from(new Set(items.map(i => i.tripId)));
+  const { data, error } = await supabase
+    .from('group_trips')
+    .select('id, hero_image_url')
+    .in('id', tripIds);
+  if (error) {
+    console.error('[groupTripsService] getGroupTripHeroImagesByConversation error:', error);
+    return {};
+  }
+  const byTrip: Record<string, string | null> = {};
+  for (const row of (data || []) as Array<{ id: string; hero_image_url: string | null }>) {
+    byTrip[row.id] = row.hero_image_url ?? null;
+  }
+  const map: Record<string, string | null> = {};
+  for (const it of items) {
+    map[it.conversationId] = byTrip[it.tripId] ?? null;
+  }
+  return map;
+}
+
+/**
  * Insert a new group trip and add the host as a participant with role='host'.
  * Returns the created trip row.
  */
@@ -508,14 +538,28 @@ export type ExploreFeedRow = GroupTrip & {
  * round-trip, keyset-paginated. `signal` cancels the request when react-query
  * aborts (scroll-past / unmount).
  */
+/** Server-side Explore filters (month/budget). Empty/null fields = filter off.
+ *  Mirrors the chip selection in TripsScreen; the RPC applies them across the
+ *  whole catalogue (not just the loaded page) — see explore_feed migration. */
+export interface ExploreFeedFilters {
+  months?: string[] | null;      // selected "YYYY-MM" chips, OR'd
+  budgetMin?: number | null;     // "above" threshold bound (band_hi >= this)
+  budgetMax?: number | null;     // "below" threshold bound (band_lo <= this)
+}
+
 export async function exploreFeed(
   limit = 10,
   cursorCreatedAt: string | null = null,
   cursorId: string | null = null,
   signal?: AbortSignal,
+  filters?: ExploreFeedFilters,
 ): Promise<ExploreFeedRow[]> {
+  const months = filters?.months && filters.months.length > 0 ? filters.months : null;
   let q = supabase.rpc('explore_feed', {
     p_limit: limit, p_cursor: cursorCreatedAt, p_cursor_id: cursorId,
+    p_months: months,
+    p_budget_min: filters?.budgetMin ?? null,
+    p_budget_max: filters?.budgetMax ?? null,
   });
   if (signal) q = q.abortSignal(signal);
   const { data, error } = await q;

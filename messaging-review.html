@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Messaging System — Deep Review</title>
+<style>
+  :root{
+    --bg:#0f1720; --card:#16212e; --line:#243343; --text:#e7edf3; --muted:#9fb0c0;
+    --good:#2ecc71; --warn:#f1c40f; --bad:#e74c3c; --accent:#4aa8ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;padding:32px 16px}
+  .wrap{max-width:880px;margin:0 auto}
+  h1{font-size:30px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 28px;font-size:15px}
+  h2{font-size:21px;margin:34px 0 12px;display:flex;align-items:center;gap:10px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin:14px 0}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;color:var(--text);font-size:14.5px}
+  .pill{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;
+    padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .ok{background:rgba(46,204,113,.15);color:var(--good);border:1px solid rgba(46,204,113,.35)}
+  .mid{background:rgba(241,196,15,.13);color:var(--warn);border:1px solid rgba(241,196,15,.35)}
+  .hi{background:rgba(231,76,60,.15);color:var(--bad);border:1px solid rgba(231,76,60,.4)}
+  .row{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:6px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 6px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .top{background:linear-gradient(180deg,#1c2a3a,#16212e);border:1px solid #2c3e52}
+  .top h2{margin-top:0;color:#fff}
+  .top .card{background:#10202e}
+  .groupnote{color:var(--muted);font-size:13.5px;margin:2px 0 4px}
+  .good-head{color:var(--good)} .warn-head{color:var(--warn)}
+  footer{color:var(--muted);font-size:12.5px;margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Messaging System — Deep Review</h1>
+  <p class="sub">Plain-English summary of how chat behaves today: speed, crashes, refresh, heavy traffic, and long conversations. Each point was found and then independently double-checked against the real code.</p>
+
+  <div class="legend">
+    <span><span class="dot" style="background:var(--bad)"></span> Fix soon</span>
+    <span><span class="dot" style="background:var(--warn)"></span> Worth improving</span>
+    <span><span class="dot" style="background:var(--good)"></span> Working well</span>
+  </div>
+
+  <!-- ============ TOP PRIORITIES ============ -->
+  <section class="top card" style="padding:8px 16px 18px">
+    <h2>🚩 Top 3 things to fix</h2>
+
+    <div class="card">
+      <div class="row"><h3>One bad message can crash the whole app</h3><span class="pill hi">Fix soon</span></div>
+      <p>There is no safety net around the chat screens. If a single message fails to draw (a broken image link, a corrupt saved message, a missing field), the entire app goes to a blank screen instead of just showing a small error. You'd get a crash report, but the user sees a full crash.</p>
+    </div>
+
+    <div class="card">
+      <div class="row"><h3>Every incoming message does a burst of database work</h3><span class="pill hi">Fix soon</span></div>
+      <p>While a chat is open, each single message that arrives makes the phone do ~5 database actions (mark-as-read, recount the unread badge, etc.) with no batching. In a busy group this multiplies by every person watching, and becomes the biggest source of load. It works now because traffic is low, but it scales badly.</p>
+    </div>
+
+    <div class="card">
+      <div class="row"><h3>Long chats slowly eat memory and get sluggish</h3><span class="pill hi">Fix soon</span></div>
+      <p>As you scroll up through an old conversation, the app keeps every message you've loaded in active memory and never lets the old ones go. In a chat with thousands of messages this gradually slows the phone and can make scrolling janky. Opening a chat stays fast — the slowdown only builds up as you scroll or jump within a session.</p>
+    </div>
+  </section>
+
+  <!-- ============ LOADING ============ -->
+  <h2>⏱️ Loading times</h2>
+  <p class="groupnote good-head"><strong>Working well</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>The chat list opens instantly</h3><span class="pill ok">Working well</span></div>
+    <p>Your chat list shows immediately from a saved copy on the phone, then quietly checks the server for anything new. If the saved copy is under 5 minutes old it skips the check entirely — so repeat opens feel instant and save data.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Opening a chat feels instant</h3><span class="pill ok">Working well</span></div>
+    <p>Recent chats are kept ready in fast memory and shown with zero wait, then a tiny background fetch fills in anything you missed. The app even pre-loads your top 10 conversations right after the list appears, so tapping them opens with no delay.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Loading placeholders only show on the very first run</h3><span class="pill ok">Working well</span></div>
+    <p>The grey placeholder rows appear only the first time, when nothing is saved yet. Every later visit shows the real list immediately — the right behavior.</p>
+  </div>
+
+  <p class="groupnote warn-head"><strong>Worth improving</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>The chat list draws every row at once</h3><span class="pill mid">Worth improving</span></div>
+    <p>The list screen builds every conversation row up front instead of only the ones on screen. Fine for most people; for power users with dozens or hundreds of chats it makes the list heavier and less smooth. (The inside-a-chat screen already does this the efficient way.)</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>The background refresh does several waves of server calls</h3><span class="pill mid">Worth improving</span></div>
+    <p>Refreshing the chat list from the server isn't one request — it's several stacked steps (who you chat with, the chats, last messages, names, unread counts). They're grouped to run in parallel, but on a slow connection a first-ever load or a manual refresh still takes a noticeable moment. This never affects the instant cached display.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Reconnect refresh does extra duplicate counting</h3><span class="pill mid">Worth improving</span></div>
+    <p>After a reconnect, the app refreshes the affected chats one-by-one and then recomputes the unread badges a second time even though it just calculated them. It's hidden behind a single screen update so there's no flicker, but it's wasted work that adds up during busy bursts.</p>
+  </div>
+
+  <!-- ============ CRASHES ============ -->
+  <h2>💥 Crashes &amp; errors</h2>
+  <p class="groupnote good-head"><strong>Working well</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>Sending and uploading fail softly, never crash</h3><span class="pill ok">Working well</span></div>
+    <p>Every outgoing action — text, photos, video, voice, edits, deletes — is wrapped safely. On failure it shows an alert and either undoes the change or marks the message "failed" with a retry, instead of crashing.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Camera, photo and video features degrade instead of crashing</h3><span class="pill ok">Working well</span></div>
+    <p>The risky phone features (image compression, video thumbnails, cropping, the photo picker) are all guarded so they quietly do nothing when unavailable, rather than taking the app down. Applied consistently.</p>
+  </div>
+
+  <p class="groupnote warn-head"><strong>Worth improving</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>No safety net around the chat screens</h3><span class="pill hi">Fix soon</span></div>
+    <p>See the top of this report: a single render error anywhere in messaging crashes the whole app to a blank screen instead of showing a small, recoverable error on just that screen.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>One keyboard feature isn't guarded for the test environment</h3><span class="pill mid">Worth improving</span></div>
+    <p>The chat screens use a keyboard-animation feature without the usual guard the rest of the app applies for the in-house test setup (Expo Go). It likely degrades gracefully, but since the team tests there, it's worth confirming on a real run.</p>
+  </div>
+
+  <!-- ============ REFRESH ============ -->
+  <h2>🔄 Targeting &amp; refresh (getting updates to the right chat)</h2>
+  <p class="groupnote good-head"><strong>Working well</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>One clean connection per open chat</h3><span class="pill ok">Working well</span></div>
+    <p>Opening a chat uses a single live connection reused for everything — new messages, edits, deletes, typing dots, and "seen" ticks. It never opens a duplicate. This part is solid.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Missed messages are recovered after a dropped connection</h3><span class="pill ok">Working well</span></div>
+    <p>The live pipe doesn't resend what you missed while offline, so the app deliberately asks the server for anything newer whenever you open a chat or reconnect. Missed messages get filled in correctly.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>The known "list stops updating" bug is already fixed</h3><span class="pill ok">Working well</span></div>
+    <p>The old method silently stopped delivering live updates for users with many conversations. The team already switched the default to a more reliable delivery method that doesn't have this problem.</p>
+  </div>
+
+  <p class="groupnote warn-head"><strong>Worth improving</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>Very large offline gaps fill in only 50 messages at a time</h3><span class="pill mid">Worth improving</span></div>
+    <p>The catch-up after reconnect pulls up to 50 messages. If someone was offline through an unusually huge burst, the rest is only filled in by scrolling up. The code itself flags this limit — a rare edge case, not data loss.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>A single chat's connection doesn't self-heal on its own</h3><span class="pill mid">Worth improving</span></div>
+    <p>If one chat's live connection errors out, the service drops it and relies on the open screen to notice and reconnect, rather than fixing itself. It's wired and recovers, but recovery leans on the screen being open.</p>
+  </div>
+
+  <!-- ============ CONCURRENCY ============ -->
+  <h2>👥 Many people typing &amp; sending at once</h2>
+  <p class="groupnote good-head"><strong>Working well</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>Duplicate sends are reliably prevented</h3><span class="pill ok">Working well</span></div>
+    <p>Retries after a flaky network or an app restart mid-send can't create a second copy. Each message carries a unique stamp the database refuses to duplicate, and a persistent "outbox" safely re-sends unconfirmed ones. Solid and scale-safe.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Your own messages never double up or jump around</h3><span class="pill ok">Working well</span></div>
+    <p>Your message appears instantly, then is swapped for the confirmed version — even when the live broadcast of your own message beats your send response. This is the tricky part of chat apps and it's handled carefully.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>"Typing…" signals can't flood the network</h3><span class="pill ok">Working well</span></div>
+    <p>The typing indicator is capped to at most one signal every half-second per chat, with an automatic "stopped typing" after a few idle seconds. Even a room full of people typing won't create a runaway stream.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>The big scaling move is already done</h3><span class="pill ok">Working well</span></div>
+    <p>The system already moved to the modern delivery method where the server sends one targeted event per channel and checks permission once when you join — instead of re-checking on every change for every person. This is the right foundation for growth.</p>
+  </div>
+
+  <p class="groupnote warn-head"><strong>Worth improving</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>Each incoming message triggers a burst of database work</h3><span class="pill hi">Fix soon</span></div>
+    <p>See the top of this report — the system's biggest load multiplier. In a fast group, every active viewer does several database actions per message, with no batching.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Sender name/photo is looked up fresh for every message</h3><span class="pill mid">Worth improving</span></div>
+    <p>For each arriving message the app re-fetches the sender's name and picture from the server, with no short-term memory. In a rapid burst the same person's details get fetched over and over — small queries, but wasteful at volume.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Big-group sends cost grows with group size</h3><span class="pill mid">Worth improving</span></div>
+    <p>Each message notifies every group member one-by-one on the database side. Fine for small groups; the per-message cost climbs steadily as groups get large.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>An extra "last updated" write on every single send</h3><span class="pill mid">Worth improving</span></div>
+    <p>Every send also stamps the conversation's "last updated" time and waits for that write. In a fast group, many people stamping the same record at once compete for it and add a little delay to each send. The info is somewhat redundant with the message's own timestamp.</p>
+  </div>
+
+  <!-- ============ LONG CONVERSATIONS ============ -->
+  <h2>📜 Long conversations</h2>
+  <p class="groupnote good-head"><strong>Working well</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>Opening a long chat stays fast</h3><span class="pill ok">Working well</span></div>
+    <p>Opening a years-old chat does NOT load thousands of messages. It shows an instant cached batch, then fetches only what's newer (usually nothing). A cold open with no cache loads just 30 messages. Speed doesn't depend on how old the chat is.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Loading a page of history is efficient</h3><span class="pill ok">Working well</span></div>
+    <p>When a batch of messages loads, all the senders' names and photos are fetched in one combined request instead of one per message — so loading older history stays cheap even with many people in the thread.</p>
+  </div>
+
+  <p class="groupnote warn-head"><strong>Worth improving</strong></p>
+
+  <div class="card">
+    <div class="row"><h3>Scrolled-up messages are never released from memory</h3><span class="pill hi">Fix soon</span></div>
+    <p>See the top of this report. The more you scroll up in a long chat, the more the phone holds at once, and it's never trimmed for the rest of the session.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>The message list keeps too much alive at once</h3><span class="pill hi">Fix soon</span></div>
+    <p>The chat is set to keep a very large number of message bubbles active and doesn't release off-screen ones from view. Combined with the memory issue above, scrolling a long, media-heavy chat gets janky and stays memory-heavy.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Each update redraws the whole history</h3><span class="pill mid">Worth improving</span></div>
+    <p>Every new message, edit, reaction, or "seen" tick rebuilds the full message list and a full lookup of all senders. Nothing in a short chat; in a chat holding thousands of messages it means several full passes per update, compounding the slowdown.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Tapping an old quoted reply can load a lot at once</h3><span class="pill mid">Worth improving</span></div>
+    <p>Tapping a reply that points far back pages in older messages several times to find it — and (because of the memory issue) all of it stays loaded afterward. Repeated reply-jumps in a long thread are a fast way to balloon memory.</p>
+  </div>
+
+  <div class="card">
+    <div class="row"><h3>Bubbles redraw more than needed</h3><span class="pill mid">Worth improving</span></div>
+    <p>Visible message bubbles aren't told to skip redrawing when their content hasn't changed, so unrelated updates (a typing dot, a reaction) redraw bubbles unnecessarily. Adds avoidable work in long, media-rich chats.</p>
+  </div>
+
+  <footer>
+    Reviewed across 5 areas — loading, crashes, refresh, heavy traffic, and long conversations — by separate agents that each investigated one area, with every point independently re-checked against the real code before being listed here. Verified findings only.
+  </footer>
+
+</div>
+</body>
+</html>

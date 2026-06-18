@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions } from '@react-navigation/native';
@@ -24,6 +24,7 @@ import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import TripsBottomNav, { NavKey } from '../components/trips/TripsBottomNav';
+import { Images } from '../assets/images';
 import { useMainNav } from './MainNavContext';
 import { useOnboarding } from '../context/OnboardingContext';
 import { queryClient } from '../lib/queryClient';
@@ -209,7 +210,6 @@ function SwellyChatCardScreen({ route, navigation }: NativeStackScreenProps<Root
   return (
     <TripPlanningChatScreen
       onChatComplete={() => {
-        swellyChat.onChatComplete();
         navigation.goBack();
       }}
       onViewUserProfile={swellyChat.onViewUserProfile}
@@ -219,7 +219,6 @@ function SwellyChatCardScreen({ route, navigation }: NativeStackScreenProps<Root
       persistedDestination={swellyChat.persistedDestination}
       onChatStateChange={swellyChat.onChatStateChange}
       service={route.params?.service === 'copy-copy' ? swellyServiceCopyCopy : swellyServiceCopy}
-      onboardingMatches={swellyChat.onboardingMatches || undefined}
       visible={true}
       // The navigator animates the card — skip the screen's own entry slide.
       noTransition={true}
@@ -229,12 +228,11 @@ function SwellyChatCardScreen({ route, navigation }: NativeStackScreenProps<Root
 
 function ProfileCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ProfileCard'>) {
   const { profileCard } = useMainNav();
-  const { userId, suppressConnectAnalytics, fromWelcomeOverlay } = route.params;
+  const { userId, suppressConnectAnalytics } = route.params;
   return (
     <ProfileScreen
       userId={userId}
       onBack={() => {
-        if (fromWelcomeOverlay) profileCard.onWelcomeOverlayProfileClosed();
         navigation.goBack();
       }}
       onMessage={profileCard.onMessage}
@@ -312,6 +310,7 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
     navControl, barSuppressed, onTabChange,
     requestedTab, onRequestedTabConsumed,
     requestedTripCard, onRequestedTripCardConsumed,
+    lineupProps,
   } = useMainNav();
   const active = KEY_FOR_ROUTE[state.routes[state.index].name] ?? 'lineup';
 
@@ -364,15 +363,55 @@ function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
   if (barSuppressed) return null;
 
   return (
-    <TripsBottomNav
-      control={navControl}
-      active={active}
-      onLineupPress={() => pressTab('lineup')}
-      onTripsPress={() => pressTab('trips')}
-      onProfilePress={() => pressTab('profile')}
-    />
+    <>
+      <TripsBottomNav
+        control={navControl}
+        active={active}
+        onLineupPress={() => pressTab('lineup')}
+        onTripsPress={() => pressTab('trips')}
+        onProfilePress={() => pressTab('profile')}
+      />
+      {/* Swelly floating avatar — lives in the nav layer (rendered AFTER the
+          bar) so it sits ABOVE the nav frost/fade instead of behind it. Only
+          on the Lineup tab. */}
+      {active === 'lineup' && lineupProps.onSwellyPress && (
+        <TouchableOpacity
+          testID="conversations-swelly-button"
+          onPress={() => lineupProps.onSwellyPress?.()}
+          activeOpacity={0.85}
+          style={swellyFloatingStyles.button}
+        >
+          <Image
+            source={Images.swellyPopout}
+            style={swellyFloatingStyles.image}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+      )}
+    </>
   );
 }
+
+const swellyFloatingStyles = StyleSheet.create({
+  button: {
+    position: 'absolute',
+    right: 12,
+    // Fixed 13px above the nav bar's top edge. The bar sits at a fixed offset
+    // from the screen bottom: paddingBottom (44) + bar height (item 66 +
+    // padding 8*2 = 82) = top at 126px → +13 = 139. Asset is tight-cropped so
+    // the box bottom maps 1:1 to the avatar's bottom.
+    bottom: 139,
+    width: 80,
+    height: 85,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 30,
+  },
+  image: {
+    width: 80,
+    height: 85,
+  },
+});
 
 const renderTabBar = (props: BottomTabBarProps) => <FloatingTabBar {...props} />;
 

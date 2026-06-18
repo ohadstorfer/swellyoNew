@@ -45,8 +45,6 @@ export interface MainNavContextValue {
     onChatStateChange: (chatId: string | null, matchedUsers: any[], destination: string) => void;
     onViewUserProfile: (userId: string) => void;
     onStartConversation: (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => void;
-    onboardingMatches: any[] | null;
-    onChatComplete: () => void;
   };
   /** Callbacks the ChatCard route needs from AppContent (legacy overlays). */
   chatCard: {
@@ -54,11 +52,9 @@ export interface MainNavContextValue {
     onOpenTripDetail: (tripId: string) => void;
     onOpenSurftripDetail: (groupId: string) => void;
   };
-  /** ProfileCard (other users): message + welcome-overlay back choreography. */
+  /** ProfileCard (other users): message handler. */
   profileCard: {
     onMessage: (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => void;
-    /** Called when a fromWelcomeOverlay profile card pops — un-hides the overlay. */
-    onWelcomeOverlayProfileClosed: () => void;
   };
   /** Settings card header data. */
   settings: {

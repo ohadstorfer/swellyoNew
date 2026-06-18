@@ -22,6 +22,7 @@ import {
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
 import { getRealtimeMode } from '../services/messaging/realtimeMode';
+import * as readWatermarkQueue from '../services/messaging/readWatermarkQueue';
 import { supabase } from '../config/supabase';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { userPresenceService } from '../services/presence/userPresenceService';
@@ -379,11 +380,23 @@ const conversationReducer = (state: Conversation[], action: ConversationAction):
   }
 };
 
+// Read receipts (the peer "Seen" indicator) are a 1:1-only feature today.
+// Groups don't display them, so we skip the broadcast to avoid per-member
+// fan-out traffic. To enable group read receipts LATER, return `true` here (or
+// gate on a per-group setting/flag). New-messages-only (live broadcast, never
+// retroactive); the per-member position already lives in
+// conversation_members.last_read_at, so a future "seen by" needs no schema change.
+function readReceiptsEnabled(isDirect: boolean): boolean {
+  return isDirect;
+}
+
 interface MessagingContextType {
   conversations: Conversation[];
   unreadTotal: number;
   dispatch: React.Dispatch<ConversationAction>;
-  markAsRead: (conversationId: string) => Promise<void>;
+  markAsRead: (conversationId: string, isDirect: boolean, messageId?: string) => void;
+  markReadRealtime: (conversationId: string, messageId: string, isDirect: boolean) => void;
+  flushReadWatermark: (conversationId: string) => void;
   refreshConversations: () => Promise<void>;
   loading: boolean;
   setCurrentConversationId: (conversationId: string | null) => void;
@@ -984,20 +997,39 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Mark conversation as read
-  const markAsRead = useCallback(async (conversationId: string) => {
-    try {
-      await messagingService.markAsRead(conversationId);
-      
-      // Recalculate unread count authoritatively
-      const unreadCount = await messagingService.getUnreadCount(conversationId);
-      dispatch({ 
-        type: 'SET_UNREAD_COUNT', 
-        payload: { conversationId, count: unreadCount } 
-      });
-    } catch (error) {
-      console.error('Error marking as read:', error);
+  // Mark conversation as read (called on chat OPEN). Opening means the user has
+  // seen everything → unread becomes 0 locally; no authoritative recount query.
+  // "Seen" is broadcast immediately (1:1 only); durable write is debounced.
+  const markAsRead = useCallback((conversationId: string, isDirect: boolean, messageId?: string) => {
+    const userId = currentUserIdRef.current;
+    const lastReadAt = new Date().toISOString();
+    dispatch({ type: 'SET_UNREAD_COUNT', payload: { conversationId, count: 0 } });
+    if (!userId) return;
+    if (readReceiptsEnabled(isDirect)) {
+      messagingService.broadcastReadReceipt(conversationId, userId, lastReadAt);
     }
+    readWatermarkQueue.schedule(conversationId, () => {
+      messagingService.persistReadWatermark(conversationId, userId, messageId, lastReadAt);
+    });
+  }, []);
+
+  // Per-incoming-message read marking while the chat is focused.
+  const markReadRealtime = useCallback((conversationId: string, messageId: string, isDirect: boolean) => {
+    const userId = currentUserIdRef.current;
+    const lastReadAt = new Date().toISOString();
+    dispatch({ type: 'SET_UNREAD_COUNT', payload: { conversationId, count: 0 } });
+    if (!userId) return;
+    if (readReceiptsEnabled(isDirect)) {
+      messagingService.broadcastReadReceipt(conversationId, userId, lastReadAt);
+    }
+    readWatermarkQueue.schedule(conversationId, () => {
+      messagingService.persistReadWatermark(conversationId, userId, messageId, lastReadAt);
+    });
+  }, []);
+
+  // Force-flush a single conversation's pending watermark (call on screen blur/unmount).
+  const flushReadWatermark = useCallback((conversationId: string) => {
+    readWatermarkQueue.flush(conversationId);
   }, []);
 
   // Refresh conversations
@@ -1056,21 +1088,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       const updated = await messagingService.getConversationsUpdatedSince(lastSync);
       
       if (updated.length > 0) {
+        // SYNC_FROM_SERVER already carries authoritative unread_count from the
+        // batched enrichment, so no separate per-conversation recount is needed.
         dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
-
-        // AUTHORITATIVE: Recalculate all unread counts after reconnect.
-        // Fetched in parallel and applied as ONE dispatch — the old
-        // one-dispatch-per-conversation loop re-rendered the whole app once
-        // per conversation (85 convs = 85 full re-renders per sync).
-        const counts: Record<string, number> = {};
-        await Promise.all(
-          updated.map(async (conv) => {
-            counts[conv.id] = await messagingService.getUnreadCount(conv.id);
-          })
-        );
-        dispatch({ type: 'SET_UNREAD_COUNTS', payload: { counts } });
       }
-      
+
       await updateLastSyncTimestamp();
       lastSyncRef.current = now;
     } catch (error) {
@@ -1119,16 +1141,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       // watermark (it races against the locally-tracked lastSync and returns 0).
       const updated = await messagingService.getConversationsUpdatedSince(0, conversationIds);
       if (updated.length > 0) {
+        // SYNC_FROM_SERVER already carries authoritative unread_count from the
+        // batched enrichment, so no separate per-conversation recount is needed.
         dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
-        // Parallel fetch + single batched dispatch (one re-render, not one per
-        // conversation — see handleReconnect for the same pattern).
-        const counts: Record<string, number> = {};
-        await Promise.all(
-          updated.map(async (conv) => {
-            counts[conv.id] = await messagingService.getUnreadCount(conv.id);
-          })
-        );
-        dispatch({ type: 'SET_UNREAD_COUNTS', payload: { counts } });
       }
     } catch (error) {
       console.error('[MessagingProvider] Error syncing on inbox change:', error);
@@ -1169,6 +1184,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (nextAppState === 'background' || nextAppState === 'inactive') {
+        readWatermarkQueue.flushAll();
         // Flush cache immediately on background
         if (cacheWriteTimerRef.current) {
           clearTimeout(cacheWriteTimerRef.current);
@@ -1770,6 +1786,8 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     unreadTotal,
     dispatch,
     markAsRead,
+    markReadRealtime,
+    flushReadWatermark,
     refreshConversations,
     loading,
     setCurrentConversationId,
@@ -1777,7 +1795,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     hasMoreConversations,
     isLoadingMoreConversations,
     loadMoreConversations,
-  }), [conversations, unreadTotal, dispatch, markAsRead, refreshConversations, loading, setCurrentConversationId, getCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations]);
+  }), [conversations, unreadTotal, dispatch, markAsRead, markReadRealtime, flushReadWatermark, refreshConversations, loading, setCurrentConversationId, getCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations]);
 
   return (
     <MessagingContext.Provider value={value}>

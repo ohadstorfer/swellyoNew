@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { getRealtimeMode, conversationTopic, userInboxTopic } from './realtimeMode';
+import { withTimeout } from './withTimeout';
 
 /**
  * Messaging Service
@@ -60,6 +61,8 @@ export interface ConversationMember {
 // WhatsApp's "Always" maps to this; auto-expiration logic still works (a real expiry
 // in the past would naturally pass), so callers don't need a special case.
 export const MUTE_ALWAYS_UNTIL = new Date('2099-01-01T00:00:00.000Z');
+
+const SEND_TIMEOUT_MS = 30000; // matches the new-conversation timeout already used in the screens
 
 // Message type
 export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'commitment_request';
@@ -369,222 +372,12 @@ class MessagingService {
       const receivedCount = pagedConversations?.length || 0;
       const hasMore = receivedCount > limit;
       const conversations = pagedConversations ? pagedConversations.slice(0, limit) : [];
-      const conversationIds = conversations.map(c => c.id);
 
       if (!conversations || conversations.length === 0) {
         return { conversations: [], hasMore: false };
       }
 
-      // Queries 5, 6, 7 each depend only on conversationIds — run them
-      // concurrently. Supabase builders resolve {data, error} and never
-      // reject, so Promise.all cannot short-circuit and each error keeps
-      // its original non-fatal handling below. Array order intentionally
-      // matches the old sequential order (conversation_members is queried
-      // twice; relative order is observable).
-      const [lastMessagesRes, allMembersRes, userMemberRes] = await Promise.all([
-        supabase
-          .rpc('get_last_messages_per_conversation', {
-            conv_ids: conversationIds
-          }),
-        supabase
-          .from('conversation_members')
-          .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
-          .in('conversation_id', conversationIds),
-        supabase
-          .from('conversation_members')
-          .select('conversation_id, last_read_at')
-          .eq('user_id', user.id)
-          .in('conversation_id', conversationIds),
-      ]);
-      const { data: lastMessages, error: messagesError } = lastMessagesRes;
-      const { data: allMembersData, error: allMembersError } = allMembersRes;
-      const { data: userMemberData, error: userMemberError } = userMemberRes;
-      markStage('lastMessages+members+readState');
-
-      // OPTIMIZATION 2 (processing): one last message per conversation (the most recent)
-      // Much more efficient and reliable than fetching many messages and filtering in JavaScript
-      // Solves the issue where only the first few conversations show last message text
-      if (messagesError) {
-        console.error('Error fetching last messages:', messagesError);
-      }
-
-      // Convert array to Map for easy lookup
-      // RPC already returns exactly one message per conversation, so no need for deduplication
-      const lastMessagesMap = new Map<string, Message>();
-      if (lastMessages && lastMessages.length > 0) {
-        lastMessages.forEach((msg: Message) => {
-          lastMessagesMap.set(msg.conversation_id, msg);
-      });
-      }
-
-      // OPTIMIZATION 3 (processing): member data for all conversations
-      if (allMembersError) {
-        console.error('Error fetching all members:', allMembersError);
-      }
-
-      // OPTIMIZATION 3.5: Extract user IDs early and fetch user data in parallel with other queries
-      const allUserIds = new Set<string>();
-      (allMembersData || []).forEach(member => {
-        allUserIds.add(member.user_id);
-      });
-      const userIdsArray = Array.from(allUserIds);
-
-      // OPTIMIZATION 4 (processing): current user's read status
-      if (userMemberError) {
-        console.error('Error fetching user member data:', userMemberError);
-      }
-
-      const userReadMap = new Map<string, string | null>();
-      (userMemberData || []).forEach(member => {
-        userReadMap.set(member.conversation_id, member.last_read_at);
-      });
-
-      // Fetch all unread messages for all conversations in one query
-      // We need messages where: conversation_id IN (ids), deleted=false, sender_id != user.id, created_at > last_read_at
-      // Since last_read_at varies per conversation, we'll fetch all messages after the oldest last_read_at
-      // and filter in JavaScript (more efficient than N queries)
-      const lastReadAtValues = Array.from(userReadMap.values()).filter(ts => ts !== null);
-      const oldestLastReadAt = lastReadAtValues.length > 0
-        ? Math.min(...lastReadAtValues.map(ts => new Date(ts!).getTime()))
-        : 0; // If no last_read_at values, use 0 (epoch) to fetch all messages
-
-      // Fetch all messages that could potentially be unread
-      // Use oldest last_read_at as the lower bound (or epoch if none exist)
-      const cutoffDate = oldestLastReadAt > 0
-        ? new Date(oldestLastReadAt).toISOString()
-        : new Date(0).toISOString(); // Epoch if no last_read_at
-
-      // CRITICAL: Add limit to prevent fetching thousands of unread messages
-      const UNREAD_MESSAGES_LIMIT = 1000;
-
-      // Queries 8 (profiles, needs userIds from q6) and 9 (unreads, needs
-      // cutoff from q7) are independent of each other — run concurrently.
-      const [usersResult, surfersResult, unreadResult] = await Promise.all([
-        supabase
-          .from('users')
-          .select('id, email')
-          .in('id', userIdsArray),
-        supabase
-          .from('surfers')
-          .select('user_id, name, profile_image_url')
-          .in('user_id', userIdsArray),
-        supabase
-          .from('messages')
-          .select('id, conversation_id, sender_id, created_at')
-          .in('conversation_id', conversationIds)
-          .eq('deleted', false)
-          .neq('sender_id', user.id)
-          .gt('created_at', cutoffDate)
-          .limit(UNREAD_MESSAGES_LIMIT),
-      ]);
-      const { data: unreadMessages, error: unreadError } = unreadResult;
-      markStage('profiles+unread');
-
-      const usersData = usersResult.data || [];
-      const surfersData = surfersResult.data || [];
-
-      // Create lookup maps early (before unread counts calculation)
-      const usersMap = new Map(usersData.map(u => [u.id, u]));
-      const surfersMap = new Map(surfersData.map(s => [s.user_id, s]));
-
-      // OPTIMIZATION 6 (processing): count unread messages per conversation in
-      // JavaScript (fetched above in a SINGLE query instead of N queries)
-      const unreadCountMap = new Map<string, number>();
-      
-      // Initialize all conversations with 0 unread
-      conversations.forEach(conv => {
-        unreadCountMap.set(conv.id, 0);
-      });
-
-      // Track if we hit the limit (indicates there may be more unread messages)
-      const hitUnreadLimit = unreadMessages && unreadMessages.length === UNREAD_MESSAGES_LIMIT;
-      const conversationsWithTruncatedUnread = new Set<string>();
-
-      if (!unreadError && unreadMessages) {
-        // Count unread messages per conversation (filtering by actual last_read_at)
-        unreadMessages.forEach(msg => {
-          const lastReadAt = userReadMap.get(msg.conversation_id);
-          const msgTime = new Date(msg.created_at).getTime();
-
-          if (lastReadAt) {
-            const lastReadTime = new Date(lastReadAt).getTime();
-            if (msgTime > lastReadTime) {
-              unreadCountMap.set(msg.conversation_id, (unreadCountMap.get(msg.conversation_id) || 0) + 1);
-              // If we hit the limit, mark this conversation as potentially truncated
-              if (hitUnreadLimit) {
-                conversationsWithTruncatedUnread.add(msg.conversation_id);
-              }
-            }
-          } else {
-            // No last_read_at means all messages are unread (count this one)
-            unreadCountMap.set(msg.conversation_id, (unreadCountMap.get(msg.conversation_id) || 0) + 1);
-            // If we hit the limit, mark this conversation as potentially truncated
-            if (hitUnreadLimit) {
-              conversationsWithTruncatedUnread.add(msg.conversation_id);
-            }
-          }
-        });
-      }
-
-      // Group members by conversation (after we have all data)
-      const membersByConversation = new Map<string, typeof allMembersData>();
-      (allMembersData || []).forEach(member => {
-        if (!membersByConversation.has(member.conversation_id)) {
-          membersByConversation.set(member.conversation_id, []);
-        }
-        membersByConversation.get(member.conversation_id)!.push(member);
-      });
-
-      // OPTIMIZATION 7: Enrich members using the lookup maps (no additional queries)
-      // Names are already fetched, so this is just mapping
-      const enrichedMembersByConv = new Map<string, ConversationMember[]>();
-      membersByConversation.forEach((members, convId: string) => {
-        const enriched = (members || []).map(member => {
-          const userData = usersMap.get(member.user_id);
-          const surferData = surfersMap.get(member.user_id);
-          
-          let name = 'Unknown';
-          if (surferData?.name && surferData.name.trim() !== '') {
-            name = surferData.name;
-          } else if (userData?.email) {
-            name = userData.email.split('@')[0];
-          }
-
-          return {
-            ...member,
-            name,
-            profile_image_url: surferData?.profile_image_url,
-            email: userData?.email,
-          };
-        });
-        enrichedMembersByConv.set(convId, enriched);
-      });
-
-      // Build final enriched conversations
-      const enrichedConversations = conversations.map(conv => {
-        const lastMessage = lastMessagesMap.get(conv.id);
-        const unreadCount = unreadCountMap.get(conv.id) || 0;
-        const enrichedMembers = enrichedMembersByConv.get(conv.id) || [];
-        const unreadTruncated = conversationsWithTruncatedUnread.has(conv.id);
-
-        // For direct conversations, find the other user
-        let otherUser: ConversationMember | undefined;
-        if (conv.is_direct && enrichedMembers.length > 0) {
-          const otherMember = enrichedMembers.find(m => m.user_id !== user.id);
-          if (otherMember) {
-            otherUser = otherMember;
-          }
-        }
-
-        return {
-          ...conv,
-          last_message: lastMessage,
-          unread_count: unreadCount,
-          unread_truncated: unreadTruncated,
-          other_user: otherUser,
-          members: enrichedMembers,
-        };
-      });
+      const enrichedConversations = await this.enrichConversations(conversations, user, markStage);
 
       if (__DEV__) {
         console.log(`[messagingService] getConversations stages: total=${Date.now() - tStart}ms :: ${stageTimes.join(' ')}`);
@@ -595,6 +388,245 @@ class MessagingService {
       console.error('Error fetching conversations:', error);
       throw error;
     }
+  }
+
+  /**
+   * Batched enrichment shared by getConversations and getConversationsUpdatedSince.
+   *
+   * Given a list of bare conversation rows (id, title, is_direct, metadata,
+   * created_by, created_at, updated_at) and the current user, this issues the
+   * BATCHED set of queries:
+   *   - rpc('get_last_messages_per_conversation', { conv_ids }) — exactly one call
+   *   - all-members of the page (.in)
+   *   - current user's read state (.in)
+   *   - users + surfers profile lookups (.in)
+   *   - ONE capped unread query (.in, UNREAD_MESSAGES_LIMIT), counted in JS
+   * and returns the full Conversation shape (last_message, unread_count,
+   * unread_truncated, other_user, members). No per-conversation round-trips.
+   *
+   * @param markStage optional timing hook (used by getConversations only)
+   */
+  private async enrichConversations(
+    conversations: Array<{ id: string; is_direct?: boolean; updated_at?: string } & Record<string, any>>,
+    user: { id: string },
+    markStage?: (label: string) => void,
+  ): Promise<Conversation[]> {
+    const conversationIds = conversations.map(c => c.id);
+
+    // Queries 5, 6, 7 each depend only on conversationIds — run them
+    // concurrently. Supabase builders resolve {data, error} and never
+    // reject, so Promise.all cannot short-circuit and each error keeps
+    // its original non-fatal handling below. Array order intentionally
+    // matches the old sequential order (conversation_members is queried
+    // twice; relative order is observable).
+    const [lastMessagesRes, allMembersRes, userMemberRes] = await Promise.all([
+      supabase
+        .rpc('get_last_messages_per_conversation', {
+          conv_ids: conversationIds
+        }),
+      supabase
+        .from('conversation_members')
+        .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
+        .in('conversation_id', conversationIds),
+      supabase
+        .from('conversation_members')
+        .select('conversation_id, last_read_at')
+        .eq('user_id', user.id)
+        .in('conversation_id', conversationIds),
+    ]);
+    const { data: lastMessages, error: messagesError } = lastMessagesRes;
+    const { data: allMembersData, error: allMembersError } = allMembersRes;
+    const { data: userMemberData, error: userMemberError } = userMemberRes;
+    markStage?.('lastMessages+members+readState');
+
+    // OPTIMIZATION 2 (processing): one last message per conversation (the most recent)
+    // Much more efficient and reliable than fetching many messages and filtering in JavaScript
+    // Solves the issue where only the first few conversations show last message text
+    if (messagesError) {
+      console.error('Error fetching last messages:', messagesError);
+    }
+
+    // Convert array to Map for easy lookup
+    // RPC already returns exactly one message per conversation, so no need for deduplication.
+    // The RPC RETURNS TABLE exposes image_metadata/video_metadata/audio_metadata/
+    // commitment_metadata, so spreading each row carries those previews through.
+    const lastMessagesMap = new Map<string, Message>();
+    if (lastMessages && lastMessages.length > 0) {
+      lastMessages.forEach((msg: Message) => {
+        lastMessagesMap.set(msg.conversation_id, msg);
+      });
+    }
+
+    // OPTIMIZATION 3 (processing): member data for all conversations
+    if (allMembersError) {
+      console.error('Error fetching all members:', allMembersError);
+    }
+
+    // OPTIMIZATION 3.5: Extract user IDs early and fetch user data in parallel with other queries
+    const allUserIds = new Set<string>();
+    (allMembersData || []).forEach(member => {
+      allUserIds.add(member.user_id);
+    });
+    const userIdsArray = Array.from(allUserIds);
+
+    // OPTIMIZATION 4 (processing): current user's read status
+    if (userMemberError) {
+      console.error('Error fetching user member data:', userMemberError);
+    }
+
+    const userReadMap = new Map<string, string | null>();
+    (userMemberData || []).forEach(member => {
+      userReadMap.set(member.conversation_id, member.last_read_at);
+    });
+
+    // Fetch all unread messages for all conversations in one query
+    // We need messages where: conversation_id IN (ids), deleted=false, sender_id != user.id, created_at > last_read_at
+    // Since last_read_at varies per conversation, we'll fetch all messages after the oldest last_read_at
+    // and filter in JavaScript (more efficient than N queries)
+    const lastReadAtValues = Array.from(userReadMap.values()).filter(ts => ts !== null);
+    const oldestLastReadAt = lastReadAtValues.length > 0
+      ? Math.min(...lastReadAtValues.map(ts => new Date(ts!).getTime()))
+      : 0; // If no last_read_at values, use 0 (epoch) to fetch all messages
+
+    // Fetch all messages that could potentially be unread
+    // Use oldest last_read_at as the lower bound (or epoch if none exist)
+    const cutoffDate = oldestLastReadAt > 0
+      ? new Date(oldestLastReadAt).toISOString()
+      : new Date(0).toISOString(); // Epoch if no last_read_at
+
+    // CRITICAL: Add limit to prevent fetching thousands of unread messages
+    const UNREAD_MESSAGES_LIMIT = 1000;
+
+    // Queries 8 (profiles, needs userIds from q6) and 9 (unreads, needs
+    // cutoff from q7) are independent of each other — run concurrently.
+    const [usersResult, surfersResult, unreadResult] = await Promise.all([
+      supabase
+        .from('users')
+        .select('id, email')
+        .in('id', userIdsArray),
+      supabase
+        .from('surfers')
+        .select('user_id, name, profile_image_url')
+        .in('user_id', userIdsArray),
+      supabase
+        .from('messages')
+        .select('id, conversation_id, sender_id, created_at')
+        .in('conversation_id', conversationIds)
+        .eq('deleted', false)
+        .neq('sender_id', user.id)
+        .gt('created_at', cutoffDate)
+        .limit(UNREAD_MESSAGES_LIMIT),
+    ]);
+    const { data: unreadMessages, error: unreadError } = unreadResult;
+    markStage?.('profiles+unread');
+
+    const usersData = usersResult.data || [];
+    const surfersData = surfersResult.data || [];
+
+    // Create lookup maps early (before unread counts calculation)
+    const usersMap = new Map(usersData.map(u => [u.id, u]));
+    const surfersMap = new Map(surfersData.map(s => [s.user_id, s]));
+
+    // OPTIMIZATION 6 (processing): count unread messages per conversation in
+    // JavaScript (fetched above in a SINGLE query instead of N queries)
+    const unreadCountMap = new Map<string, number>();
+
+    // Initialize all conversations with 0 unread
+    conversations.forEach(conv => {
+      unreadCountMap.set(conv.id, 0);
+    });
+
+    // Track if we hit the limit (indicates there may be more unread messages)
+    const hitUnreadLimit = unreadMessages && unreadMessages.length === UNREAD_MESSAGES_LIMIT;
+    const conversationsWithTruncatedUnread = new Set<string>();
+
+    if (!unreadError && unreadMessages) {
+      // Count unread messages per conversation (filtering by actual last_read_at)
+      unreadMessages.forEach(msg => {
+        const lastReadAt = userReadMap.get(msg.conversation_id);
+        const msgTime = new Date(msg.created_at).getTime();
+
+        if (lastReadAt) {
+          const lastReadTime = new Date(lastReadAt).getTime();
+          if (msgTime > lastReadTime) {
+            unreadCountMap.set(msg.conversation_id, (unreadCountMap.get(msg.conversation_id) || 0) + 1);
+            // If we hit the limit, mark this conversation as potentially truncated
+            if (hitUnreadLimit) {
+              conversationsWithTruncatedUnread.add(msg.conversation_id);
+            }
+          }
+        } else {
+          // No last_read_at means all messages are unread (count this one)
+          unreadCountMap.set(msg.conversation_id, (unreadCountMap.get(msg.conversation_id) || 0) + 1);
+          // If we hit the limit, mark this conversation as potentially truncated
+          if (hitUnreadLimit) {
+            conversationsWithTruncatedUnread.add(msg.conversation_id);
+          }
+        }
+      });
+    }
+
+    // Group members by conversation (after we have all data)
+    const membersByConversation = new Map<string, typeof allMembersData>();
+    (allMembersData || []).forEach(member => {
+      if (!membersByConversation.has(member.conversation_id)) {
+        membersByConversation.set(member.conversation_id, []);
+      }
+      membersByConversation.get(member.conversation_id)!.push(member);
+    });
+
+    // OPTIMIZATION 7: Enrich members using the lookup maps (no additional queries)
+    // Names are already fetched, so this is just mapping
+    const enrichedMembersByConv = new Map<string, ConversationMember[]>();
+    membersByConversation.forEach((members, convId: string) => {
+      const enriched = (members || []).map(member => {
+        const userData = usersMap.get(member.user_id);
+        const surferData = surfersMap.get(member.user_id);
+
+        let name = 'Unknown';
+        if (surferData?.name && surferData.name.trim() !== '') {
+          name = surferData.name;
+        } else if (userData?.email) {
+          name = userData.email.split('@')[0];
+        }
+
+        return {
+          ...member,
+          name,
+          profile_image_url: surferData?.profile_image_url,
+          email: userData?.email,
+        };
+      });
+      enrichedMembersByConv.set(convId, enriched);
+    });
+
+    // Build final enriched conversations
+    const enrichedConversations = conversations.map(conv => {
+      const lastMessage = lastMessagesMap.get(conv.id);
+      const unreadCount = unreadCountMap.get(conv.id) || 0;
+      const enrichedMembers = enrichedMembersByConv.get(conv.id) || [];
+      const unreadTruncated = conversationsWithTruncatedUnread.has(conv.id);
+
+      // For direct conversations, find the other user
+      let otherUser: ConversationMember | undefined;
+      if (conv.is_direct && enrichedMembers.length > 0) {
+        const otherMember = enrichedMembers.find(m => m.user_id !== user.id);
+        if (otherMember) {
+          otherUser = otherMember;
+        }
+      }
+
+      return {
+        ...conv,
+        last_message: lastMessage,
+        unread_count: unreadCount,
+        unread_truncated: unreadTruncated,
+        other_user: otherUser,
+        members: enrichedMembers,
+      };
+    });
+
+    return enrichedConversations as Conversation[];
   }
 
   /**
@@ -803,6 +835,60 @@ class MessagingService {
   }
 
   /**
+   * Fetch a window of messages centered on a target: `span` older + the target
+   * + `span` newer, chronological, sender-enriched. Used by reply-jump to
+   * re-anchor the in-memory window (Telegram-style "jump to message").
+   */
+  async getMessagesAround(
+    conversationId: string,
+    targetMessageId: string,
+    span: number = 20
+  ): Promise<{ messages: Message[]; hasMoreOlder: boolean }> {
+    if (!isSupabaseConfigured()) throw new Error('Supabase is not configured');
+    const cols = 'id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot';
+    try {
+      const { data: target } = await supabase
+        .from('messages').select('created_at').eq('id', targetMessageId).single();
+      if (!target) return { messages: [], hasMoreOlder: false };
+
+      const { data: olderDesc } = await supabase
+        .from('messages').select(cols)
+        .eq('conversation_id', conversationId)
+        .lte('created_at', target.created_at)
+        .order('created_at', { ascending: false })
+        .limit(span + 1);
+
+      const { data: newerAsc } = await supabase
+        .from('messages').select(cols)
+        .eq('conversation_id', conversationId)
+        .gt('created_at', target.created_at)
+        .order('created_at', { ascending: true })
+        .limit(span);
+
+      const hasMoreOlder = (olderDesc?.length ?? 0) > span;
+      const olderTrimmed = (olderDesc ?? []).slice(0, span).reverse(); // chronological, includes target
+      const merged = [...olderTrimmed, ...(newerAsc ?? [])];
+
+      const senderIds = [...new Set(merged.map((m: any) => m.sender_id))];
+      if (senderIds.length === 0) return { messages: merged as Message[], hasMoreOlder };
+      const { data: surfersData } = await supabase
+        .from('surfers').select('user_id, name, profile_image_url').in('user_id', senderIds);
+      const surferMap = new Map((surfersData ?? []).map((s: any) => [s.user_id, s]));
+      return {
+        messages: merged.map((m: any) => ({
+          ...m,
+          sender_name: surferMap.get(m.sender_id)?.name,
+          sender_avatar: surferMap.get(m.sender_id)?.profile_image_url,
+        })) as Message[],
+        hasMoreOlder,
+      };
+    } catch (error) {
+      console.error('Error fetching messages around target:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Send a message in a conversation.
    * When `clientId` is provided the insert is idempotent via the partial unique
    * index messages_sender_client_id_idx — retries of the same (sender_id,
@@ -858,41 +944,46 @@ class MessagingService {
         // Idempotent path: ON CONFLICT DO NOTHING. If the row already exists
         // (retry landed twice), maybeSingle returns null and we fetch the
         // winning row so callers still get a usable Message object.
-        const { data: upserted, error } = await supabase
-          .from('messages')
-          .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
-          .select()
-          .maybeSingle();
+        const { data: upserted, error } = await withTimeout(
+          supabase
+            .from('messages')
+            .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
+            .select()
+            .maybeSingle(),
+          SEND_TIMEOUT_MS,
+          'send-upsert'
+        );
 
         if (error) throw error;
 
         if (upserted) {
           data = upserted as Message;
         } else {
-          const { data: existing, error: fetchErr } = await supabase
-            .from('messages')
-            .select()
-            .eq('sender_id', senderId)
-            .eq('client_id', clientId)
-            .single();
+          const { data: existing, error: fetchErr } = await withTimeout(
+            supabase.from('messages').select().eq('sender_id', senderId).eq('client_id', clientId).single(),
+            SEND_TIMEOUT_MS,
+            'send-fetch'
+          );
           if (fetchErr) throw fetchErr;
           data = existing as Message;
         }
       } else {
-        const { data: inserted, error } = await supabase
-          .from('messages')
-          .insert(payload)
-          .select()
-          .single();
+        const { data: inserted, error } = await withTimeout(
+          supabase.from('messages').insert(payload).select().single(),
+          SEND_TIMEOUT_MS,
+          'send-insert'
+        );
         if (error) throw error;
         data = inserted as Message;
       }
 
-      // Update conversation's updated_at
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
+      // Fire-and-forget: bounded, and never blocks the send return. The message
+      // is already inserted; updated_at is non-critical recency metadata.
+      withTimeout(
+        supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId),
+        10000,
+        'send-touch'
+      ).catch((e) => console.warn('[messagingService] updated_at touch failed:', e));
 
       return data;
     } catch (error) {
@@ -1073,6 +1164,235 @@ class MessagingService {
       return data;
     } catch (error) {
       console.error('Error updating image message metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create an image message with its metadata in a single insert (upload-first
+   * flow). client_id makes it idempotent and lets the client swap the optimistic
+   * row when Realtime echoes it. Returns the created (or existing) Message.
+   */
+  async createImageMessageWithMetadata(
+    conversationId: string,
+    caption: string | undefined,
+    imageMetadata: any,
+    clientId: string
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      // Mirror sendMessage's auth pattern: prefer cached session, fall back to getUser.
+      let senderId: string | undefined;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        senderId = session.user.id;
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error('Not authenticated');
+        }
+        senderId = user.id;
+      }
+
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: senderId,
+        type: 'image',
+        body: caption ?? '',
+        image_metadata: imageMetadata,
+        client_id: clientId,
+      };
+
+      // Idempotent path: ON CONFLICT DO NOTHING on (sender_id, client_id). If the
+      // row already exists (retry landed twice / realtime echo race), fetch the
+      // winning row so callers still get a usable Message object.
+      let data: Message | null = null;
+      const { data: upserted, error } = await supabase
+        .from('messages')
+        .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
+        .select()
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (upserted) {
+        data = upserted as Message;
+      } else {
+        const { data: existing, error: fetchErr } = await supabase
+          .from('messages')
+          .select()
+          .eq('sender_id', senderId)
+          .eq('client_id', clientId)
+          .single();
+        if (fetchErr) throw fetchErr;
+        data = existing as Message;
+      }
+
+      // Update conversation's updated_at (best-effort).
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      return data;
+    } catch (error) {
+      console.error('Error creating image message with metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a video message with its metadata in a single insert (upload-first
+   * flow). Mirrors createImageMessageWithMetadata: client_id makes it idempotent
+   * and lets the client swap the optimistic row when Realtime echoes it. The row
+   * is only created AFTER the upload succeeds, so a failed send leaves no ghost.
+   */
+  async createVideoMessageWithMetadata(
+    conversationId: string,
+    caption: string | undefined,
+    videoMetadata: any,
+    clientId: string
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      // Prefer cached session, fall back to getUser (matches sendMessage).
+      let senderId: string | undefined;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        senderId = session.user.id;
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error('Not authenticated');
+        }
+        senderId = user.id;
+      }
+
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: senderId,
+        type: 'video',
+        body: caption ?? '',
+        video_metadata: videoMetadata,
+        client_id: clientId,
+      };
+
+      // Idempotent path: ON CONFLICT DO NOTHING on (sender_id, client_id).
+      let data: Message | null = null;
+      const { data: upserted, error } = await supabase
+        .from('messages')
+        .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
+        .select()
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (upserted) {
+        data = upserted as Message;
+      } else {
+        const { data: existing, error: fetchErr } = await supabase
+          .from('messages')
+          .select()
+          .eq('sender_id', senderId)
+          .eq('client_id', clientId)
+          .single();
+        if (fetchErr) throw fetchErr;
+        data = existing as Message;
+      }
+
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      return data;
+    } catch (error) {
+      console.error('Error creating video message with metadata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create an audio (voice) message with its metadata in a single insert
+   * (upload-first flow). Mirrors createImageMessageWithMetadata. Voice messages
+   * have no caption, so body is always ''. The row is only created AFTER the
+   * upload succeeds, so a failed send leaves no ghost. Pass replyTo to carry a
+   * quoted-message snapshot.
+   */
+  async createAudioMessageWithMetadata(
+    conversationId: string,
+    audioMetadata: any,
+    clientId: string,
+    replyTo?: ReplyToSnapshot | null
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    try {
+      // Prefer cached session, fall back to getUser (matches sendMessage).
+      let senderId: string | undefined;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        senderId = session.user.id;
+      } else {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          throw new Error('Not authenticated');
+        }
+        senderId = user.id;
+      }
+
+      const payload: Record<string, unknown> = {
+        conversation_id: conversationId,
+        sender_id: senderId,
+        type: 'audio',
+        body: '',
+        audio_metadata: audioMetadata,
+        client_id: clientId,
+      };
+      if (replyTo) {
+        payload.reply_to_message_id = replyTo.message_id;
+        payload.reply_to_snapshot = replyTo;
+      }
+
+      // Idempotent path: ON CONFLICT DO NOTHING on (sender_id, client_id).
+      let data: Message | null = null;
+      const { data: upserted, error } = await supabase
+        .from('messages')
+        .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
+        .select()
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (upserted) {
+        data = upserted as Message;
+      } else {
+        const { data: existing, error: fetchErr } = await supabase
+          .from('messages')
+          .select()
+          .eq('sender_id', senderId)
+          .eq('client_id', clientId)
+          .single();
+        if (fetchErr) throw fetchErr;
+        data = existing as Message;
+      }
+
+      await supabase
+        .from('conversations')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      return data;
+    } catch (error) {
+      console.error('Error creating audio message with metadata:', error);
       throw error;
     }
   }
@@ -1550,6 +1870,44 @@ class MessagingService {
     } catch (error) {
       console.error('Error marking as read:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Broadcast the read receipt on the conversation channel ONLY (no DB write).
+   * Drives the sender's instant "Seen". Reuses the already-open per-conversation
+   * channel and takes the caller's userId so it makes no auth round-trip on the
+   * hot per-message path.
+   */
+  broadcastReadReceipt(conversationId: string, userId: string, lastReadAt: string): void {
+    const channel = this.getChannel(conversationId);
+    if (!channel) return;
+    channel
+      .send({ type: 'broadcast', event: 'read_receipt', payload: { userId, lastReadAt } })
+      .catch((e: unknown) => console.warn('[messagingService] read_receipt broadcast failed:', e));
+  }
+
+  /**
+   * Persist the read watermark to conversation_members. Durability only
+   * (cold-load, multi-device, push badges) — safe to debounce/coalesce. One
+   * UPDATE; does not recount unread.
+   */
+  async persistReadWatermark(
+    conversationId: string,
+    userId: string,
+    messageId: string | undefined,
+    lastReadAt: string
+  ): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const { error } = await supabase
+        .from('conversation_members')
+        .update({ last_read_message_id: messageId, last_read_at: lastReadAt })
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+      if (error) throw error;
+    } catch (error) {
+      console.error('[messagingService] persistReadWatermark failed:', error);
     }
   }
 
@@ -2118,22 +2476,27 @@ class MessagingService {
    * Start typing indicator (with rate limiting). Uses the same channel as subscribeToMessages;
    * never creates a second channel.
    */
-  async startTyping(conversationId: string): Promise<void> {
+  async startTyping(conversationId: string, userId?: string): Promise<void> {
     if (!isSupabaseConfigured()) {
       return;
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      // Prefer the caller-supplied (cached) userId so we don't make a GoTrue
+      // auth.getUser() network round-trip on the typing hot path. Fall back to
+      // a lookup only if no id was passed (keeps older callers working).
+      const uid = userId ?? (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
 
       const channel = this.getChannel(conversationId);
       if (!channel) return; // No channel until subscribeToMessages has run (e.g. DM screen open)
 
-      // Rate limiting: max 1 event per 500ms
+      // Server-side safety valve: discard keepalives arriving faster than 2s.
+      // The sender already throttles to ~3s; this just caps abuse. WhatsApp uses
+      // the same ~2s discard behind a ~3s client keepalive.
       const lastEvent = this.lastTypingEvent.get(conversationId) || 0;
       const now = Date.now();
-      if (now - lastEvent < 500) {
+      if (now - lastEvent < 2000) {
         return;
       }
       this.lastTypingEvent.set(conversationId, now);
@@ -2141,10 +2504,10 @@ class MessagingService {
       await channel.send({
         type: 'broadcast',
         event: 'typing',
-        payload: { userId: user.id, isTyping: true },
+        payload: { userId: uid, isTyping: true },
       });
       if (__DEV__) {
-        console.log('[MessagingService] Typing sent', { conversationId, userId: user.id });
+        console.log('[MessagingService] Typing sent', { conversationId, userId: uid });
       }
     } catch (error) {
       console.error('Error sending typing indicator:', error);
@@ -2154,14 +2517,15 @@ class MessagingService {
   /**
    * Stop typing indicator. Uses the same channel as subscribeToMessages; never creates a second channel.
    */
-  async stopTyping(conversationId: string): Promise<void> {
+  async stopTyping(conversationId: string, userId?: string): Promise<void> {
     if (!isSupabaseConfigured()) {
       return;
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      // Same cached-id optimization as startTyping — avoid an auth round-trip.
+      const uid = userId ?? (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
 
       const channel = this.getChannel(conversationId);
       if (!channel) return;
@@ -2169,7 +2533,7 @@ class MessagingService {
       await channel.send({
         type: 'broadcast',
         event: 'typing',
-        payload: { userId: user.id, isTyping: false },
+        payload: { userId: uid, isTyping: false },
       });
     } catch (error) {
       console.error('Error stopping typing indicator:', error);
@@ -2811,62 +3175,11 @@ class MessagingService {
         return [];
       }
 
-      // Enrich with last message and unread counts (reuse logic from getConversations)
-      // This is a simplified version - full enrichment would be the same as getConversations
-      // Note: We include deleted messages so they can be displayed with "deleted" placeholder
-      const lastMessagesPromises = conversations.map(conv =>
-        supabase
-          .from('messages')
-          .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
-          .eq('conversation_id', conv.id)
-          // Note: We include deleted messages so they can be displayed with "deleted" placeholder
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-      );
-      const lastMessagesResults = await Promise.all(lastMessagesPromises);
-      const lastMessagesMap = new Map<string, Message>();
-      lastMessagesResults.forEach((result, index) => {
-        if (result.data && conversations[index]) {
-          lastMessagesMap.set(conversations[index].id, result.data);
-        }
-      });
-
-      // Calculate unread counts
-      const unreadCountPromises = conversations.map(conv => {
-        const lastMessage = lastMessagesMap.get(conv.id);
-        if (!lastMessage) return Promise.resolve(0);
-
-        return supabase
-          .from('conversation_members')
-          .select('last_read_at')
-          .eq('conversation_id', conv.id)
-          .eq('user_id', user.id)
-          .maybeSingle()
-          .then(memberResult => {
-            const lastReadAt = memberResult.data?.last_read_at || new Date(0).toISOString();
-            return supabase
-              .from('messages')
-              .select('id', { count: 'exact', head: true })
-              .eq('conversation_id', conv.id)
-              .eq('deleted', false)
-              .neq('sender_id', user.id)
-              .gt('created_at', lastReadAt)
-              .then(result => result.count || 0);
-          });
-      });
-      const unreadCounts = await Promise.all(unreadCountPromises);
-      const unreadCountMap = new Map<string, number>();
-      conversations.forEach((conv, index) => {
-        unreadCountMap.set(conv.id, unreadCounts[index]);
-      });
-
-      // Build enriched conversations (simplified - full version would include members, etc.)
-      return conversations.map(conv => ({
-        ...conv,
-        last_message: lastMessagesMap.get(conv.id),
-        unread_count: unreadCountMap.get(conv.id) || 0,
-      })) as Conversation[];
+      // Reuse the SAME batched enrichment as getConversations: one RPC for last
+      // messages (carrying image/video/audio/commitment metadata), one capped
+      // unread query, and full member/other_user enrichment — no per-conversation
+      // round-trips. Returns the full Conversation shape (not the old simplified one).
+      return this.enrichConversations(conversations, user);
     } catch (error) {
       console.error('Error fetching conversations updated since:', error);
       throw error;
@@ -2875,6 +3188,7 @@ class MessagingService {
 
   /**
    * Get unread count for a conversation (authoritative calculation)
+   * @deprecated No callers since WS3 enrichment refactor. Safe to remove after one release.
    */
   async getUnreadCount(conversationId: string): Promise<number> {
     if (!isSupabaseConfigured()) {

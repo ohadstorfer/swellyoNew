@@ -36,9 +36,10 @@ import {
   TripCardMeta,
 } from '../../services/trips/groupTripsService';
 import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
+import { BUDGET_THRESHOLD } from '../../services/trips/exploreFilterPredicates';
 import { COUNTRY_NAMES } from '../../data/countryNames';
 import { useQueryClient } from '@tanstack/react-query';
-import { useExploreTrips, useMyTrips, tripsKeys } from '../../hooks/trips/useTripQueries';
+import { useExploreTrips, useMyTrips, tripsKeys, type ExploreFilterKey } from '../../hooks/trips/useTripQueries';
 import { fetchTripCore } from '../../hooks/trips/useTripDetail';
 import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
@@ -610,7 +611,9 @@ const TripDeck: React.FC<{
   // even for the filtered Popular deck and the operator subset.
   useEffect(() => {
     if (isAppendingPage) return;
-    scrollX.setValue(0);
+    // `scrollX` is now native-driven (onScroll uses useNativeDriver:true), so
+    // JS may not mutate it via setValue. scrollToOffset(0) makes the native
+    // driver emit a scroll event that resets scrollX to 0 itself.
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [trips, scrollX, isAppendingPage]);
 
@@ -700,14 +703,23 @@ const TripDeck: React.FC<{
           offset: index * DECK_ITEM_W,
           index,
         })}
-        onScroll={e => {
-          const x = e.nativeEvent.contentOffset.x;
-          scrollX.setValue(x);
-          if (onUserScroll && Math.abs(x - lastReportedX.current) > 24) {
-            lastReportedX.current = x;
-            onUserScroll();
-          }
-        }}
+        // Native-driver scroll: the rotate/scale/opacity/translate transforms run
+        // on the UI thread, so the deck never freezes mid-tilt even when the JS
+        // thread is busy (slow dev build or a stalled frame). The JS `listener`
+        // still fires onUserScroll for the Explore prefetch system.
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          {
+            useNativeDriver: true,
+            listener: (e: any) => {
+              const x = e.nativeEvent.contentOffset.x;
+              if (onUserScroll && Math.abs(x - lastReportedX.current) > 24) {
+                lastReportedX.current = x;
+                onUserScroll();
+              }
+            },
+          },
+        )}
         onMomentumScrollEnd={e => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / DECK_ITEM_W);
           neighbourHeroUrls(trips, idx).forEach(u => { CachedImage.prefetch(u); });
@@ -732,11 +744,14 @@ const TripDeck: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// Explore filters (Figma 11966:32392) — month + budget chips, all client-side.
+// Explore filters (Figma 11966:32392) — month + budget chips.
 // Chips toggle independently. Within a group (months / budget) the matches are
-// OR'd; across groups they're AND'd. "All" clears every selection.
+// OR'd; across groups they're AND'd. "All" clears every selection. The actual
+// filtering now happens server-side in the explore_feed RPC (covers the whole
+// catalogue); these chips just drive the RPC args + query key.
 // ---------------------------------------------------------------------------
-const BUDGET_THRESHOLD = 1000; // $ — the below/above split point (boundary inclusive)
+// BUDGET_THRESHOLD + the trip predicates live in exploreFilterPredicates.ts (the
+// shared source of truth the SQL port is parity-tested against).
 
 type ExploreChipKind = 'month' | 'budget';
 interface ExploreChip {
@@ -768,53 +783,27 @@ const buildExploreChips = (now: Date): ExploreChip[] => {
   ];
 };
 
-// A trip happens in month "YYYY-MM" if its loose months list includes it, or if
-// the month falls within the firm start..end range (so a Jun–Jul trip matches
-// both June and July). Trips with no dates ("TBD") match no month filter.
-const tripInMonth = (trip: GroupTrip, ym: string): boolean => {
-  if (trip.date_months?.some(m => m === ym)) return true;
-  if (trip.start_date && trip.end_date) {
-    return ym >= trip.start_date.slice(0, 7) && ym <= trip.end_date.slice(0, 7);
-  }
-  return false;
-};
-
-// Collapse the three possible budget shapes into one [min, max] band: a flat
-// per-person price is a zero-width band; otherwise the min/max pair.
-const tripBudgetBand = (trip: GroupTrip): [number, number] | null => {
-  if (trip.cost_per_person != null) return [trip.cost_per_person, trip.cost_per_person];
-  const lo = trip.budget_min;
-  const hi = trip.budget_max;
-  if (lo != null || hi != null) {
-    const min = lo ?? hi!;
-    const max = hi ?? lo!;
-    return [min, max];
-  }
-  return null;
-};
-
-// "Below" = the band dips to/under the threshold; "Above" = it reaches/over it.
-// Boundary is inclusive both ways, so a trip priced exactly at the threshold
-// matches both chips.
-const tripInBudget = (trip: GroupTrip, value: string): boolean => {
-  const band = tripBudgetBand(trip);
-  if (!band) return false;
-  return value === 'below' ? band[0] <= BUDGET_THRESHOLD : band[1] >= BUDGET_THRESHOLD;
-};
-
-const applyExploreFilters = (
-  trips: GroupTrip[],
+// Collapse the chip selection into the RPC's filter args (the same shape the
+// query key carries). months are OR'd; the two budget chips map to the inclusive
+// threshold bounds the RPC expects: "below" → budgetMax (band_lo <= bound),
+// "above" → budgetMin (band_hi >= bound). Returns canonical (sorted months) so an
+// equivalent selection always yields the same key.
+const deriveExploreFilterKey = (
   chips: ExploreChip[],
   selected: Set<string>,
-): GroupTrip[] => {
-  if (selected.size === 0) return trips;
-  const months = chips.filter(c => c.kind === 'month' && selected.has(c.id)).map(c => c.value);
-  const budgets = chips.filter(c => c.kind === 'budget' && selected.has(c.id)).map(c => c.value);
-  return trips.filter(t => {
-    const monthOk = months.length === 0 || months.some(ym => tripInMonth(t, ym));
-    const budgetOk = budgets.length === 0 || budgets.some(v => tripInBudget(t, v));
-    return monthOk && budgetOk;
-  });
+): ExploreFilterKey => {
+  const months = chips
+    .filter(c => c.kind === 'month' && selected.has(c.id))
+    .map(c => c.value)
+    .sort();
+  const budgets = new Set(
+    chips.filter(c => c.kind === 'budget' && selected.has(c.id)).map(c => c.value),
+  );
+  return {
+    months,
+    budgetMin: budgets.has('above') ? BUDGET_THRESHOLD : null,
+    budgetMax: budgets.has('below') ? BUDGET_THRESHOLD : null,
+  };
 };
 
 const ExploreHeader: React.FC<{
@@ -880,11 +869,6 @@ const ExploreTripsView: React.FC<{
   onDeckScroll?: () => void;
   userId: string | null;
 }> = ({ onOpenTrip, onNavScroll, onDeckScroll, userId }) => {
-  // Cached + stale-while-revalidate. The data survives tab switches and
-  // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
-  // revalidates silently in the background when stale.
-  const { trips, meta, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useExploreTrips();
-
   // Month chips roll off the device clock; built once per mount.
   const chips = useMemo(() => buildExploreChips(new Date()), []);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -897,6 +881,21 @@ const ExploreTripsView: React.FC<{
   }, []);
   const clearChips = useCallback(() => setSelected(new Set()), []);
 
+  // Push month/budget filters into the RPC so they span the whole catalogue, not
+  // just the loaded page. The derived key drives BOTH the query cache identity and
+  // the RPC args (changing a chip re-queries the server). Memoised by primitive
+  // signature so the key reference is stable across renders that don't change the
+  // selection (otherwise useInfiniteQuery would see a new key every render).
+  const filterKey: ExploreFilterKey = useMemo(
+    () => deriveExploreFilterKey(chips, selected),
+    [chips, selected],
+  );
+
+  // Cached + stale-while-revalidate. The data survives tab switches and
+  // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
+  // revalidates silently in the background when stale.
+  const { trips, meta, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useExploreTrips(filterKey);
+
   // Pull-to-refresh: drive the spinner ONLY from the user's pull — NOT from
   // background refetches (the realtime catch-up that fires on first focus,
   // stale-while-revalidate, etc.). Those must stay silent so we don't flash a
@@ -907,10 +906,26 @@ const ExploreTripsView: React.FC<{
     try { await refetch(); } finally { setPullRefreshing(false); }
   }, [refetch]);
 
-  const filtered = useMemo(
-    () => applyExploreFilters(trips, chips, selected),
-    [trips, chips, selected],
-  );
+  // The server already applied the month/budget filters (see explore_feed RPC),
+  // so the loaded pages ARE the filtered result — no client-side month/budget
+  // pass. `filtered` stays as a name so the deck/operator-subset code below is
+  // untouched; non-month/budget client filtering (operatorTrips, style 'C') is
+  // preserved further down.
+  const filtered = trips;
+  const hasActiveFilter = selected.size > 0;
+
+  // IMPORTANT: these hooks MUST stay ABOVE the early returns below. Rules of Hooks —
+  // a conditional early return before a hook makes a later render run "fewer hooks
+  // than expected" and crashes the screen. Detect a page APPEND on the RAW
+  // (unfiltered) list, shared by both decks so a background page load preserves scroll.
+  const rawTripsRef = useRef<GroupTrip[]>([]);
+  const isAppendingPage = isAppend(rawTripsRef.current, trips);
+  rawTripsRef.current = trips;
+  // Stable load-more handler shared by both decks (keeps the !isFetchingNextPage guard consistent).
+  const handleLoadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const operatorTrips = useMemo(() => filtered.filter(t => t.hosting_style === 'C'), [filtered]);
 
   // Error on cold load (no cached data) — show retry instead of falling through
   // to the "No trips yet" empty state, which would mislead the user.
@@ -926,8 +941,10 @@ const ExploreTripsView: React.FC<{
     );
   }
 
-  // Empty only once we actually know there are no trips (not while loading).
-  if (trips.length === 0 && !isLoading) {
+  // Empty only once we actually know the CATALOGUE is empty (not while loading,
+  // and not when a filter is what emptied the result — that's handled by the
+  // "No trips match these filters" branch below, which keeps the chips visible).
+  if (trips.length === 0 && !isLoading && !hasActiveFilter) {
     return (
       <FadeInView style={styles.emptyState}>
         <Ionicons name="compass-outline" size={48} color="#B0B0B0" />
@@ -939,24 +956,10 @@ const ExploreTripsView: React.FC<{
   // The title, filter chips and "Popular" heading are static (chips come from the
   // device clock, not the DB) → render them immediately. Only the swipe-deck card
   // shows a skeleton while trips load. "Trip Operators" narrows to operator-run
-  // trips (style 'C').
-  //
-  // FadeInView wraps ONLY the skeleton branch so the 280ms entry animation plays
-  // during the initial cold load. When cache is warm (!isLoading on first render),
-  // we use a plain View — the cards' own image transitions cover the visual.
-  // Detect a page APPEND on the RAW (unfiltered) list — passed to both decks so
-  // a background page load preserves scroll even on the filtered/operator subset.
-  const rawTripsRef = useRef<GroupTrip[]>([]);
-  const isAppendingPage = isAppend(rawTripsRef.current, trips);
-  rawTripsRef.current = trips;
-
-  // Stable load-more handler shared by both decks (avoids inline-closure churn and
-  // keeps the !isFetchingNextPage guard consistent across the two decks).
-  const handleLoadMore = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-  const operatorTrips = useMemo(() => filtered.filter(t => t.hosting_style === 'C'), [filtered]);
+  // trips (style 'C'). FadeInView wraps ONLY the skeleton branch so the 280ms entry
+  // animation plays during the initial cold load; when cache is warm we use a plain
+  // View. (rawTripsRef / isAppendingPage / handleLoadMore / operatorTrips are declared
+  // above the early returns — see the Rules-of-Hooks note.)
   return (
     <View style={styles.fillFlex}>
       <ScrollView
@@ -1206,7 +1209,7 @@ export default function TripsScreen({ onBack, navControl: navControlProp }: Trip
 
   // Keep Explore + My Trips live while this screen is mounted — new trips,
   // card edits, member counts. Per-trip realtime is useTripRealtime in detail.
-  useTripsListRealtime();
+  useTripsListRealtime(currentUserId ?? undefined);
 
   const [activeTab, setActiveTab] = useState<TripsTab>('explore');
   // Tabs are lazily mounted on first visit, then kept mounted (translated

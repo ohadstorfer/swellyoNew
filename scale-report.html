@@ -123,18 +123,18 @@ const DATA = {
       ]
     },
     {
-      id:"matching", name:"Matching", overall:"red",
-      desc:"findMatchingUsers() runs supabase.from('surfers').select('*') with NO pagination — pulls every non-demo surfer row + full destinations_array JSONB to the device, filters destinations in-memory, scores each user in a JS loop. On zero matches it re-runs the same unbounded select.",
-      breaks:"The unbounded select('*') with in-memory JSONB destination filtering: every match request downloads and scans the entire surfers table on the mobile client, so cost grows linearly with total users regardless of concurrency.",
-      total:{ "1K":["green",""], "10K":["yellow","select('*') pulls all 10K rows + full destinations_array JSONB to the device per search; payload + parse slow on mobile"], "100K":["red","no limit/range fetches 100K full rows client-side + filters JSONB in-memory; multi-MB egress + JS-thread scan freezes the device"], "1M":["red","full-table read of 1M rows over mobile network with in-memory filtering is unusable; relaxed re-query doubles it"] },
-      conc:{ "100":["yellow","each of 100 searches triggers its own full-table select('*'); egress + read load multiply by table size"], "1K":["red","1K concurrent full-table scans of surfers saturate DB read throughput + egress bandwidth"], "10K":["red","10K concurrent unbounded full-table reads overwhelm Postgres connections + egress; no caching or pagination"] },
+      id:"matching", name:"Matching", overall:"yellow",
+      desc:"UPDATED 2026-06-16: live matching is the swelly-trip-planning-copy edge fn /find-matches, which now calls the in-DB match_surfers() RPC — filter + score + rank + limit run in Postgres and only the top-3 page (+ total_count) is returned. The whole-surfers-table egress to the client is GONE. But the RPC still seq-scans every surfer per call with fuzzy per-row predicates + a correlated destinations_array JSONB subquery, so per-call cost is still O(total users). (The client matchingService.ts select('*') is DEAD CODE — never the live path; it was mis-cited as the bottleneck in the prior version of this report.)",
+      breaks:"match_surfers seq-scans + scores every surfer per call (fuzzy mc_* country/board/level fns + per-row destinations_array JSONB subquery, none indexable), so latency still grows linearly with total users — but it now returns only 3 rows, not the whole table, so the multi-MB client egress and on-device scan are eliminated. Remaining O(N) is the tier-2 work.",
+      total:{ "1K":["green",""], "10K":["green","in-DB match_surfers scan of ~10K rows with fuzzy fns + JSONB subquery is sub-second; only 3 rows returned"], "100K":["yellow","per-row fuzzy predicates + correlated JSONB subquery over ~100K surfers per call, no usable index — seconds-ish, but egress is just the top-3 page"], "1M":["red","O(N) seq-scan + per-row JSONB subquery over 1M surfers per call; computed/fuzzy predicates can't use any index — seconds per match"] },
+      conc:{ "100":["green","matching is server-side now (3-row egress, one round-trip); 100 concurrent match_surfers calls are comfortable"], "1K":["yellow","1K concurrent O(N) match_surfers scans contend for CPU on the single Postgres"], "10K":["red","10K concurrent full-scan RPCs saturate Postgres CPU/connections; no index, no caching"] },
       ev:[
-        ["Main findMatchingUsers query select('*') with no pagination — only optional in/gte filters, never bounded","src/services/matching/matchingService.ts:930"],
-        ["V2 query select('*') with no limit/range fetches every non-demo surfer row and all columns","src/services/matching/matchingService.ts:693"],
-        ["Destination filtering done in-memory over full result set (JSONB not filterable in SQL); regex per destination per surfer","src/services/matching/matchingService.ts:1204"],
-        ["On zero matches re-runs the entire unfiltered select('*') a second time, doubling the full-table read","src/services/matching/matchingService.ts:1113"],
-        ["Scoring loop iterates every returned surfer in JS on the client device","src/services/matching/matchingService.ts:1286"],
-        ["Matching invoked client-side on chat completion — all egress + CPU is on-device","src/screens/TripPlanningChatScreen.tsx:786"]
+        ["Live matching = edge fn /find-matches → match_surfers() RPC (filter+score+rank+limit in Postgres), returns top-3 + total_count instead of shipping every surfer row","supabase/functions/swelly-trip-planning-copy/index.ts:510"],
+        ["match_surfers seq-scans surfers applying per-row fuzzy predicates (mc_country_from_match / mc_board_pass / mc_surf_level_pass) — substring/fuzzy matching can't be index-served","supabase/migrations/20260605120000_match_surfers.sql:162-169"],
+        ["Per-row correlated JSONB subquery over destinations_array for score + area match — O(N) array work per call, un-indexable","supabase/migrations/20260605120000_match_surfers.sql:170-194"],
+        ["Egress fixed: only LIMIT p_limit (3) rows + count(*) over() total returned, not the full surfers table to the client","supabase/migrations/20260605120000_match_surfers.sql:208-213"],
+        ["Client matchingService.ts select('*') + in-memory JS scoring is DEAD CODE — not on the live path","src/services/matching/matchingService.ts:881"],
+        ["Tier 2 (pending) for sub-linear: denormalized GIN-indexed destination_countries + normalized filter cols → index to a candidate superset, then apply the exact fuzzy predicate",""]
       ]
     },
     {
@@ -192,6 +192,22 @@ const DATA = {
         ["getConversations fetches EVERY conversation_member row for the user with no pagination before paging conversations — unbounded for many-group users","src/services/messaging/messagingService.ts:309-316"],
         ["getConversationsUpdatedSince is N+1: per-conversation last-message + member-read + exact-count query, run on every reconnect","src/services/messaging/messagingService.ts:2605-2646"],
         ["Send path is robust: idempotent upsert on (sender_id, client_id) + persistent outbox flushed on reconnect — not a scaling bottleneck","src/services/messaging/messagingService.ts:760-851"]
+      ]
+    },
+    {
+      id:"typing-plan", name:"Group Typing — Fix Plan", overall:"green", isPlan:true,
+      verdict:"Safe for a small company on Supabase. All four steps are client-only JS (OTA-shippable): no migrations, no edge functions, no schema/trigger changes. They REDUCE Supabase usage — ~6x fewer Realtime broadcast messages (step 1) and one fewer GoTrue auth round-trip per typing event (step 2) — so they lower cost, not raise it. Steps 3-4 are pure on-device (zero backend cost). At small-company scale typing was already survivable; this just adds headroom and fixes the stuck-indicator correctness bug. Only note: client-only means it ships in the app bundle / OTA, not a server flip. WhatsApp keeps the same O(N) per-member fan-out — it just makes each event cheap (no re-auth) and infrequent (3s keepalive) and caps group size; this plan does the same.",
+      cost:[
+        ["Per-typer send rate","~2/sec (500ms keepalive)","~0.33/sec (3s keepalive)"],
+        ["Received per client @100 typers","~200/sec","~33/sec"],
+        ["Room-wide @100 typers","~20,000/sec","~3,300/sec"],
+        ["Auth round-trips per typing event","1 (auth.getUser)","0 (cached id)"]
+      ],
+      steps:[
+        {n:"1", t:"Keepalive 500ms → 3000ms (+ idle-stop 3s → 5s)", effort:"XS", change:"Match WhatsApp cadence. Bump the screen typing throttle and the service-side rate limit from 500ms to 3000ms; extend the trailing stopTyping from 3s to 5s. ~6x fewer broadcasts instantly — the biggest single win.", files:"DirectGroupChat.tsx:1700 (timeSinceLastSent>=500), :1721 (3000ms trailing stop); messagingService.ts:2236 (now-lastEvent<500); mirror in DirectMessageScreen.tsx", verify:"Type continuously; dev log shows ~1 '[MessagingService] Typing sent' per 3s, not ~2/sec."},
+        {n:"2", t:"Drop auth.getUser() from the typing hot path", effort:"S", change:"startTyping/stopTyping call supabase.auth.getUser() (a GoTrue network round-trip) on every event, before the rate check. Pass a cached userId instead — reuse currentUserIdRef from the read-receipt work, or the screen's existing 'me'. Safest high-value fix; independent of step 1.", files:"messagingService.ts:2221 startTyping / :2257 stopTyping (add userId param); callers in DirectGroupChat.tsx + DirectMessageScreen.tsx pass the cached id", verify:"Network inspector shows no /auth/v1/user call while typing; indicator still works."},
+        {n:"3", t:"Receiver-side 6s auto-expiry timer", effort:"S", change:"Stop events are best-effort (a backgrounded / disconnected typer never sends one). Add a per-userId setTimeout(6000) that clears the typer if no refresh arrives; reset on each typing event, clear on explicit stop. Closes the one correctness gap vs WhatsApp.", files:"DirectGroupChat.tsx onTyping handler ~:827 (+ DirectMessageScreen.tsx)", verify:"Start typing on device B, kill B's network; the indicator on A clears within ~6s."},
+        {n:"4", t:"Display: 'N people are typing' (optional, do last)", effort:"M", change:"Track typing userIds as a Set instead of the boolean isTyping; when more than 2 are typing, render 'N people are typing' instead of names. Pure UI/display — no network change.", files:"DirectGroupChat.tsx isTyping state + TypingIndicator :2832", verify:"3 accounts type at once; header shows '3 people are typing'."}
       ]
     },
     {
@@ -290,6 +306,29 @@ function renderFlow(f){
   c.parentElement.scrollTop=0;
 }
 
+function renderPlan(f){
+  const c=document.getElementById("content");
+  let h=`<div class="crumb">Implementation plan</div><h2><span class="dot ${f.overall}"></span>${esc(f.name)}</h2>`;
+  h+=`<div class="breaks"><div class="lbl">Fit for a small company on Supabase</div><div class="txt">${esc(f.verdict)}</div></div>`;
+  h+=`<div class="secttl">Typing cost — before vs after</div><table><thead><tr><th class="colhead"></th><th>Before</th><th>After</th></tr></thead><tbody>`;
+  f.cost.forEach(([label,before,after])=>{
+    h+=`<tr><td class="cell"><b>${esc(label)}</b></td><td class="cell yellow"><span class="reason" style="margin-top:0">${esc(before)}</span></td><td class="cell green"><span class="reason" style="margin-top:0">${esc(after)}</span></td></tr>`;
+  });
+  h+=`</tbody></table>`;
+  h+=`<div class="secttl">Steps — client-only (no DB / edge / migration)</div><div class="ovgrid">`;
+  f.steps.forEach(s=>{
+    h+=`<div class="ovrow" style="cursor:default;align-items:flex-start;flex-direction:column;gap:7px">`;
+    h+=`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span class="dot green"></span><span style="font-weight:600">${esc(s.n)}. ${esc(s.t)}</span><span class="reason" style="margin:0;color:var(--accent)">effort ${esc(s.effort)}</span></div>`;
+    h+=`<span class="reason" style="margin:0">${esc(s.change)}</span>`;
+    h+=`<span class="loc">${esc(s.files)}</span>`;
+    h+=`<span class="reason" style="margin:0"><b>Verify:</b> ${esc(s.verify)}</span>`;
+    h+=`</div>`;
+  });
+  h+=`</div>`;
+  c.innerHTML=h;
+  c.parentElement.scrollTop=0;
+}
+
 function renderOverview(){
   const c=document.getElementById("content");
   const flows=DATA.flows.filter(f=>!f.isOverview);
@@ -321,7 +360,7 @@ function buildNav(){
 function select(id){
   document.querySelectorAll(".navitem").forEach(n=>n.classList.toggle("active",n.dataset.id===id));
   const f=DATA.flows.find(x=>x.id===id);
-  if(f.isOverview) renderOverview(); else renderFlow(f);
+  if(f.isOverview) renderOverview(); else if(f.isPlan) renderPlan(f); else renderFlow(f);
   location.hash=id;
 }
 

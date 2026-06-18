@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Messaging System — Deep Review</title>
+<style>
+  :root {
+    --bg: #0f1720;
+    --card: #18222e;
+    --line: #26323f;
+    --text: #e7edf3;
+    --muted: #9fb0c0;
+    --high: #ff5d5d;
+    --med: #ffb84d;
+    --low: #5db0ff;
+    --good: #41d693;
+    --accent: #2dd4bf;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 40px 22px 80px; }
+  h1 { font-size: 30px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 15px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 34px; font-size: 13px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .d-high { background: var(--high); }
+  .d-med { background: var(--med); }
+  .d-low { background: var(--low); }
+  .d-good { background: var(--good); }
+
+  .summary {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 20px 22px; margin-bottom: 34px;
+  }
+  .summary h2 { margin: 0 0 12px; font-size: 17px; }
+  .summary ul { margin: 0; padding-left: 18px; }
+  .summary li { margin-bottom: 7px; color: var(--text); }
+
+  section { margin-bottom: 30px; }
+  .area-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 20px; margin: 0 0 4px;
+  }
+  .area-emoji { font-size: 22px; }
+  .area-desc { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-left-width: 4px; border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card.high { border-left-color: var(--high); }
+  .card.med { border-left-color: var(--med); }
+  .card.low { border-left-color: var(--low); }
+  .card.good { border-left-color: var(--good); }
+
+  .card .head { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+  .tag {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .5px;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 20px;
+    white-space: nowrap;
+  }
+  .tag.high { background: rgba(255,93,93,.15); color: var(--high); }
+  .tag.med { background: rgba(255,184,77,.15); color: var(--med); }
+  .tag.low { background: rgba(93,176,255,.15); color: var(--low); }
+  .tag.good { background: rgba(65,214,147,.15); color: var(--good); }
+  .card .title { font-weight: 650; font-size: 15px; }
+  .card .body { color: var(--text); font-size: 14px; margin: 2px 0 0; }
+  .card .fix { color: var(--muted); font-size: 13px; margin-top: 7px; }
+  .card .fix b { color: var(--accent); font-weight: 600; }
+
+  .good-block { background: rgba(65,214,147,.07); border-color: rgba(65,214,147,.25); }
+  .good-block .title { color: var(--good); }
+  .good-list { margin: 4px 0 0; padding-left: 18px; }
+  .good-list li { margin-bottom: 5px; font-size: 14px; }
+
+  footer { color: var(--muted); font-size: 12.5px; margin-top: 50px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Messaging System — Deep Review</h1>
+  <p class="sub">A plain-English health check of chat: speed, crashes, refresh, heavy traffic, and long conversations. Reviewed by 5 focused agents · June 2026.</p>
+
+  <div class="legend">
+    <span><i class="dot d-high"></i> Needs attention</span>
+    <span><i class="dot d-med"></i> Worth fixing</span>
+    <span><i class="dot d-low"></i> Minor / polish</span>
+    <span><i class="dot d-good"></i> Already good</span>
+  </div>
+
+  <div class="summary">
+    <h2>The short version</h2>
+    <ul>
+      <li><b>Overall it's in good shape.</b> The hard parts — caching, no duplicate chats, clean reconnects — are already done well.</li>
+      <li><b>Biggest single win:</b> the chat list shows every conversation at once instead of only the visible ones. This gets slow for people with many chats.</li>
+      <li><b>One bug can freeze the chat:</b> if sending a message times out, the screen can get stuck loading until you close and reopen it.</li>
+      <li><b>No safety net:</b> if one message fails to draw, the whole app can go to a blank screen with no "try again".</li>
+      <li><b>Heavy traffic is mostly handled,</b> but a few places do many small database calls at once that could be one.</li>
+    </ul>
+  </div>
+
+  <!-- LOAD TIMES -->
+  <section>
+    <div class="area-title"><span class="area-emoji">⏱️</span> Load times</div>
+    <p class="area-desc">How fast chats open and how quickly the list appears.</p>
+
+    <div class="card good good-block">
+      <div class="head"><span class="tag good">Good</span><span class="title">Opening feels instant</span></div>
+      <ul class="good-list">
+        <li>The chat list shows saved data immediately, then quietly refreshes in the background.</li>
+        <li>If the saved data is fresh (under 5 min), it skips the refresh entirely.</li>
+        <li>The top 10 chats are pre-loaded so they open with no wait.</li>
+        <li>A skeleton placeholder shows instead of a blank screen.</li>
+      </ul>
+    </div>
+
+    <div class="card high">
+      <div class="head"><span class="tag high">Needs attention</span><span class="title">Refresh does many small database calls at once</span></div>
+      <p class="body">Every time the app comes back to the foreground or a message arrives, it asks the database one question per chat — up to three questions each. For someone with 50 chats that's a burst of calls that should be a single one.</p>
+      <p class="fix"><b>Fix:</b> Combine them into one database call that returns everything at once.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Two login checks back-to-back</span></div>
+      <p class="body">Before loading chats, the app verifies who you are twice in a row, adding a small delay on every load.</p>
+      <p class="fix"><b>Fix:</b> Use the already-known login info instead of asking again.</p>
+    </div>
+
+    <div class="card low">
+      <div class="head"><span class="tag low">Minor</span><span class="title">Starting a new chat re-fetches the whole list</span></div>
+      <p class="body">Tapping someone to start a chat reloads all conversations just to check if one already exists — that info is already on the screen.</p>
+      <p class="fix"><b>Fix:</b> Check the chats already in memory first.</p>
+    </div>
+
+    <div class="card low">
+      <div class="head"><span class="tag low">Minor</span><span class="title">Pre-loading top chats one at a time</span></div>
+      <p class="body">The top 10 chats are warmed up one after another instead of together, so a slow one holds up the rest.</p>
+      <p class="fix"><b>Fix:</b> Warm them all up in parallel.</p>
+    </div>
+  </section>
+
+  <!-- CRASHES -->
+  <section>
+    <div class="area-title"><span class="area-emoji">💥</span> Crashes &amp; stability</div>
+    <p class="area-desc">Where the chat can break, freeze, or show errors.</p>
+
+    <div class="card good good-block">
+      <div class="head"><span class="tag good">Good</span><span class="title">Solid foundations</span></div>
+      <ul class="good-list">
+        <li>Failed messages stay visible with a "retry" instead of vanishing.</li>
+        <li>Network drops are caught and re-synced automatically.</li>
+        <li>Logout cleanly tears everything down in the right order.</li>
+        <li>Duplicate messages are well guarded against.</li>
+      </ul>
+    </div>
+
+    <div class="card high">
+      <div class="head"><span class="tag high">Needs attention</span><span class="title">Send timeout can freeze the chat</span></div>
+      <p class="body">If sending a message takes too long, the error is thrown in a way the app can't catch. The result: the loading spinner never stops and the send button stays disabled until you close and reopen the chat.</p>
+      <p class="fix"><b>Fix:</b> Handle the timeout the normal way so the screen recovers on its own.</p>
+    </div>
+
+    <div class="card high">
+      <div class="head"><span class="tag high">Needs attention</span><span class="title">No safety net around the chat screens</span></div>
+      <p class="body">If a single message fails to draw (e.g. odd image data), there's nothing to catch it — the whole app can go to a blank white screen with no way back.</p>
+      <p class="fix"><b>Fix:</b> Wrap the chat screens in a "Something went wrong — tap to retry" guard.</p>
+    </div>
+
+    <div class="card high">
+      <div class="head"><span class="tag high">Needs attention</span><span class="title">Trip "approve / decline" errors aren't caught</span></div>
+      <p class="body">Approving or declining a trip commitment inside a chat can fail silently or, in worse cases, crash, because the error isn't handled.</p>
+      <p class="fix"><b>Fix:</b> Catch the error and show a simple "Couldn't do that" message.</p>
+    </div>
+
+    <div class="card low">
+      <div class="head"><span class="tag low">Minor</span><span class="title">Rare stale data after a delete</span></div>
+      <p class="body">If a message is deleted at the exact moment another device edits it, slightly outdated info can get saved locally. Not a crash.</p>
+      <p class="fix"><b>Fix:</b> Skip the update when the message no longer exists.</p>
+    </div>
+  </section>
+
+  <!-- TARGETING & REFRESH -->
+  <section>
+    <div class="area-title"><span class="area-emoji">🎯</span> Targeting &amp; refresh</div>
+    <p class="area-desc">How a new message reaches the right chat and how the list stays up to date.</p>
+
+    <div class="card good good-block">
+      <div class="head"><span class="tag good">Good</span><span class="title">Routing is clean</span></div>
+      <ul class="good-list">
+        <li>One channel per chat, reused — no duplicates.</li>
+        <li>New messages always land in the correct conversation.</li>
+        <li>The list moves the latest chat to the top instantly.</li>
+        <li>Unread counts get re-checked against the database to stay accurate.</li>
+      </ul>
+    </div>
+
+    <div class="card high">
+      <div class="head"><span class="tag high">Needs attention</span><span class="title">A "lost connection" bug fix is built but not shipped</span></div>
+      <p class="body">When you leave the last open chat, the live connection can briefly drop, and messages arriving in that gap are missed. The fix is already written but hasn't been released yet.</p>
+      <p class="fix"><b>Fix:</b> Ship the connection fix that's already on the branch.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">No pull-to-refresh on the chat list</span></div>
+      <p class="body">If a message is ever missed, there's no way to manually refresh — you have to background and reopen the app.</p>
+      <p class="fix"><b>Fix:</b> Add the standard pull-down-to-refresh gesture.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Returning to the app resets your scroll spot</span></div>
+      <p class="body">Coming back to the app reloads and re-sorts the whole list, which can jump you away from where you were scrolled.</p>
+      <p class="fix"><b>Fix:</b> Do a lighter "what changed" sync instead of a full reload.</p>
+    </div>
+
+    <div class="card low">
+      <div class="head"><span class="tag low">Minor</span><span class="title">Unread count briefly counts twice</span></div>
+      <p class="body">A new message can bump the unread badge by an extra one for a fraction of a second before it self-corrects.</p>
+      <p class="fix"><b>Fix:</b> Let only the authoritative re-check set the number.</p>
+    </div>
+  </section>
+
+  <!-- CONCURRENCY -->
+  <section>
+    <div class="area-title"><span class="area-emoji">🚦</span> Heavy traffic (many typing &amp; sending at once)</div>
+    <p class="area-desc">How the system holds up when lots of people are active together.</p>
+
+    <div class="card good good-block">
+      <div class="head"><span class="tag good">Good</span><span class="title">Built to scale</span></div>
+      <ul class="good-list">
+        <li>A busy person with 200 chats uses about 4 live connections, not 200.</li>
+        <li>Typing signals are throttled so they don't flood.</li>
+        <li>"Who's online" tracking is capped and efficient.</li>
+        <li>Rapid-fire sends can't create duplicates on the server.</li>
+      </ul>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Double-tap can send twice (briefly)</span></div>
+      <p class="body">The "don't send twice" lock turns on a moment too late, so a fast double-tap can slip a second send through before it engages. The server prevents true duplicates, but the screen can flicker an extra bubble.</p>
+      <p class="fix"><b>Fix:</b> Lock the send button the instant it's tapped.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Whole message list redraws on small changes</span></div>
+      <p class="body">When a read receipt or similar small change happens, every visible message bubble redraws instead of just the affected one — causes lag during busy chats on older phones.</p>
+      <p class="fix"><b>Fix:</b> Make each bubble redraw only when its own data changes.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Bursts trigger many database calls</span></div>
+      <p class="body">When a burst of messages arrives, the app recalculates unread counts with two database calls per chat — for 50 chats that's 100 calls at once.</p>
+      <p class="fix"><b>Fix:</b> One database call that returns all the counts together.</p>
+    </div>
+
+    <div class="card low">
+      <div class="head"><span class="tag low">Minor</span><span class="title">"Stopped typing" signal isn't throttled</span></div>
+      <p class="body">Start-typing is rate-limited but stop-typing isn't, so busy chats send a bit more signal traffic than needed.</p>
+      <p class="fix"><b>Fix:</b> Apply the same throttle to the stop signal.</p>
+    </div>
+  </section>
+
+  <!-- LONG CONVERSATIONS -->
+  <section>
+    <div class="area-title"><span class="area-emoji">📜</span> Long conversations &amp; big accounts</div>
+    <p class="area-desc">Chats with thousands of messages, and accounts with many chats.</p>
+
+    <div class="card good good-block">
+      <div class="head"><span class="tag good">Good</span><span class="title">Long chats are handled well</span></div>
+      <ul class="good-list">
+        <li>Messages load in pages as you scroll up, not all at once.</li>
+        <li>The message screen only renders what's on screen.</li>
+        <li>Photos/videos load lazily with quick thumbnails first.</li>
+        <li>Saved history is capped on disk so storage stays small.</li>
+      </ul>
+    </div>
+
+    <div class="card high">
+      <div class="head"><span class="tag high">Needs attention</span><span class="title">The chat LIST renders every chat at once</span></div>
+      <p class="body">Unlike the message screen, the conversation list draws all chats together instead of only the visible ones. With 85+ chats this is the single heaviest load on the screen — each row has an avatar, animations, and a badge.</p>
+      <p class="fix"><b>Fix:</b> Switch the list to a virtualized list that only draws visible rows.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Open chats keep growing in memory</span></div>
+      <p class="body">Scrolling far up in a long chat keeps every loaded message in memory for the session — fine for text, heavier for image-rich chats on old devices.</p>
+      <p class="fix"><b>Fix:</b> Keep only the most recent ~200 in memory and reload older ones if needed.</p>
+    </div>
+
+    <div class="card med">
+      <div class="head"><span class="tag med">Worth fixing</span><span class="title">Message screen keeps a wide render window</span></div>
+      <p class="body">The chat keeps a large buffer of off-screen messages rendered, which adds memory pressure on image-heavy threads.</p>
+      <p class="fix"><b>Fix:</b> Reduce the render window size.</p>
+    </div>
+
+    <div class="card low">
+      <div class="head"><span class="tag low">Minor</span><span class="title">Cache cleanup reads everything one by one</span></div>
+      <p class="body">Tidying up saved chats reads each saved chat separately to total up size, which briefly works the phone harder than needed.</p>
+      <p class="fix"><b>Fix:</b> Keep a small running total instead of recounting.</p>
+    </div>
+  </section>
+
+  <footer>
+    Reviewed across 5 areas: load times · crashes · targeting &amp; refresh · heavy traffic · long conversations.<br>
+    Plain-English summary — see code findings for file references.
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Swellyo — How We Scale</title>
+<style>
+  :root{
+    --bg:#f5f7fa; --card:#ffffff; --ink:#16202b; --muted:#62707f; --line:#e6ebf1;
+    --accent:#0ea5e9; --accent-soft:#e6f6fd;
+    --green:#15803d; --green-bg:#e7f6ec; --green-dot:#22c55e;
+    --amber:#b45309; --amber-bg:#fdf3e0; --amber-dot:#f59e0b;
+    --red:#b91c1c;  --red-bg:#fdeaea;  --red-dot:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:40px 24px 100px}
+  .hero{margin-bottom:8px}
+  .kicker{font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:38px;line-height:1.15;margin:8px 0 14px;font-weight:800;letter-spacing:-.5px}
+  .lede{font-size:18px;color:var(--muted);max-width:760px;margin:0}
+  .meta{font-size:13px;color:var(--muted);margin-top:14px}
+
+  .tldr{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px 26px;margin:28px 0 8px;
+    box-shadow:0 1px 2px rgba(16,32,43,.04)}
+  .tldr h2{margin:0 0 14px;font-size:14px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+  .tldr ul{margin:0;padding-left:0;list-style:none}
+  .tldr li{display:flex;gap:12px;padding:8px 0;align-items:flex-start}
+  .tldr li .ic{flex:0 0 26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;margin-top:1px}
+  .ic.g{background:var(--green-bg);color:var(--green)} .ic.a{background:var(--amber-bg);color:var(--amber)} .ic.r{background:var(--red-bg);color:var(--red)}
+  .tldr li b{font-weight:700}
+
+  .sectlabel{font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin:46px 0 6px}
+  .secthint{color:var(--muted);font-size:14px;margin:0 0 18px}
+
+  /* heat map */
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:0 0 16px}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .pill{width:12px;height:12px;border-radius:50%}
+  .pill.g{background:var(--green-dot)} .pill.a{background:var(--amber-dot)} .pill.r{background:var(--red-dot)}
+
+  .grid{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(16,32,43,.04)}
+  table{width:100%;border-collapse:collapse}
+  thead th{background:#fbfcfe;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;
+    padding:13px 12px;text-align:center;border-bottom:1px solid var(--line)}
+  thead th.who{text-align:left;width:230px}
+  tbody td{padding:0;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  .who-cell{padding:13px 14px;font-weight:600;font-size:14.5px;line-height:1.3}
+  .cell{height:100%;padding:12px 11px;text-align:center;cursor:default;position:relative}
+  .cell .dot{width:15px;height:15px;border-radius:50%;margin:0 auto 5px}
+  .cell .nt{font-size:11px;line-height:1.3;color:var(--muted);display:block}
+  .cell.g{background:var(--green-bg)} .cell.a{background:var(--amber-bg)} .cell.r{background:var(--red-bg)}
+  .cell.g .dot{background:var(--green-dot)} .cell.a .dot{background:var(--amber-dot)} .cell.r .dot{background:var(--red-dot)}
+
+  /* priority fixes */
+  .fixes{display:grid;gap:14px}
+  .fix{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;gap:16px;
+    box-shadow:0 1px 2px rgba(16,32,43,.04)}
+  .fix .rank{flex:0 0 34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent);
+    font-weight:800;font-size:17px;display:flex;align-items:center;justify-content:center}
+  .fix .body{flex:1}
+  .fix h3{margin:0 0 4px;font-size:16px}
+  .fix p{margin:0;color:var(--muted);font-size:14.5px}
+  .tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}
+  .tag{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:20px;letter-spacing:.3px}
+  .tag.eff-low{background:var(--green-bg);color:var(--green)}
+  .tag.eff-medium{background:var(--amber-bg);color:var(--amber)}
+  .tag.eff-high{background:var(--red-bg);color:var(--red)}
+  .tag.fixes-n{background:#eef2f7;color:var(--muted)}
+
+  /* detail cards */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;margin-bottom:16px;overflow:hidden;
+    box-shadow:0 1px 2px rgba(16,32,43,.04)}
+  .card .head{display:flex;align-items:center;gap:14px;padding:18px 22px}
+  .card .head .nm{flex:1}
+  .card .head h3{margin:0;font-size:18px}
+  .card .head .sub{margin:3px 0 0;color:var(--muted);font-size:14px}
+  .verdict{font-size:12px;font-weight:800;padding:5px 11px;border-radius:20px;white-space:nowrap}
+  .verdict.g{background:var(--green-bg);color:var(--green)}
+  .verdict.a{background:var(--amber-bg);color:var(--amber)}
+  .verdict.r{background:var(--red-bg);color:var(--red)}
+  .card .body{padding:0 22px 20px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:4px}
+  @media(max-width:680px){.row2{grid-template-columns:1fr}.lede{font-size:16px}h1{font-size:30px}thead th.who{width:auto}}
+  .block .lbl{font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;gap:6px}
+  .block p{margin:0;font-size:14.5px;color:#39434e}
+  .block.risk{background:#fbfcfe;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .block.risk .lbl{color:var(--accent)}
+  details.eng{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+  details.eng summary{cursor:pointer;font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);list-style:none}
+  details.eng summary::-webkit-details-marker{display:none}
+  details.eng summary::before{content:"▸ ";color:var(--accent)}
+  details.eng[open] summary::before{content:"▾ "}
+  details.eng ul{margin:10px 0 0;padding-left:18px}
+  details.eng li{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#54616e;line-height:1.5;margin-bottom:5px;word-break:break-word}
+  .foot{margin-top:50px;color:var(--muted);font-size:13px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="kicker">Scaling Review</div>
+    <h1>Will Swellyo hold up as it grows?</h1>
+    <p class="lede">A plain-English look at how every part of the app behaves with 1, 10, 100, 1,000 and 10,000 users — what stays smooth, what starts to strain, and what to fix first. No jargon.</p>
+    <div class="meta">Reviewed by an 11-expert team that read the real code · 17 June 2026</div>
+  </div>
+
+  <div class="tldr">
+    <h2>The short version</h2>
+    <ul>
+      <li><span class="ic g">✓</span><div><b>Today you're fine.</b> At ~500 active users (where you are now) and up to a few hundred, everything feels instant. Nothing needs fixing to keep today's users happy.</div></li>
+      <li><span class="ic a">!</span><div><b>First strain shows around 1,000 active users.</b> Mostly at busy moments — the trips feed refreshes a lot, chat badges lag for heavy users, and some phone alerts arrive a few minutes late. Annoying, not broken.</div></li>
+      <li><span class="ic r">✕</span><div><b>Real trouble lands around 10,000 users.</b> Eight of the eleven parts hit a wall during busy peaks: laggy chats, a flickering trips feed, late notifications, stalled AI replies, and the live "online/instant" connection hitting its ceiling.</div></li>
+      <li><span class="ic a">!</span><div><b>The good news:</b> almost every red is the <b>same handful of root causes</b> repeated. Fix ~5 things (mostly medium effort) and the app comfortably clears 10,000+.</div></li>
+    </ul>
+  </div>
+
+  <div class="sectlabel">The whole app at a glance</div>
+  <p class="secthint">Each row is one part of the app. Each column is how it behaves at that many users. Hover a cell for the one-line reason.</p>
+  <div class="legend">
+    <span><i class="pill g"></i> Smooth — users feel nothing</span>
+    <span><i class="pill a"></i> Strained — slower, occasional hiccups, still works</span>
+    <span><i class="pill r"></i> Breaks — timeouts, lag, or runaway cost at busy peaks</span>
+  </div>
+  <div class="grid">
+    <table>
+      <thead><tr>
+        <th class="who">Part of the app</th>
+        <th>1</th><th>10</th><th>100</th><th>1,000</th><th>10,000</th>
+      </tr></thead>
+      <tbody id="heat"></tbody>
+    </table>
+  </div>
+
+  <div class="sectlabel">Fix these first</div>
+  <p class="secthint">Ranked by impact. Notice how the top fixes each repair more than one red box at once.</p>
+  <div class="fixes" id="fixes"></div>
+
+  <div class="sectlabel">Part-by-part detail</div>
+  <p class="secthint">Worst-at-scale first. Each card: what it does, when it breaks, and the one thing to fix. Engineers can expand the code evidence.</p>
+  <div id="cards"></div>
+
+  <div class="foot">Generated from a code-level review of every subsystem · statuses reflect behaviour at busy peaks, not idle averages.</div>
+</div>
+
+<script>
+const M = {g:'g',green:'g',yellow:'a',amber:'a',a:'a',red:'r',r:'r'};
+const VERDICT = {g:'SMOOTH TO 10K',a:'STRAINS AT SCALE',r:'NEEDS WORK FOR 10K'};
+
+// ordered worst-at-10k first, foundational parts first
+const SUB = [
+  {
+    name:"The shared database & permission rules",
+    plain:"The one database that stores every surfer, chat, trip and message — and the rules deciding who can see what.",
+    t:{1:["green","Instant, tons of room."],10:["green","Nobody notices anything."],100:["green","Fast and smooth."],1000:["amber","Search & busy chats feel a touch slower at peak."],10000:["red","Search drags; busy moments hit the server's limit and error."]},
+    breaks:"Two things hurt past a few thousand users. (1) The “find me surfers” search reads the entire surfer list and re-scores everyone every time, so it gets heavier as the surfer base grows. (2) The database only lets a fixed number of people talk to it at the exact same instant; during busy spikes, new actions wait in line and some users see errors or spinners. The smallest server plan won’t carry 10,000 users.",
+    risk:"The permission rules run on every chat, profile and message and re-check “who are you?” repeatedly instead of once, plus there are leftover duplicate rules stacked on the busiest tables. This quietly makes every read heavier as data grows — and it’s the cheapest high-impact thing to fix.",
+    eff:"medium",
+    ev:["match_surfers RPC full-scans + per-row JSONB scores all surfers (539 today); no index serves the scoring","live: max_connections=60, auth limited to ~10 connections","advisors: 86 auth_rls_initplan + 17 duplicate permissive policies on messages/surfers/users","surfers carries 4 SELECT policies incl per-row block EXISTS"]
+  },
+  {
+    name:"The live connection (online dots & instant updates)",
+    plain:"The always-on link that powers green “online” dots, “typing…”, and messages appearing instantly without refreshing.",
+    t:{1:["green","Instant and effortless."],10:["green","Live updates feel instant."],100:["green","Each person keeps only a few links open."],1000:["amber","When most are online at once, the server feels busy."],10000:["red","Too many people online at the same time for today’s plan."]},
+    breaks:"What matters here is not total signups but how many people are using the app at the very same moment. The shared live-update service has a fixed ceiling on simultaneous connections, and every online person also writes a “last seen” stamp every minute. Past roughly a couple thousand people online at once, users start seeing stale online dots, slightly delayed messages, and occasional “reconnecting” hiccups until the plan is upgraded.",
+    risk:"Load is driven by how many are online at the same instant, and the live-update service has a hard connection cap. Before any launch that could put thousands online at once, raise that cap (a paid-plan setting) and run a load test — otherwise people drop off the live connection.",
+    eff:"medium",
+    ev:["presence rescoped to per-user topics (O(N) not O(N^2))","60s heartbeat writes last_seen per online user — DB writes scale with concurrency","MAX_SUBSCRIPTIONS=50 caps watched peers per client","per-user inbox broadcast bounds channels to ~3-4 per active user"]
+  },
+  {
+    name:"Direct messages (1:1 chat)",
+    plain:"Two people texting one-on-one, with the chat list, “seen” ticks and “typing…” dots.",
+    t:{1:["green","Instant, from the phone’s cache."],10:["green","Everyone chats smoothly."],100:["green","Opening a chat feels instant."],1000:["amber","Chat list slower to refresh for people in many chats."],10000:["red","The live link strains; messages & badges lag by seconds."]},
+    breaks:"Reading inside a single chat stays fast at every size (each chat is cached on the phone, ~30 messages at a time). The strain is in the chat LIST: whenever a new message touches any of your chats — or your phone reconnects — the app asks the server about each of your chats one at a time instead of all at once. Invisible for a few chats; for a heavy user in many trips + DMs, dozens of little requests fire together, so around 1,000+ users the list feels slow to refresh.",
+    risk:"On every new message (or reconnect) the app queries each of your chats separately instead of in one summary request. The very first list load already does it the efficient way — the live-update and reconnect paths just don’t yet. Make them use the same single batched request.",
+    eff:"medium",
+    ev:["getConversationsUpdatedSince: per-conversation last-message + member + exact-count, runs on reconnect & every inbox change","broadcast mode default; each inbox event fans out, debounced 400ms","initial getConversations IS optimized (batched RPC + single capped unread query)","one private inbox channel per user — scales with users, not conversations"]
+  },
+  {
+    name:"Chat inbox (the list of all your chats)",
+    plain:"The screen showing all your chats in one list — latest message, time, unread badge — updating live.",
+    t:{1:["green","Instant, loads from cache."],10:["green","Smooth, live updates instant."],100:["green","Even users with many chats are fine."],1000:["amber","Heavy-chat users see slower updates & badge lag."],10000:["red","Heavy users & busy group chats get visibly laggy updates."]},
+    breaks:"This strains for individual heavy users (roughly 50+ chats) and people in busy group chats, not the app as a whole. When a message lands, the app refreshes each affected chat with several lookups one chat at a time — then redundantly recounts the unread badges a second time. For someone with many chats, badges and previews visibly lag behind the real messages. Importantly this is mostly each phone doing extra work, not a central server melting down, and nothing gets corrupted.",
+    risk:"On each new message the app refreshes chats one at a time and then double-counts the unread badges. Recount everything in one combined request (and stop the double count), and draw only the rows actually on screen.",
+    eff:"medium",
+    ev:["getConversationsUpdatedSince: up to 3 round-trips per conversation","handleInboxChange computes unread, then fires getUnreadCount per conversation AGAIN","ConversationsScreen renders all loaded rows (not virtualized)","broadcast mode only notifies affected users — well-built core"]
+  },
+  {
+    name:"Group trips & their chat",
+    plain:"Shared trips people join, the live group chat inside each, and the “something changed” nudges keeping everyone’s trip list current.",
+    t:{1:["green","One person, nothing to send."],10:["green","Chat & updates feel instant."],100:["green","Group chat keeps up smoothly."],1000:["amber","Browsing trips gets pinged on every join anywhere."],10000:["red","One shared signal refreshes everyone’s list at once."]},
+    breaks:"Smooth to a few hundred, fine with extra background work near a thousand. The weak spot is a single shared “the trip list changed” signal: everyone with the Trips screen open listens to the same channel, so ANY person joining/leaving ANY trip nudges all of them to reload. By ~10,000 users, busy moments turn into a near-constant stream of refreshes for everyone browsing. Group chat itself stays healthy (history loads in pages).",
+    risk:"The single app-wide “trip list changed” channel: every join/leave anywhere nudges everyone looking at trips. Split it so people only get updates for trips they actually care about, instead of one shared firehose.",
+    eff:"medium",
+    ev:["every Trips viewer subscribes to one shared 'trips-list' topic","any participant change on any trip broadcasts to that global topic","per-message loop writes one inbox note per member (up to 200)","join/commit writes one notification per member"]
+  },
+  {
+    name:"Explore feed & trips lists",
+    plain:"Where people browse surf trips others are hosting, plus their own “My Trips” list.",
+    t:{1:["green","Instant."],10:["green","Browsing is smooth."],100:["green","Loads a page at a time."],1000:["amber","Filters miss most trips; feed refreshes a lot."],10000:["red","Every trip action anywhere reloads the feed for all browsers."]},
+    breaks:"The list itself stays fast even with tons of trips (loads a page at a time, newest first). Two real problems grow with traffic: (1) the month & budget filters only look at the ~100 trips a person already scrolled past, so once there are thousands of trips a filter shows far fewer results than exist and feels broken. (2) The same shared “something changed” signal as group trips — any trip action reloads the feed for everyone browsing, snowballing into constant reloading at scale.",
+    risk:"The shared “refresh everyone” signal reloads the feed for every browser on any trip action; and filters need to query the whole catalogue, not just the page already loaded.",
+    eff:"medium",
+    ev:["every group_trips/participants change broadcasts to one shared 'trips-list' topic","every browsing client invalidates explore + my-trips on each ping","month/budget filters applied only over already-loaded ~100 trips","explore_feed is keyset-paginated & indexed — list query itself stays fast"]
+  },
+  {
+    name:"Notifications & push alerts",
+    plain:"The bell list of “what happened” plus the phone alerts for those events and new chat messages.",
+    t:{1:["green","Everything instant."],10:["green","Alerts feel instant."],100:["green","The sender keeps up easily."],1000:["amber","During spikes, some alerts arrive a few minutes late."],10000:["red","Alerts pile up & arrive very late; big blasts can time out."]},
+    breaks:"The alert sender is the weak link. A background job wakes once a minute and handles at most 100 waiting alerts per run, and for each one makes several separate database trips then sends to Apple/Google one at a time. That caps it near 100 alerts/minute regardless of backlog. Around 1,000 users, busy moments push delivery a few minutes late; by 10,000 the backlog grows faster than it drains. The bell list itself stays fast (small, well-indexed per-person lookup).",
+    risk:"The sender can only push ~100 alerts/minute and does lots of repeated per-alert work plus one-at-a-time sending. Send in bulk batches (Apple/Google/Expo accept 100 per call), fetch checks for a whole batch at once, and let each run process more than 100.",
+    eff:"medium",
+    ev:["dispatch queue: BATCH=100, sequential per-row loop, one push fetch each","cron 1/min × 100 = ~100 pushes/min ceiling","scan-trip-reminders: nested per-trip then per-participant queries","onboarding blast loads ALL surfers into memory, no time budget"]
+  },
+  {
+    name:"Swelly AI assistant (chat & trip planning)",
+    plain:"The surf chatbot that talks with users to set up their profile and find matching travel buddies.",
+    t:{1:["green","Instant, cheap, perfect."],10:["green","Smooth, tiny AI bill."],100:["amber","Works, but the AI bill grows faster than it should."],1000:["amber","Fine mostly; AI cost is noticeably high."],10000:["red","At peaks the AI provider throttles — some replies stall; costs high."]},
+    breaks:"It keeps working a long time but gets expensive and occasionally slow rather than crashing. Every chat message re-sends a very large fixed instruction sheet plus the entire prior conversation to a premium AI model with no reuse of repeated text — so each reply costs more than it should, and that grows with chat length. A per-user cap stops one person spamming, but doesn’t limit total load on the outside AI provider, so at busy peaks the provider can reject bursts and some replies hang. (It’s mostly used once per user during onboarding — the pain is cost-per-reply and peak bursts, not steady traffic.)",
+    risk:"Every message re-sends a huge fixed instruction sheet + the full conversation to a premium model with no reuse, and the per-user limit doesn’t cap total provider load. Turn on prompt reuse/caching and a global throughput guard so cost and peak stalls stay in check.",
+    eff:"medium",
+    ev:["premium model gpt-5.2, full history resent each turn; ~35KB trip prompt / ~16KB chat prompt, no caching","per-country AI correction only fires for unknown names — fan-out is limited","rate limiter is per-user, fails open — caps abuse not total OpenAI throughput"]
+  },
+  {
+    name:"Onboarding finish + finding matches",
+    plain:"When someone finishes their profile the app scans every surfer to pick a few similar people and open chats; Swelly can also search all surfers for a trip.",
+    t:{1:["green","Instant, nobody to match yet."],10:["green","Instant for everyone."],100:["green","Reads a tiny surfer list."],1000:["green","Reads every surfer but still quick."],10000:["amber","Reads all 10k surfers; a short wait, worse in sign-up rushes."]},
+    breaks:"It never crashes — it just gets heavier as the surfer base grows, because every match looks at every surfer and re-checks each person’s travel history one by one. Around tens of thousands of surfers a single match takes a noticeable beat (about a second), and these add up when many people finish their profile at once (e.g. after a marketing push). The work can never grow faster than the surfer count, so it degrades gently rather than falling off a cliff. Users feel a short pause, not errors.",
+    risk:"Both the post-signup match and the Swelly search re-examine the entire surfer list every time, so wait time and cost climb with how many surfers exist. Add filtering shortcuts so popular searches don’t force a look at everyone, and cap the work the profile-finish match does.",
+    eff:"medium",
+    ev:["find_and_connect_matches scores ALL surfers per onboarding finish (incl. correlated tag subquery), then writes chats","match_surfers: non-indexable filters + per-row JSONB expansion + full scan","live edge fn now returns top-3 + count, not the whole table"]
+  },
+  {
+    name:"Sign-in & staying logged in",
+    plain:"How people log in with Google/Apple and how the app remembers them next time.",
+    t:{1:["green","Login & reopening instant."],10:["green","No delay for anyone."],100:["green","Smooth — about where we are today."],1000:["green","Stays fast; finding a user never slows down."],10000:["amber","Fine normally; brief slow logins only in a big sign-in rush."]},
+    breaks:"It doesn’t really break from more users — finding and remembering a person is always a direct lookup of just their own record. The everyday “reopen & stay logged in” is a single quick check. The weak spot is the one-time login: each fresh login quietly makes ~8–12 back-and-forth server trips because the app re-asks “who is this?” several times and reads/re-saves the profile twice. Invisible normally, but a simultaneous sign-in rush (after a marketing push or forced update) piles those trips onto the login server at once. It retries automatically and recovers.",
+    risk:"A single login makes far more server trips than it needs to. Trim it to one identity check and one profile read to keep logins fast and cheap during big sign-in rushes. (Separately: one behind-the-scenes step creates a user’s record on first signup — if it ever fails, all new signups break until fixed. Worth a guardrail.)",
+    eff:"medium",
+    ev:["getOrCreateUserProfile = saveUser + surfers select + conditional saveSurfer; each re-calls auth.getUser()","convertSupabaseUserToAppUser runs twice per login via onAuthStateChange","boot restore is a single cheap auth.getUser() — the good path","handle_new_auth_user trigger = single point of failure for new signups"]
+  },
+  {
+    name:"Photos & videos",
+    plain:"Uploading and showing profile pictures, cover photos, surf videos, and media sent inside chats.",
+    t:{1:["green","Uploads & viewing instant."],10:["green","Everything loads fast."],100:["green","Photos cached & shrunk; videos fine."],1000:["green","Smooth; small video-processing bill builds."],10000:["amber","Lots of video uploads grow the bill & small waits."]},
+    breaks:"Nothing hard-breaks at any size. Photos stay fast and cheap everywhere (shrunk before upload, served as small cached copies). The weak spot is video: (1) after a video upload the phone checks the server every 15s for up to 7 minutes until processing finishes — cheap but wasteful; (2) tapping a chat video always asks the server for a fresh play link with no reuse, so five taps = five calls. The real growing cost is the paid video-compression service running on every upload — a steady bill that rises with upload volume.",
+    risk:"Video is the only part that gets pricier as the app grows. Cache each chat-video play link for the few hours it stays valid (so re-taps are free), and replace the 7-minute check-loop with a server message that fires the moment processing is done.",
+    eff:"medium",
+    ev:["pollForProcessedVideo loops 28×15s after each upload","sign-dm-video re-signs on every tap (6h TTL but no client cache)","images compressed before upload; thumbnails CDN-cached"]
+  }
+];
+
+// ---- Priority fixes (synthesized: top ones repair multiple reds) ----
+const FIXES = [
+  {h:"Split the one shared “trips changed” firehose", p:"Right now any trip join/leave anywhere reloads the feed for everyone browsing. Send updates only to people who care about that trip. One fix calms two of the worst red boxes.", eff:"medium", fixes:"Fixes 2 areas: Group trips + Explore feed"},
+  {h:"Raise the live-connection cap & load-test before launch", p:"The realtime service has a hard ceiling on how many people can be online at once. It’s a paid-plan setting, not a rewrite — confirm and raise it, then load-test, before any push that could put thousands online together.", eff:"low", fixes:"Unblocks all live features"},
+  {h:"Refresh the chat list in one batched request", p:"On every new message (or reconnect) the app queries each chat separately and double-counts unread badges. The first list load already does it the efficient way — make the live & reconnect paths match it.", eff:"medium", fixes:"Fixes 2 areas: 1:1 chat + Chat inbox"},
+  {h:"Send push notifications in bulk batches", p:"The sender is stuck near 100 alerts/minute doing one-at-a-time work. Batch the sends (Apple/Google/Expo take 100 per call) and fetch checks per-batch so alerts keep up during spikes.", eff:"medium", fixes:"Fixes late notifications"},
+  {h:"Make match search skip past non-candidates", p:"Both the signup match and Swelly search read & re-score every surfer each time. Add filtering shortcuts so common searches don’t scan everyone, and tidy the duplicate permission rules on the busiest tables.", eff:"medium", fixes:"Fixes Matching + lightens the database"},
+  {h:"Turn on AI prompt reuse + a global throughput guard", p:"Each AI message re-sends a huge fixed instruction sheet at full price. Cache the repeated part and add an app-wide limit so peak bursts don’t get throttled. Cuts the AI bill and the peak stalls.", eff:"medium", fixes:"Fixes Swelly AI cost & stalls"},
+  {h:"Slim the login round-trips & cache video links", p:"Two smaller wins: trim login to one identity check + one profile read (faster sign-in rushes), and cache chat-video play links so re-taps are free.", eff:"low", fixes:"Fixes Login spikes + Video"}
+];
+
+// render heat map
+document.getElementById('heat').innerHTML = SUB.map(s=>{
+  const cols=[1,10,100,1000,10000].map(k=>{
+    const [st,nt]=s.t[k]; const c=M[st];
+    return `<td><div class="cell ${c}" title="${nt.replace(/"/g,'&quot;')}"><div class="dot"></div><span class="nt">${nt}</span></div></td>`;
+  }).join('');
+  return `<tr><td><div class="who-cell">${s.name}</div></td>${cols}</tr>`;
+}).join('');
+
+// render fixes
+document.getElementById('fixes').innerHTML = FIXES.map((f,i)=>`
+  <div class="fix">
+    <div class="rank">${i+1}</div>
+    <div class="body">
+      <h3>${f.h}</h3>
+      <p>${f.p}</p>
+      <div class="tags">
+        <span class="tag eff-${f.eff}">${f.eff} effort</span>
+        <span class="tag fixes-n">${f.fixes}</span>
+      </div>
+    </div>
+  </div>`).join('');
+
+// render detail cards
+document.getElementById('cards').innerHTML = SUB.map(s=>{
+  const worst=M[s.t[10000][0]];
+  return `<div class="card">
+    <div class="head">
+      <div class="nm"><h3>${s.name}</h3><p class="sub">${s.plain}</p></div>
+      <span class="verdict ${worst}">${VERDICT[worst]}</span>
+    </div>
+    <div class="body">
+      <div class="row2">
+        <div class="block"><div class="lbl">When it starts to break</div><p>${s.breaks}</p></div>
+        <div class="block risk"><div class="lbl">★ The one thing to fix</div><p>${s.risk}</p></div>
+      </div>
+      <details class="eng"><summary>Code evidence (for engineers)</summary>
+        <ul>${s.ev.map(e=>`<li>${e}</li>`).join('')}</ul>
+      </details>
+    </div>
+  </div>`;
+}).join('');
+</script>
+</body>
+</html>

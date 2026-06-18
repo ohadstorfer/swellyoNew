@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { Message } from './messagingService';
+import { sanitizeMessages } from './messageSanitizer';
 
 /**
  * Chat History Cache Service
@@ -257,7 +258,7 @@ class ChatHistoryCache {
       const currentCount = this.conversationAccessCounts.get(conversationId) || 0;
       this.conversationAccessCounts.set(conversationId, currentCount + 1);
       console.log(`[chatHistoryCache] ✅ MEMORY CACHE HIT for ${conversationId}: ${memoryCached.messages.length} messages`);
-      return memoryCached.messages; // INSTANT return - no async delay
+      return sanitizeMessages(memoryCached.messages); // INSTANT return - no async delay
     }
     
     // Memory cache miss - return null (caller will await async load)
@@ -341,8 +342,8 @@ class ChatHistoryCache {
       });
       
       console.log(`[chatHistoryCache] 💾 Loaded ${result.length} messages from AsyncStorage and updated memory cache for ${conversationId} (memory cache size: ${this.memoryCache.size})`);
-      
-      return result;
+
+      return sanitizeMessages(result);
     } catch (error) {
       console.error('[chatHistoryCache] Error loading cached messages:', error);
       return null;

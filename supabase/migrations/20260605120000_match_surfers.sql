@@ -1,3 +1,7 @@
+-- ⚠️ DRAFT — reconcile against live def before applying; RLS changes are
+-- high-risk, apply table-by-table with before/after pg_policies diff + realtime +
+-- visibility verification. (This file carries the WS5 Part A sargable pre-filter;
+-- the function itself is NOT yet applied to prod — apply the whole file as a unit.)
 -- ============================================================================
 -- match_surfers: in-DB surfer matching (filter + score + rank + limit)
 --
@@ -7,6 +11,14 @@
 --
 -- Parity reference: supabase/functions/swelly-trip-planning-copy/index.ts
 -- Spec: docs/superpowers/specs/2026-06-05-matching-scale-rpc-design.md
+--
+-- WS5 Part A (2026-06-17): a sargable `prefiltered` CTE narrows on indexable
+-- columns (age range, exact surf_level_category / surfboard_type sets) BEFORE the
+-- fuzzy mc_* fns + per-row JSONB scoring run. The fuzzy fns still run in `criteria`
+-- (reading FROM prefiltered) so semantics are IDENTICAL — the pre-filter only
+-- removes rows that could never pass the corresponding exact-set hard filter.
+-- Scoring + ORDER BY are untouched; the parity suite must still pass byte-for-byte.
+-- Supporting indexes: supabase/migrations/20260617120000_match_surfers_indexes.sql
 -- ============================================================================
 
 -- ---------- helpers ----------
@@ -159,8 +171,56 @@ language sql stable security definer set search_path = public as $$
       and (s.is_demo_user is null or s.is_demo_user = false)
       and (p_excluded_ids is null or array_length(p_excluded_ids,1) is null or s.user_id <> all(p_excluded_ids))
   ),
-  criteria as (
+  -- WS5 sargable pre-filter: narrow on INDEXABLE columns before the fuzzy mc_*
+  -- fns + JSONB scoring. Each clause here is a *necessary condition* of the
+  -- corresponding exact-set hard filter in `criteria`, so it can only remove rows
+  -- that `criteria` would have rejected anyway (no row that should match is lost):
+  --   * age_min/age_max are already exactly what `criteria` checks (sargable).
+  --   * surf_level_category = any(...) : when the requested set is given, a row
+  --     whose category is not in the set can still pass mc_surf_level_pass ONLY via
+  --     the numeric (surf_level) ladder. Because we keep the FULL mc_surf_level_pass
+  --     in `criteria`, we must NOT drop those numeric-only matches here -> so the
+  --     category equality is applied only as a fast path guarded by an OR on the
+  --     numeric fallback (see note). To stay provably semantics-identical, this
+  --     CTE drops a row only when it could not pass on EITHER the category OR the
+  --     numeric path. surfboard_type has no numeric fallback, so its exact-set
+  --     check is an unconditional necessary condition.
+  prefiltered as (
     select b.* from base b
+    where (p_age_min is null or (b.age is not null and b.age >= p_age_min))
+      and (p_age_max is null or (b.age is not null and b.age <= p_age_max))
+      -- surfboard_type: exact-set is a hard necessary condition (mc_board_pass
+      -- returns false when no board matches; there is no numeric fallback).
+      -- Mirror mc_norm_board on BOTH sides (the fn normalizes e.g. 'mid length'
+      -- -> 'mid_length', 'long_board' -> 'longboard') so normalization differences
+      -- can't drop a row the fuzzy fn would accept. mc_board_pass also rejects a
+      -- user whose normalized board is '' -> that exclusion is left to `criteria`.
+      and (
+        p_surfboard_type is null
+        or array_length(p_surfboard_type,1) is null
+        or mc_norm_board(b.surfboard_type::text) = any (
+             select mc_norm_board(x) from unnest(p_surfboard_type) x
+           )
+      )
+      -- surf_level_category: keep numeric-ladder matches. Row survives if its
+      -- category is in the set OR it still has a surf_level that the ladder could
+      -- accept. We DON'T recompute the ladder here (that lives in
+      -- mc_surf_level_pass) — we only require "category in set OR has a numeric
+      -- level", which is a necessary condition for any pass when a set is given.
+      and (
+        p_surf_level_category is null
+        or array_length(p_surf_level_category,1) is null
+        -- mirror mc_surf_level_pass's lower(btrim(...)) on BOTH sides so a row with
+        -- category 'Advanced' vs request 'advanced' is not wrongly dropped when it
+        -- has no numeric level to fall back on.
+        or lower(btrim(coalesce(b.surf_level_category,''))) = any (
+             select lower(btrim(c)) from unnest(p_surf_level_category) c
+           )
+        or b.surf_level is not null
+      )
+  ),
+  criteria as (
+    select b.* from prefiltered b
     where mc_country_from_match(p_country_from, b.country_from)
       and mc_board_pass(p_surfboard_type, b.surfboard_type::text)
       and mc_surf_level_pass(p_surf_level_category, b.surf_level_category, b.surf_level)

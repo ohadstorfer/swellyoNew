@@ -76,6 +76,14 @@ class AuthService {
     }
   }
 
+  /**
+   * @deprecated Legacy client-side Google OAuth fallback. Only reachable when
+   * `isSupabaseConfigured()` is false, which never happens in production (Supabase
+   * is the backend and its env vars are always set). The live auth path is
+   * `supabaseAuthService` (see signInWithGoogle above). This method — and
+   * `signInWithGoogleMobile` below, which does a manual client-side
+   * code→token exchange — are dead code kept only as a safety net. Do not extend.
+   */
   private async signInWithGoogleWeb(): Promise<User> {
     return new Promise((resolve, reject) => {
       try {
@@ -173,6 +181,7 @@ class AuthService {
     }
   }
 
+  /** @deprecated See signInWithGoogleWeb — dead legacy fallback, not used in production. */
   private async signInWithGoogleMobile(): Promise<User> {
     try {
       console.log('Starting Google Sign-In process with expo-auth-session...');

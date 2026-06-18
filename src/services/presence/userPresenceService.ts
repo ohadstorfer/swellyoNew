@@ -46,7 +46,7 @@ class UserPresenceService {
   private presenceUpdateInterval: ReturnType<typeof setInterval> | null = null;
   private appStateSubscription: any = null;
   private lastDbWrite = 0;
-  private readonly DB_WRITE_COOLDOWN = 60000;
+  private readonly DB_WRITE_COOLDOWN = 180000; // 3 min — still under the 5-min online threshold
 
   // --- watched users (subscribe side) ---
   private userStatusSubscriptions = new Map<string, Set<(isOnline: boolean) => void>>();

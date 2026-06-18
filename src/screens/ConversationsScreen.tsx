@@ -30,9 +30,10 @@ import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { CreateSurftripModal } from '../components/surftrips/CreateSurftripModal';
-import { SurftripsList } from '../components/surftrips/SurftripsList';
 import { TutorialOverlay, AnchorRect } from '../components/TutorialOverlay';
 import { getSurftripHeroImagesByConversation } from '../services/surftrips/surftripsService';
+import { getGroupTripHeroImagesByConversation } from '../services/trips/groupTripsService';
+import { getStorageThumbUrl } from '../services/media/imageService';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { DirectGroupChat } from './DirectGroupChat';
@@ -43,6 +44,7 @@ import { ConversationListSkeleton } from '../components/skeletons';
 import { pushRootCard } from '../navigation/navigationRef';
 import { useTutorial } from '../context/TutorialContext';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
+import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
 
 interface ConversationsScreenProps {
   onConversationPress?: (conversationId: string) => void;
@@ -68,7 +70,7 @@ interface ConversationsScreenProps {
   stackScreenFocused?: boolean;
 }
 
-type FilterType = 'all' | 'surftrips';
+type FilterType = 'all' | 'lineup' | 'trips';
 
 // Cache helper functions are now imported from '../utils/userProfileCache'
 
@@ -440,13 +442,23 @@ export default function ConversationsScreen({
     };
   };
 
-  const getFilteredConversations = () => {
+  // A conversation is visible at all if it passes the base gating: group chats
+  // (group trips) are gated to local mode while the feature is hidden; direct
+  // chats require an enriched other_user.
+  const isConversationVisible = (conv: Conversation) => {
     const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
+    if (conv.is_direct === false) return isLocalMode && !!conv.title;
+    return !!conv.other_user?.name;
+  };
+
+  const getFilteredConversations = () => {
     const filtered = conversations.filter(conv => {
-      // Group chats (surftrips) are gated to local mode while the feature is hidden.
-      if (conv.is_direct === false) return isLocalMode && !!conv.title;
-      // Direct chats: keep existing requirement that the other user is enriched.
-      return !!conv.other_user?.name;
+      if (!isConversationVisible(conv)) return false;
+      // Chip filter: "The lineup" = direct messages, "Trips" = group-trip
+      // chats, "All" = both.
+      if (filter === 'lineup') return conv.is_direct === true;
+      if (filter === 'trips') return conv.is_direct === false;
+      return true;
     });
 
     if (!loading && filtered.length === 0 && filter === 'all') {
@@ -610,14 +622,14 @@ export default function ConversationsScreen({
     }
   };
 
-  const renderFilterButton = (type: FilterType, label: string) => {
+  const renderFilterButton = (type: FilterType, label: string, dotColor?: string) => {
     const isActive = filter === type;
 
     return (
       <TouchableOpacity
-        ref={type === 'surftrips' ? surftripsTabRef : undefined}
+        ref={type === 'trips' ? surftripsTabRef : undefined}
         onLayout={
-          type === 'surftrips'
+          type === 'trips'
             ? () =>
                 surftripsTabRef.current?.measureInWindow?.(
                   (x: number, y: number, width: number, height: number) => {
@@ -634,8 +646,10 @@ export default function ConversationsScreen({
         ]}
         onPress={() => setFilter(type)}
       >
+        {dotColor && <View style={[styles.filterDot, { backgroundColor: dotColor }]} />}
         <Text style={[
           styles.filterButtonText,
+          isActive && styles.filterButtonTextActive,
           Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
         ]}>{label}</Text>
       </TouchableOpacity>
@@ -679,16 +693,33 @@ export default function ConversationsScreen({
     onPendingNotificationHandled?.();
   }, [pendingNotificationConversationId, conversations]);
 
-  // Load surftrip cover photos for group conversations, used as the group-chat avatar.
+  // Load cover photos for group conversations, used as the group-chat avatar.
+  // Two sources: surftrip_groups (old feature, keyed by conversation_id) and
+  // group_trips (new feature, resolved via conversations.metadata.trip_id).
   useEffect(() => {
-    const groupIds = rawConversations.filter(c => !c.is_direct).map(c => c.id);
-    if (groupIds.length === 0) {
+    const groupConvs = rawConversations.filter(c => !c.is_direct);
+    if (groupConvs.length === 0) {
       setSurftripHeroImages({});
       return;
     }
+    const surftripIds = groupConvs.map(c => c.id);
+    const groupTripItems = groupConvs
+      .filter(c => !!c.metadata?.trip_id)
+      .map(c => ({ conversationId: c.id, tripId: c.metadata.trip_id as string }));
     let cancelled = false;
-    getSurftripHeroImagesByConversation(groupIds)
-      .then(map => { if (!cancelled) setSurftripHeroImages(map); })
+    Promise.all([
+      getSurftripHeroImagesByConversation(surftripIds),
+      getGroupTripHeroImagesByConversation(groupTripItems),
+    ])
+      .then(([surftripMap, groupTripMap]) => {
+        if (cancelled) return;
+        const merged: Record<string, string | null> = { ...surftripMap };
+        // A group-trip hero wins when present.
+        for (const [convId, url] of Object.entries(groupTripMap)) {
+          if (url) merged[convId] = url;
+        }
+        setSurftripHeroImages(merged);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [rawConversations]);
@@ -826,6 +857,11 @@ export default function ConversationsScreen({
       ? conv.other_user?.name || 'Unknown User'
       : conv.title || 'Group Chat';
     const avatarUrl = conv.is_direct ? conv.other_user?.profile_image_url : null;
+    // Group chats: cover photo as avatar, served via Supabase's render-time
+    // thumbnail transform (same mechanism as profile avatars — no stored thumb).
+    const groupHeroThumb = !conv.is_direct
+      ? getStorageThumbUrl(surftripHeroImages[conv.id], 144)
+      : null;
 
     // Check if last message is an image or video
     const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
@@ -860,9 +896,9 @@ export default function ConversationsScreen({
                 style={styles.avatar}
                 showLoadingIndicator={false}
               />
-            ) : surftripHeroImages[conv.id] ? (
+            ) : groupHeroThumb ? (
               <ProfileImage
-                imageUrl={surftripHeroImages[conv.id]}
+                imageUrl={groupHeroThumb}
                 name={displayName}
                 style={styles.avatar}
                 showLoadingIndicator={false}
@@ -977,65 +1013,14 @@ export default function ConversationsScreen({
     );
   };
 
-  const renderSwellyConversation = () => {
-    return (
-      <View collapsable={false}>
-      <TouchableOpacity
-        testID="conversations-swelly-button"
-        style={styles.swellyContainer}
-        onPress={() => onSwellyPress?.()}
-      >
-        <View style={styles.conversationContent}>
-          {/* Swelly avatar with ellipse design - matching ChatScreen */}
-          <View style={styles.swellyAvatarContainer}>
-            <View style={styles.swellyAvatarRing}>
-              <View style={styles.swellyEllipseBackground}>
-                <SwellyEllipse />
-              </View>
-              <View style={styles.swellyAvatarImageContainer}>
-                <Image
-                  source={Images.swellyAvatar}
-                  style={styles.swellyAvatarImage}
-                  resizeMode="cover"
-                />
-              </View>
-              <View style={styles.swellyEllipseForeground} pointerEvents="none">
-                <SwellyEllipseStroke />
-              </View>
-            </View>
-          </View>
-
-          {/* Text content */}
-          <View style={styles.swellyTextContainer}>
-            <Text style={styles.swellyName}>Swelly</Text>
-            <Text style={[
-              styles.swellyLastMessage,
-              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-            ]} numberOfLines={1}>
-              Let's explore new surfers!
-            </Text>
-          </View>
-        </View>
-
-        {/* Time and unread badge */}
-        {/* <View style={styles.swellyTimeContainer}>
-          <Text style={[
-            styles.swellyTimeText,
-            Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-          ]}>15:20</Text>
-          <View style={styles.swellyUnreadBadge}>
-            <Text style={[
-              styles.unreadBadgeText,
-              Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-            ]}>2</Text>
-          </View>
-        </View> */}
-      </TouchableOpacity>
-      </View>
-    );
-  };
+  // Swelly is now a floating circular avatar button (see styles.swellyFloating)
+  // anchored bottom-right above the nav bar — no longer a card in the list.
 
   const filteredConversations = getFilteredConversations();
+  // Count of visible group-trip chats, surfaced as "Trips (N)" on the chip.
+  const tripsCount = conversations.filter(
+    c => c.is_direct === false && isConversationVisible(c),
+  ).length;
 
   // Set body and html background color on web to ensure dark background is visible
   // This hook MUST be called before any early returns to follow Rules of Hooks
@@ -1088,6 +1073,7 @@ export default function ConversationsScreen({
   const Container = Platform.OS === 'web' ? View : SafeAreaView;
 
   const content = (
+    <ChatErrorBoundary>
     <Container style={styles.container} {...(Platform.OS !== 'web' && { edges: ['top'] as const })}>
       {/* Header - Dark background */}
       <View style={styles.header}>
@@ -1155,32 +1141,11 @@ export default function ConversationsScreen({
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
             {renderFilterButton('all', 'All')}
-            {renderFilterButton('surftrips', 'Surf Trips')}
+            {renderFilterButton('lineup', 'The lineup', '#BCAC99')}
+            {renderFilterButton('trips', tripsCount > 0 ? `Trips (${tripsCount})` : 'Trips', '#05BCD3')}
           </View>
 
-          {filter === 'surftrips' ? (
-            <View style={styles.surftripsContainer}>
-              <SurftripsList
-                currentUserId={currentUserId}
-                reloadKey={surftripsReloadKey}
-                onCreatePress={() => setShowCreateSurftripModal(true)}
-                onOpenGroupChat={(group) => {
-                  openConversation({
-                    id: group.conversation_id,
-                    otherUserId: '',
-                    otherUserName: group.name,
-                    otherUserAvatar: group.hero_image_url ?? null,
-                    isDirect: false,
-                    surftripId: group.id,
-                  });
-                }}
-                onOpenGroupDetail={(groupId) => {
-                  pushRootCard('SurftripCard', { groupId });
-                }}
-              />
-            </View>
-          ) : (
-          /* Conversations list */
+          {/* Conversations list */}
           <ScrollView
             ref={scrollViewRef}
             style={styles.conversationsList}
@@ -1295,52 +1260,13 @@ export default function ConversationsScreen({
               </>
             )}
           </ScrollView>
-          )}
         </View>
       </View>
       </View>
 
-      {/* Swelly conversation card - positioned at bottom */}
-      <View style={[styles.swellyCardWrapper, Platform.OS !== 'web' && { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        {/* Swelly Copy-Copy (Dev) card — hidden
-        {showSwellyCopyCard && (
-          <TouchableOpacity
-            style={[styles.swellyContainer, { marginBottom: 4, borderColor: '#00BCD4' }]}
-            onPress={onSwellyPressCopy}
-          >
-            <View style={styles.conversationContent}>
-              <View style={styles.swellyAvatarContainer}>
-                <View style={styles.swellyAvatarRing}>
-                  <View style={styles.swellyEllipseBackground}>
-                    <SwellyEllipse />
-                  </View>
-                  <View style={styles.swellyAvatarImageContainer}>
-                    <Image
-                      source={Images.swellyAvatar}
-                      style={styles.swellyAvatarImage}
-                      resizeMode="cover"
-                    />
-                  </View>
-                  <View style={styles.swellyEllipseForeground} pointerEvents="none">
-                    <SwellyEllipseStroke />
-                  </View>
-                </View>
-              </View>
-              <View style={styles.swellyTextContainer}>
-                <Text style={styles.swellyName}>Swelly Copy-Copy (Dev)</Text>
-                <Text style={[
-                  styles.swellyLastMessage,
-                  Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
-                ]} numberOfLines={1}>
-                  Testing swelly-trip-planning-copy-copy
-                </Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-        */}
-        {renderSwellyConversation()}
-      </View>
+      {/* Swelly floating button is rendered in the nav layer (FloatingTabBar in
+          RootNavigator) so it sits ABOVE the bottom-nav frost instead of behind
+          it. See styles.swellyFloating there. */}
 
       {/* One-time "Surf Trips tab" coach-mark */}
       <TutorialOverlay
@@ -1606,6 +1532,7 @@ export default function ConversationsScreen({
       )}
 
     </Container>
+    </ChatErrorBoundary>
   );
 
   // On native, wrap in a View with the dark background so it extends below the safe area
@@ -1743,48 +1670,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 20,
     paddingBottom: 4,
-    gap: 8,
+    gap: 11,
   },
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: 32,
-    height: 41,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    gap: 9,
+    gap: 4,
   },
   filterButtonActive: {
-    ...(Platform.OS === 'web' ? {
-      backgroundColor: 'var(--Colors-Neutral-300, #EEE)',
-      borderColor: 'var(--Colors-Neutral-400, #E4E4E4)',
-    } : {
-      backgroundColor: '#EEE',
-      borderColor: '#E4E4E4',
-    }),
+    backgroundColor: '#212121',
+    borderColor: '#212121',
   },
   filterButtonInactive: {
-    ...(Platform.OS === 'web' ? {
-      backgroundColor: 'var(--Surface-white, #FFF)',
-      borderColor: 'var(--Colors-Neutral-400, #E4E4E4)',
-    } : {
-      backgroundColor: '#FFFFFF',
-      borderColor: '#E4E4E4',
-    }),
+    backgroundColor: '#F7F7F7',
+    borderColor: '#EEEEEE',
   },
   filterButtonText: {
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
     fontSize: 12,
     fontWeight: '400',
     lineHeight: 15,
-    color: '#000000',
+    color: '#333333',
+  },
+  filterButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  filterDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
   },
   conversationsList: {
-    flex: 1,
-  },
-  surftripsContainer: {
     flex: 1,
   },
   conversationsListContent: {
@@ -1921,15 +1842,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#FFFFFF',
     // CSS variable applied via inline style on web
-  },
-  swellyCardWrapper: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingBottom: Platform.OS === 'web' ? 16 : 32,
-    zIndex: 10,
   },
   swellyContainer: {
     flexDirection: 'row',
