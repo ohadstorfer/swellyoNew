@@ -207,10 +207,17 @@ export interface UnseenJoinDecision {
   trip: {
     id: string;
     title: string | null;
+    description: string | null;
     hero_image_url: string;
     destination_label: string | null;
     start_date: string | null;
     end_date: string | null;
+    /** Host name + avatar for the card's profile overlay. */
+    host_name: string | null;
+    host_avatar: string | null;
+    /** Up to 3 member avatars (host first) + the total member count for "+N". */
+    member_avatars: string[];
+    member_count: number;
   };
   decided_at: string | null;
 }
@@ -2493,7 +2500,7 @@ export async function listUnseenJoinDecisions(
   const tripIds = Array.from(new Set(rows.map((r: any) => r.trip_id as string)));
   const { data: trips, error: tripsErr } = await supabase
     .from('group_trips')
-    .select(`id, title, hero_image_url, start_date, end_date, ${TRIP_DEST_EMBED}`)
+    .select(`id, host_id, title, description, hero_image_url, start_date, end_date, participant_count, ${TRIP_DEST_EMBED}`)
     .in('id', tripIds);
   if (tripsErr) {
     console.warn('[groupTripsService] listUnseenJoinDecisions trips error:', tripsErr);
@@ -2502,10 +2509,47 @@ export async function listUnseenJoinDecisions(
   const tripById = new Map<string, any>();
   (trips || []).forEach((t: any) => tripById.set(t.id, t));
 
+  // Members (host first) for each trip — powers the avatar stack on the card.
+  const { data: partRows } = await supabase
+    .from('group_trip_participants')
+    .select('trip_id, user_id, role, joined_at')
+    .in('trip_id', tripIds)
+    .order('joined_at', { ascending: true });
+
+  const memberIdsByTrip = new Map<string, string[]>();
+  (partRows || []).forEach((r: any) => {
+    const arr = memberIdsByTrip.get(r.trip_id) ?? [];
+    if (r.role === 'host') arr.unshift(r.user_id);
+    else arr.push(r.user_id);
+    memberIdsByTrip.set(r.trip_id, arr);
+  });
+
+  // Resolve name + avatar for every host and member we touched.
+  const userIds = new Set<string>();
+  (trips || []).forEach((t: any) => t.host_id && userIds.add(t.host_id));
+  (partRows || []).forEach((r: any) => userIds.add(r.user_id));
+
+  const profById = new Map<string, { name: string | null; avatar: string | null }>();
+  if (userIds.size > 0) {
+    const { data: surfers } = await supabase
+      .from('surfers')
+      .select('user_id, name, profile_image_url')
+      .in('user_id', Array.from(userIds));
+    (surfers || []).forEach((s: any) =>
+      profById.set(s.user_id, { name: s.name ?? null, avatar: s.profile_image_url ?? null })
+    );
+  }
+
   const out: UnseenJoinDecision[] = [];
   rows.forEach((r: any) => {
     const trip = tripById.get(r.trip_id);
     if (!trip) return;
+    const host = trip.host_id ? profById.get(trip.host_id) : undefined;
+    const memberIds = memberIdsByTrip.get(trip.id) ?? (trip.host_id ? [trip.host_id] : []);
+    const memberAvatars = memberIds
+      .map(id => profById.get(id)?.avatar)
+      .filter((a): a is string => !!a)
+      .slice(0, 3);
     out.push({
       request_id: r.id,
       status: r.status,
@@ -2513,10 +2557,15 @@ export async function listUnseenJoinDecisions(
       trip: {
         id: trip.id,
         title: trip.title ?? null,
+        description: trip.description ?? null,
         hero_image_url: trip.hero_image_url ?? '',
         destination_label: destinationLabel(pickDestination(trip.destination)),
         start_date: trip.start_date ?? null,
         end_date: trip.end_date ?? null,
+        host_name: host?.name ?? null,
+        host_avatar: host?.avatar ?? null,
+        member_avatars: memberAvatars,
+        member_count: trip.participant_count ?? memberIds.length,
       },
     });
   });

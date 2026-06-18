@@ -39,58 +39,13 @@
 -- but at current catalogue size it isn't warranted (left as a future option).
 
 -- ---------------------------------------------------------------------------
--- LIVE 3-arg form (canonical — kept intact for unshipped/older dev builds that
--- still call the 3-arg signature). Mirrors prod after migration 20260616120000.
+-- SINGLE 6-arg function (all params defaulted). 2026-06-18: the earlier two-overload
+-- approach (3-arg + 6-arg) was AMBIGUOUS — a 3-arg call matched both ("function is not
+-- unique"). Dropped the 3-arg form; this 6-arg serves old {p_limit,p_cursor,p_cursor_id}
+-- callers too (filters default to null = no-op) and still returns member_avatars.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.explore_feed(
-  p_limit int DEFAULT 10,
-  p_cursor timestamptz DEFAULT NULL,
-  p_cursor_id uuid DEFAULT NULL
-)
-RETURNS TABLE (
-  id uuid, host_id uuid, status text, hosting_style text, title text, hero_image_url text,
-  start_date date, end_date date, dates_set_in_stone boolean, date_months text[],
-  cost_per_person numeric, budget_min numeric, budget_max numeric,
-  max_participants int, participant_count int, created_at timestamptz,
-  destination jsonb, host_name text, host_avatar text, member_avatars text[]
-)
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public, extensions, pg_temp
-AS $$
-  SELECT gt.id, gt.host_id, gt.status, gt.hosting_style, gt.title, gt.hero_image_url,
-         gt.start_date, gt.end_date, gt.dates_set_in_stone, gt.date_months,
-         gt.cost_per_person, gt.budget_min, gt.budget_max,
-         gt.max_participants, gt.participant_count, gt.created_at,
-         (SELECT jsonb_build_object('name', d.name, 'short_label', d.short_label,
-                   'country', d.country, 'admin_level_1', d.admin_level_1,
-                   'lat', d.lat, 'lng', d.lng)
-            FROM public.group_trip_destinations d WHERE d.trip_id = gt.id) AS destination,
-         s.name AS host_name, s.profile_image_url AS host_avatar,
-         (SELECT array_agg(sub.av) FROM (
-              SELECT s2.profile_image_url AS av FROM public.group_trip_participants p
-              JOIN public.surfers s2 ON s2.user_id = p.user_id
-              WHERE p.trip_id = gt.id AND s2.profile_image_url IS NOT NULL
-              ORDER BY (p.user_id = gt.host_id) DESC, p.user_id LIMIT 4) sub) AS member_avatars
-  FROM public.group_trips gt
-  LEFT JOIN public.surfers s ON s.user_id = gt.host_id
-  WHERE gt.status = 'active'
-    AND (gt.visibility IS NULL OR gt.visibility = 'public')
-    AND (
-      p_cursor IS NULL
-      OR gt.created_at < p_cursor
-      OR (gt.created_at = p_cursor AND gt.id < p_cursor_id)
-    )
-  ORDER BY gt.created_at DESC, gt.id DESC
-  LIMIT LEAST(GREATEST(p_limit, 1), 50);
-$$;
+DROP FUNCTION IF EXISTS public.explore_feed(int, timestamptz, uuid);
 
--- ---------------------------------------------------------------------------
--- 6-arg overload: the LIVE body above PLUS month/budget filters (Task 2.4).
--- Same columns (member_avatars + destination), same visibility filter, same
--- SECURITY DEFINER + search_path pin — only the three filter params and their
--- two WHERE blocks are added.
--- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.explore_feed(
   p_limit int DEFAULT 10,
   p_cursor timestamptz DEFAULT NULL,

@@ -199,7 +199,8 @@
       "Bash(open -a Simulator)",
       "mcp__maestro__*",
       "mcp__expo__*",
-      "Bash(open *)"
+      "Bash(open *)",
+      "mcp__supabase__execute_sql"
     ],
     "deny": [
       "Bash(supabase db reset:*)",

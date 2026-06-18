@@ -54,7 +54,6 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
     <BottomSheetShell
       visible={visible}
       onClose={onClose}
-      avoidKeyboard
       backdropColor="rgba(0,0,0,0.5)"
     >
       {({ panHandlers }) => (
@@ -78,7 +77,11 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
             onChangeText={setQuery}
           />
 
-          <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            style={styles.list}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
             {filtered.map(country => (
               <TouchableOpacity
                 key={country}

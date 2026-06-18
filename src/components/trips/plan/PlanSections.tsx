@@ -203,22 +203,23 @@ export const CommitPill: React.FC<{
   return (
     <View style={styles.commitWrap}>
       <PressableScale
-        onPress={onPress}
-        style={[styles.commitPill, pending && styles.commitPillPending]}
+        onPress={pending ? undefined : onPress}
+        style={[styles.commitPill, pending && styles.commitPillPending, approved && styles.commitPillApproved]}
         accessibilityLabel="Commitment"
       >
         {approved ? <BadgeCheckIcon size={24} color="#FFFFFF" /> : null}
         <Text style={styles.commitText}>
-          {approved ? 'Committed to this trip' : pending ? 'Commitment Pending…' : 'Commit to this trip'}
+          {approved ? 'Committed' : pending ? 'Commitment request sent' : 'Commit to this trip'}
         </Text>
         {!approved && !pending ? <Ionicons name="chevron-forward" size={20} color="#FFFFFF" /> : null}
       </PressableScale>
-      {/* Committed state has no caption (Image #2). */}
-      {!approved ? (
-        <Text style={styles.commitCaption}>
-          {pending ? 'Waiting for the host to approve. Tap to update.' : "Let the admin know how you're committed"}
-        </Text>
-      ) : null}
+      <Text style={styles.commitCaption}>
+        {approved
+          ? "You're all set for this trip"
+          : pending
+            ? 'Waiting for host approval'
+            : "Let the admin know how you're committed"}
+      </Text>
     </View>
   );
 };
@@ -636,9 +637,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: T.ink,
   },
-  commitPillPending: { backgroundColor: '#6B7280' },
+  commitPillPending: { backgroundColor: '#FFB443' }, // Colors/Yellow/100 — request sent
+  commitPillApproved: { backgroundColor: '#2BCCBD' }, // Colors/Green/M 200 — committed
   commitText: { fontFamily: ff('Montserrat', '700'), fontSize: 16, lineHeight: 24, fontWeight: '700', color: '#FFFFFF' },
-  commitCaption: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted, textAlign: 'center', marginTop: 10 },
+  commitCaption: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#6A7282', textAlign: 'center', marginTop: 10 },
 
   // Admin updates — rows live in AdminUpdateUI. The Plan card connects them into
   // one rounded card (Figma 12716:6935): a single border, hairline dividers

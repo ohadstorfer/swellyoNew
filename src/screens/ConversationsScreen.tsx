@@ -870,6 +870,19 @@ export default function ConversationsScreen({
     const isLastMessageCommitment = conv.last_message?.type === 'commitment_request';
     const isLastMessageMine = conv.last_message?.sender_id === currentUserId;
 
+    // WhatsApp-style: in group chats, prefix the last-message preview with who sent it.
+    // Skipped for 1:1 DMs and for system messages ("X joined the group").
+    // last_message from the conversations RPC has no sender_name, so resolve the
+    // name from the enriched members list (falls back to no prefix if unknown).
+    const lastSenderMember = conv.members?.find(m => m.user_id === conv.last_message?.sender_id);
+    const lastSenderName = lastSenderMember?.name && lastSenderMember.name !== 'Unknown'
+      ? lastSenderMember.name.trim().split(/\s+/)[0]
+      : undefined;
+    const showSenderPrefix = !conv.is_direct && !!conv.last_message && !conv.last_message?.is_system;
+    const senderPrefix = showSenderPrefix
+      ? (isLastMessageMine ? 'You: ' : (lastSenderName ? `${lastSenderName}: ` : ''))
+      : '';
+
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
     const meMember = conv.members?.find(m => m.user_id === currentUserId);
@@ -935,6 +948,12 @@ export default function ConversationsScreen({
               </View>
             ) : isLastMessageImage ? (
               <View style={styles.imageMessagePreview}>
+                {senderPrefix ? (
+                  <Text style={[
+                    styles.lastMessage,
+                    Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                  ]} numberOfLines={1}>{senderPrefix}</Text>
+                ) : null}
                 <Ionicons name="image-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
                 <Text style={[
                   styles.lastMessage,
@@ -945,6 +964,12 @@ export default function ConversationsScreen({
               </View>
             ) : isLastMessageVideo ? (
               <View style={styles.imageMessagePreview}>
+                {senderPrefix ? (
+                  <Text style={[
+                    styles.lastMessage,
+                    Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                  ]} numberOfLines={1}>{senderPrefix}</Text>
+                ) : null}
                 <Ionicons name="videocam-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
                 <Text style={[
                   styles.lastMessage,
@@ -955,6 +980,12 @@ export default function ConversationsScreen({
               </View>
             ) : isLastMessageAudio ? (
               <View style={styles.imageMessagePreview}>
+                {senderPrefix ? (
+                  <Text style={[
+                    styles.lastMessage,
+                    Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
+                  ]} numberOfLines={1}>{senderPrefix}</Text>
+                ) : null}
                 <Ionicons name="mic-outline" size={14} color="#7B7B7B" style={styles.imageIcon} />
                 <Text style={[
                   styles.lastMessage,
@@ -978,7 +1009,9 @@ export default function ConversationsScreen({
                 styles.lastMessage,
                 Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
               ]} numberOfLines={1}>
-                {conv.last_message?.body || 'You got a new match!'}
+                {conv.last_message?.body
+                  ? `${senderPrefix}${conv.last_message.body}`
+                  : 'You got a new match!'}
               </Text>
             )}
           </View>

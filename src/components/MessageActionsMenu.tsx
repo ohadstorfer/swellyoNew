@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Modal, Platform, Dimensions } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, TouchableOpacity, Platform, Dimensions, Animated, Easing, BackHandler } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
@@ -10,14 +10,14 @@ import {
   REACTIONS_BAR_WIDTH_ESTIMATE,
 } from './MessageReactionsBar';
 
-interface BubbleRadii {
+export interface BubbleRadii {
   topLeft: number;
   topRight: number;
   bottomLeft: number;
   bottomRight: number;
 }
 
-const DEFAULT_RADII: BubbleRadii = {
+export const DEFAULT_RADII: BubbleRadii = {
   topLeft: 16,
   topRight: 16,
   bottomLeft: 16,
@@ -30,7 +30,7 @@ const DEFAULT_RADII: BubbleRadii = {
  * inner rect ends up as a transparent hole through which the selected bubble
  * shows.
  */
-function buildDimPathD(
+export function buildDimPathD(
   screenW: number,
   screenH: number,
   bx: number,
@@ -98,11 +98,32 @@ interface MessageActionsMenuProps {
   // Passed explicitly by the parent screen at render time so it doesn't
   // depend on the async measureInWindow round-trip.
   isOwnSelected?: boolean;
+  // Height of the open keyboard (0 when closed). The menu renders IN-TREE (not a
+  // Modal) so opening it doesn't resign the composer's first responder — the
+  // native keyboard stays up. With it up, the bar/menu must sit ABOVE it, so
+  // placement treats `screenH - keyboardHeight` as the usable bottom.
+  keyboardHeight?: number;
   // WhatsApp-style quick-reactions strip rendered above the menu.
   showReactionsBar?: boolean;
   currentReaction?: string;
   onReact?: (emoji: string) => void;
 }
+
+// Edit action icon — pencil from Figma (14×14 viewBox, scaled to match the
+// Ionicons in the other rows). Stroke colour comes from the design.
+const EditPencilIcon: React.FC<{ size?: number; color?: string }> = ({
+  size = 20,
+  color = '#7B7B7B',
+}) => (
+  <Svg width={size} height={size} viewBox="0 0 14 14" fill="none">
+    <Path
+      d="M10.5007 5.83319L8.16733 3.49985M1.45898 12.5415L3.4332 12.3222C3.6744 12.2954 3.795 12.282 3.90773 12.2455C4.00774 12.2131 4.10291 12.1673 4.19067 12.1095C4.28958 12.0443 4.37539 11.9585 4.54699 11.7868L12.2507 4.08319C12.895 3.43885 12.895 2.39418 12.2507 1.74985C11.6063 1.10552 10.5617 1.10552 9.91733 1.74985L2.21366 9.45351C2.04205 9.62512 1.95625 9.71092 1.89102 9.80983C1.83315 9.89759 1.78741 9.99277 1.75503 10.0928C1.71854 10.2055 1.70514 10.3261 1.67834 10.5673L1.45898 12.5415Z"
+      stroke={color}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
 
 export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   visible,
@@ -120,10 +141,52 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   messagePosition,
   bubbleRect,
   isOwnSelected,
+  keyboardHeight = 0,
   showReactionsBar = false,
   currentReaction,
   onReact,
 }) => {
+  // The overlay renders in-tree, so its (0,0) is NOT window (0,0) — it sits below
+  // the SafeAreaView's top inset and inside react-native-screen-transitions'
+  // transformed ContentLayer. Rather than guess that offset, we MEASURE the
+  // overlay's real window origin and shift the content up/left by it, so all the
+  // measureInWindow-based math below (which is in window coords) lines up exactly.
+  const rootRef = useRef<View>(null);
+  const [origin, setOrigin] = useState({ x: 0, y: 0 });
+  const measureRoot = () => {
+    rootRef.current?.measureInWindow((x: number, y: number) => {
+      if (typeof x === 'number' && typeof y === 'number') {
+        setOrigin((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+      }
+    });
+  };
+
+  // Quick ease-out fade-in for the dim + menu (replaces the old Modal's
+  // animationType="fade"). Opacity-only so it runs on the native driver.
+  const fade = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (visible) {
+      fade.setValue(0);
+      Animated.timing(fade, {
+        toValue: 1,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible, fade]);
+
+  // The old Modal intercepted the Android hardware back button (onRequestClose).
+  // In-tree we restore that so back closes the menu instead of popping the chat.
+  useEffect(() => {
+    if (!visible || Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
+
   // Only log when visible to reduce noise
   if (visible) {
     console.log('[MessageActionsMenu] Render (visible)', { visible, canEdit, canDelete, canCopy, canReply });
@@ -179,6 +242,9 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   // before measureInWindow callback fires) we estimate from the touch Y.
   const screenH = Dimensions.get('window').height;
   const screenW = Dimensions.get('window').width;
+  // With the keyboard staying open the menu must sit above it, so the bottom
+  // boundary for placement is the keyboard's top, not the physical screen bottom.
+  const usableBottom = screenH - Math.max(0, keyboardHeight);
 
   // Menu height varies with which actions are visible. Each row is
   // ~36px (16px line height + 8px padding × 2); menu has 4px vertical
@@ -205,7 +271,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   const bubbleRight = bubbleRect ? bubbleRect.x + bubbleRect.width : screenW;
 
   const spaceAbove = bubbleTop - SAFE_TOP;
-  const spaceBelow = screenH - bubbleBottom - SAFE_BOTTOM;
+  const spaceBelow = usableBottom - bubbleBottom - SAFE_BOTTOM;
 
   // Only budget vertical space for the reactions bar when it will actually
   // render — own messages don't get one, so the bar's height shouldn't be
@@ -232,11 +298,11 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
 
   const barTop = Math.max(
     SAFE_TOP,
-    Math.min(screenH - SAFE_BOTTOM - REACTIONS_BAR_HEIGHT, barTopRaw),
+    Math.min(usableBottom - SAFE_BOTTOM - REACTIONS_BAR_HEIGHT, barTopRaw),
   );
   const menuTop = Math.max(
     SAFE_TOP,
-    Math.min(screenH - SAFE_BOTTOM - MENU_H_EST, menuTopRaw),
+    Math.min(usableBottom - SAFE_BOTTOM - MENU_H_EST, menuTopRaw),
   );
 
   // Side detection: own bubbles are right-aligned, other bubbles left-aligned.
@@ -281,14 +347,19 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
   }
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
+    // Rendered IN-TREE (not a Modal) so presenting it does not resign the
+    // composer's first responder — the native keyboard stays up. The root fills
+    // the host; we measure its window origin and offset the inner (window-sized)
+    // layer by -origin so all the window-coord math below maps to the screen
+    // exactly, regardless of safe-area padding or the screen-transition transform.
+    <Animated.View
+      ref={rootRef}
+      onLayout={measureRoot}
+      pointerEvents="box-none"
+      style={[styles.root, { opacity: fade }]}
     >
       <TouchableOpacity
-        style={styles.overlay}
+        style={{ position: 'absolute', left: -origin.x, top: -origin.y, width: screenW, height: screenH }}
         activeOpacity={1}
         onPress={onClose}
       >
@@ -372,7 +443,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>Reply</Text>
-              <Ionicons name="arrow-undo-outline" size={20} color={colors.text} />
+              <Ionicons name="arrow-undo-outline" size={20} color={colors.textDark} />
             </TouchableOpacity>
           )}
 
@@ -383,7 +454,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>Edit</Text>
-              <Ionicons name="create-outline" size={20} color={colors.text} />
+              <EditPencilIcon size={20} color={colors.textDark} />
             </TouchableOpacity>
           )}
 
@@ -394,7 +465,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
               activeOpacity={0.7}
             >
               <Text style={styles.menuItemText}>Copy</Text>
-              <Ionicons name="copy-outline" size={20} color={colors.text} />
+              <Ionicons name="copy-outline" size={20} color={colors.textDark} />
             </TouchableOpacity>
           )}
 
@@ -426,14 +497,20 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
           )}
         </TouchableOpacity>
       </TouchableOpacity>
-    </Modal>
+    </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
+  root: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'transparent',
+    zIndex: 1000,
+    elevation: 1000,
   },
   dimStrip: {
     position: 'absolute',
@@ -466,7 +543,7 @@ const styles = StyleSheet.create({
   },
   menuItemText: {
     fontSize: 16,
-    color: colors.text,
+    color: colors.textDark,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
   deleteText: {

@@ -48,6 +48,7 @@ export const JoinRequestActionBar: React.FC<JoinRequestActionBarProps> = ({
   onDecline,
   onDismissed,
 }) => {
+  const trip = tripTitle?.trim() || 'this trip';
   const insets = useSafeAreaInsets();
   const decided = state === 'approved' || state === 'declined';
   const busy = state === 'approving' || state === 'declining';
@@ -84,10 +85,6 @@ export const JoinRequestActionBar: React.FC<JoinRequestActionBarProps> = ({
           }
         }}
       >
-        <Text style={styles.subtitle} numberOfLines={1}>
-          {`Wants to join · ${tripTitle}`}
-        </Text>
-
         {decided ? (
           <Animated.View entering={FadeIn.duration(220)} style={styles.row}>
             <View
@@ -111,24 +108,10 @@ export const JoinRequestActionBar: React.FC<JoinRequestActionBarProps> = ({
         ) : (
           <Animated.View exiting={FadeOut.duration(150)} style={styles.row}>
             <Pressable
-              onPress={onDecline}
-              disabled={busy}
-              style={({ pressed }) => [
-                styles.btn,
-                styles.declineBtn,
-                pressed && styles.pressed,
-              ]}
-            >
-              {state === 'declining' ? (
-                <ActivityIndicator size="small" color="#222B30" />
-              ) : (
-                <Text style={[styles.btnText, styles.declineText]}>Decline</Text>
-              )}
-            </Pressable>
-
-            <Pressable
               onPress={onApprove}
               disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={`Approve request to join ${trip}`}
               style={({ pressed }) => [
                 styles.btn,
                 styles.approveBtn,
@@ -139,6 +122,24 @@ export const JoinRequestActionBar: React.FC<JoinRequestActionBarProps> = ({
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Text style={[styles.btnText, styles.approveText]}>Approve</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              onPress={onDecline}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={`Decline request to join ${trip}`}
+              style={({ pressed }) => [
+                styles.btn,
+                styles.declineBtn,
+                pressed && styles.pressed,
+              ]}
+            >
+              {state === 'declining' ? (
+                <ActivityIndicator size="small" color="#333333" />
+              ) : (
+                <Text style={[styles.btnText, styles.declineText]}>Decline</Text>
               )}
             </Pressable>
           </Animated.View>
@@ -154,46 +155,37 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   bar: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#212121', // Surface/M-07
     paddingHorizontal: 16,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ECEFF1',
-  },
-  subtitle: {
-    fontSize: 12.5,
-    color: '#7A828A',
-    marginBottom: 8,
+    paddingBottom: 16,
   },
   row: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 16,
   },
   btn: {
     flex: 1,
-    height: 38,
-    borderRadius: 8,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  declineBtn: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#C9CED4',
-  },
   approveBtn: {
-    backgroundColor: '#212121',
+    backgroundColor: '#05BCD3', // Fill/secondary
+  },
+  declineBtn: {
+    backgroundColor: '#FFFFFF', // Surface/M-01
   },
   btnText: {
-    fontSize: 15,
-  },
-  declineText: {
-    color: '#222B30',
-    fontWeight: '600',
+    fontSize: 14, // size/s
+    lineHeight: 18,
+    fontWeight: '400', // Weight/Regular
   },
   approveText: {
     color: '#FFFFFF',
-    fontWeight: '700',
+  },
+  declineText: {
+    color: '#333333', // text/M-01
   },
   // Emil: subtle press feedback — the bar should feel like it's listening.
   pressed: {
@@ -202,8 +194,8 @@ const styles = StyleSheet.create({
   },
   pill: {
     flex: 1,
-    height: 38,
-    borderRadius: 8,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },

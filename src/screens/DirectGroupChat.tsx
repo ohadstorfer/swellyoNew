@@ -67,6 +67,8 @@ import { ReportMessageSheet } from '../components/ReportMessageSheet';
 import { withTimeout } from '../services/messaging/withTimeout';
 import { sanitizeMessage } from '../services/messaging/messageSanitizer';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
+import { MessageEditBar } from '../components/chat/MessageEditBar';
+import { BubbleSpotlightDim, type SpotlightRect } from '../components/chat/BubbleSpotlightDim';
 import { SafeMessageBubble } from '../components/chat/SafeMessageBubble';
 
 // WhatsApp-style read receipts for own messages.
@@ -122,6 +124,48 @@ const SEND_SLIDE_TOP_PEEK_DP = 8;
 // Module-scoped so an in-flight upload survives a screen unmount/remount
 // (navigate away & back) — prevents the zombie-heal from failing a still-uploading message.
 const inFlightUploads = new Set<string>();
+
+// Window in which a second send of the same media URI is treated as an
+// accidental duplicate and ignored (see lastMediaSendRef).
+const MEDIA_SEND_DEDUP_MS = 4000;
+
+// Lifecycle rank used by dedupeMessages — a more-advanced row wins a merge.
+const uploadRank = (m: Message): number => {
+  if (m.upload_state === 'failed') return 0;
+  if (m.upload_state === 'uploading') return 1;
+  return 2; // 'sent' or undefined (a normal server row)
+};
+
+// Collapse rows that represent the same logical message. Concurrent paths
+// (optimistic insert, the realtime echo, retry, cache merge) can briefly leave
+// two rows sharing a client_id — one 'failed'/'uploading', one 'sent' — which
+// renders a duplicate bubble AND trips React's "two children with the same key"
+// warning (keyExtractor is client_id || id). Deduping at the single render
+// chokepoint fixes both, race-proof regardless of which path created the dupe.
+// Rows are matched on EITHER client_id or id, so an optimistic row (id ===
+// client_id) collapses into its server row (id === server uuid, same client_id).
+const dedupeMessages = (list: Message[]): Message[] => {
+  const slotByIdentity = new Map<string, number>();
+  const result: Message[] = [];
+  for (const m of list) {
+    const identities = [m.client_id, m.id].filter(Boolean) as string[];
+    let slot = -1;
+    for (const key of identities) {
+      const found = slotByIdentity.get(key);
+      if (found !== undefined) { slot = found; break; }
+    }
+    if (slot === -1) {
+      slot = result.length;
+      result.push(m);
+    } else if (uploadRank(m) > uploadRank(result[slot])) {
+      // Keep whichever row is further along the send lifecycle; ties keep the
+      // existing (earlier) row so list ordering stays stable.
+      result[slot] = m;
+    }
+    for (const key of identities) slotByIdentity.set(key, slot);
+  }
+  return result;
+};
 
 const messageSlideUpFromComposer = (values: { targetHeight: number }) => {
   'worklet';
@@ -364,7 +408,27 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [realtimeHealthy, setRealtimeHealthy] = useState(true); // Track realtime subscription health
   const [editingText, setEditingText] = useState('');
+  // Bubble bounds for the edit-mode spotlight dim (same "lift" as long-press).
+  const [editDimRect, setEditDimRect] = useState<SpotlightRect | null>(null);
+  // Host view the dim is drawn inside — used to measure the bubble in the dim's
+  // LOCAL coords (not window), so the carved hole isn't offset by the header.
+  const dimHostRef = useRef<any>(null);
   const [menuVisible, setMenuVisible] = useState(false);
+  // Keyboard height captured when the long-press menu opens, so the in-tree menu
+  // positions itself above the keyboard (which now stays up).
+  const [menuKeyboardHeight, setMenuKeyboardHeight] = useState(0);
+  // Last *full* keyboard height (from the native event); used as the snapshot at
+  // long-press time because `kbHeight.value` can already be mid-collapse.
+  const keyboardFullHeightRef = useRef(0);
+  useEffect(() => {
+    const onShow = (e: any) => {
+      const h = e?.endCoordinates?.height;
+      if (typeof h === 'number' && h > 0) keyboardFullHeightRef.current = h;
+    };
+    const s1 = Keyboard.addListener('keyboardDidShow', onShow);
+    const s2 = Keyboard.addListener('keyboardWillShow', onShow);
+    return () => { s1.remove(); s2.remove(); };
+  }, []);
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
   const pendingPickerRef = useRef<(() => void) | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
@@ -403,6 +467,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // on-demand cropper (Edit button) can pass them to openCropper, avoiding
   // the lib's 200px default-output trap.
   const selectedImageDimensionsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  // Dedup guard for media sends. Each send mints a fresh clientId, so any
+  // duplicate invocation — a fast double-tap, an OS-delivered duplicate touch,
+  // or a modal remount that resets the modal's own per-tap guard — yields two
+  // optimistic rows and two uploads (one usually fails, as seen in the wild).
+  // This blocks a repeat send of the same URI within a short window, at the one
+  // function every image/video send must pass through.
+  const lastMediaSendRef = useRef<{ uri: string | null; at: number }>({ uri: null, at: 0 });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const isPickerOpenRef = useRef(false);
   const pickerFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -508,6 +579,34 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   useEffect(() => {
     hasMoreMessagesRef.current = hasMoreMessages;
   }, [hasMoreMessages]);
+
+  // Measure the edited bubble so the spotlight dim carves its hole over the right
+  // spot. The keyboard now STAYS open through long-press → Edit, so the list
+  // doesn't reflow and we can measure quickly: once right after the edit bar
+  // mounts, and once more to catch the small composer→edit-bar height swap.
+  useEffect(() => {
+    if (!editingMessageId) { setEditDimRect(null); return; }
+    let cancelled = false;
+    const measure = () => {
+      const host = dimHostRef.current;
+      const node = bubbleRefsRef.current.get(editingMessageId);
+      if (host && node && typeof host.measureInWindow === 'function' && typeof node.measureInWindow === 'function') {
+        host.measureInWindow((hx: number, hy: number) => {
+          node.measureInWindow((bx: number, by: number, w: number, h: number) => {
+            if (!cancelled && w > 0 && h > 0) {
+              setEditDimRect({
+                x: bx - hx, y: by - hy, width: w, height: h,
+                radii: { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 },
+              });
+            }
+          });
+        });
+      }
+    };
+    const t1 = setTimeout(measure, 50);
+    const t2 = setTimeout(measure, 250);
+    return () => { cancelled = true; clearTimeout(t1); clearTimeout(t2); };
+  }, [editingMessageId]);
 
   // Analytics: opening a trip's group chat = "active in this trip today"
   // (charts B + C). Throttled per (user, trip); DMs (no tripId) don't log.
@@ -2375,6 +2474,18 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       return;
     }
 
+    // Block an accidental duplicate send of the same image (double-tap / OS
+    // double-touch / modal remount). Without this, each call mints a new
+    // clientId and the photo is sent twice.
+    const sendAt = Date.now();
+    if (
+      lastMediaSendRef.current.uri === uriToUse &&
+      sendAt - lastMediaSendRef.current.at < MEDIA_SEND_DEDUP_MS
+    ) {
+      return;
+    }
+    lastMediaSendRef.current = { uri: uriToUse, at: sendAt };
+
     const conversationId = currentConversationId;
     // Client-generated UUID. Acts as the optimistic row's id (so we can locate it
     // later) AND the server-side idempotency key (client_id) used at create time.
@@ -2500,6 +2611,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     if (!videoUri || !currentConversationId || !currentUserId) {
       return;
     }
+
+    // Block an accidental duplicate send of the same video (mirrors handleImageSend).
+    const sendAt = Date.now();
+    if (
+      lastMediaSendRef.current.uri === videoUri &&
+      sendAt - lastMediaSendRef.current.at < MEDIA_SEND_DEDUP_MS
+    ) {
+      return;
+    }
+    lastMediaSendRef.current = { uri: videoUri, at: sendAt };
 
     const conversationId = currentConversationId;
     // Client-generated UUID — optimistic row id AND server idempotency key.
@@ -3091,15 +3212,26 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     setSelectedMessage(message);
     setEditingText(message.body || ''); // Initialize edit text
     setMenuPosition({ x: pageX, y: pageY });
+    // Was the keyboard up at long-press? If so we keep it up (re-focus below) and
+    // budget its height so the in-tree menu sits above it.
+    const wasKeyboardOpen = Math.abs(kbHeight.value) > 1;
+    setMenuKeyboardHeight(
+      wasKeyboardOpen
+        ? Math.round(keyboardFullHeightRef.current || Math.abs(kbHeight.value))
+        : 0,
+    );
 
+    const radii = isOwnMessage
+      ? { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 }
+      : { topLeft: 16, topRight: 16, bottomLeft: 2, bottomRight: 16 };
+    // Measure ONCE, synchronously, while the long-pressed row's ref is guaranteed
+    // correct — re-measuring later read a recycled FlatList ref and carved the
+    // hole over the wrong message. The keyboard stays up so layout doesn't move.
     setBubbleRect(null);
     const bubbleRef = bubbleRefsRef.current.get(message.id);
     if (bubbleRef && typeof bubbleRef.measureInWindow === 'function') {
       bubbleRef.measureInWindow((x: number, y: number, width: number, height: number) => {
         if (width > 0 && height > 0) {
-          const radii = isOwnMessage
-            ? { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 }
-            : { topLeft: 16, topRight: 16, bottomLeft: 2, bottomRight: 16 };
           setBubbleRect({ x, y, width, height, radii, isOwn: isOwnMessage });
         }
       });
@@ -3108,7 +3240,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // Use setTimeout to ensure selectedMessage is set before menu becomes visible
     setTimeout(() => {
       setMenuVisible(true);
-
+      if (wasKeyboardOpen) chatInputRef.current?.focus?.();
     }, 0);
   };
 
@@ -3216,7 +3348,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
   // For inverted FlatList, data must be newest-first (first item renders at bottom)
   // State keeps messages chronological (oldest-first) for easy append/merge
-  const invertedMessages = useMemo(() => [...messages].reverse(), [messages]);
+  const invertedMessages = useMemo(() => dedupeMessages(messages).reverse(), [messages]);
 
   // Map of sender_id → display name, harvested from any message we have that
   // was already enriched. Lets reply previews resolve the original author's
@@ -3254,11 +3386,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     const newerMessage = invertedMessages[index - 1];
     const sameSender = !!newerMessage && newerMessage.sender_id === item.sender_id;
     const messageGap = index === 0 ? 0 : (sameSender ? 3 : 9);
-    // "Last/newest of run" — used in group chats to decide where to show the
-    // sender name + avatar (per user spec, on the newest message of a run, not
-    // the WhatsApp-default oldest). True when the message after this one (visually
-    // below) has a different sender, or this is the newest message overall.
+    // "Last/newest of run" (visually bottom): keeps the avatar + the bubble tail.
+    // True when the message below has a different sender, or this is the newest.
     const isLastInRun = !sameSender;
+    // "First/oldest of run" (visually top): the sender name renders here now
+    // (WhatsApp-style), while the avatar stays on the last/newest below.
+    const olderMessage = invertedMessages[index + 1];
+    const isFirstInRun = !olderMessage || olderMessage.sender_id !== item.sender_id;
     // Own sends slide up from behind the composer; received messages slide
     // up from the typing indicator's height so the typing → message swap is
     // seamless even when the typing indicator wasn't visible.
@@ -3272,7 +3406,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         style={{ marginBottom: messageGap }}
       >
         <SafeMessageBubble messageId={item.id}>
-          {renderMessage(item, isLastInRun)}
+          {renderMessage(item, isLastInRun, isFirstInRun)}
         </SafeMessageBubble>
       </Reanimated.View>
     );
@@ -3334,7 +3468,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     return `${hours}:${minutes}`;
   };
 
-  const renderMessage = (message: Message, isLastInRun: boolean = true) => {
+  const renderMessage = (message: Message, isLastInRun: boolean = true, isFirstInRun: boolean = true) => {
     // System banner (e.g. "X left the group", "Y removed X", "X joined the group").
     // Renders as a centered pill — no avatar, no sender name, no timestamp, no
     // reply/edit affordance. Bypasses every interaction handler below.
@@ -3363,15 +3497,18 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // the WhatsApp-style inline-when-it-fits, wrap-when-it-doesn't layout.)
     const isRtl = bodyTextAlign === 'right';
 
-    // Group chats: show sender name + avatar on the LAST/newest message of a run from
-    // the same sender (per user spec). Mid-run messages reserve avatar space so
+    // Group chats: sender name on the FIRST/oldest message of a run (top), avatar on
+    // the LAST/newest message (bottom). Mid-run messages reserve avatar space so
     // bubble alignment stays consistent.
     const isGroupReceived = !isOwnMessage && !isDirect;
     const senderName = message.sender_name || message.sender?.name || otherUserName;
-    const senderAvatar = message.sender_avatar || message.sender?.avatar || otherUserAvatar;
+    // Avatar source is the SENDER's own photo only — never fall back to
+    // otherUserAvatar (in a group that's the group cover, which would wrongly show
+    // as a member's avatar). No photo → initials placeholder (the default avatar).
+    const senderAvatar = message.sender_avatar || message.sender?.avatar || null;
     const showAvatar = isGroupReceived && isLastInRun && (message.sender_name || message.sender_avatar);
     const showAvatarSpacer = isGroupReceived && !isLastInRun;
-    const showSenderName = isGroupReceived && isLastInRun && !!senderName;
+    const showSenderName = isGroupReceived && isFirstInRun && !!senderName;
     const senderNameColor = isGroupReceived ? getSenderColor(message.sender_id) : undefined;
 
     // Photo/video bubbles get a thin visible bubble frame around the media
@@ -3443,6 +3580,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           style={[
             styles.messageBubble,
             isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
+            // Consecutive run: only the last/newest bubble keeps its tail (the sharp
+            // 2px corner). Earlier messages in the run are fully rounded. overflow:hidden
+            // on media bubbles makes this clip photos/videos to the rounded corner too.
+            !isLastInRun && (isOwnMessage
+              ? { borderTopRightRadius: 16 }
+              : { borderBottomLeftRadius: 16 }),
             // Conditionally apply padding: 0 for images/videos/audio, normal for text.
             // `!message.deleted &&`: a deleted media message renders the text-style
             // placeholder, so it must NOT get the media-frame styling.
@@ -3588,12 +3731,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                       </View>
                     ) : isFailed ? (
                       <View style={styles.failedOverlay}>
-                        <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+                        <Ionicons name="alert-circle" size={26} color="#FFFFFF" />
                         <Text style={styles.failedText}>Failed to send</Text>
                         <TouchableOpacity
                           style={styles.retryButton}
                           onPress={() => handleRetryUpload(message)}
+                          activeOpacity={0.8}
                         >
+                          <Ionicons name="refresh" size={15} color="#FFFFFF" style={styles.retryIcon} />
                           <Text style={styles.retryButtonText}>Retry</Text>
                         </TouchableOpacity>
                       </View>
@@ -3699,12 +3844,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     )}
                     {message.upload_state === 'failed' && (
                       <View style={styles.failedOverlay}>
-                        <Ionicons name="alert-circle" size={24} color="#FFFFFF" />
+                        <Ionicons name="alert-circle" size={26} color="#FFFFFF" />
                         <Text style={styles.failedText}>Failed to send</Text>
                         <TouchableOpacity
                           style={styles.retryButton}
                           onPress={() => handleRetryUpload(message)}
+                          activeOpacity={0.8}
                         >
+                          <Ionicons name="refresh" size={15} color="#FFFFFF" style={styles.retryIcon} />
                           <Text style={styles.retryButtonText}>Retry</Text>
                         </TouchableOpacity>
                       </View>
@@ -3798,34 +3945,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 // Allow full width for deleted messages from other user
                 message.deleted && !isOwnMessage && styles.deletedMessageTextContainer,
               ]}>
-                {isEditing ? (
-                  <View style={styles.editContainer}>
-                    <PaperTextInput
-                      value={editingText}
-                      onChangeText={setEditingText}
-                      multiline
-                      style={styles.editInput}
-                      autoFocus
-                    />
-                    <View style={styles.editActions}>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setEditingMessageId(null);
-                          setEditingText('');
-                        }}
-                        style={styles.editButton}
-                      >
-                        <Text style={styles.editButtonText}>Cancel</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleEditMessage(message.id, editingText)}
-                        style={[styles.editButton, styles.editButtonSave]}
-                      >
-                        <Text style={[styles.editButtonText, styles.editButtonTextSave]}>Save</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : message.deleted ? (
+                {message.deleted ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <View style={{ opacity: 0.6 }}>
                       <Svg height={16} viewBox="0 -960 960 960" width={16} fill={colors.textDark}>
@@ -3959,7 +4079,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               {/* Timestamp row for editing / deleted states only — active text
                   messages render the timestamp inline inside the flex-wrap row
                   above. */}
-              {(isEditing || message.deleted) && (
+              {message.deleted && (
                 isOwnMessage ? (
                   <Reanimated.View
                     style={{
@@ -4331,6 +4451,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               />
             )}
             <View style={styles.inputWrapper}>
+              {editingMessageId ? (
+                <MessageEditBar
+                  value={editingText}
+                  onChangeText={setEditingText}
+                  onCancel={() => { setEditingMessageId(null); setEditingText(''); }}
+                  onSave={() => handleEditMessage(editingMessageId, editingText)}
+                  primaryColor={composerPrimaryColor}
+                  nativeID={composerNativeID}
+                />
+              ) : (
               <ChatTextInput
                 ref={chatInputRef}
                 testID="group-chat-input"
@@ -4357,13 +4487,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   </TouchableOpacity>
                 }
               />
+              )}
             </View>
             </View>
           </Reanimated.View>
         );
 
         const inner = (
-          <View style={{ flex: 1 }}>
+          <View ref={dimHostRef} style={{ flex: 1 }}>
             <ImageBackground
               source={Images.chatBackground}
               style={[styles.backgroundImage, { pointerEvents: 'none' }]}
@@ -4375,6 +4506,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 <TouchableOpacity style={styles.returnToLatestPill} onPress={handleReturnToLatest}>
                   <Text style={styles.returnToLatestText}>Return to latest ↓</Text>
                 </TouchableOpacity>
+              )}
+              {editingMessageId && editDimRect && (
+                <BubbleSpotlightDim
+                  rect={editDimRect}
+                  onPress={() => { setEditingMessageId(null); setEditingText(''); }}
+                />
               )}
               {composer}
             </Reanimated.View>
@@ -4409,8 +4546,17 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         }}
         onEdit={() => {
           if (selectedMessage && canEditMessage(selectedMessage)) {
-            setEditingMessageId(selectedMessage.id);
-            setEditingText(selectedMessage.body || '');
+            // The menu is in-tree now (no Modal), so the keyboard no longer drops
+            // when it closes — we only need a short defer for the overlay to
+            // unmount before the composer swaps to the edit bar (which autofocuses
+            // and keeps the keyboard up). Capture id/body first since onClose
+            // clears selectedMessage.
+            const id = selectedMessage.id;
+            const body = selectedMessage.body || '';
+            setTimeout(() => {
+              setEditingText(body);
+              setEditingMessageId(id);
+            }, 120);
           }
         }}
         onDelete={() => {
@@ -4492,6 +4638,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         messagePosition={menuPosition}
         bubbleRect={bubbleRect}
         isOwnSelected={!!selectedMessage && selectedMessage.sender_id === currentUserId}
+        keyboardHeight={menuKeyboardHeight}
         showReactionsBar={
           !!selectedMessage &&
           selectedMessage.sender_id !== currentUserId &&
@@ -5320,7 +5467,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
     borderRadius: borderRadius.medium,
     justifyContent: 'center',
     alignItems: 'center',
@@ -5329,14 +5476,19 @@ const styles = StyleSheet.create({
   failedText: {
     color: colors.white,
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   retryButton: {
-    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.brandTeal,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.medium,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.full,
     marginTop: spacing.xs,
+  },
+  retryIcon: {
+    marginRight: 5,
   },
   retryButtonText: {
     color: colors.white,

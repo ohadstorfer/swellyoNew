@@ -1,0 +1,139 @@
+import React, { useRef, useEffect } from 'react';
+import { View, TextInput, Pressable, StyleSheet, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { ff } from '../../theme/fonts';
+
+interface Props {
+  value: string;
+  onChangeText: (t: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  /** Brand/per-chat color for the confirm (✓) circle. */
+  primaryColor?: string;
+  maxLength?: number;
+  /**
+   * Reuse the composer's nativeID so the screen's KeyboardGestureArea keeps
+   * tracking this input when it replaces the normal composer — otherwise the
+   * gesture area loses its tracked input and iOS drops the keyboard.
+   */
+  nativeID?: string;
+}
+
+/**
+ * WhatsApp-style inline message editor that sits in the COMPOSER slot (not in the
+ * bubble): [⊗ cancel] · [rounded pill input] · [✓ confirm]. The message being
+ * edited stays visible in the list above. Replaces the old in-bubble TextInput +
+ * Cancel/Save buttons so editing matches the rest of the app's composer.
+ */
+export function MessageEditBar({
+  value,
+  onChangeText,
+  onCancel,
+  onSave,
+  primaryColor = '#8A5A2B',
+  maxLength = 500,
+  nativeID,
+}: Props) {
+  const inputRef = useRef<TextInput>(null);
+
+  // This bar is mounted only AFTER the long-press menu Modal has fully dismissed
+  // (the screen defers it), so the `autoFocus` prop reliably brings the keyboard
+  // up with no Modal to fight it. A single short fallback covers slow mounts.
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 120);
+    return () => clearTimeout(t);
+  }, []);
+
+  const canSave = value.trim().length > 0;
+
+  return (
+    <View style={styles.row}>
+      {/* Cancel — outline circle. Instant press feedback (scale + dim). */}
+      <Pressable
+        onPress={onCancel}
+        hitSlop={8}
+        style={({ pressed }) => [styles.circle, styles.cancel, pressed && styles.pressed]}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel edit"
+      >
+        <Ionicons name="close" size={22} color="#3A3A3A" />
+      </Pressable>
+
+      <TextInput
+        ref={inputRef}
+        nativeID={nativeID}
+        autoFocus
+        value={value}
+        onChangeText={onChangeText}
+        style={styles.input}
+        multiline
+        maxLength={maxLength}
+        returnKeyType="done"
+        blurOnSubmit={false}
+        placeholder="Edit message"
+        placeholderTextColor="#9AA0A6"
+      />
+
+      {/* Save — filled brand circle. Disabled (dimmed) when empty. */}
+      <Pressable
+        onPress={canSave ? onSave : undefined}
+        disabled={!canSave}
+        hitSlop={8}
+        style={({ pressed }) => [
+          styles.circle,
+          { backgroundColor: primaryColor },
+          !canSave && styles.saveDisabled,
+          pressed && canSave && styles.pressed,
+        ]}
+        accessibilityRole="button"
+        accessibilityLabel="Save edit"
+      >
+        <Ionicons name="checkmark" size={24} color="#FFFFFF" />
+      </Pressable>
+    </View>
+  );
+}
+
+const CIRCLE = 40;
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    width: '100%',
+  },
+  circle: {
+    width: CIRCLE,
+    height: CIRCLE,
+    borderRadius: CIRCLE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancel: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#D9DCE1',
+  },
+  // Instant press feedback — Emil: pressables must feel responsive.
+  pressed: {
+    transform: [{ scale: 0.92 }],
+    opacity: 0.85,
+  },
+  saveDisabled: {
+    opacity: 0.45,
+  },
+  input: {
+    flex: 1,
+    minHeight: CIRCLE,
+    maxHeight: 120,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 10 : 8,
+    paddingBottom: Platform.OS === 'ios' ? 10 : 8,
+    fontSize: 16,
+    color: '#1A1A1A',
+    fontFamily: ff('Inter', '400'),
+  },
+});

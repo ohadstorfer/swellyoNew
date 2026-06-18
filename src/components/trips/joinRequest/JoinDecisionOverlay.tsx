@@ -6,17 +6,22 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  SafeAreaView,
+  ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { ff } from '../../../theme/fonts';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
+
+const DOODLES = require('../../../assets/images/trips/welcome-doodles.png');
 
 interface Props {
   visible: boolean;
   decision: UnseenJoinDecision | null;
   /** Called when the user taps the primary CTA (Enter Trip / Explore trips). */
   onPrimaryAction: (decision: UnseenJoinDecision) => void;
-  /** Called when the user dismisses without taking the primary action (e.g. close button). */
+  /** Called when the user dismisses without taking the primary action (back). */
   onDismiss: (decision: UnseenJoinDecision) => void;
 }
 
@@ -39,169 +44,385 @@ function formatDateRange(startIso: string | null, endIso: string | null): string
   return `${startStr} - ${MONTHS[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
 }
 
+const initialsOf = (name: string | null | undefined): string =>
+  (name || '?').trim().charAt(0).toUpperCase() || '?';
+
+// Round avatar with initials fallback (matches the gear/member avatars elsewhere).
+const Avatar: React.FC<{
+  url: string | null;
+  name: string | null;
+  size: number;
+  ring?: boolean;
+}> = ({ url, name, size, ring }) => {
+  const dim = { width: size, height: size, borderRadius: size / 2 };
+  if (url) {
+    return (
+      <Image source={{ uri: url }} style={[dim, ring && styles.avatarRing]} />
+    );
+  }
+  return (
+    <View style={[dim, styles.avatarFallback, ring && styles.avatarRing]}>
+      <Text style={[styles.avatarInitial, { fontSize: size * 0.42 }]}>{initialsOf(name)}</Text>
+    </View>
+  );
+};
+
 export const JoinDecisionOverlay: React.FC<Props> = ({
   visible,
   decision,
   onPrimaryAction,
   onDismiss,
 }) => {
+  const insets = useSafeAreaInsets();
   if (!decision) return null;
+
   const approved = decision.status === 'approved';
-  const tripTitle = decision.trip.title?.trim() || 'this trip';
-  const location = decision.trip.destination_label;
-  const dates = formatDateRange(decision.trip.start_date, decision.trip.end_date);
+  const trip = decision.trip;
+  const tripTitle = trip.title?.trim() || 'this trip';
+  const location = trip.destination_label;
+  const description = trip.description?.trim() || null;
+  const dates = formatDateRange(trip.start_date, trip.end_date);
+  const hostName = trip.host_name?.trim() || null;
+
+  const avatars = trip.member_avatars ?? [];
+  const overflow = Math.max(0, (trip.member_count ?? avatars.length) - avatars.length);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => onDismiss(decision)}>
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.container}>
+      <View style={styles.root}>
+        {/* Faint surf doodles behind everything. */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Image source={DOODLES} style={styles.doodles} resizeMode="cover" />
+        </View>
+
+        {/* Dark header — back chevron dismisses. */}
+        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity
-            style={styles.closeBtn}
+            style={styles.backBtn}
             onPress={() => onDismiss(decision)}
-            hitSlop={12}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
             accessibilityLabel="Close"
           >
-            <Ionicons name="close" size={22} color="#222B30" />
+            <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
+            <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
+        </View>
 
-          <View style={styles.content}>
-            <View style={[styles.iconCircle, approved ? styles.iconApproved : styles.iconDeclined]}>
-              <Ionicons
-                name={approved ? 'checkmark' : 'close'}
-                size={48}
-                color="#FFFFFF"
-              />
-            </View>
-
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Headline */}
+          <View style={styles.headlineWrap}>
             <Text style={styles.headline}>
               {approved ? "You're in!" : 'Not a match this time'}
             </Text>
-            <Text style={styles.sub}>
+            <Text style={styles.subhead}>
               {approved
                 ? 'Welcome to the group'
                 : 'The host is looking for a different vibe for this trip'}
             </Text>
+          </View>
 
-            <View style={styles.tripCard}>
-              {decision.trip.hero_image_url ? (
-                <Image
-                  source={{ uri: decision.trip.hero_image_url }}
-                  style={styles.heroImage}
-                  resizeMode="cover"
-                />
+          {/* Trip card */}
+          <View style={styles.card}>
+            <View style={styles.tripsCard}>
+              {trip.hero_image_url ? (
+                <Image source={{ uri: trip.hero_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
               ) : (
-                <View style={[styles.heroImage, styles.heroFallback]}>
-                  <Ionicons name="image-outline" size={26} color="#9AA0A6" />
+                <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>
+                  <Ionicons name="image-outline" size={30} color="#9AA0A6" />
                 </View>
               )}
-              <View style={styles.tripText}>
-                <Text style={styles.tripTitle} numberOfLines={2}>{tripTitle}</Text>
-                {location ? <Text style={styles.tripMeta}>{location}</Text> : null}
-                {dates ? <Text style={styles.tripMeta}>{dates}</Text> : null}
+
+              {/* Top scrim so the host name stays legible on bright photos. */}
+              <LinearGradient
+                colors={['rgba(0,0,0,0.35)', 'rgba(0,0,0,0)']}
+                style={styles.topScrim}
+                pointerEvents="none"
+              />
+
+              {/* Host */}
+              {hostName || trip.host_avatar ? (
+                <View style={styles.profileRow}>
+                  <Avatar url={trip.host_avatar} name={hostName} size={40} ring />
+                  {hostName ? <Text style={styles.hostName}>{hostName}</Text> : null}
+                </View>
+              ) : null}
+
+              <View style={styles.heroSpacer} />
+
+              {/* Bottom glass band with title + description. */}
+              <View style={styles.eventContainer}>
+                <LinearGradient
+                  colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.65)']}
+                  style={StyleSheet.absoluteFill}
+                  pointerEvents="none"
+                />
+                <Text style={styles.tripTitle} numberOfLines={1}>{tripTitle}</Text>
+                {description ? (
+                  <Text style={styles.tripDesc} numberOfLines={2}>{description}</Text>
+                ) : location ? (
+                  <Text style={styles.tripDesc} numberOfLines={1}>{location}</Text>
+                ) : null}
+              </View>
+
+              {/* Member avatar stack */}
+              {avatars.length > 0 ? (
+                <View style={styles.avatarStack}>
+                  {avatars.map((url, i) => (
+                    <View key={i} style={[styles.stackItem, i > 0 && styles.stackOverlap]}>
+                      <Avatar url={url} name={null} size={32} />
+                    </View>
+                  ))}
+                  {overflow > 0 ? <Text style={styles.stackNumber}>+{overflow}</Text> : null}
+                </View>
+              ) : null}
+            </View>
+
+            {/* Info pill */}
+            <View style={[styles.infoPill, approved ? styles.infoPillApproved : styles.infoPillDeclined]}>
+              <View style={styles.infoIcon}>
+                <Ionicons
+                  name={approved ? 'calendar-outline' : 'compass-outline'}
+                  size={18}
+                  color="#0A0A0A"
+                />
+              </View>
+              <View style={styles.infoTextRow}>
+                <Text style={styles.infoStatus}>{approved ? 'Upcoming' : 'Closed'}</Text>
+                {dates ? <Text style={styles.infoDates}>{dates}</Text> : null}
               </View>
             </View>
           </View>
+        </ScrollView>
 
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={[styles.cta, approved ? styles.ctaApproved : styles.ctaDeclined]}
-              onPress={() => onPrimaryAction(decision)}
-              activeOpacity={0.85}
-            >
-              <Text style={[styles.ctaText, !approved && styles.ctaTextDeclined]}>
-                {approved ? 'Enter Trip' : 'Explore trips'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+        {/* CTA */}
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
+          <LinearGradient
+            colors={['rgba(250,250,250,0)', '#FAFAFA']}
+            style={styles.footerFade}
+            pointerEvents="none"
+          />
+          <TouchableOpacity
+            style={styles.cta}
+            onPress={() => onPrimaryAction(decision)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+          >
+            <Text style={styles.ctaText}>{approved ? 'Enter Trip' : 'Explore trips'}</Text>
+          </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
-  container: { flex: 1 },
-  closeBtn: {
-    position: 'absolute',
-    top: 12,
-    right: 16,
-    zIndex: 2,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F1F3F4',
-    alignItems: 'center',
-    justifyContent: 'center',
+  root: { flex: 1, backgroundColor: '#FAFAFA' },
+  doodles: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.9,
   },
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
+
+  // Header
+  header: {
+    backgroundColor: '#212121',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
   },
-  iconCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
+  backBtn: { flexDirection: 'row', alignItems: 'center' },
+  backText: {
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginLeft: 4,
   },
-  iconApproved: { backgroundColor: '#16A34A' },
-  iconDeclined: { backgroundColor: '#9AA0A6' },
+
+  scroll: { flex: 1 },
+  scrollContent: { paddingBottom: 24 },
+
+  // Headline
+  headlineWrap: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 28, paddingBottom: 8 },
   headline: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#222B30',
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: 24,
+    lineHeight: 29,
+    fontWeight: '700',
+    color: '#0A0A0A',
     textAlign: 'center',
   },
-  sub: {
-    fontSize: 14.5,
+  subhead: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 16,
+    lineHeight: 24,
     color: '#4A5565',
     textAlign: 'center',
     marginTop: 8,
-    lineHeight: 21,
-    maxWidth: 320,
+    maxWidth: 280,
   },
-  tripCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 12,
-    gap: 12,
+
+  // Card
+  card: {
+    marginHorizontal: 20,
     marginTop: 28,
-    width: '100%',
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
+    padding: 10,
+    gap: 12,
+    // Card Shadow — Figma: #00000017, radius 24.
+    shadowColor: '#000000',
+    shadowOpacity: 0.09,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
-  heroImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
+  tripsCard: {
+    height: 246,
+    borderRadius: 24,
+    overflow: 'hidden',
     backgroundColor: '#E5E7EB',
   },
   heroFallback: { alignItems: 'center', justifyContent: 'center' },
-  tripText: { flex: 1 },
-  tripTitle: { fontSize: 15, fontWeight: '700', color: '#222B30' },
-  tripMeta: { fontSize: 12.5, color: '#7B7B7B', marginTop: 2 },
-  footer: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
+  topScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 88 },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 16,
+  },
+  hostName: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  heroSpacer: { flex: 1 },
+  eventContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
     paddingBottom: 20,
+    paddingRight: 96, // keep text clear of the avatar stack
+  },
+  tripTitle: {
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: 22,
+    lineHeight: 32,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  tripDesc: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#FFFFFF',
+    marginTop: 4,
+  },
+
+  // Member avatar stack (bottom-right of hero)
+  avatarStack: {
+    position: 'absolute',
+    right: 12,
+    bottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+    borderRadius: 56,
+    paddingVertical: 1,
+    paddingLeft: 1,
+    paddingRight: 8,
+  },
+  stackItem: { borderRadius: 16 },
+  stackOverlap: { marginLeft: -16 },
+  stackNumber: {
+    fontFamily: ff('Montserrat', '400'),
+    fontSize: 16,
+    lineHeight: 20,
+    color: '#7B7B7B',
+    marginLeft: 6,
+  },
+
+  // Info pill
+  infoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderRadius: 32,
+  },
+  infoPillApproved: { backgroundColor: '#84EBB4' },
+  infoPillDeclined: { backgroundColor: '#E7EAEE' },
+  infoIcon: {
+    backgroundColor: '#FFFFFF',
+    padding: 10,
+    borderRadius: 32,
+  },
+  infoTextRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  infoStatus: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#0A0A0A',
+  },
+  infoDates: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#4A5565',
+  },
+
+  // CTA
+  footer: {
+    paddingHorizontal: 40,
+    paddingTop: 12,
+  },
+  footerFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: '100%',
+    height: 96,
   },
   cta: {
-    paddingVertical: 16,
-    borderRadius: 10,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#212121',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  ctaApproved: { backgroundColor: '#222B30' },
-  ctaDeclined: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#222B30',
+  ctaText: {
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
-  ctaText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  ctaTextDeclined: { color: '#222B30' },
+
+  // Avatars
+  avatarRing: { borderWidth: 1.5, borderColor: '#FFFFFF' },
+  avatarFallback: {
+    backgroundColor: '#0788B0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    fontFamily: ff('Montserrat', '700'),
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
 });
