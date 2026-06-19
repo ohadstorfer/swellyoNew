@@ -1,6 +1,5 @@
 import React from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
-import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { Text } from './Text';
 
 export const QUICK_REACTION_EMOJIS: readonly string[] = [
@@ -31,13 +30,10 @@ export const MessageReactionsBar: React.FC<Props> = ({
   currentReaction,
   onReact,
 }) => {
+  // Plain RN View positioned by absolute top/left in the overlay's coordinate
+  // space. Fade-in is owned by the parent overlay's opacity animation.
   return (
-    <Animated.View
-      entering={FadeIn.duration(180)}
-      exiting={FadeOut.duration(120)}
-      style={[styles.container, { top, left }]}
-      pointerEvents="box-none"
-    >
+    <View style={[styles.container, { top, left }]} pointerEvents="box-none">
       <View style={styles.bar}>
         {QUICK_REACTION_EMOJIS.map(emoji => {
           const isActive = emoji === currentReaction;
@@ -53,7 +49,7 @@ export const MessageReactionsBar: React.FC<Props> = ({
           );
         })}
       </View>
-    </Animated.View>
+    </View>
   );
 };
 

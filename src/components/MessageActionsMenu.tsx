@@ -364,17 +364,27 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
     // the host; we measure its window origin and offset the inner (window-sized)
     // layer by -origin so all the window-coord math below maps to the screen
     // exactly, regardless of safe-area padding or the screen-transition transform.
+    // The OUTER view is the one we measure for `origin` — it must carry NO
+    // transform. The scale "pop" lives on the INNER layer instead: measuring a
+    // scaled view returns its shrunk, transformed window position (e.g. a
+    // full-screen view at scale 0.96 reports top-left ≈ (8,17)), which would make
+    // `origin` a scale artifact rather than the real host offset and shift the
+    // whole menu up by that amount. Opacity is transform-free, so it's safe here.
     <Animated.View
       ref={rootRef}
       onLayout={measureRoot}
       pointerEvents="box-none"
-      style={[styles.root, { opacity: fade, transform: [{ scale }] }]}
+      style={[styles.root, { opacity: fade }]}
     >
-      <TouchableOpacity
-        style={{ position: 'absolute', left: -origin.x, top: -origin.y, width: screenW, height: screenH }}
-        activeOpacity={1}
-        onPress={() => requestClose()}
+      <Animated.View
+        pointerEvents="box-none"
+        style={{ position: 'absolute', left: -origin.x, top: -origin.y, width: screenW, height: screenH, transform: [{ scale }] }}
       >
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => requestClose()}
+        />
         {/* The dim layer is no longer drawn here — the screen renders ONE in-tree
             BubbleSpotlightDim (below the composer) shared by the menu AND edit
             mode, so tapping Edit only removes these items while the dim stays put
@@ -467,7 +477,7 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
             </TouchableOpacity>
           )}
         </TouchableOpacity>
-      </TouchableOpacity>
+      </Animated.View>
     </Animated.View>
   );
 };

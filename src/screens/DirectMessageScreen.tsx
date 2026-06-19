@@ -39,7 +39,7 @@ import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
 import { loadCachedConversationList, saveCachedConversationList } from '../services/messaging/conversationListCache';
 import * as Crypto from 'expo-crypto';
-import { MessageActionsMenu } from '../components/MessageActionsMenu';
+import { MessageActionsMenu, type BubbleRadii } from '../components/MessageActionsMenu';
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
 import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
@@ -414,6 +414,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [editingText, setEditingText] = useState('');
   // Bubble bounds for the edit-mode spotlight dim (same "lift" as long-press).
   const [editDimRect, setEditDimRect] = useState<SpotlightRect | null>(null);
+  // Per-corner radii captured at long-press, so the edit-mode re-measure reuses
+  // the same tail/no-tail cutout instead of assuming the bubble always has a tail.
+  const editDimRadiiRef = useRef<BubbleRadii>({ topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 });
   // Host view the dim is drawn inside — measure the bubble in the dim's LOCAL
   // coords (not window) so the carved hole isn't offset by the header.
   const dimHostRef = useRef<any>(null);
@@ -592,6 +595,54 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (!menuVisible && !editingMessageId) setEditDimRect(null);
   }, [menuVisible, editingMessageId]);
 
+  // Keep the long-press menu, reactions bar, and spotlight dim GLUED to the
+  // selected bubble while the menu is open. The bubble lives in the message list,
+  // not in the overlay, so anything that reflows the list — the keyboard opening/
+  // closing, an image above finishing loading, layout animations — slides the
+  // bubble out from under a one-shot measurement. We re-measure every frame while
+  // the menu is visible and update bubbleRect (window coords → bar/menu placement)
+  // and editDimRect (host-local coords → dim cutout) only when the position
+  // actually changes, so a settled menu stops triggering re-renders.
+  useEffect(() => {
+    if (!menuVisible || !selectedMessage) return;
+    const id = selectedMessage.id;
+    const isOwn = selectedMessage.sender_id === currentUserId;
+    let raf = 0;
+    let cancelled = false;
+    const near = (a: number, b: number) => Math.abs(a - b) < 0.5;
+    const tick = () => {
+      if (cancelled) return;
+      const node = bubbleRefsRef.current.get(id);
+      const host = dimHostRef.current;
+      if (node?.measureInWindow) {
+        node.measureInWindow((x: number, y: number, w: number, h: number) => {
+          if (cancelled || w <= 0 || h <= 0) return;
+          const radii = editDimRadiiRef.current;
+          setBubbleRect((prev) =>
+            prev && near(prev.x, x) && near(prev.y, y) && near(prev.width, w) && near(prev.height, h)
+              ? prev
+              : { x, y, width: w, height: h, radii, isOwn },
+          );
+          if (host?.measureInWindow) {
+            host.measureInWindow((hx: number, hy: number) => {
+              if (cancelled) return;
+              const ex = x - hx;
+              const ey = y - hy;
+              setEditDimRect((prev) =>
+                prev && near(prev.x, ex) && near(prev.y, ey) && near(prev.width, w) && near(prev.height, h)
+                  ? prev
+                  : { x: ex, y: ey, width: w, height: h, radii },
+              );
+            });
+          }
+        });
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelled = true; cancelAnimationFrame(raf); };
+  }, [menuVisible, selectedMessage, currentUserId]);
+
   useEffect(() => {
     // Don't clear here — the menu also uses editDimRect; the effect above clears
     // it. While editing, re-measure to refine after the composer→edit-bar swap.
@@ -606,7 +657,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             if (!cancelled && w > 0 && h > 0) {
               setEditDimRect({
                 x: bx - hx, y: by - hy, width: w, height: h,
-                radii: { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 },
+                radii: editDimRadiiRef.current,
               });
             }
           });
@@ -3224,7 +3275,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     return { id: message.id, type, snippet };
   };
 
-  const handleMessageLongPress = (message: Message, event: any) => {
+  const handleMessageLongPress = (message: Message, event: any, isLastInRun: boolean = true) => {
     console.log('[DirectMessageScreen] handleMessageLongPress called', {
       messageId: message.id,
       currentUserId,
@@ -3289,9 +3340,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
     // Per-corner radii must match styles.userMessageBubble / styles.botMessageBubble
     // so the dim cutout's curve aligns pixel-perfectly with the bubble's tail.
+    // Only the last/newest bubble in a consecutive run keeps its sharp 2px tail
+    // corner — earlier messages in the run are fully rounded (see the render-side
+    // `!isLastInRun` override). The cutout must mirror that or the dim peeks past
+    // the rounded corner of a tail-less bubble.
+    const tailCorner = isLastInRun ? 2 : 16;
     const radii = isOwnMessage
-      ? { topLeft: 16, topRight: 2, bottomLeft: 16, bottomRight: 16 }
-      : { topLeft: 16, topRight: 16, bottomLeft: 2, bottomRight: 16 };
+      ? { topLeft: 16, topRight: tailCorner, bottomLeft: 16, bottomRight: 16 }
+      : { topLeft: 16, topRight: 16, bottomLeft: tailCorner, bottomRight: 16 };
+    // Remember it so the edit-mode re-measure keeps the same tail/no-tail cutout.
+    editDimRadiiRef.current = radii;
     // Measure the bubble ONCE while the long-pressed row's ref is correct.
     // - Window coords (bubbleRect) feed the menu items' placement.
     // - Host-local coords (editDimRect = bubble − dim-host origin) feed the SINGLE
@@ -3606,7 +3664,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       <TouchableOpacity
         activeOpacity={0.7}
         onPress={() => Keyboard.dismiss()}
-        onLongPress={(e) => handleMessageLongPress(message, e)}
+        onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
         style={[
           styles.messageContainer,
           isOwnMessage ? styles.userMessageContainer : [
@@ -3707,7 +3765,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               <AudioMessageBubble
                 message={message}
                 isOwn={isOwnMessage}
-                onLongPress={(e) => handleMessageLongPress(message, e)}
+                onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
               />
               {isOwnMessage && message.upload_state === 'failed' && !message.deleted && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 12, paddingHorizontal: 10, paddingBottom: 6 }}>
@@ -3764,7 +3822,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   <TouchableOpacity
                     activeOpacity={0.9}
                     onPress={openVideo}
-                    onLongPress={(e) => handleMessageLongPress(message, e)}
+                    onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
                     disabled={!videoReady || isUploading || isFailed || isSigning}
                     style={styles.imageTouchable}
                   >
@@ -3867,7 +3925,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                         setFullscreenThumbnailUrl(message.image_metadata.thumbnail_url || null);
                       }
                     }}
-                    onLongPress={(e) => handleMessageLongPress(message, e)}
+                    onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
                     disabled={message.upload_state === 'uploading' || message.upload_state === 'failed'}
                     style={styles.imageTouchable}
                   >
@@ -4231,7 +4289,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
   return (
     <ChatErrorBoundary resetKeys={[currentConversationId]} onGoBack={onBack}>
-    <>
+    <View style={{ flex: 1 }}>
     <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
       {/* Header */}
       <View style={[styles.headerContainer, { paddingTop: insets.top + (Platform.OS === 'web' ? 24 : 12) }]}>
@@ -4594,118 +4652,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         );
       })()}
 
-      {/* Message Actions Menu */}
-      <MessageActionsMenu
-        visible={menuVisible}
-        onClose={() => {
-          setMenuVisible(false);
-          setSelectedMessage(null);
-          setBubbleRect(null);
-        }}
-        onEdit={() => {
-          if (selectedMessage && canEditMessage(selectedMessage)) {
-            // Flip the SAME composer input into edit mode — no input swap, so the
-            // keyboard never moves. Focus it so the keyboard is up for editing
-            // (no-op/seamless if it's already up from the menu re-focus).
-            setEditingText(selectedMessage.body || '');
-            setEditingMessageId(selectedMessage.id);
-            chatInputRef.current?.focus?.();
-          }
-        }}
-        onDelete={() => {
-          console.log('[DirectMessageScreen] onDelete callback called', {
-            selectedMessage: selectedMessage ? {
-              id: selectedMessage.id,
-              body: selectedMessage.body?.substring(0, 30),
-            } : null,
-          });
-          if (selectedMessage) {
-            console.log('[DirectMessageScreen] Calling handleDeleteMessage', {
-              messageId: selectedMessage.id,
-            });
-            handleDeleteMessage(selectedMessage.id);
-          } else {
-            console.error('[DirectMessageScreen] No selected message to delete');
-          }
-        }}
-        onCopy={() => {
-          if (selectedMessage) {
-            handleCopyMessageText(selectedMessage);
-          }
-        }}
-        onReply={() => {
-          if (selectedMessage) {
-            setReplyingTo(selectedMessage);
-            // Focus the input so the keyboard comes up right away.
-            chatInputRef.current?.focus?.();
-          }
-        }}
-        onReport={() => {
-          if (selectedMessage) {
-            setReportMessageContext(describeMessageForReport(selectedMessage));
-            // The actions menu is a Modal and the report sheet is a Modal too
-            // (BottomSheetShell). Opening the second in the same frame the first
-            // dismisses makes iOS drop the presentation, so the sheet never shows.
-            // Wait for the menu's fade-out to finish, then present the sheet.
-            setTimeout(() => setReportSheetVisible(true), 320);
-          }
-        }}
-        canReport={(() => {
-          if (!selectedMessage) return false;
-          // You can't report your own messages.
-          if (selectedMessage.sender_id === currentUserId) return false;
-          if (selectedMessage.deleted || selectedMessage.is_system) return false;
-          if (selectedMessage.upload_state === 'failed') return false;
-          return true;
-        })()}
-        canReply={(() => {
-          if (!selectedMessage) return false;
-          if (selectedMessage.deleted || selectedMessage.is_system) return false;
-          if (selectedMessage.upload_state === 'failed') return false;
-          return true;
-        })()}
-        canCopy={!!selectedMessage?.body && selectedMessage.body.trim().length > 0}
-        canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
-        canDelete={(() => {
-          // Only calculate when menu is visible and message is selected
-          if (!menuVisible || !selectedMessage) {
-            return false;
-          }
-          const canDelete = canDeleteMessage(selectedMessage);
-          console.log('[DirectMessageScreen] MessageActionsMenu canDelete prop', {
-            hasSelectedMessage: !!selectedMessage,
-            canDelete,
-            menuVisible,
-            selectedMessageId: selectedMessage?.id,
-            currentUserId,
-            messageSenderId: selectedMessage.sender_id,
-          });
-          return canDelete;
-        })()}
-        messagePosition={menuPosition}
-        bubbleRect={bubbleRect}
-        isOwnSelected={!!selectedMessage && selectedMessage.sender_id === currentUserId}
-        keyboardHeight={menuKeyboardHeight}
-        showReactionsBar={
-          !!selectedMessage &&
-          selectedMessage.sender_id !== currentUserId &&
-          !selectedMessage.deleted &&
-          !selectedMessage.is_system &&
-          selectedMessage.upload_state !== 'failed'
-        }
-        currentReaction={
-          selectedMessage?.reactions?.find(r => r.hasMine)?.emoji
-        }
-        onReact={(emoji) => {
-          if (!selectedMessage) return;
-          const mine = selectedMessage.reactions?.find(r => r.hasMine);
-          if (mine?.emoji === emoji) {
-            removeReaction(selectedMessage.id);
-          } else {
-            setReaction(selectedMessage.id, emoji);
-          }
-        }}
-      />
 
       {/* In-chat "report this message" bottom sheet */}
       <ReportMessageSheet
@@ -4854,6 +4800,118 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         }}
       />
     </SafeAreaView>
+      {/* Message Actions Menu */}
+      <MessageActionsMenu
+        visible={menuVisible}
+        onClose={() => {
+          setMenuVisible(false);
+          setSelectedMessage(null);
+          setBubbleRect(null);
+        }}
+        onEdit={() => {
+          if (selectedMessage && canEditMessage(selectedMessage)) {
+            // Flip the SAME composer input into edit mode — no input swap, so the
+            // keyboard never moves. Focus it so the keyboard is up for editing
+            // (no-op/seamless if it's already up from the menu re-focus).
+            setEditingText(selectedMessage.body || '');
+            setEditingMessageId(selectedMessage.id);
+            chatInputRef.current?.focus?.();
+          }
+        }}
+        onDelete={() => {
+          console.log('[DirectMessageScreen] onDelete callback called', {
+            selectedMessage: selectedMessage ? {
+              id: selectedMessage.id,
+              body: selectedMessage.body?.substring(0, 30),
+            } : null,
+          });
+          if (selectedMessage) {
+            console.log('[DirectMessageScreen] Calling handleDeleteMessage', {
+              messageId: selectedMessage.id,
+            });
+            handleDeleteMessage(selectedMessage.id);
+          } else {
+            console.error('[DirectMessageScreen] No selected message to delete');
+          }
+        }}
+        onCopy={() => {
+          if (selectedMessage) {
+            handleCopyMessageText(selectedMessage);
+          }
+        }}
+        onReply={() => {
+          if (selectedMessage) {
+            setReplyingTo(selectedMessage);
+            // Focus the input so the keyboard comes up right away.
+            chatInputRef.current?.focus?.();
+          }
+        }}
+        onReport={() => {
+          if (selectedMessage) {
+            setReportMessageContext(describeMessageForReport(selectedMessage));
+            // The actions menu is a Modal and the report sheet is a Modal too
+            // (BottomSheetShell). Opening the second in the same frame the first
+            // dismisses makes iOS drop the presentation, so the sheet never shows.
+            // Wait for the menu's fade-out to finish, then present the sheet.
+            setTimeout(() => setReportSheetVisible(true), 320);
+          }
+        }}
+        canReport={(() => {
+          if (!selectedMessage) return false;
+          // You can't report your own messages.
+          if (selectedMessage.sender_id === currentUserId) return false;
+          if (selectedMessage.deleted || selectedMessage.is_system) return false;
+          if (selectedMessage.upload_state === 'failed') return false;
+          return true;
+        })()}
+        canReply={(() => {
+          if (!selectedMessage) return false;
+          if (selectedMessage.deleted || selectedMessage.is_system) return false;
+          if (selectedMessage.upload_state === 'failed') return false;
+          return true;
+        })()}
+        canCopy={!!selectedMessage?.body && selectedMessage.body.trim().length > 0}
+        canEdit={selectedMessage ? canEditMessage(selectedMessage) : false}
+        canDelete={(() => {
+          // Only calculate when menu is visible and message is selected
+          if (!menuVisible || !selectedMessage) {
+            return false;
+          }
+          const canDelete = canDeleteMessage(selectedMessage);
+          console.log('[DirectMessageScreen] MessageActionsMenu canDelete prop', {
+            hasSelectedMessage: !!selectedMessage,
+            canDelete,
+            menuVisible,
+            selectedMessageId: selectedMessage?.id,
+            currentUserId,
+            messageSenderId: selectedMessage.sender_id,
+          });
+          return canDelete;
+        })()}
+        messagePosition={menuPosition}
+        bubbleRect={bubbleRect}
+        isOwnSelected={!!selectedMessage && selectedMessage.sender_id === currentUserId}
+        keyboardHeight={menuKeyboardHeight}
+        showReactionsBar={
+          !!selectedMessage &&
+          selectedMessage.sender_id !== currentUserId &&
+          !selectedMessage.deleted &&
+          !selectedMessage.is_system &&
+          selectedMessage.upload_state !== 'failed'
+        }
+        currentReaction={
+          selectedMessage?.reactions?.find(r => r.hasMine)?.emoji
+        }
+        onReact={(emoji) => {
+          if (!selectedMessage) return;
+          const mine = selectedMessage.reactions?.find(r => r.hasMine);
+          if (mine?.emoji === emoji) {
+            removeReaction(selectedMessage.id);
+          } else {
+            setReaction(selectedMessage.id, emoji);
+          }
+        }}
+      />
     {Platform.OS !== 'web' && (
       <GalleryPermissionOverlay
         visible={showPermissionOverlay}
@@ -4869,7 +4927,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         }}
       />
     )}
-    </>
+    </View>
     </ChatErrorBoundary>
   );
 };

@@ -48,9 +48,11 @@ const FROST_COLLAPSE_SCALE = 0.72;
 // filters out touch jitter.
 const NAV_DIR_THRESHOLD = 8;
 const TIMING = { duration: 450, easing: Easing.out(Easing.cubic) };
-// The active-pill hand-off: exponential ease-OUT — launches at full speed
-// immediately, all the slowness lives in the long settle at the end
-const ITEM_TIMING = { duration: 350, easing: Easing.out(Easing.exp) };
+// The active-pill hand-off: a strong ease-IN-OUT so the pill reads as ONE
+// continuous movement — accelerates, slides, decelerates to rest. (The old
+// Easing.out(Easing.exp) was biphasic: an instant snap then a long crawl, which
+// looked like two separate motions.)
+const ITEM_TIMING = { duration: 350, easing: Easing.bezier(0.77, 0, 0.175, 1) };
 const ITEM_SIZE = 66; // square side of an inactive item
 
 export interface TripsBottomNavControl {

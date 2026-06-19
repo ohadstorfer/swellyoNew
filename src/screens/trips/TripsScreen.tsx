@@ -691,6 +691,14 @@ const TripDeck: React.FC<{
         snapToAlignment="start"
         decelerationRate="fast"
         disableIntervalMomentum
+        // Virtualization: the deck shows ~1.5 cards, but without these it mounts
+        // and lays out ~10 cards on activation — that Yoga layout spike is what
+        // stutters the bottom-bar pill animation on tab switch. getItemLayout is
+        // already provided, so windowing is exact and cheap.
+        initialNumToRender={2}
+        maxToRenderPerBatch={3}
+        windowSize={3}
+        removeClippedSubviews
         // 16 (~60 events/s). 1 streamed ~120 JS-thread onScroll events/s on
         // ProMotion — each calling scrollX.setValue — which saturated the JS
         // thread and froze the whole app while a deck was on screen. The minor
@@ -1116,6 +1124,12 @@ const MyTripsView: React.FC<{
       keyExtractor={x => x.trip.id}
       onScroll={onNavScroll}
       scrollEventThrottle={16}
+      // Windowing: cap the cards mounted/laid-out on activation so the Yoga
+      // layout pass doesn't stutter the bottom-bar animation on tab switch.
+      initialNumToRender={4}
+      maxToRenderPerBatch={4}
+      windowSize={5}
+      removeClippedSubviews
       ListHeaderComponent={
         <FadeInView>
           <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
