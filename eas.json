@@ -14,12 +14,20 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "environment": "preview"
+      "environment": "preview",
+      "env": {
+        "SENTRY_ORG": "swellyo",
+        "SENTRY_PROJECT": "react-native"
+      }
     },
     "production": {
       "channel": "production",
       "environment": "production",
       "prebuildCommand": "echo 'Skipping prebuild — committed native folders are the source of truth'",
+      "env": {
+        "SENTRY_ORG": "swellyo",
+        "SENTRY_PROJECT": "react-native"
+      },
       "ios": {
         "autoIncrement": "buildNumber"
       },
