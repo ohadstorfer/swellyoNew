@@ -2848,9 +2848,9 @@ const styles = StyleSheet.create({
   userMessageBubble: {
     backgroundColor: '#B72DF2',
     borderTopLeftRadius: 16,
-    borderTopRightRadius: 2,
+    borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    borderBottomRightRadius: 2, // Pointy corner at bottom right
   },
   botMessageBubble: {
     backgroundColor: colors.white,

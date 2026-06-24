@@ -351,8 +351,8 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: C.surface,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },

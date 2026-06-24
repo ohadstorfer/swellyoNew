@@ -10,6 +10,14 @@
 [build]
   publish = "."
 
+# Rewrites the link-preview (Open Graph) tags per trip. For ?grouptrip=<id>
+# links it swaps the default Swellyo logo for that trip's cover photo + title;
+# everything else (and real users) pass through untouched. Needs the
+# SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars set on this Netlify site.
+[[edge_functions]]
+  path = "/"
+  function = "invite-preview"
+
 [[headers]]
   for = "/.well-known/apple-app-site-association"
   [headers.values]

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, InteractionManager } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, InteractionManager, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions } from '@react-navigation/native';
@@ -16,6 +16,7 @@ import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
 import TripDetailScreen from '../screens/trips/TripDetailScreen';
 import TripUpdatesScreen from '../screens/trips/TripUpdatesScreen';
+import TripMembersScreen from '../screens/trips/TripMembersScreen';
 import PackingAndGearScreen from '../screens/trips/PackingAndGearScreen';
 import YourGearScreen from '../screens/trips/YourGearScreen';
 import ManageSuggestedGearScreen from '../screens/trips/ManageSuggestedGearScreen';
@@ -30,6 +31,7 @@ import { useMainNav } from './MainNavContext';
 import { useOnboarding } from '../context/OnboardingContext';
 import { queryClient } from '../lib/queryClient';
 import { tripsKeys } from '../hooks/trips/useTripQueries';
+import { approveJoinRequest, declineJoinRequest } from '../services/trips/groupTripsService';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
 
 /**
@@ -104,6 +106,7 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       onEditTrip={trip => navigation.dispatch(StackActions.push('EditTrip', { trip }))}
       onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
       onViewAllUpdates={() => navigation.dispatch(StackActions.push('TripUpdates', { tripId }))}
+      onViewAllMembers={() => navigation.dispatch(StackActions.push('TripMembers', { tripId }))}
       onViewAllGroupGear={() => navigation.dispatch(StackActions.push('PackingAndGear', { tripId }))}
       onViewAllYourGear={() => navigation.dispatch(StackActions.push('YourGear', { tripId }))}
       onManageSuggestedGear={() => navigation.dispatch(StackActions.push('ManageSuggestedGear', { tripId }))}
@@ -165,6 +168,23 @@ function CommitmentCardScreen({ route, navigation }: NativeStackScreenProps<Root
 function TripUpdatesCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripUpdates'>) {
   const { tripId } = route.params;
   return <TripUpdatesScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+}
+
+function TripMembersCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripMembers'>) {
+  const { tripCard } = useMainNav();
+  const { tripId } = route.params;
+  return (
+    <TripMembersScreen
+      tripId={tripId}
+      onBack={() => navigation.goBack()}
+      onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
+      onReviewRequest={(userId, requestId) =>
+        navigation.dispatch(
+          StackActions.push('ProfileCard', { userId, joinRequest: { tripId, requestId } })
+        )
+      }
+    />
+  );
 }
 
 function EditTripCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'EditTrip'>) {
@@ -281,7 +301,33 @@ function SwellyChatCardScreen({ route, navigation }: NativeStackScreenProps<Root
 
 function ProfileCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ProfileCard'>) {
   const { profileCard } = useMainNav();
-  const { userId, suppressConnectAnalytics } = route.params;
+  const { userId, suppressConnectAnalytics, joinRequest } = route.params;
+  // Opened to review a pending join request → Approve / Decline footer that
+  // actions the request, refreshes the trip caches, then pops back.
+  const reviewRequest = joinRequest
+    ? {
+        onApprove: async () => {
+          try {
+            await approveJoinRequest(joinRequest.requestId);
+            queryClient.invalidateQueries({ queryKey: tripsKeys.detail(joinRequest.tripId) });
+            queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(joinRequest.tripId) });
+            queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+            navigation.goBack();
+          } catch (e: any) {
+            Alert.alert('Could not approve', e?.message || 'Please try again.');
+          }
+        },
+        onDecline: async () => {
+          try {
+            await declineJoinRequest(joinRequest.requestId);
+            queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(joinRequest.tripId) });
+            navigation.goBack();
+          } catch (e: any) {
+            Alert.alert('Could not decline', e?.message || 'Please try again.');
+          }
+        },
+      }
+    : undefined;
   return (
     <ProfileScreen
       userId={userId}
@@ -290,6 +336,7 @@ function ProfileCardScreen({ route, navigation }: NativeStackScreenProps<RootSta
       }}
       onMessage={profileCard.onMessage}
       suppressConnectAnalytics={suppressConnectAnalytics}
+      reviewRequest={reviewRequest}
       // Card: the navigator owns slide-in and swipe-back.
       noTransition={true}
       swipeBackDisabled={true}
@@ -504,7 +551,7 @@ const renderTabBar = (props: BottomTabBarProps) => <FloatingTabBar {...props} />
 function HomeTabs() {
   return (
     <Tab.Navigator
-      initialRouteName="Lineup"
+      initialRouteName="Trips"
       // Hardware back must not jump between tabs (platform convention —
       // Instagram/WhatsApp behavior). Each root handles its own back.
       backBehavior="none"
@@ -539,6 +586,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="TripMembers" component={TripMembersCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="PackingAndGear" component={PackingAndGearCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="YourGear" component={YourGearCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ManageSuggestedGear" component={ManageSuggestedGearCardScreen} options={{ presentation: 'card' }} />

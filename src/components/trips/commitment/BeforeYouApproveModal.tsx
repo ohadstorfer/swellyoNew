@@ -48,7 +48,7 @@ export const BeforeYouApproveModal: React.FC<Props> = ({ visible, onDismiss }) =
 
           <Text style={styles.title}>Before you approve</Text>
           <Text style={styles.body}>
-            Make sure they're truly committed. Others may join based on this.
+            Verify their commitment is genuine - other members may book flights, accommodation, and more based on it.
           </Text>
 
           <TouchableOpacity
@@ -118,7 +118,8 @@ const styles = StyleSheet.create({
     color: '#7B7B7B',
     textAlign: 'center',
     marginTop: 8,
-    marginBottom: 24,
+    marginBottom: 36,
+    paddingHorizontal: 12,
   },
   btn: {
     width: '100%',

@@ -46,6 +46,7 @@ import {
   declineGearRequest,
   getTripById,
   updateGroupTrip,
+  getGroupTripInviteUrl,
   getTripParticipants,
   getMyJoinRequest,
   listPendingRequests,
@@ -139,6 +140,9 @@ interface TripDetailScreenProps {
   initialFocus?: TripDetailFocus | null;
   /** "View all" on the admin-updates preview pushes the full Updates list. */
   onViewAllUpdates?: () => void;
+  /** "View all" on the Members section / Overview Participants row pushes the full
+   *  Members list (permission layers resolved inside that screen). */
+  onViewAllMembers?: () => void;
   /** "View all" on the Group Gear preview pushes the full Packing & Gear list. */
   onViewAllGroupGear?: () => void;
   onViewAllYourGear?: () => void;
@@ -318,7 +322,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -516,6 +520,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         name: p.name ?? null,
         avatarUrl: p.profile_image_url ?? null,
         committed: !!p.committed,
+        isHost: p.role === 'host',
       })),
     [participants]
   );
@@ -830,8 +835,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const handleShare = async () => {
     if (!trip) return;
     try {
-      const message = `${trip.title || 'Surftrip'} — ${formatDestination(trip)} · ${formatDates(trip)}`;
-      await Share.share({ message });
+      const url = getGroupTripInviteUrl(trip.id);
+      const name = trip.title?.trim() || 'my surf trip';
+      // Keep the URL in `message` so it survives apps that ignore the `url`
+      // field (WhatsApp, etc.); `url` gives iOS a rich link target. Without
+      // this the share pasted as plain text with no link.
+      await Share.share({
+        message: `Yo! checkout my trip "${name}" on Swellyo! 🌊\n${url}`,
+        url,
+      });
       logEvent('trip_invite_shared', { tripId: trip.id });
     } catch {
       // user cancelled or platform unavailable — silently no-op
@@ -1235,6 +1247,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     label: string;
     group: number;
     onPress: () => void;
+    /** Destructive actions render in red (Figma: Exit / Cancel trip). */
+    destructive?: boolean;
   };
   const menuItems: TripMenuEntry[] = (
     [
@@ -1265,6 +1279,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         label: 'Cancel trip',
         group: 2,
         onPress: handleCancelTrip,
+        destructive: true,
+      },
+      // Exit — approved member (not the host); replaces the old bottom-of-Plan
+      // destructive card.
+      (isApprovedMember && !isHost) && {
+        key: 'exit',
+        icon: 'exit-outline',
+        label: 'Exit trip',
+        group: 2,
+        onPress: handleLeaveTrip,
+        destructive: true,
       },
     ] as (TripMenuEntry | false)[]
   ).filter(Boolean) as TripMenuEntry[];
@@ -1354,6 +1379,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 }
               : undefined
           }
+          onSeeAllParticipants={onViewAllMembers}
           onLeaderPress={
             onViewUserProfile && trip.host_id && trip.host_id !== currentUserId
               ? () => onViewUserProfile(trip.host_id)
@@ -1432,14 +1458,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             requests, breakdown, destructive actions) stay below — they're not
             in the Figma frames and live only here, not in Overview. */}
 
-        {/* 1) Commit pill — approved members only (host can't commit). */}
-        {isApprovedMember && (
-          <View onLayout={registerSection('commit')}>
-            <CommitPill status={myCommitmentStatus} onPress={handleOpenCommitSheet} />
-          </View>
-        )}
-
-        {/* 1.5) Members — moved here from the Overview body (members-only;
+        {/* 1) Members — moved here from the Overview body (members-only;
             non-members still see the simpler Participants row in Overview). */}
         <View onLayout={registerSection('members')}>
           <TripMemberSection
@@ -1447,6 +1466,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             participantCount={participants.length}
             maxParticipants={trip.max_participants}
             committedCount={committedCount}
+            onViewAll={onViewAllMembers}
+            pendingCount={isHost ? pendingRequests.length : 0}
             onMemberPress={
               onViewUserProfile
                 ? userId => {
@@ -1456,6 +1477,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             }
           />
         </View>
+
+        {/* 1.5) Commit pill — below the members + commitment bar (approved
+            members only; the host can't commit). */}
+        {isApprovedMember && (
+          <View onLayout={registerSection('commit')}>
+            <CommitPill status={myCommitmentStatus} onPress={handleOpenCommitSheet} />
+          </View>
+        )}
 
         {/* 2) Recent admin updates — always shown (members see a read-only
             "No updates yet" placeholder; only the host gets "+ Add update").
@@ -1539,22 +1568,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* Pending requests (host only) */}
-        {isHost && pendingRequests.length > 0 && (
-          <View onLayout={registerSection('requests')}>
-            <Section title={`Pending requests (${pendingRequests.length})`}>
-              {pendingRequests.map(r => (
-                <PendingRequestCard
-                  key={r.id}
-                  request={r}
-                  onApprove={handleApprove}
-                  onDecline={handleDecline}
-                  isProcessing={processingRequestId === r.id}
-                />
-              ))}
-            </Section>
-          </View>
-        )}
+        {/* Pending requests + member management now live in the full Members
+            view ("View all" / "Requests pending" on the Members section). */}
 
         {/* Declined requests (host only) — lets the host reverse a decision. */}
         {isHost && declinedRequests.length > 0 && (
@@ -1573,39 +1588,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </Section>
         )}
 
-        {/* Manage members (host only) — remove a member from the trip. */}
-        {isHost && hasNonHostMembers && (
-          <Section title="Members">
-            {participants
-              .filter(p => p.role !== 'host')
-              .map(p => (
-                <ParticipantCard
-                  key={p.user_id}
-                  participant={p}
-                  onPress={onViewUserProfile}
-                  onRemove={removingUserId === p.user_id ? undefined : handleRemoveParticipant}
-                  rightSlot={
-                    removingUserId === p.user_id ? (
-                      <ActivityIndicator size="small" color="#C0392B" />
-                    ) : undefined
-                  }
-                />
-              ))}
-          </Section>
-        )}
-
-        {/* Bottom destructive — Exit (member only). Host's Cancel / Complete
-            now live in the header overflow (⋮) menu. */}
-        {isApprovedMember && !isHost && (
-          <View style={styles.destructiveCard}>
-            <DangerRow
-              icon="exit-outline"
-              label="Exit trip"
-              onPress={handleLeaveTrip}
-              loading={leaving}
-            />
-          </View>
-        )}
+        {/* "Exit trip" now lives in the header overflow (⋮) menu, alongside the
+            host's Cancel / Complete. */}
         </>
         )}
 
@@ -1840,6 +1824,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       />
       <EditAccommodationSheet
         visible={editSheet === 'accommodation'}
+        specificOnly
         initial={{
           kind: (trip.accommodation_type?.[0] ?? null) as AccommodationInitial['kind'],
           name: trip.accommodation_name ?? '',
@@ -1870,7 +1855,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             activeOpacity={1}
             onPress={() => setMenuVisible(false)}
           />
-          <Reanimated.View entering={FadeInDown.duration(160)} style={styles.menuDropdown}>
+          {/* Open just BELOW the kebab. Absolute `top` is measured from the
+              screen's border edge (RN ignores SafeAreaView's inset padding for
+              absolute children), so add the inset + header height ourselves. */}
+          <Reanimated.View
+            entering={FadeInDown.duration(160)}
+            style={[styles.menuDropdown, { top: insets.top + 56 }]}
+          >
             {menuItems.map((item, i) => {
               const showDivider = i > 0 && item.group !== menuItems[i - 1].group;
               return (
@@ -1884,8 +1875,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                       item.onPress();
                     }}
                   >
-                    <Ionicons name={item.icon} size={22} color="#222B30" />
-                    <Text style={styles.menuItemText}>{item.label}</Text>
+                    <Ionicons name={item.icon} size={22} color={item.destructive ? '#FF5367' : '#222B30'} />
+                    <Text style={[styles.menuItemText, item.destructive && styles.menuItemTextDestructive]}>{item.label}</Text>
                   </TouchableOpacity>
                 </React.Fragment>
               );
@@ -2013,7 +2004,7 @@ const styles = StyleSheet.create({
   menuBackdrop: { ...StyleSheet.absoluteFillObject, zIndex: 9998 },
   menuDropdown: {
     position: 'absolute',
-    top: 52,
+    // `top` is set inline (insets.top + header height) so it clears the kebab.
     right: 12,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -2040,6 +2031,8 @@ const styles = StyleSheet.create({
     color: '#222B30',
     flex: 1,
   },
+  // Destructive menu items — Exit / Cancel trip (Figma red).
+  menuItemTextDestructive: { color: '#FF5367' },
   menuDivider: { height: 1, backgroundColor: '#ECECEC', marginVertical: 4 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },

@@ -122,8 +122,8 @@ const styles = StyleSheet.create({
   dim: { backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     paddingTop: 8,
     paddingBottom: 24,
     paddingHorizontal: 16,

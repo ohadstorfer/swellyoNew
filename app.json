@@ -19,6 +19,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
+      "appleTeamId": "683UA9HZYT",
       "buildNumber": "37",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
@@ -27,7 +28,8 @@
         "applinks:swellyo-invite.netlify.app"
       ],
       "entitlements": {
-        "aps-environment": "production"
+        "aps-environment": "production",
+        "com.apple.developer.usernotifications.communication": true
       },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats.",
@@ -103,7 +105,8 @@
           "project": "react-native",
           "organization": "swellyo"
         }
-      ]
+      ],
+      "@bacons/apple-targets"
     ],
     "extra": {
       "eas": {

@@ -27,15 +27,15 @@ const REMINDERS: ReminderConfig[] = [
     olderThan: '1 hour',
     newerThan: '2 hours',
     title: 'Just one more step \u{1F30A}',
-    body: 'Your profile is almost there — finish in 2 minutes.',
+    body: 'Finish setting up your profile in less than 2 min and start joining trips!',
   },
   {
     key: '24h',
     column: 'onboarding_reminder_24h_sent_at',
     olderThan: '24 hours',
     newerThan: '25 hours',
-    title: 'Surfers are waiting \u{1F3C4}',
-    body: "Finish your profile to start matching. It's quick.",
+    title: 'Awesome surftrips are waiting \u{1F334}\u{1F30A}',
+    body: 'Finish your profile to find your trip!',
   },
   {
     key: '7d',
@@ -43,7 +43,7 @@ const REMINDERS: ReminderConfig[] = [
     olderThan: '7 days',
     newerThan: '7 days 1 hour',
     title: 'Still want in? \u{1F334}',
-    body: 'Your profile takes 2 minutes. Come back and finish.',
+    body: 'Your profile takes literally 2 minutes. Come back and finish \u{1F64C}\u{1F3FC}',
   },
 ]
 

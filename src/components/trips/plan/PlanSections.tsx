@@ -176,9 +176,9 @@ const SectionHeader: React.FC<{
   </View>
 );
 
-const LinkText: React.FC<{ label: string; onPress?: () => void; size?: 'sm' | 'md' }> = ({ label, onPress, size = 'md' }) => (
+const LinkText: React.FC<{ label: string; onPress?: () => void; size?: 'sm' | 'md'; color?: string }> = ({ label, onPress, size = 'md', color }) => (
   <Pressable onPress={onPress} hitSlop={8}>
-    <Text style={size === 'sm' ? styles.linkSmall : styles.link}>{label}</Text>
+    <Text style={[size === 'sm' ? styles.linkSmall : styles.link, color ? { color } : null]}>{label}</Text>
   </Pressable>
 );
 
@@ -197,7 +197,8 @@ const BadgeCheckIcon: React.FC<{ size?: number; color?: string }> = ({ size = 24
 
 // Passport-in-badge icon for the "Committed to trip" row (Figma 13455-38704):
 // a teal scalloped badge filled #05BCD3 with a white passport document inside.
-const CommittedPassportIcon: React.FC<{ size?: number }> = ({ size = 24 }) => (
+// Exported so the full Members screen reuses the exact same committed badge.
+export const CommittedPassportIcon: React.FC<{ size?: number }> = ({ size = 24 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path
       d="M17.9012 4.99851C18.1071 5.49653 18.5024 5.8924 19.0001 6.09907L20.7452 6.82198C21.2433 7.02828 21.639 7.42399 21.8453 7.92206C22.0516 8.42012 22.0516 8.97974 21.8453 9.47781L21.1229 11.2218C20.9165 11.7201 20.9162 12.2803 21.1236 12.7783L21.8447 14.5218C21.9469 14.7685 21.9996 15.0329 21.9996 15.2999C21.9997 15.567 21.9471 15.8314 21.8449 16.0781C21.7427 16.3249 21.5929 16.549 21.4041 16.7378C21.2152 16.9266 20.991 17.0764 20.7443 17.1785L19.0004 17.9009C18.5023 18.1068 18.1065 18.5021 17.8998 18.9998L17.1769 20.745C16.9706 21.2431 16.575 21.6388 16.0769 21.8451C15.5789 22.0514 15.0193 22.0514 14.5212 21.8451L12.7773 21.1227C12.2792 20.9169 11.7198 20.9173 11.2221 21.1239L9.47689 21.8458C8.97912 22.0516 8.42001 22.0514 7.92237 21.8453C7.42473 21.6391 7.02925 21.2439 6.82281 20.7464L6.09972 19.0006C5.8938 18.5026 5.49854 18.1067 5.00085 17.9L3.25566 17.1771C2.75783 16.9709 2.36226 16.5754 2.15588 16.0777C1.94951 15.5799 1.94923 15.0205 2.1551 14.5225L2.87746 12.7786C3.08325 12.2805 3.08283 11.7211 2.8763 11.2233L2.15497 9.47678C2.0527 9.2301 2.00004 8.96568 2 8.69863C1.99996 8.43159 2.05253 8.16715 2.15472 7.92043C2.25691 7.67372 2.40671 7.44955 2.59557 7.26075C2.78442 7.07195 3.00862 6.92222 3.25537 6.8201L4.9993 6.09772C5.49687 5.89197 5.89248 5.4972 6.0993 5.00006L6.82218 3.25481C7.02848 2.75674 7.42418 2.36103 7.92222 2.15473C8.42027 1.94842 8.97987 1.94842 9.47792 2.15473L11.2218 2.87712C11.7199 3.08291 12.2793 3.08249 12.7771 2.87595L14.523 2.15585C15.021 1.94966 15.5804 1.9497 16.0784 2.15597C16.5763 2.36223 16.972 2.75783 17.1783 3.25576L17.9014 5.00153L17.9012 4.99851Z"
@@ -212,6 +213,27 @@ const CommittedPassportIcon: React.FC<{ size?: number }> = ({ size = 24 }) => (
       stroke="#FFFFFF"
       strokeLinecap="round"
       strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+// Admin/host marker — same scalloped badge as the committed one, but amber
+// (#F5A623) with a white crown instead of teal + passport. Marks the trip host
+// in member lists; shown to everyone (who the admin is isn't sensitive).
+export const AdminBadgeIcon: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M17.9012 4.99851C18.1071 5.49653 18.5024 5.8924 19.0001 6.09907L20.7452 6.82198C21.2433 7.02828 21.639 7.42399 21.8453 7.92206C22.0516 8.42012 22.0516 8.97974 21.8453 9.47781L21.1229 11.2218C20.9165 11.7201 20.9162 12.2803 21.1236 12.7783L21.8447 14.5218C21.9469 14.7685 21.9996 15.0329 21.9996 15.2999C21.9997 15.567 21.9471 15.8314 21.8449 16.0781C21.7427 16.3249 21.5929 16.549 21.4041 16.7378C21.2152 16.9266 20.991 17.0764 20.7443 17.1785L19.0004 17.9009C18.5023 18.1068 18.1065 18.5021 17.8998 18.9998L17.1769 20.745C16.9706 21.2431 16.575 21.6388 16.0769 21.8451C15.5789 22.0514 15.0193 22.0514 14.5212 21.8451L12.7773 21.1227C12.2792 20.9169 11.7198 20.9173 11.2221 21.1239L9.47689 21.8458C8.97912 22.0516 8.42001 22.0514 7.92237 21.8453C7.42473 21.6391 7.02925 21.2439 6.82281 20.7464L6.09972 19.0006C5.8938 18.5026 5.49854 18.1067 5.00085 17.9L3.25566 17.1771C2.75783 16.9709 2.36226 16.5754 2.15588 16.0777C1.94951 15.5799 1.94923 15.0205 2.1551 14.5225L2.87746 12.7786C3.08325 12.2805 3.08283 11.7211 2.8763 11.2233L2.15497 9.47678C2.0527 9.2301 2.00004 8.96568 2 8.69863C1.99996 8.43159 2.05253 8.16715 2.15472 7.92043C2.25691 7.67372 2.40671 7.44955 2.59557 7.26075C2.78442 7.07195 3.00862 6.92222 3.25537 6.8201L4.9993 6.09772C5.49687 5.89197 5.89248 5.4972 6.0993 5.00006L6.82218 3.25481C7.02848 2.75674 7.42418 2.36103 7.92222 2.15473C8.42027 1.94842 8.97987 1.94842 9.47792 2.15473L11.2218 2.87712C11.7199 3.08291 12.2793 3.08249 12.7771 2.87595L14.523 2.15585C15.021 1.94966 15.5804 1.9497 16.0784 2.15597C16.5763 2.36223 16.972 2.75783 17.1783 3.25576L17.9014 5.00153L17.9012 4.99851Z"
+      fill="#F5A623"
+      stroke="#FFFFFF"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    {/* White crown — three peaks + base bar, centred in the badge. */}
+    <Path
+      d="M7.6 15.1L6.95 9.7L9.85 11.85L12 8.6L14.15 11.85L17.05 9.7L16.4 15.1H7.6Z M7.7 15.9H16.3V17.1H7.7V15.9Z"
+      fill="#FFFFFF"
     />
   </Svg>
 );
@@ -260,6 +282,8 @@ export type TripMember = {
   name: string | null;
   avatarUrl: string | null;
   committed: boolean;
+  /** Host → amber admin crown instead of the committed badge. */
+  isHost?: boolean;
 };
 
 export const TripMemberSection: React.FC<{
@@ -272,19 +296,37 @@ export const TripMemberSection: React.FC<{
   /** When wired, the header count becomes a "View all (n/max)" link. The avatar
    *  row already scrolls to reveal everyone, so this is optional. */
   onViewAll?: () => void;
-}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll }) => {
-  // Header shows only the total (the trip cap), not "joined/cap" — e.g. "(12)".
-  const countLabel = maxParticipants ? `${maxParticipants}` : `${participantCount}`;
-  // Fill = committed out of the cap; with no cap we fall back to head-count so
-  // the bar still reads as "how many are locked in".
-  const denom = maxParticipants && maxParticipants > 0 ? maxParticipants : Math.max(participantCount, 1);
+  /** Host only — number of pending join requests. When > 0, a red pill next to
+   *  "View all" nudges the admin to open the Members screen and act on them. */
+  pendingCount?: number;
+}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0 }) => {
+  // "View all (N)" = the actual number of members to view. Previously this used
+  // the trip cap (max_participants), which made a 2-member/13-cap trip read as
+  // "View all (13)" — i.e. "13 members". Always show the real head-count.
+  const countLabel = `${participantCount}`;
+  // "Committed to trip" = how many of the CURRENT members have committed, so the
+  // denominator is the actual head-count (not the trip cap — a 2-member trip read
+  // "0/13" against a 13 cap, which is wrong).
+  const denom = Math.max(participantCount, 1);
   const fillPct = Math.max(0, Math.min(1, committedCount / denom));
   return (
     <View style={styles.memberSection}>
       <SectionHeader
         title="Members"
         large
-        right={<LinkText label={`View all (${countLabel})`} onPress={onViewAll} />}
+        right={
+          pendingCount > 0 ? (
+            // Host with pending join requests — the link turns into an amber
+            // "Request pending (N)" nudge; reverts to "View all" once cleared.
+            <LinkText
+              label={`Requests pending (${pendingCount})`}
+              onPress={onViewAll}
+              color="#F5A623"
+            />
+          ) : (
+            <LinkText label={`View all (${countLabel})`} onPress={onViewAll} />
+          )
+        }
       />
 
       {members.length > 0 ? (
@@ -318,9 +360,13 @@ export const TripMemberSection: React.FC<{
                       <Ionicons name="person" size={24} color="#FFFFFF" />
                     </View>
                   )}
-                  {m.committed ? (
+                  {m.isHost ? (
                     <View style={styles.memberBadge}>
-                      <CommittedPassportIcon size={22} />
+                      <AdminBadgeIcon size={26} />
+                    </View>
+                  ) : m.committed ? (
+                    <View style={styles.memberBadge}>
+                      <CommittedPassportIcon size={26} />
                     </View>
                   ) : null}
                 </View>
@@ -343,8 +389,7 @@ export const TripMemberSection: React.FC<{
             <Text style={styles.memberProgressLabel}>Committed to trip</Text>
           </View>
           <Text style={styles.memberProgressCount}>
-            {committedCount}
-            {maxParticipants ? `/${maxParticipants}` : ''}
+            {committedCount}/{participantCount}
           </Text>
         </View>
         <View style={styles.memberProgressTrack}>
@@ -770,8 +815,8 @@ const styles = StyleSheet.create({
   // Bleed edge-to-edge so avatars scroll to the screen edge.
   memberScroll: { marginHorizontal: -16, marginTop: 16 },
   memberScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'flex-start' },
-  memberItem: { width: 56, alignItems: 'center' },
-  memberAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#9CB6C0' },
+  memberItem: { width: 68, alignItems: 'center' },
+  memberAvatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#9CB6C0' },
   memberAvatarEmpty: { alignItems: 'center', justifyContent: 'center' },
   // Passport badge — the Figma scalloped teal badge (CommittedPassportIcon
   // brings its own teal fill + white ring), notched into the avatar's
@@ -780,8 +825,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: -2,
     bottom: -2,
-    width: 22,
-    height: 22,
+    width: 26,
+    height: 26,
   },
   // Name caption (Body/B-4: Size/xs) — nudged to 11px for legibility under the avatar.
   memberName: {

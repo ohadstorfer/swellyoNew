@@ -193,7 +193,7 @@ const TripCard: React.FC<{
   onPressIn?: () => void;
 }> = ({ trip, status, meta, onPress, onPressIn }) => {
   const badge = STATUS_BADGE[status];
-  const avatars = meta?.memberAvatars ?? [];
+  const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const total = meta?.totalCount ?? trip.participant_count ?? 0;
   const overflow = total - avatars.length;
 
@@ -374,7 +374,7 @@ const ExploreTripCard: React.FC<{
 }> = ({ trip, meta, onPress, userId }) => {
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
   const typeGradient = TRIP_TYPE_GRADIENT[trip.hosting_style] ?? TRIP_TYPE_GRADIENT.A;
-  const avatars = meta?.memberAvatars ?? [];
+  const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
   const spotsLeft = max != null ? Math.max(0, max - count) : null;
@@ -1204,7 +1204,7 @@ const TabPane: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, navControl: navControlProp }: TripsScreenProps) {
+export default function TripsScreen({ navControl: navControlProp }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -1380,15 +1380,7 @@ export default function TripsScreen({ onBack, navControl: navControlProp }: Trip
       <View style={styles.tripsHeader}>
         <View style={styles.headerTopRow}>
           <View style={styles.headerLeft}>
-            <TouchableOpacity
-              testID="trips-back-button"
-              onPress={onBack}
-              style={styles.backBtn}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
-            </TouchableOpacity>
-            <Logo size={40} iconOnly />
+            <Logo size={52} iconOnly />
             <Text style={styles.tripsHeaderTitle}>Trips</Text>
           </View>
           <NotificationCenter userId={currentUserId} bare />

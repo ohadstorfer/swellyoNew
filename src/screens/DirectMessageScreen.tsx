@@ -69,6 +69,7 @@ import {
   listPendingCommitmentsToReviewFromUser,
   approveCommitment,
   declineCommitment,
+  getCommitmentStatusesByMessageIds,
   type PendingCommitmentToReview,
 } from '../services/trips/groupTripsService';
 import { queryClient } from '../lib/queryClient';
@@ -1326,6 +1327,48 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       cancelled = true;
     };
   }, [isDirect, otherUserId, currentUserId, latestPartnerCommitmentMessageId]);
+
+  // Hydrate each commitment bubble's status from the request table (the source
+  // of truth). The approve/decline write-back to the message's metadata is
+  // RLS-blocked for the host (non-sender of that message), so the cached status
+  // on the message can be stale on reopen — read the real status here and patch.
+  // Keyed on the set of commitment message IDs so it runs on load, not on every
+  // status change (patching status doesn't change the key → no loop).
+  const commitmentMsgIdsKey = useMemo(
+    () =>
+      messages
+        .filter((m) => m.type === 'commitment_request' && m.id)
+        .map((m) => m.id)
+        .join(','),
+    [messages]
+  );
+
+  useEffect(() => {
+    const ids = commitmentMsgIdsKey ? commitmentMsgIdsKey.split(',') : [];
+    if (!ids.length) return;
+    let cancelled = false;
+    getCommitmentStatusesByMessageIds(ids)
+      .then((statusMap) => {
+        if (cancelled || !Object.keys(statusMap).length) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.type === 'commitment_request' &&
+            m.id &&
+            statusMap[m.id] &&
+            m.commitment_metadata &&
+            m.commitment_metadata.status !== statusMap[m.id]
+              ? { ...m, commitment_metadata: { ...m.commitment_metadata, status: statusMap[m.id] } }
+              : m
+          )
+        );
+      })
+      .catch((err) => {
+        console.warn('[DirectMessageScreen] hydrate commitment statuses failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [commitmentMsgIdsKey]);
 
   // Opened from a "Review request" notification → pop the one-time heads-up
   // ~1s after the chat is on screen. Guarded so it fires only once per mount.
@@ -3635,6 +3678,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // For now, render all messages as received (will update when currentUserId loads)
     // This allows messages to appear instantly while currentUserId loads in background
 
+    // System banner (e.g. "X's commitment was declined", "Y left the trip").
+    // Centered pill — no avatar, no sender name, no timestamp, no reply/edit.
+    // Without this branch it renders as the poster's own chat bubble.
+    if (message.is_system) {
+      return (
+        <View key={message.id} style={styles.systemBannerRow}>
+          <Text style={styles.systemBannerText}>{message.body}</Text>
+        </View>
+      );
+    }
+
     // Commitment request: short-circuit with a custom bubble (own border, own
     // layout) so the standard chat-bubble wrapper doesn't double-frame it.
     if (message.type === 'commitment_request' && message.commitment_metadata) {
@@ -3740,7 +3794,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             // 2px corner). Earlier messages in the run are fully rounded. overflow:hidden
             // on media bubbles makes this clip photos/videos to the rounded corner too.
             !isLastInRun && (isOwnMessage
-              ? { borderTopRightRadius: 16 }
+              ? { borderBottomRightRadius: 16 }
               : { borderBottomLeftRadius: 16 }),
             // Conditionally apply padding: 0 for images/videos/audio, normal for text.
             // `!message.deleted &&`: a deleted media message renders the text-style
@@ -5300,6 +5354,21 @@ const styles = StyleSheet.create({
     maxWidth: MESSAGE_BUBBLE_MAX_WIDTH,
     flexDirection: 'column',
   },
+  systemBannerRow: {
+    alignSelf: 'center',
+    maxWidth: '85%',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#E8F4F5',
+  },
+  systemBannerText: {
+    fontSize: 13,
+    color: '#555',
+    textAlign: 'center',
+    ...(Platform.OS === 'web' ? { fontFamily: 'Inter, sans-serif' } : {}),
+  },
   userMessageBubble: {
     maxWidth: MESSAGE_BUBBLE_MAX_WIDTH,
     paddingTop: 8,
@@ -5311,10 +5380,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     backgroundColor: '#05BCD3', // Celeste background for outbound messages
 
-    borderTopLeftRadius: 16, // 16px 2px 16px 16px
-    borderTopRightRadius: 2,
+    borderTopLeftRadius: 16, // 16px 16px 16px 2px (pointy corner at bottom right)
+    borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    borderBottomRightRadius: 2, // Pointy corner at bottom right
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),

@@ -95,8 +95,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#E4E4E4', // Light gray for skeleton
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
-    borderBottomLeftRadius: 2, // Pointy corner at bottom left
-    borderBottomRightRadius: 16,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 2, // Pointy corner at bottom right
   },
   receivedBubble: {
     backgroundColor: '#E4E4E4', // Light gray for skeleton

@@ -418,6 +418,9 @@ export interface EditAccommodationSheetProps {
   /** Receives the chosen values. photoUri may be a freshly-picked LOCAL uri (the
    *  parent uploads it) or the existing remote url (left as-is). */
   onSave: (next: AccommodationInitial) => void | Promise<void>;
+  /** When true, hide the stay-type picker and only edit the specific place
+   *  (name / link / photo). The type stays whatever was set at creation. */
+  specificOnly?: boolean;
 }
 
 export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
@@ -425,6 +428,7 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
   initial,
   onClose,
   onSave,
+  specificOnly = false,
 }) => {
   const [kind, setKind] = useState<AccommodationKind | null>(initial.kind);
   const [name, setName] = useState(initial.name);
@@ -441,7 +445,7 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
     }
   }, [visible, initial]);
 
-  const valid = !!kind && name.trim().length > 0;
+  const valid = (specificOnly || !!kind) && name.trim().length > 0;
 
   const handleSave = async () => {
     if (!valid) return;
@@ -459,15 +463,42 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
   return (
     <WizardBottomSheet
       visible={visible}
-      title="Accommodation"
-      subtitle="Pick the stay type and add the specific place."
+      // specificOnly mirrors the create-trip "Stay details" sheet EXACTLY:
+      // left title, no header divider, no subtitle, dark Save button.
+      title={specificOnly ? 'Stay details' : 'Accommodation'}
+      titleAlign={specificOnly ? 'left' : undefined}
+      hideHeaderDivider={specificOnly || undefined}
+      subtitle={specificOnly ? undefined : 'Pick the stay type and add the specific place.'}
       onClose={onClose}
       heightMode="full"
       extendBehindKeyboard
-      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} />}
+      footer={
+        specificOnly ? (
+          <TouchableOpacity
+            onPress={handleSave}
+            activeOpacity={0.85}
+            disabled={!valid || saving}
+            style={[styles.staySaveBtn, (!valid || saving) && styles.saveBtnDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel="Save stay details and close"
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.staySaveBtnText}>Save</Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <SaveButton onPress={handleSave} loading={saving} disabled={!valid} />
+        )
+      }
     >
-      <StayTypeSheetContent selected={kind} onChange={setKind} />
-      <View style={{ height: 20 }} />
+      {!specificOnly && (
+        <>
+          <StayTypeSheetContent selected={kind} onChange={setKind} />
+          <View style={{ height: 20 }} />
+        </>
+      )}
       <SpecificStaySheetContent
         name={name}
         url={url}
@@ -493,6 +524,22 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: {
     opacity: 0.4,
+  },
+  // Matches the create-trip "Stay details" sheet Save button exactly
+  // (CreateTripFlowA localStyles.sheetSetBtn).
+  staySaveBtn: {
+    backgroundColor: '#212121',
+    paddingVertical: 16,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  staySaveBtnText: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
   saveBtnText: {
     fontFamily: FONT_MONTSERRAT,
