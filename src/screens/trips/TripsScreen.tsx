@@ -192,7 +192,7 @@ const TripCard: React.FC<{
   onPressIn?: () => void;
 }> = ({ trip, status, meta, onPress, onPressIn }) => {
   const badge = STATUS_BADGE[status];
-  const avatars = meta?.memberAvatars ?? [];
+  const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const total = meta?.totalCount ?? trip.participant_count ?? 0;
   const overflow = total - avatars.length;
 
@@ -373,7 +373,7 @@ const ExploreTripCard: React.FC<{
 }> = ({ trip, meta, onPress, userId }) => {
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
   const typeGradient = TRIP_TYPE_GRADIENT[trip.hosting_style] ?? TRIP_TYPE_GRADIENT.A;
-  const avatars = meta?.memberAvatars ?? [];
+  const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
   const spotsLeft = max != null ? Math.max(0, max - count) : null;
@@ -1203,7 +1203,7 @@ const TabPane: React.FC<{
 // ---------------------------------------------------------------------------
 // Wrapper screen
 // ---------------------------------------------------------------------------
-export default function TripsScreen({ onBack, navControl: navControlProp }: TripsScreenProps) {
+export default function TripsScreen({ navControl: navControlProp }: TripsScreenProps) {
   const insets = useSafeAreaInsets();
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;

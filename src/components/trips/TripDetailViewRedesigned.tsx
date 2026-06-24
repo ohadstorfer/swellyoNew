@@ -253,6 +253,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   vm,
   participants = [],
   onParticipantPress,
+  onSeeAllParticipants,
   onLeaderPress,
   afterHeroSlot,
   bodyHidden,
@@ -776,6 +777,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   <Text style={styles.participantsCount}>{vm.participantCount}</Text>
                 ) : null}
               </View>
+              {onSeeAllParticipants && participants.length > 0 ? (
+                <TouchableOpacity onPress={onSeeAllParticipants} hitSlop={8}>
+                  <Text style={styles.seeAllLink}>View all</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
             {participants.length > 0 ? (
               <ScrollView
@@ -843,17 +849,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* ---- Accommodation ---- */}
           {showAccommodation || canEditStay ? (
             <View style={styles.section}>
-              <SectionTitle
-                title="Accommodation"
-                right={
-                  canEditStay ? (
-                    <EditPill
-                      label={vm.accommodationKindLabel ? 'Add stay' : 'Set stay'}
-                      onPress={onEditAccommodation}
-                    />
-                  ) : undefined
-                }
-              />
+              {/* The empty-state card below is itself the "add" affordance for
+                  the host, so the header keeps just the title (Figma 13518-9184). */}
+              <SectionTitle title="Accommodation" />
               {vm.specificStaySelected && vm.accommodationName ? (
                 <TouchableOpacity
                   style={styles.stayCard}
@@ -892,23 +890,38 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   </View>
                 </TouchableOpacity>
               ) : (
-                <View style={styles.cellRow}>
-                  <IconCell
-                    icon="home-03"
-                    label="Type"
-                    value={vm.accommodationKindLabel ?? '—'}
-                  />
-                  <IconCell
-                    icon="passport"
-                    label="Specific stay"
-                    value={
-                      vm.specificStaySelected == null
-                        ? '—'
-                        : vm.specificStaySelected
-                          ? 'Selected'
-                          : 'Not yet'
-                    }
-                  />
+                // Empty state (no specific stay yet). Host (loose flow) → a big
+                // tap-to-add card; members/viewers → the same card reading
+                // "Not set yet" (Figma 13518-9184).
+                <View style={styles.stayCard}>
+                  <TouchableOpacity
+                    style={[styles.stayImage, styles.stayEmpty]}
+                    activeOpacity={canEditStay ? 0.85 : 1}
+                    disabled={!canEditStay}
+                    onPress={canEditStay ? onEditAccommodation : undefined}
+                    accessibilityRole={canEditStay ? 'button' : undefined}
+                    accessibilityLabel={canEditStay ? 'Add accommodation' : undefined}
+                  >
+                    <TripIcon name="home-03" size={30} color="#7B7B7B" />
+                    <Text style={styles.stayEmptyText}>
+                      {canEditStay ? 'Tap to add Accommodation' : 'Not set yet'}
+                    </Text>
+                  </TouchableOpacity>
+                  {vm.accommodationKindLabel ? (
+                    <View style={styles.stayPill}>
+                      <View style={styles.stayPillIcon}>
+                        <TripIcon name="home-03" size={24} color={ICON_INK} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.stayName} numberOfLines={1}>
+                          {vm.accommodationKindLabel}
+                        </Text>
+                        <Text style={styles.stayMeta} numberOfLines={1}>
+                          Leading option
+                        </Text>
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               )}
             </View>
@@ -1552,6 +1565,13 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     color: C.textMuted,
   },
+  // "View all" → full Members screen (Figma 13459-48582).
+  seeAllLink: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#05BCD3',
+  },
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1617,6 +1637,18 @@ const styles = StyleSheet.create({
   stayImagePlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Empty-state "Tap to add Accommodation" / "Not set yet" placeholder.
+  stayEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  stayEmptyText: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    lineHeight: 20,
+    color: C.textHowDesc,
   },
   stayPill: {
     flexDirection: 'row',

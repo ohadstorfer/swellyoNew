@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ff } from '../../../theme/fonts';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
+import { getGroupTripInviteUrl } from '../../../services/trips/groupTripsService';
 import { YoureInIllustration } from './YoureInIllustration';
 
 const DOODLES = require('../../../assets/images/trips/welcome-doodles.png');
@@ -91,11 +92,16 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
   const avatars = trip.member_avatars ?? [];
   const overflow = Math.max(0, (trip.member_count ?? avatars.length) - avatars.length);
 
-  // Native share — mirrors TripDetailScreen's handleShare message format.
+  // Native share — includes the trip invite link (matching TripDetailScreen /
+  // TripPublishedScreen) so it doesn't paste as plain text without a link.
   const handleShare = async () => {
     try {
-      const parts = [tripTitle, location, dates].filter(Boolean);
-      await Share.share({ message: parts.join(' · ') });
+      const url = getGroupTripInviteUrl(trip.id);
+      const name = trip.title?.trim() || 'my surf trip';
+      await Share.share({
+        message: `Join ${name} on Swellyo 🌊\n${url}`,
+        url,
+      });
     } catch {
       // user cancelled or share unavailable — silently no-op
     }

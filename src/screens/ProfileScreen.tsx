@@ -5,6 +5,7 @@ import {
   Image,
   ImageBackground,
   TouchableOpacity,
+  ActivityIndicator,
   Platform,
   Dimensions,
   Alert,
@@ -83,6 +84,12 @@ interface ProfileScreenProps {
   noTransition?: boolean; // When true, skip the slide-in/slide-out animations (e.g. when layered under a modal that handles its own fade)
   suppressConnectAnalytics?: boolean; // When true, the Connect button does NOT log swelly_connect_clicked (e.g. opened from the post-onboarding matches overlay)
   swipeBackDisabled?: boolean; // When the screen is a kept-mounted tab root: no swipe-dismiss, no slide-out (it would park the mounted screen off-screen)
+  // When opened to review a pending join request, show an Approve / Decline
+  // footer (in place of Connect). Handlers do the work + dismiss the profile.
+  reviewRequest?: {
+    onApprove: () => void | Promise<void>;
+    onDecline: () => void | Promise<void>;
+  };
 }
 
 // Board type mapping
@@ -792,8 +799,10 @@ const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
 const SWIPE_DISMISS_VELOCITY = 800;
 const SWIPE_ANIMATION_DURATION = 220;
 
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, onSettings, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false }) => {
+export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, onSettings, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false, reviewRequest }) => {
   const insets = useSafeAreaInsets();
+  // Join-request review footer — which action is in flight (disables both).
+  const [reviewBusy, setReviewBusy] = useState<null | 'approve' | 'decline'>(null);
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
 
@@ -2705,7 +2714,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               {topDestinations.map((destination, index) => renderDestinationCard(destination, index))}
             </View>
           )}
-          {!isViewingOwnProfile && userId && onMessage && (
+          {!isViewingOwnProfile && userId && (onMessage || reviewRequest) && (
             <View style={{ height: 100 }} />
           )}
           </View>
@@ -2713,8 +2722,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       </ScrollView>
       </MaybeGestureDetector>
       </ImageBackground>
-      {/* Connect Button with fading overlay - Floating at bottom when viewing other user's profile */}
-      {!isViewingOwnProfile && userId && onMessage && (
+      {/* Connect Button with fading overlay - Floating at bottom when viewing other user's profile. Hidden while reviewing a join request (the Approve/Decline footer takes its place). */}
+      {!isViewingOwnProfile && userId && onMessage && !reviewRequest && (
         <>
           <View style={styles.connectOverlay} pointerEvents="none">
             <LinearGradient
@@ -2769,6 +2778,52 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </Text>
             </View>
           </TouchableOpacity>
+        </>
+      )}
+
+      {/* Approve / Decline footer — only when this profile was opened to review
+          a pending join request (replaces the Connect button). */}
+      {!isViewingOwnProfile && userId && reviewRequest && (
+        <>
+          <View style={styles.connectOverlay} pointerEvents="none">
+            <LinearGradient
+              colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
+              locations={[0, 0.35, 0.6, 0.87]}
+              style={styles.connectOverlayGradient}
+            />
+          </View>
+          <View style={[styles.reviewFooter, { bottom: Math.max(insets.bottom, 16) + 24 }]}>
+            <TouchableOpacity
+              style={[styles.reviewBtn, styles.reviewDeclineBtn]}
+              activeOpacity={0.8}
+              disabled={!!reviewBusy}
+              onPress={async () => {
+                setReviewBusy('decline');
+                try { await reviewRequest.onDecline(); } finally { setReviewBusy(null); }
+              }}
+            >
+              {reviewBusy === 'decline' ? (
+                <ActivityIndicator color="#7B7B7B" />
+              ) : (
+                <Text style={styles.reviewDeclineText}>Decline</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.reviewBtn, styles.reviewApproveBtn]}
+              activeOpacity={0.8}
+              disabled={!!reviewBusy}
+              onPress={async () => {
+                setReviewBusy('approve');
+                try { await reviewRequest.onApprove(); } finally { setReviewBusy(null); }
+              }}
+            >
+              {reviewBusy === 'approve' ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.reviewApproveText}>Approve</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </>
       )}
 
@@ -3246,6 +3301,36 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
     lineHeight: 24,
     textAlign: 'center',
+  },
+  // Approve / Decline footer (pending join-request review).
+  reviewFooter: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 10,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  reviewBtn: {
+    flex: 1,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  reviewDeclineBtn: { backgroundColor: '#F2F2F2' },
+  reviewApproveBtn: { backgroundColor: '#05BCD3' },
+  reviewDeclineText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#7B7B7B',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
+  },
+  reviewApproveText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : undefined,
   },
   messageButtonInner: {
     backgroundColor: '#0788B0',

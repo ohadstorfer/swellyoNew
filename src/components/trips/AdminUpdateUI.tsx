@@ -160,7 +160,10 @@ export const AdminUpdateRow: React.FC<{
       </View>
       {right}
       {isAccordion && hasDescription ? (
-        <Animated.View style={chevronStyle}>
+        // Row is top-aligned (so the icon doesn't jump on toggle). Anchor the
+        // chevron to the top in a fixed icon-height box and center it within —
+        // so it lines up with the icon when collapsed AND doesn't move on open.
+        <Animated.View style={[chevronStyle, styles.chevronBox]}>
           <Ionicons name="chevron-forward" size={16} color={C.muted} />
         </Animated.View>
       ) : !connected && !expanded ? (
@@ -186,6 +189,9 @@ const styles = StyleSheet.create({
   // Full Updates page: body wraps over many lines, so top-align the icon to the
   // first line instead of vertically centering it against the whole block.
   cardExpanded: { alignItems: 'flex-start' },
+  // Fixed icon-height box (iconBox = 10 pad + 18 icon = 38) so the chevron
+  // centers against the icon when collapsed and stays put when the body opens.
+  chevronBox: { alignSelf: 'flex-start', height: 38, justifyContent: 'center' },
   iconBox: {
     padding: 10,
     borderRadius: 8,

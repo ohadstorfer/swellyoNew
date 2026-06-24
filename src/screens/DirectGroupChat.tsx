@@ -3660,7 +3660,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             // 2px corner). Earlier messages in the run are fully rounded. overflow:hidden
             // on media bubbles makes this clip photos/videos to the rounded corner too.
             !isLastInRun && (isOwnMessage
-              ? { borderTopRightRadius: 16 }
+              ? { borderBottomRightRadius: 16 }
               : { borderBottomLeftRadius: 16 }),
             // Conditionally apply padding: 0 for images/videos/audio, normal for text.
             // `!message.deleted &&`: a deleted media message renders the text-style
@@ -5289,10 +5289,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     backgroundColor: '#05BCD3', // Celeste background for outbound messages
 
-    borderTopLeftRadius: 16, // 16px 2px 16px 16px
-    borderTopRightRadius: 2,
+    borderTopLeftRadius: 16, // 16px 16px 16px 2px (pointy corner at bottom right)
+    borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
+    borderBottomRightRadius: 2, // Pointy corner at bottom right
     ...(Platform.OS === 'web' && {
       boxShadow: '0px 0px 20px rgba(0, 0, 0, 0.08)',
     }),

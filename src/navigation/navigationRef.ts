@@ -20,6 +20,9 @@ export type RootStackParamList = {
   EditTrip: { trip: GroupTrip };
   /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
   TripUpdates: { tripId: string };
+  /** Full "Members" list — "View all" target of the Overview Participants row and
+   *  the Plan-tab Members section. Permission layers resolved inside the screen. */
+  TripMembers: { tripId: string };
   /** Full "Packing & Gear" list — "View all" target of the Plan-tab Group Gear. */
   PackingAndGear: { tripId: string };
   /** Full-screen host "Manage Gear" editor — "Manage" target of the Group Gear card. */
@@ -60,7 +63,13 @@ export type RootStackParamList = {
   /** Surftrip detail card (was dual-rendered: AppContent overlay + inner stack). */
   SurftripCard: { groupId: string };
   /** OTHER-user profile card (own profile is the Profile tab root). */
-  ProfileCard: { userId: string; suppressConnectAnalytics?: boolean };
+  ProfileCard: {
+    userId: string;
+    suppressConnectAnalytics?: boolean;
+    /** When opened to review a pending join request — the profile shows an
+     *  Approve / Decline footer that actions this request, then pops back. */
+    joinRequest?: { tripId: string; requestId: string };
+  };
   /** Settings card — opened from the gear icon on the own-profile root. */
   Settings: undefined;
 };

@@ -237,8 +237,8 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
 const styles = StyleSheet.create({
   modalContent: {
     backgroundColor: colors.white,
-    borderTopLeftRadius: borderRadius.large,
-    borderTopRightRadius: borderRadius.large,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     height: SCREEN_H * 0.8,
     paddingTop: spacing.md,
   },

@@ -11,7 +11,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const EXPO_ACCESS_TOKEN = Deno.env.get('EXPO_ACCESS_TOKEN')
 
 const TITLE = "Don't miss out \u{1F30A}"
-const BODY = "Finish your profile in 2 minutes and start matching with surfers."
+const BODY = "Finish your profile in 2 minutes and join your dream surftrip!"
 const BATCH_SIZE = 100
 
 interface Candidate {

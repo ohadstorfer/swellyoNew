@@ -148,8 +148,8 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
 const styles = StyleSheet.create({
   sheet: {
     backgroundColor: colors.white || '#FFFFFF',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     height: SHEET_HEIGHT,
     paddingBottom: 24,
     overflow: 'hidden',

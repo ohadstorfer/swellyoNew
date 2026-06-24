@@ -6,14 +6,96 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const EXPO_ACCESS_TOKEN = Deno.env.get('EXPO_ACCESS_TOKEN')
 
 /**
+ * Shared context for one inbound message — resolved once per webhook, not per
+ * recipient. Holds everything the notification copy + the iOS rich-avatar
+ * extension need (sender identity, conversation kind, the image to show).
+ */
+interface MessageContext {
+  senderName: string;
+  senderAvatarUrl: string | null;
+  isGroup: boolean;
+  groupName: string | null;
+  groupImageUrl: string | null;
+  body: string;
+}
+
+/**
+ * Resolve sender, message body and conversation kind (DM vs group), plus the
+ * image the push should display:
+ *   • DM    → the sender's profile photo (iOS adds the Swellyo badge corner)
+ *   • Group → the group's hero image      (iOS adds the Swellyo badge corner)
+ */
+async function buildMessageContext(
+  supabase: any,
+  senderId: string,
+  messageId: string,
+  conversationId: string
+): Promise<MessageContext | null> {
+  const { data: senderSurfer } = await supabase
+    .from('surfers')
+    .select('name, profile_image_url')
+    .eq('user_id', senderId)
+    .single();
+
+  const { data: msg, error: msgError } = await supabase
+    .from('messages')
+    .select('body, type')
+    .eq('id', messageId)
+    .single();
+
+  if (msgError || !msg) {
+    console.error('[Push Notification] Error loading message:', msgError);
+    return null;
+  }
+
+  let body: string;
+  if (msg.type === 'image') {
+    body = 'Sent a photo';
+  } else {
+    body = msg.body || '';
+    if (body.length > 100) body = body.substring(0, 97) + '...';
+  }
+
+  // Conversation kind + group image (group chats link to a trip via metadata.trip_id).
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('is_direct, title, metadata')
+    .eq('id', conversationId)
+    .single();
+
+  const isGroup = conv ? conv.is_direct === false : false;
+  let groupImageUrl: string | null = null;
+  if (isGroup) {
+    const tripId = conv?.metadata?.trip_id;
+    if (tripId) {
+      const { data: trip } = await supabase
+        .from('group_trips')
+        .select('hero_image_url')
+        .eq('id', tripId)
+        .single();
+      groupImageUrl = trip?.hero_image_url ?? null;
+    }
+  }
+
+  return {
+    senderName: senderSurfer?.name || 'Someone',
+    senderAvatarUrl: senderSurfer?.profile_image_url ?? null,
+    isGroup,
+    groupName: isGroup ? (conv?.title ?? null) : null,
+    groupImageUrl,
+    body,
+  };
+}
+
+/**
  * Send push notification via Expo Push API
  */
 async function sendPushNotification(
   supabase: any,
   recipientId: string,
   senderId: string,
-  messageId: string,
-  conversationId: string
+  conversationId: string,
+  ctx: MessageContext
 ): Promise<void> {
   // Check if either user has blocked the other
   const { data: blockExists } = await supabase
@@ -40,37 +122,16 @@ async function sendPushNotification(
     return;
   }
 
-  // Get sender name
-  const { data: senderSurfer } = await supabase
-    .from('surfers')
-    .select('name')
-    .eq('user_id', senderId)
-    .single();
+  const { senderName, body, isGroup, groupName } = ctx;
+  // The image the iOS extension fetches for the big avatar (DM = sender photo,
+  // group = group hero). iOS stamps the Swellyo app icon in the corner itself.
+  const avatarUrl = isGroup ? ctx.groupImageUrl : ctx.senderAvatarUrl;
 
-  const senderName = senderSurfer?.name || 'Someone';
-
-  // Get message body
-  const { data: msg, error: msgError } = await supabase
-    .from('messages')
-    .select('body, type')
-    .eq('id', messageId)
-    .single();
-
-  if (msgError || !msg) {
-    console.error('[Push Notification] Error loading message:', msgError);
-    return;
-  }
-
-  // Build notification body
-  let body: string;
-  if (msg.type === 'image') {
-    body = 'Sent a photo';
-  } else {
-    body = msg.body || '';
-    if (body.length > 100) {
-      body = body.substring(0, 97) + '...';
-    }
-  }
+  // Fallback text (shown on devices/builds without the rich extension):
+  //  • DM    → "Sender" / message
+  //  • group → "Group name" / "Sender: message"
+  const title = isGroup ? (groupName || 'New message') : senderName;
+  const displayBody = isGroup ? `${senderName}: ${body}` : body;
 
   // Send via Expo Push API
   const headers: Record<string, string> = {
@@ -85,10 +146,25 @@ async function sendPushNotification(
     headers,
     body: JSON.stringify({
       to: pushToken,
-      title: senderName,
-      body,
+      title,
+      body: displayBody,
       sound: 'default',
-      data: { conversationId, senderId },
+      // High priority so the message arrives promptly and reliably wakes the
+      // iOS Notification Service Extension (iMessage-style delivery).
+      priority: 'high',
+      // mutableContent lets the iOS Notification Service Extension intercept the
+      // push and rebuild it as a Communication Notification (big avatar + badge).
+      mutableContent: true,
+      data: {
+        type: 'message',
+        conversationId,
+        senderId,
+        senderName,
+        message: body,
+        isGroup,
+        groupName: groupName ?? '',
+        avatarUrl: avatarUrl ?? '',
+      },
     }),
   });
 
@@ -213,6 +289,15 @@ serve(async (req) => {
       );
     }
 
+    // Resolve sender / message / conversation kind + image ONCE for this message.
+    const ctx = await buildMessageContext(supabase, sender_id, message_id, conversation_id);
+    if (!ctx) {
+      return new Response(
+        JSON.stringify({ error: 'Could not build message context', request_id: requestId }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const now = Date.now();
 
     // Send push notification to each recipient, skipping muted members
@@ -227,7 +312,7 @@ serve(async (req) => {
       }
 
       try {
-        await sendPushNotification(supabase, member.user_id, sender_id, message_id, conversation_id);
+        await sendPushNotification(supabase, member.user_id, sender_id, conversation_id, ctx);
       } catch (error) {
         console.error(`[Push Notification] [${requestId}] Error for recipient ${member.user_id}:`, error);
       }

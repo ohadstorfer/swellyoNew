@@ -1348,6 +1348,36 @@ export async function listPendingCommitmentsToReviewFromUser(
 }
 
 /**
+ * Resolve the CURRENT status of commitment chat bubbles straight from the
+ * request table (the source of truth), keyed by their linked chat message_id.
+ *
+ * Why this exists: approve/decline writes the new status back onto the original
+ * chat message's `commitment_metadata`, but that message is owned by the member
+ * — messages-table RLS blocks the host (a non-sender) from updating it, so the
+ * cached status on the message never changes. The request row IS updated, so we
+ * read from there on load and patch each bubble's status client-side. Works for
+ * both the host (hosted-trip RLS) and the member (own-request RLS).
+ */
+export async function getCommitmentStatusesByMessageIds(
+  messageIds: string[]
+): Promise<Record<string, 'pending' | 'approved' | 'declined' | 'superseded'>> {
+  if (!messageIds.length) return {};
+  const { data, error } = await supabase
+    .from('group_trip_commitment_requests')
+    .select('message_id, status')
+    .in('message_id', messageIds);
+  if (error || !data) {
+    if (error) console.warn('[groupTripsService] getCommitmentStatusesByMessageIds:', error);
+    return {};
+  }
+  const out: Record<string, 'pending' | 'approved' | 'declined' | 'superseded'> = {};
+  for (const r of data as any[]) {
+    if (r.message_id && r.status) out[r.message_id] = r.status;
+  }
+  return out;
+}
+
+/**
  * Member self-leaves a trip. Removes from group_trip_participants and from the
  * linked group conversation, and clears their join_request row so the
  * "Request to join" CTA re-appears if they ever want to rejoin.
