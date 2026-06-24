@@ -1427,6 +1427,15 @@ export default function CreateTripFlowA({
       });
       setBudgetEstimate(est);
       setLastEstimateKey(key);
+      // Default the picker to "Balanced" (mid tier) once an estimate lands,
+      // unless the user has already chosen a tier or entered a manual range.
+      // setState directly (not update()) so the auto-default doesn't count as a
+      // user "touch" and kick off draft autosave just from landing on the page.
+      if (!state.budgetTier && !state.manualBudget) {
+        setState(prev =>
+          prev.budgetTier || prev.manualBudget ? prev : { ...prev, budgetTier: 'medium' },
+        );
+      }
     } catch (e: any) {
       console.warn('[CreateTripFlowA] budget estimate failed:', e);
       setBudgetError(e?.message || 'Could not estimate budget');
@@ -1445,6 +1454,8 @@ export default function CreateTripFlowA({
     state.destination,
     state.destinationGeo,
     state.accommodationKind,
+    state.budgetTier,
+    state.manualBudget,
   ]);
 
   const resolveBudget = useCallback((): {
@@ -3277,6 +3288,7 @@ export default function CreateTripFlowA({
         hideHeaderDivider
         onClose={closeSheet}
         heightMode="full"
+        footer={sheetSelectFooter}
       >
         <HowItWorksSheetContent
           selected={state.tripStructure}
@@ -3291,6 +3303,7 @@ export default function CreateTripFlowA({
         hideHeaderDivider
         onClose={closeSheet}
         heightMode="full"
+        footer={sheetSelectFooter}
       >
         <VibeSheetContent
           selected={state.tripVibes}
