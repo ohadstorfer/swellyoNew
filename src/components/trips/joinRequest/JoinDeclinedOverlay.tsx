@@ -7,50 +7,37 @@ import {
   StyleSheet,
   Image,
   ScrollView,
-  Share,
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as CachedImage } from 'expo-image';
+import Svg, { Path } from 'react-native-svg';
 import { ff } from '../../../theme/fonts';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
-import { YoureInIllustration } from './YoureInIllustration';
 
-const DOODLES = require('../../../assets/images/trips/welcome-doodles.png');
+// Full doodle illustration (line + icons) — Figma node 13073:15813, native
+// 391×706, baked #FAFAFA background. Same asset the "You're in!" screen uses.
+const ILLUSTRATION = require('../../../assets/illustrations/youre-in-illustration.png');
+// Figma frame width the illustration coords are authored against.
+const FIGMA_W = 393;
 
 interface Props {
   visible: boolean;
   decision: UnseenJoinDecision | null;
-  /** Called when the user taps the primary CTA (Enter Trip / Explore trips). */
+  /** Called when the user taps the primary CTA (Explore trips). */
   onPrimaryAction: (decision: UnseenJoinDecision) => void;
   /** Called when the user dismisses without taking the primary action (back). */
   onDismiss: (decision: UnseenJoinDecision) => void;
-}
-
-const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-function formatDateRange(startIso: string | null, endIso: string | null): string | null {
-  if (!startIso) return null;
-  const start = new Date(startIso);
-  if (Number.isNaN(start.getTime())) return null;
-  const startStr = `${MONTHS[start.getMonth()]} ${start.getDate()}`;
-  if (!endIso) return `${startStr}, ${start.getFullYear()}`;
-  const end = new Date(endIso);
-  if (Number.isNaN(end.getTime())) return `${startStr}, ${start.getFullYear()}`;
-  if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
-    return `${MONTHS[start.getMonth()]} ${start.getDate()}-${end.getDate()}, ${end.getFullYear()}`;
-  }
-  return `${startStr} - ${MONTHS[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
+  /** "Message admin" — open a DM with the trip's host. Falls back to onDismiss. */
+  onMessageAdmin?: (decision: UnseenJoinDecision) => void;
 }
 
 const initialsOf = (name: string | null | undefined): string =>
   (name || '?').trim().charAt(0).toUpperCase() || '?';
 
-// Round avatar with initials fallback (matches the gear/member avatars elsewhere).
+// Round avatar with initials fallback — mirrors JoinDecisionOverlay's Avatar.
 const Avatar: React.FC<{
   url: string | null;
   name: string | null;
@@ -59,9 +46,7 @@ const Avatar: React.FC<{
 }> = ({ url, name, size, ring }) => {
   const dim = { width: size, height: size, borderRadius: size / 2 };
   if (url) {
-    return (
-      <Image source={{ uri: url }} style={[dim, ring && styles.avatarRing]} />
-    );
+    return <Image source={{ uri: url }} style={[dim, ring && styles.avatarRing]} />;
   }
   return (
     <View style={[dim, styles.avatarFallback, ring && styles.avatarRing]}>
@@ -70,52 +55,63 @@ const Avatar: React.FC<{
   );
 };
 
-export const JoinDecisionOverlay: React.FC<Props> = ({
+// "annotation-x" glyph from Figma (node 13431:7008) — a message bubble with an x,
+// stroked in Colors/Accent/100 (#FF5367). Inlined so it has no 7-day URL dependency.
+const MessageXIcon: React.FC<{ size?: number }> = ({ size = 18 }) => (
+  <Svg width={size} height={size} viewBox="0 0 18 18" fill="none">
+    <Path
+      d="M7.125 6L10.875 9.75M10.875 6L7.125 9.75M7.425 14.4L8.52 15.86C8.68284 16.0771 8.76426 16.1857 8.86407 16.2245C8.9515 16.2585 9.0485 16.2585 9.13593 16.2245C9.23574 16.1857 9.31716 16.0771 9.48 15.86L10.575 14.4C10.7949 14.1069 10.9048 13.9603 11.0389 13.8484C11.2177 13.6992 11.4287 13.5936 11.6554 13.5401C11.8253 13.5 12.0086 13.5 12.375 13.5C13.4234 13.5 13.9476 13.5 14.361 13.3287C14.9124 13.1004 15.3504 12.6624 15.5787 12.111C15.75 11.6976 15.75 11.1734 15.75 10.125V5.85C15.75 4.58988 15.75 3.95982 15.5048 3.47852C15.289 3.05516 14.9448 2.71095 14.5215 2.49524C14.0402 2.25 13.4101 2.25 12.15 2.25H5.85C4.58988 2.25 3.95982 2.25 3.47852 2.49524C3.05516 2.71095 2.71095 3.05516 2.49524 3.47852C2.25 3.95982 2.25 4.58988 2.25 5.85V10.125C2.25 11.1734 2.25 11.6976 2.42127 12.111C2.64963 12.6624 3.08765 13.1004 3.63896 13.3287C4.05245 13.5 4.57663 13.5 5.625 13.5C5.99143 13.5 6.17465 13.5 6.34463 13.5401C6.57127 13.5936 6.78234 13.6992 6.96112 13.8484C7.09521 13.9603 7.20514 14.1069 7.425 14.4Z"
+      stroke="#FF5367"
+      strokeWidth={1}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
+/**
+ * Declined counterpart of JoinDecisionOverlay ("You're in!"). Shown when a
+ * group-trip join request was declined. Same Modal / header / hero-card shell,
+ * but a red "message-x" info pill and an "Explore trips" / "Message admin" CTA.
+ *
+ * Matches Figma node 13431:6818.
+ */
+export const JoinDeclinedOverlay: React.FC<Props> = ({
   visible,
   decision,
   onPrimaryAction,
   onDismiss,
+  onMessageAdmin,
 }) => {
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
   if (!decision) return null;
 
-  const approved = decision.status === 'approved';
   const trip = decision.trip;
   const tripTitle = trip.title?.trim() || 'this trip';
   const location = trip.destination_label;
   const description = trip.description?.trim() || null;
-  const dates = formatDateRange(trip.start_date, trip.end_date);
   const hostName = trip.host_name?.trim() || null;
-
-  const avatars = trip.member_avatars ?? [];
-  const overflow = Math.max(0, (trip.member_count ?? avatars.length) - avatars.length);
-
-  // Native share — mirrors TripDetailScreen's handleShare message format.
-  const handleShare = async () => {
-    try {
-      const parts = [tripTitle, location, dates].filter(Boolean);
-      await Share.share({ message: parts.join(' · ') });
-    } catch {
-      // user cancelled or share unavailable — silently no-op
-    }
-  };
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => onDismiss(decision)}>
       <View style={styles.root}>
-        {/* Background — approved shows the full "You're in!" doodle illustration
-            (line + icons) at the design's native coords; declined falls back to
-            the faint surf doodles. */}
-        {approved ? (
-          // Animated doodle: the line crawls in from the left while the icons
-          // pop in one-by-one along it, both starting together on mount.
-          <YoureInIllustration screenW={screenW} />
-        ) : (
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            <Image source={DOODLES} style={styles.doodles} resizeMode="cover" />
-          </View>
-        )}
+        {/* Background — the full doodle illustration (line + icons), scaled to the
+            device width so the proportions match the Figma frame (393 wide). Same
+            asset/positioning as the "You're in!" screen. */}
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <Image
+            source={ILLUSTRATION}
+            style={{
+              position: 'absolute',
+              top: 84 * (screenW / FIGMA_W),
+              left: 0,
+              width: screenW,
+              height: screenW * (706 / 391),
+            }}
+            resizeMode="stretch"
+          />
+        </View>
 
         {/* Dark header — back chevron dismisses. */}
         <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
@@ -138,21 +134,20 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
         >
           {/* Headline */}
           <View style={styles.headlineWrap}>
-            <Text style={[styles.headline, approved && styles.headlineApproved]}>
-              {approved ? "You're in!" : 'Not a match this time'}
-            </Text>
-            <Text style={[styles.subhead, approved && styles.subheadApproved]}>
-              {approved
-                ? 'Welcome to the group'
-                : 'The host is looking for a different vibe for this trip'}
-            </Text>
+            <Text style={styles.headline}>Not this time...</Text>
+            <Text style={styles.subhead}>This trip isn&rsquo;t a match right now.</Text>
+            <Text style={styles.subtext}>but there are more waves out there</Text>
           </View>
 
           {/* Trip card */}
           <View style={styles.card}>
             <View style={styles.tripsCard}>
               {trip.hero_image_url ? (
-                <Image source={{ uri: trip.hero_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <CachedImage
+                  source={{ uri: trip.hero_image_url }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                />
               ) : (
                 <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>
                   <Ionicons name="image-outline" size={30} color="#9AA0A6" />
@@ -183,39 +178,30 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
                   style={StyleSheet.absoluteFill}
                   pointerEvents="none"
                 />
-                <Text style={styles.tripTitle} numberOfLines={1}>{tripTitle}</Text>
+                <Text style={styles.tripTitle} numberOfLines={1}>
+                  {tripTitle}
+                </Text>
                 {description ? (
-                  <Text style={styles.tripDesc} numberOfLines={2}>{description}</Text>
+                  <Text style={styles.tripDesc} numberOfLines={2}>
+                    {description}
+                  </Text>
                 ) : location ? (
-                  <Text style={styles.tripDesc} numberOfLines={1}>{location}</Text>
+                  <Text style={styles.tripDesc} numberOfLines={1}>
+                    {location}
+                  </Text>
                 ) : null}
               </View>
-
-              {/* Member avatar stack */}
-              {avatars.length > 0 ? (
-                <View style={styles.avatarStack}>
-                  {avatars.map((url, i) => (
-                    <View key={i} style={[styles.stackItem, i > 0 && styles.stackOverlap]}>
-                      <Avatar url={url} name={null} size={32} />
-                    </View>
-                  ))}
-                  {overflow > 0 ? <Text style={styles.stackNumber}>+{overflow}</Text> : null}
-                </View>
-              ) : null}
             </View>
 
-            {/* Info pill */}
-            <View style={[styles.infoPill, approved ? styles.infoPillApproved : styles.infoPillDeclined]}>
+            {/* Info pill — declined message */}
+            <View style={styles.infoPill}>
               <View style={styles.infoIcon}>
-                <Ionicons
-                  name={approved ? 'calendar-outline' : 'compass-outline'}
-                  size={18}
-                  color="#0A0A0A"
-                />
+                <MessageXIcon size={18} />
               </View>
               <View style={styles.infoTextRow}>
-                <Text style={styles.infoStatus}>{approved ? 'Upcoming' : 'Closed'}</Text>
-                {dates ? <Text style={styles.infoDates}>{dates}</Text> : null}
+                <Text style={styles.infoText}>
+                  Your request to join {tripTitle} was declined
+                </Text>
               </View>
             </View>
           </View>
@@ -228,38 +214,24 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
             style={styles.footerFade}
             pointerEvents="none"
           />
-          {approved ? (
-            <>
-              <TouchableOpacity
-                style={styles.cta}
-                onPress={handleShare}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel="Share your trip"
-              >
-                <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
-                <Text style={styles.ctaText}>Share your trip</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.secondaryBtn}
-                onPress={() => onPrimaryAction(decision)}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Maybe later"
-              >
-                <Text style={styles.secondaryText}>Maybe later</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity
-              style={styles.cta}
-              onPress={() => onPrimaryAction(decision)}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-            >
-              <Text style={styles.ctaText}>Explore trips</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.cta}
+            onPress={() => onPrimaryAction(decision)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Explore trips"
+          >
+            <Text style={styles.ctaText}>Explore trips</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryBtn}
+            onPress={() => (onMessageAdmin ?? onDismiss)(decision)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Message admin"
+          >
+            <Text style={styles.secondaryText}>Message admin</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -268,15 +240,6 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FAFAFA' },
-  doodles: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.9,
-  },
-  // Full doodle illustration (Figma 13073:15813, native 391×706). left/right:0
-  // makes it span the screen width; aspectRatio derives the height — no
-  // screenW math (a NaN there made the Image fall back to its huge intrinsic
-  // size). top mirrors the Figma illustration offset (84 in a 393-wide frame).
-  illustration: { position: 'absolute', top: 84, left: 0, right: 0, aspectRatio: 391 / 706 },
 
   // Header
   header: {
@@ -297,35 +260,33 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
 
-  // Headline
+  // Headline (Figma: "Not this time..." accent 32 / subhead Montserrat 18 / subtext Inter 16)
   headlineWrap: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 72, paddingBottom: 8 },
   headline: {
     fontFamily: ff('Montserrat', '700'),
-    fontSize: 24,
-    lineHeight: 29,
-    fontWeight: '700',
-    color: '#0A0A0A',
-    textAlign: 'center',
-  },
-  // Approved → big accent "You're in!" (Figma: Text/M Accent, Size/4-xl 32).
-  headlineApproved: {
-    color: '#05BCD3',
     fontSize: 32,
     lineHeight: 34,
+    fontWeight: '700',
+    color: '#05BCD3',
+    textAlign: 'center',
   },
   subhead: {
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: '#333333',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  subtext: {
     fontFamily: ff('Inter', '400'),
     fontSize: 16,
     lineHeight: 24,
-    color: '#4A5565',
+    color: '#333333',
     textAlign: 'center',
     marginTop: 8,
-    maxWidth: 280,
-  },
-  // Approved → "Welcome to the group" (Figma: Text/M 01 #333, Size/xl 18).
-  subheadApproved: {
-    color: '#333333',
-    fontSize: 18,
+    maxWidth: 336,
   },
 
   // Card
@@ -371,7 +332,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 20,
-    paddingRight: 96, // keep text clear of the avatar stack
   },
   tripTitle: {
     fontFamily: ff('Montserrat', '700'),
@@ -388,32 +348,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // Member avatar stack (bottom-right of hero)
-  avatarStack: {
-    position: 'absolute',
-    right: 12,
-    bottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F7F7F7',
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
-    borderRadius: 56,
-    paddingVertical: 1,
-    paddingLeft: 1,
-    paddingRight: 8,
-  },
-  stackItem: { borderRadius: 16 },
-  stackOverlap: { marginLeft: -16 },
-  stackNumber: {
-    fontFamily: ff('Montserrat', '400'),
-    fontSize: 16,
-    lineHeight: 20,
-    color: '#7B7B7B',
-    marginLeft: 6,
-  },
-
-  // Info pill
+  // Info pill — gray (Surface/M 04 #CFCFCF) with the red message-x glyph.
   infoPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -421,9 +356,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 7,
     borderRadius: 32,
+    backgroundColor: '#CFCFCF',
   },
-  infoPillApproved: { backgroundColor: '#84EBB4' },
-  infoPillDeclined: { backgroundColor: '#E7EAEE' },
   infoIcon: {
     backgroundColor: '#FFFFFF',
     padding: 10,
@@ -433,19 +367,13 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
   },
-  infoStatus: {
+  infoText: {
+    flex: 1,
     fontFamily: ff('Inter', '400'),
     fontSize: 12,
     lineHeight: 18,
     color: '#0A0A0A',
-  },
-  infoDates: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#4A5565',
   },
 
   // CTA
@@ -476,8 +404,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  // "Maybe later" — secondary text button under the share CTA (Figma: Inter Bold,
-  // Size/md 14 / Size/xl 18, #333).
+  // "Message admin" — secondary text button (Figma: Inter Bold, Size/md 14 / Size/xl 18, #333).
   secondaryBtn: {
     alignItems: 'center',
     justifyContent: 'center',

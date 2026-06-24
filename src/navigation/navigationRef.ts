@@ -29,6 +29,14 @@ export type RootStackParamList = {
   /** Full "Members pack suggestion" editor — host "Manage" target of the Plan-tab
    *  "What should members pack for themselves?" section. */
   ManageSuggestedGear: { tripId: string };
+  /** Member "How committed are you?" flow — full-screen options (step 1) + a
+   *  note bottom sheet (step 2). Submits a pending commitment to the host. */
+  Commitment: {
+    tripId: string;
+    tripTitle?: string | null;
+    initialItems?: string[];
+    initialNote?: string | null;
+  };
   /** Right-side notifications drawer as a transparent route — lives in back
    *  history, so back from a notification-opened trip returns TO the panel. */
   NotificationsPanel: { userId: string | null };
@@ -43,6 +51,9 @@ export type RootStackParamList = {
     isDirect?: boolean;
     tripId?: string;
     surftripId?: string;
+    /** Opened from a "Review request" commitment notification — the chat shows a
+     *  one-time "Before you approve" heads-up ~1s after it opens. */
+    reviewCommitment?: boolean;
   };
   /** Swelly AI chat card. service picks the edge-function variant (dev). */
   SwellyChat: { service?: 'copy' | 'copy-copy' };

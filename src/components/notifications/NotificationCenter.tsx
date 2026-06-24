@@ -32,6 +32,7 @@ import {
 import {
   approveJoinRequest,
   declineJoinRequest,
+  declineCommitment,
   approveGearRequest,
   declineGearRequest,
   listGearRequests,
@@ -286,6 +287,28 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
     [acting, stampHandled, invalidateTrip]
   );
 
+  // ── Commit request → decline straight from the bell (no chat needed). ───────
+  // Commit isn't in DECISION_STATUS_TYPES, so there's no "Declined" label — the
+  // optimistic handled_at just clears the action buttons.
+  const handleDeclineCommit = useCallback(
+    async (n: NotificationRow) => {
+      if (acting || !n.entity_id || !userId) return;
+      setActing(n.id);
+      stampHandled(n.id, 'declined');
+      try {
+        await declineCommitment(n.entity_id, userId);
+        notificationsService.markHandled(n.id);
+        invalidateTrip(n.trip_id);
+      } catch (e: any) {
+        setItems((prev) => prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r)));
+        Alert.alert('Could not decline', e?.message || 'Please try again.');
+      } finally {
+        setActing(null);
+      }
+    },
+    [acting, userId, stampHandled, invalidateTrip]
+  );
+
   // ── Commit request → open the 1:1 chat (the reason + approve/decline live
   //    in the commitment bubble there). ───────────────────────────────────────
   const handleOpenChat = useCallback(
@@ -301,6 +324,8 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
           otherUserAvatar: (n.data?.actor_avatar_url as string) ?? null,
           isDirect: true,
           tripId: n.trip_id ?? undefined,
+          // Triggers the one-time "Before you approve" heads-up in the chat.
+          reviewCommitment: true,
         });
       } catch (e: any) {
         Alert.alert('Could not open chat', e?.message || 'Please try again.');
@@ -327,13 +352,13 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
             prev.map((r) => (r.id === n.id ? { ...r, handled_at: new Date().toISOString() } : r))
           );
           notificationsService.markHandled(n.id);
-          Alert.alert('Already handled', 'This request was already resolved.');
+          Alert.alert('Already handled', 'This suggestion was already resolved.');
           return;
         }
         setGearSheet({ request: found, notifId: n.id, tripId: n.trip_id });
         setGearVisible(true);
       } catch (e: any) {
-        Alert.alert('Could not load request', e?.message || 'Please try again.');
+        Alert.alert('Could not load suggestion', e?.message || 'Please try again.');
       } finally {
         setActing(null);
       }
@@ -341,12 +366,33 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
     [acting, stampHandled]
   );
 
+  // Decline a gear suggestion straight from the bell (gear is in
+  // DECISION_STATUS_TYPES, so the row then shows its "Declined" status).
+  const handleDeclineGear = useCallback(
+    async (n: NotificationRow) => {
+      if (acting || !n.entity_id) return;
+      setActing(n.id);
+      stampHandled(n.id, 'declined');
+      try {
+        await declineGearRequest(n.entity_id);
+        notificationsService.markHandled(n.id);
+        invalidateTrip(n.trip_id);
+      } catch (e: any) {
+        setItems((prev) => prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r)));
+        Alert.alert('Could not decline', e?.message || 'Please try again.');
+      } finally {
+        setActing(null);
+      }
+    },
+    [acting, stampHandled, invalidateTrip]
+  );
+
   const handleGearApprove = useCallback(
-    async (request: EnrichedGearRequest, neededQty: number) => {
+    async (request: EnrichedGearRequest, neededQty: number, itemName: string) => {
       if (!gearSheet) return;
       setGearProcessing(request.id);
       try {
-        await approveGearRequest(request.id, neededQty);
+        await approveGearRequest(request.id, neededQty, itemName);
         stampHandled(gearSheet.notifId, 'approved');
         notificationsService.markHandled(gearSheet.notifId);
         invalidateTrip(gearSheet.tripId);
@@ -424,7 +470,9 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                     disabled={!!acting && acting !== n.id}
                     onDecision={handleDecision}
                     onOpenChat={handleOpenChat}
+                    onDeclineCommit={handleDeclineCommit}
                     onSeeSuggestion={handleSeeSuggestion}
+                    onDeclineGear={handleDeclineGear}
                     onPress={onOpenTrip && n.trip_id ? handleRowPress : undefined}
                   />
                 ))}
@@ -537,8 +585,12 @@ interface ItemProps {
   onDecision: (n: NotificationRow, decision: Decision) => void;
   /** Commit request → open the 1:1 chat with the requester. */
   onOpenChat: (n: NotificationRow) => void;
+  /** Commit request → decline directly from the bell. */
+  onDeclineCommit: (n: NotificationRow) => void;
   /** Gear request → open the suggestion review sheet. */
   onSeeSuggestion: (n: NotificationRow) => void;
+  /** Gear request → decline the suggestion directly from the bell. */
+  onDeclineGear: (n: NotificationRow) => void;
   /** When set, the whole row is tappable (deep-links to trip, or to the
    *  requester profile for a join request). */
   onPress?: (n: NotificationRow) => void;
@@ -551,7 +603,9 @@ const NotificationItem: React.FC<ItemProps> = ({
   disabled,
   onDecision,
   onOpenChat,
+  onDeclineCommit,
   onSeeSuggestion,
+  onDeclineGear,
   onPress,
 }) => {
   const r = renderNotification(n);
@@ -606,10 +660,22 @@ const NotificationItem: React.FC<ItemProps> = ({
             {isUnread && <View style={styles.unreadDot} />}
           </View>
         </View>
-        {!!r.body && (
+        {r.bodyParts && r.bodyParts.length > 0 ? (
+          // Name/action layout: action + group on the body line, with the action
+          // verb and group name bolded (see the bell Figma).
           <Text style={[styles.rowText, isUnread && styles.rowTextUnread]} numberOfLines={2}>
-            {r.body}
+            {r.bodyParts.map((p, i) => (
+              <Text key={i} style={p.b ? styles.rowTextStrong : undefined}>
+                {p.t}
+              </Text>
+            ))}
           </Text>
+        ) : (
+          !!r.body && (
+            <Text style={[styles.rowText, isUnread && styles.rowTextUnread]} numberOfLines={2}>
+              {r.body}
+            </Text>
+          )
         )}
 
         {/* Join request → inline Approve / Decline. */}
@@ -620,7 +686,7 @@ const NotificationItem: React.FC<ItemProps> = ({
               disabled={disabled || acting}
               style={({ pressed }) => [
                 styles.actionBtn,
-                styles.approveBtn,
+                styles.approveJoinBtn,
                 pressed && styles.btnPressed,
                 (disabled || acting) && styles.btnDisabled,
               ]}
@@ -650,7 +716,8 @@ const NotificationItem: React.FC<ItemProps> = ({
           </View>
         )}
 
-        {/* Commit request → open the chat where the reason + approve/decline live. */}
+        {/* Commit request → "Review request" opens the chat (reason + approve
+            live there); "Decline" rejects the commitment straight from the bell. */}
         {isCommitAction && (
           <View style={styles.actions}>
             <Pressable
@@ -663,25 +730,16 @@ const NotificationItem: React.FC<ItemProps> = ({
                 (disabled || acting) && styles.btnDisabled,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="Open chat"
+              accessibilityLabel="Review request"
             >
               {acting ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <View style={styles.btnRow}>
-                  <Ionicons name="chatbubble-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.approveText}>Open chat</Text>
-                </View>
+                <Text style={styles.approveText}>Review request</Text>
               )}
             </Pressable>
-          </View>
-        )}
-
-        {/* Gear request → open the suggestion sheet (host sets qty, then decides). */}
-        {isGearAction && (
-          <View style={styles.actions}>
             <Pressable
-              onPress={() => onSeeSuggestion(n)}
+              onPress={() => onDeclineCommit(n)}
               disabled={disabled || acting}
               style={({ pressed }) => [
                 styles.actionBtn,
@@ -690,16 +748,48 @@ const NotificationItem: React.FC<ItemProps> = ({
                 (disabled || acting) && styles.btnDisabled,
               ]}
               accessibilityRole="button"
-              accessibilityLabel="See suggestion"
+              accessibilityLabel="Decline"
+            >
+              <Text style={styles.declineText}>Decline</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Gear request → "Review suggestion" opens the sheet (host sets qty,
+            then approves); "Decline" rejects it straight from the bell. */}
+        {isGearAction && (
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => onSeeSuggestion(n)}
+              disabled={disabled || acting}
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.approveBtn,
+                pressed && styles.btnPressed,
+                (disabled || acting) && styles.btnDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Review suggestion"
             >
               {acting ? (
-                <ActivityIndicator size="small" color="#333333" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <View style={styles.btnRow}>
-                  <Ionicons name="eye-outline" size={16} color="#333333" />
-                  <Text style={styles.declineText}>See suggestion</Text>
-                </View>
+                <Text style={styles.approveText}>Review suggestion</Text>
               )}
+            </Pressable>
+            <Pressable
+              onPress={() => onDeclineGear(n)}
+              disabled={disabled || acting}
+              style={({ pressed }) => [
+                styles.actionBtn,
+                styles.declineBtn,
+                pressed && styles.btnPressed,
+                (disabled || acting) && styles.btnDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Decline"
+            >
+              <Text style={styles.declineText}>Decline</Text>
             </Pressable>
           </View>
         )}
@@ -917,6 +1007,15 @@ const styles = StyleSheet.create({
   rowTextUnread: {
     color: '#7B7B7B',
   },
+  // Bold spans inside the body — the action verb + group name. Inherits the
+  // parent's fontSize/lineHeight; only family/weight/color change.
+  rowTextStrong: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#7B7B7B', // Text/M-02 — Body/B-3
+  },
   actions: {
     flexDirection: 'row',
     gap: 16,
@@ -938,6 +1037,11 @@ const styles = StyleSheet.create({
   approveBtn: {
     backgroundColor: '#212121',
   },
+  // Join-request "Approve" — accent teal (other actions like "Review request"
+  // stay #212121).
+  approveJoinBtn: {
+    backgroundColor: '#05BCD3',
+  },
   declineBtn: {
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
@@ -952,15 +1056,17 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   approveText: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '400',
     color: '#FFFFFF',
   },
   declineText: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '400',
     color: '#333333',
   },
   statusText: {

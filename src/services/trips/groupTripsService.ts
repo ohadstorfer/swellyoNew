@@ -165,7 +165,7 @@ export type CommitmentStatus = 'none' | 'pending' | 'approved';
 
 /** Categories the member picks from in the commitment sheet. Stored as strings
  *  in commitment_items (jsonb array) so we can add more without a migration. */
-export type CommitmentItem = 'flight_booked' | 'insurance_sorted' | 'something_else';
+export type CommitmentItem = 'flight_booked' | 'accommodation_booked' | 'something_else';
 
 export interface GroupTripParticipant {
   id: string;
@@ -212,6 +212,8 @@ export interface UnseenJoinDecision {
     destination_label: string | null;
     start_date: string | null;
     end_date: string | null;
+    /** Host user_id — lets the declined overlay open a DM with the admin. */
+    host_id: string | null;
     /** Host name + avatar for the card's profile overlay. */
     host_name: string | null;
     host_avatar: string | null;
@@ -1115,14 +1117,13 @@ export async function submitCommitment(
  *  2. Update the participant → commitment_status='approved' (trigger flips `committed`).
  *  3. Update the original chat message's commitment_metadata.status so the
  *     bubble stops offering an Approve action in any open chat client.
- *  4. Post a system banner ("<name> is now marked as committed") into the same DM.
  *
  * Idempotent: if the request is already approved this is a no-op.
  */
 export async function approveCommitment(
   requestId: string,
   approverUserId: string
-): Promise<void> {
+): Promise<string | null> {
   const reqRes = await supabase
     .from('group_trip_commitment_requests')
     .select('id, trip_id, user_id, status, message_id, commitment_proofs, note')
@@ -1133,7 +1134,7 @@ export async function approveCommitment(
     throw new Error('Commitment request not found');
   }
   const req = reqRes.data as any;
-  if (req.status === 'approved') return; // idempotent
+  if (req.status === 'approved') return req.trip_id ?? null; // idempotent
 
   // 1. Mark request approved.
   const { error: updReqErr } = await supabase
@@ -1179,25 +1180,16 @@ export async function approveCommitment(
       .eq('id', req.message_id);
   }
 
-  // 4. Post the "X is now marked as committed" banner into the DM.
-  try {
-    const conv = await messagingService.createDirectConversation(req.user_id);
-    const { data: surfer } = await supabase
-      .from('surfers')
-      .select('name')
-      .eq('user_id', req.user_id)
-      .maybeSingle();
-    const name = ((surfer as any)?.name?.trim() as string | undefined) || 'They';
-    await messagingService.postSystemMessage(conv.id, `${name} is now marked as committed`);
-  } catch (bannerErr) {
-    console.warn('[groupTripsService] approveCommitment: banner post failed', bannerErr);
-  }
+  // (No "X is now marked as committed" DM banner — the approved card already
+  // shows the outcome; the extra system message was noise.)
 
   logEvent('trip_commit', {
     userId: approverUserId,
     tripId: req.trip_id,
     properties: { action: 'approve' },
   });
+
+  return (req.trip_id as string | null) ?? null;
 }
 
 /**
@@ -1213,7 +1205,7 @@ export async function approveCommitment(
 export async function declineCommitment(
   requestId: string,
   declinerUserId: string
-): Promise<void> {
+): Promise<string | null> {
   const reqRes = await supabase
     .from('group_trip_commitment_requests')
     .select('id, trip_id, user_id, status, message_id')
@@ -1224,7 +1216,7 @@ export async function declineCommitment(
     throw new Error('Commitment request not found');
   }
   const req = reqRes.data as any;
-  if (req.status === 'declined') return;
+  if (req.status === 'declined') return req.trip_id ?? null;
 
   const { error: updReqErr } = await supabase
     .from('group_trip_commitment_requests')
@@ -1285,6 +1277,8 @@ export async function declineCommitment(
     tripId: req.trip_id,
     properties: { action: 'decline' },
   });
+
+  return (req.trip_id as string | null) ?? null;
 }
 
 /**
@@ -2281,12 +2275,14 @@ export async function createGearRequest(
 }
 
 /**
- * Host approves a gear request: creates the corresponding gear_item and marks
- * the request approved. Default needed_qty=1 — the host can edit afterwards.
+ * Host approves a gear suggestion: creates the corresponding gear_item and marks
+ * the request approved. The host can edit the name (overrideName) and quantity
+ * before approving; both fall back to what the member suggested.
  */
 export async function approveGearRequest(
   requestId: string,
-  neededQty: number = 1
+  neededQty: number = 1,
+  overrideName?: string
 ): Promise<GearItem> {
   const { data: { user } } = await supabase.auth.getUser();
   const hostId = user?.id;
@@ -2306,7 +2302,10 @@ export async function approveGearRequest(
     throw new Error('Request is no longer pending');
   }
 
-  const item = await addGearItem(req.trip_id, hostId, req.item_name, neededQty, requestId);
+  // The host may have renamed the item in the review sheet; fall back to the
+  // member's original suggestion when no (non-empty) override is supplied.
+  const itemName = overrideName?.trim() || req.item_name;
+  const item = await addGearItem(req.trip_id, hostId, itemName, neededQty, requestId);
 
   const { error: updateError } = await supabase
     .from('group_trip_gear_requests')
@@ -2562,6 +2561,7 @@ export async function listUnseenJoinDecisions(
         destination_label: destinationLabel(pickDestination(trip.destination)),
         start_date: trip.start_date ?? null,
         end_date: trip.end_date ?? null,
+        host_id: trip.host_id ?? null,
         host_name: host?.name ?? null,
         host_avatar: host?.avatar ?? null,
         member_avatars: memberAvatars,

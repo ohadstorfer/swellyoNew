@@ -1309,6 +1309,9 @@ export default function CreateTripFlowA({
     id: string;
     title: string | null;
     hero: string | null;
+    description: string | null;
+    startDate: string | null;
+    endDate: string | null;
   } | null>(null);
 
   // Flow B "About you" — the host's own surfer profile (for the embedded card)
@@ -1842,7 +1845,14 @@ export default function CreateTripFlowA({
         await clearDraft();
         // Show the Published / invite-friends screen. onCreated() fires when
         // the host taps Done there.
-        setPublished({ id: trip.id, title: trip.title ?? state.title ?? null, hero: heroUrl });
+        setPublished({
+          id: trip.id,
+          title: trip.title ?? state.title ?? null,
+          hero: heroUrl,
+          description: trip.description ?? state.description ?? null,
+          startDate: trip.start_date ?? null,
+          endDate: trip.end_date ?? null,
+        });
       }
     } catch (e: any) {
       console.error('[CreateTripFlowA] submit error:', e);
@@ -3065,6 +3075,9 @@ export default function CreateTripFlowA({
         tripId={published.id}
         tripTitle={published.title}
         heroImageUri={published.hero}
+        description={published.description}
+        startDate={published.startDate}
+        endDate={published.endDate}
         onDone={onCreated}
       />
     );

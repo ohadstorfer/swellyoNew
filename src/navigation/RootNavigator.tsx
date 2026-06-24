@@ -20,6 +20,7 @@ import PackingAndGearScreen from '../screens/trips/PackingAndGearScreen';
 import YourGearScreen from '../screens/trips/YourGearScreen';
 import ManageSuggestedGearScreen from '../screens/trips/ManageSuggestedGearScreen';
 import ManageGearScreen from '../screens/trips/ManageGearScreen';
+import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -107,6 +108,14 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       onViewAllYourGear={() => navigation.dispatch(StackActions.push('YourGear', { tripId }))}
       onManageSuggestedGear={() => navigation.dispatch(StackActions.push('ManageSuggestedGear', { tripId }))}
       onManageGroupGear={() => navigation.dispatch(StackActions.push('ManageGear', { tripId }))}
+      onOpenCommitment={args =>
+        navigation.dispatch(StackActions.push('Commitment', {
+          tripId,
+          tripTitle: args.tripTitle,
+          initialItems: args.initialItems,
+          initialNote: args.initialNote,
+        }))
+      }
     />
   );
 }
@@ -135,6 +144,22 @@ function ManageSuggestedGearCardScreen({ route, navigation }: NativeStackScreenP
 function ManageGearCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'ManageGear'>) {
   const { tripId } = route.params;
   return <ManageGearScreen tripId={tripId} onBack={() => navigation.goBack()} />;
+}
+
+function CommitmentCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'Commitment'>) {
+  const { user } = useOnboarding();
+  const currentUserId = user?.id ? String(user.id) : null;
+  const { tripId, tripTitle, initialItems, initialNote } = route.params;
+  return (
+    <CommitmentScreen
+      tripId={tripId}
+      currentUserId={currentUserId}
+      tripTitle={tripTitle ?? null}
+      initialItems={initialItems}
+      initialNote={initialNote ?? null}
+      onClose={() => navigation.goBack()}
+    />
+  );
 }
 
 function TripUpdatesCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripUpdates'>) {
@@ -197,6 +222,7 @@ function ChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackP
       isDirect={params.isDirect ?? true}
       tripId={params.tripId}
       surftripId={params.surftripId}
+      reviewCommitment={params.reviewCommitment}
       onBack={() => navigation.goBack()}
       onViewProfile={chatCard.onViewProfile}
       onOpenTripDetail={chatCard.onOpenTripDetail}
@@ -517,6 +543,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="YourGear" component={YourGearCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ManageSuggestedGear" component={ManageSuggestedGearCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ManageGear" component={ManageGearCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="Commitment" component={CommitmentCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SwellyChat" component={SwellyChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SurftripCard" component={SurftripCardScreen} options={{ presentation: 'card' }} />

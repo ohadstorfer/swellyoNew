@@ -40,14 +40,17 @@ function row(type: NotificationType, data: Record<string, any> | null): Notifica
 describe('renderNotification — happy path (full snapshot)', () => {
   const full = { actor_name: 'Alice', trip_title: 'Costa Rica Camp', qty: 2, gear_name: 'wetsuit', item_name: 'wetsuit', preview: 'Meet at 7am', decision: 'approved' };
 
-  it('member_joined names the actor and the trip', () => {
+  it('member_joined puts the actor in the title and the trip in the body', () => {
     const r = renderNotification(row('member_joined', full));
-    expect(r.body).toBe('Alice joined “Costa Rica Camp”.');
+    expect(r.title).toBe('Alice');
+    expect(r.body).toBe('joined Costa Rica Camp');
     expect(r.icon).toBe('person-add-outline');
   });
 
   it('gear_claimed includes qty + gear name', () => {
-    expect(renderNotification(row('gear_claimed', full)).body).toBe('Alice claimed 2 wetsuit.');
+    const r = renderNotification(row('gear_claimed', full));
+    expect(r.title).toBe('Alice');
+    expect(r.body).toBe('claimed 2 wetsuit');
   });
 
   it('admin_update_posted prefers the preview text', () => {
@@ -60,8 +63,15 @@ describe('renderNotification — happy path (full snapshot)', () => {
     expect(r.icon).toBe('checkmark-circle-outline');
   });
 
-  it('join_request_received names requester + trip', () => {
-    expect(renderNotification(row('join_request_received', full)).body).toBe('Alice asked to join “Costa Rica Camp”.');
+  it('join_request_received puts requester in the title, action + trip in the body', () => {
+    const r = renderNotification(row('join_request_received', full));
+    expect(r.title).toBe('Alice');
+    expect(r.body).toBe('requested to join Costa Rica Camp');
+    // The action verb + trip render as one bold span.
+    expect(r.bodyParts).toEqual([
+      { t: 'requested to ' },
+      { t: 'join Costa Rica Camp', b: true },
+    ]);
   });
 
   it('declined decisions flip the wording and icon', () => {
@@ -95,12 +105,14 @@ describe('renderNotification — degraded snapshot (the REAL B1 bug surface)', (
 
   it('falls back to "the trip" when trip_title is missing', () => {
     const r = renderNotification(row('join_request_received', { actor_name: 'Bob' }));
-    expect(r.body).toBe('Bob asked to join the trip.'); // <-- generic, no trip name (B1)
+    expect(r.title).toBe('Bob');
+    expect(r.body).toBe('requested to join the trip'); // <-- generic, no trip name (B1)
   });
 
   it('falls back to "Someone" when actor_name is missing', () => {
     const r = renderNotification(row('member_joined', { trip_title: 'Baleal' }));
-    expect(r.body).toBe('Someone joined “Baleal”.');
+    expect(r.title).toBe('Someone');
+    expect(r.body).toBe('joined Baleal');
   });
 
   it('personal_gear_updated does NOT reference the actor (corrects an audit claim)', () => {
@@ -113,7 +125,8 @@ describe('renderNotification — degraded snapshot (the REAL B1 bug surface)', (
 
   it('null data never throws and yields a usable fallback', () => {
     const r = renderNotification(row('gear_claimed', null));
-    expect(r.body).toBe('Someone claimed gear.');
+    expect(r.title).toBe('Someone');
+    expect(r.body).toBe('claimed gear');
   });
 
   it('unknown type returns the safe default', () => {

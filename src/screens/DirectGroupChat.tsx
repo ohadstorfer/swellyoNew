@@ -338,6 +338,9 @@ interface DirectGroupChatProps {
   onOpenTripDetail?: (tripId: string) => void;
   surftripId?: string;
   onOpenSurftripDetail?: (surftripId: string) => void;
+  // Accepted only so the ChatCard routing union type-checks — group chats never
+  // review individual commitments, so this is ignored here.
+  reviewCommitment?: boolean;
 }
 
 export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({

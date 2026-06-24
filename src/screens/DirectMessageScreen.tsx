@@ -64,13 +64,15 @@ import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { ReportUserScreen, ReportedMessageContext } from './ReportUserScreen';
 import { ReportMessageSheet } from '../components/ReportMessageSheet';
 import { CommitmentMessageBubble } from '../components/trips/commitment/CommitmentMessageBubble';
-import { CommitmentReviewBar } from '../components/trips/commitment/CommitmentReviewBar';
+import { BeforeYouApproveModal } from '../components/trips/commitment/BeforeYouApproveModal';
 import {
   listPendingCommitmentsToReviewFromUser,
   approveCommitment,
   declineCommitment,
   type PendingCommitmentToReview,
 } from '../services/trips/groupTripsService';
+import { queryClient } from '../lib/queryClient';
+import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { withTimeout } from '../services/messaging/withTimeout';
 import { sanitizeMessage } from '../services/messaging/messageSanitizer';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
@@ -345,6 +347,9 @@ interface DirectMessageScreenProps {
   onOpenTripDetail?: (tripId: string) => void;
   surftripId?: string;
   onOpenSurftripDetail?: (surftripId: string) => void;
+  // Opened from a "Review request" commitment notification → show a one-time
+  // "Before you approve" heads-up ~1s after the chat opens.
+  reviewCommitment?: boolean;
 }
 
 export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
@@ -359,11 +364,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   onViewProfile,
   tripId,
   onOpenTripDetail,
+  reviewCommitment = false,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
   
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
+  // "Before you approve" heads-up — shown once, ~1s after opening from a
+  // "Review request" commitment notification.
+  const [showBeforeApprove, setShowBeforeApprove] = useState(false);
+  const beforeApproveShownRef = useRef(false);
   const [showDmMenu, setShowDmMenu] = useState(false);
   const [showReportUser, setShowReportUser] = useState(false);
   // When set, the report flow targets a specific message instead of the whole user.
@@ -1317,6 +1327,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
   }, [isDirect, otherUserId, currentUserId, latestPartnerCommitmentMessageId]);
 
+  // Opened from a "Review request" notification → pop the one-time heads-up
+  // ~1s after the chat is on screen. Guarded so it fires only once per mount.
+  useEffect(() => {
+    if (!reviewCommitment || beforeApproveShownRef.current) return;
+    beforeApproveShownRef.current = true;
+    const t = setTimeout(() => setShowBeforeApprove(true), 1000);
+    return () => clearTimeout(t);
+  }, [reviewCommitment]);
+
   const handleApproveCommitment = async (req: PendingCommitmentToReview) => {
     if (!currentUserId) return;
     try {
@@ -1346,16 +1365,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     setPendingCommitments((prev) => prev.filter((r) => r.id !== requestId));
   };
 
+  // Approving/declining a commitment from the chat changes the trip's committed
+  // count + member badges — refresh any mounted/cached Trip Detail so it isn't
+  // stale (the host often acts here while the trip screen sits behind).
+  const refreshTripAfterCommitment = (tid: string | null) => {
+    if (!tid) return;
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tid) });
+    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+  };
+
   const handleApproveCommitmentById = async (requestId: string) => {
     if (!currentUserId) throw new Error('Not authenticated');
-    await approveCommitment(requestId, currentUserId);
+    const tripId = await approveCommitment(requestId, currentUserId);
     patchCommitmentStatus(requestId, 'approved');
+    refreshTripAfterCommitment(tripId);
   };
 
   const handleDeclineCommitmentById = async (requestId: string) => {
     if (!currentUserId) throw new Error('Not authenticated');
-    await declineCommitment(requestId, currentUserId);
+    const tripId = await declineCommitment(requestId, currentUserId);
     patchCommitmentStatus(requestId, 'declined');
+    refreshTripAfterCommitment(tripId);
   };
 
   // Prefetch avatar when component mounts or avatar URL changes
@@ -4554,13 +4584,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 onCancel={() => setReplyingTo(null)}
               />
             )}
-            {isDirect && pendingCommitments.length > 0 && (
-              <CommitmentReviewBar
-                pending={pendingCommitments}
-                requesterName={otherUserName}
-                onApprove={handleApproveCommitment}
-              />
-            )}
             <View style={styles.inputWrapper}>
               {/* ONE input for composing AND editing. Editing flips ChatTextInput to
                   editMode (⊗ cancel + ✓ save, message body as value) — the SAME
@@ -4798,6 +4821,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           setShowBlockOverlay(false);
           onBack?.();
         }}
+      />
+      <BeforeYouApproveModal
+        visible={showBeforeApprove}
+        onDismiss={() => setShowBeforeApprove(false)}
       />
     </SafeAreaView>
       {/* Message Actions Menu */}

@@ -256,6 +256,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onLeaderPress,
   afterHeroSlot,
   bodyHidden,
+  hideParticipants = false,
   onShare,
   isHost = false,
   aboutHost = null,
@@ -763,7 +764,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Participants — tappable avatars, scroll right for more ---- */}
+          {/* ---- Participants — tappable avatars, scroll right for more ----
+              Hidden for members who have the Plan tab: they see the richer
+              Members section there (Figma 13455-38686). */}
+          {!hideParticipants && (
           <View style={styles.section}>
             <View style={styles.sectionTitleRow}>
               <View style={styles.participantsTitle}>
@@ -808,6 +812,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
               <Text style={styles.mutedSmall}>No one yet</Text>
             )}
           </View>
+          )}
 
           {/* ---- Who it's for ---- */}
           {showWhoFor ? (

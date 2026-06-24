@@ -142,67 +142,35 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       useNativeDriver: true,
     });
 
-    // Animate icons fade in and scale up sequentially after line animation finishes
-    // Line animation finishes at 3800ms (800ms slide + 3000ms line)
-    // Icons appear one after another with 150ms delay between each
+    // Icons fade + pop in, one-by-one, STARTING when the line starts (delay 800,
+    // same as the cover/line) and spread across the 3000ms line draw so each
+    // appears as the line reaches it — mirrors the "You're in!" illustration.
+    const ICON_DUR = 400;
+    const ICON_DELAYS = [800, 1500, 2200, 2900];
+    const ICON_EASE = Easing.out(Easing.back(1.6));
     const icon1Fade = Animated.timing(icon1Opacity, {
-      toValue: 1,
-      duration: 400,
-      delay: 3800, // Start after line animation finishes
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[0], easing: ICON_EASE, useNativeDriver: true,
     });
     const icon1ScaleAnim = Animated.timing(icon1Scale, {
-      toValue: 1,
-      duration: 400,
-      delay: 3800,
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[0], easing: ICON_EASE, useNativeDriver: true,
     });
-    
     const icon2Fade = Animated.timing(icon2Opacity, {
-      toValue: 1,
-      duration: 400,
-      delay: 3950, // 150ms after icon 1
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[1], easing: ICON_EASE, useNativeDriver: true,
     });
     const icon2ScaleAnim = Animated.timing(icon2Scale, {
-      toValue: 1,
-      duration: 400,
-      delay: 3950,
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[1], easing: ICON_EASE, useNativeDriver: true,
     });
-    
     const icon3Fade = Animated.timing(icon3Opacity, {
-      toValue: 1,
-      duration: 400,
-      delay: 4100, // 150ms after icon 2
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[2], easing: ICON_EASE, useNativeDriver: true,
     });
     const icon3ScaleAnim = Animated.timing(icon3Scale, {
-      toValue: 1,
-      duration: 400,
-      delay: 4100,
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[2], easing: ICON_EASE, useNativeDriver: true,
     });
-    
     const icon4Fade = Animated.timing(icon4Opacity, {
-      toValue: 1,
-      duration: 400,
-      delay: 4250, // 150ms after icon 3
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[3], easing: ICON_EASE, useNativeDriver: true,
     });
     const icon4ScaleAnim = Animated.timing(icon4Scale, {
-      toValue: 1,
-      duration: 400,
-      delay: 4250,
-      easing: Easing.in(Easing.ease),
-      useNativeDriver: true,
+      toValue: 1, duration: ICON_DUR, delay: ICON_DELAYS[3], easing: ICON_EASE, useNativeDriver: true,
     });
     
     // Text slider animation - slides to second text after 3000ms
@@ -215,7 +183,6 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
     });
 
     // Start all animations
-    console.log('[ConversationLoadingScreen] Starting animations sequence');
     Animated.parallel([
       leftProfileSlideIn,
       rightProfileSlideIn,
@@ -231,20 +198,15 @@ export const ConversationLoadingScreen: React.FC<ConversationLoadingScreenProps>
       icon4Fade,
       icon4ScaleAnim,
       textSlideAnimation,
-    ]).start(() => {
-      console.log('[ConversationLoadingScreen] All animations completed');
-    });
+    ]).start();
 
-    // Call onComplete 2 seconds after profile pics animation (move closer + grow) finishes
-    // Profile animation ends at 3800 + 600 = 4400ms, then wait 2000ms = 6400ms total
-    console.log('[ConversationLoadingScreen] Setting timer to call onComplete in 6400ms');
+    // Call onComplete 2 seconds after profile pics animation (move closer + grow)
+    // finishes: 3800 + 600 = 4400ms, then wait 2000ms = 6400ms total.
     const timer = setTimeout(() => {
-      console.log('[ConversationLoadingScreen] Timer fired, calling onComplete');
       onComplete();
     }, 6400);
 
     return () => {
-      console.log('[ConversationLoadingScreen] Cleanup: clearing timer');
       clearTimeout(timer);
     };
   }, [onComplete]);

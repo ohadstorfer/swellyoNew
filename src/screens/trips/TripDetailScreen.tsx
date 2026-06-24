@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Image,
   ScrollView,
   ActivityIndicator,
@@ -58,8 +59,6 @@ import {
   isTripPast,
   leaveTrip,
   removeParticipant,
-  submitCommitment,
-  type CommitmentItem,
   type CommitmentStatus,
   setTripGroupGear,
   setMyGroupGear,
@@ -97,15 +96,14 @@ import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
 import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
 import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
 import { GearRequestsSheet } from '../../components/trips/gear/GearRequestsSheet';
-import { CommitmentSheet } from '../../components/trips/commitment/CommitmentSheet';
 import {
   CommitPill,
+  TripMemberSection,
   AdminUpdatesCard,
   GroupGearCard,
   YourGearCard,
 } from '../../components/trips/plan/PlanSections';
 import { ff } from '../../theme/fonts';
-import { RequestToJoinSheet } from '../../components/trips/joinRequest/RequestToJoinSheet';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
 import { useQueryClient } from '@tanstack/react-query';
@@ -148,6 +146,8 @@ interface TripDetailScreenProps {
   onManageSuggestedGear?: () => void;
   /** Host "Manage" on the Group Gear card pushes the full-screen Manage Gear editor. */
   onManageGroupGear?: () => void;
+  /** Member "Commit to this trip" → pushes the full-screen commitment flow. */
+  onOpenCommitment?: (args: { tripTitle: string | null; initialItems: string[]; initialNote: string | null }) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +318,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
@@ -370,13 +370,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [cancelling, setCancelling] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [commitSheetOpen, setCommitSheetOpen] = useState(false);
-  const [joinSheetOpen, setJoinSheetOpen] = useState(false);
-  const [myJoinProfile, setMyJoinProfile] = useState<{
-    name: string | null;
-    avatarUrl: string | null;
-    surfLevel: string | null;
-  } | null>(null);
   const [editingPacking, setEditingPacking] = useState(false);
   const [groupGearDraft, setGroupGearDraft] = useState('');
   const [savingPacking, setSavingPacking] = useState(false);
@@ -514,6 +507,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const myCommitmentStatus: CommitmentStatus = meParticipant?.commitment_status ?? 'none';
   const myCommitmentItems = meParticipant?.commitment_items ?? [];
   const myCommitmentNote = meParticipant?.commitment_note ?? null;
+  // Members section (Plan tab) — avatars + committed-to-trip count. The passport
+  // badge tracks the `committed` flag (host counts as committed by default).
+  const memberList = useMemo(
+    () =>
+      participants.map(p => ({
+        id: p.user_id,
+        name: p.name ?? null,
+        avatarUrl: p.profile_image_url ?? null,
+        committed: !!p.committed,
+      })),
+    [participants]
+  );
+  const committedCount = useMemo(
+    () => participants.filter(p => p.committed).length,
+    [participants]
+  );
   const myGroupGear = useMemo<GroupGearItem[]>(
     () => participants.find(p => p.user_id === currentUserId)?.personal_gear_by_host ?? [],
     [participants, currentUserId]
@@ -535,49 +544,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Data is now managed by react-query hooks above.
   // refreshGear / refreshGearRequests replaced by queryClient.invalidateQueries.
 
-  // Lazy-fetch the user's own profile preview the first time it could be shown
-  // in the join sheet. Skipped for host/approved-member; cached after first load.
-  useEffect(() => {
-    let cancelled = false;
-    if (!currentUserId || isHost || isApprovedMember || myJoinProfile) return;
-    supabase
-      .from('surfers')
-      .select('name, profile_image_url, surf_level_category')
-      .eq('user_id', currentUserId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled || !data) return;
-        setMyJoinProfile({
-          name: (data as any).name ?? null,
-          avatarUrl: (data as any).profile_image_url ?? null,
-          surfLevel: (data as any).surf_level_category ?? null,
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUserId, isHost, isApprovedMember, myJoinProfile]);
-
   // -------------------------------------------------------------------------
   // Actions
   // -------------------------------------------------------------------------
-  const handleOpenJoinSheet = () => {
-    if (!currentUserId) return;
-    setJoinSheetOpen(true);
-  };
-
-  const handleSubmitJoinRequest = async (note: string) => {
+  // Tapping "Request to join" sends the request straight away — no note sheet.
+  const handleRequestToJoin = async () => {
     if (!currentUserId) return;
     setSubmitting(true);
     try {
-      const newReq = await requestToJoinTrip(tripId, currentUserId, note || undefined);
+      const newReq = await requestToJoinTrip(tripId, currentUserId);
       queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
         tripsKeys.detail(tripId),
         prev => (prev ? { ...prev, myRequest: newReq } : prev)
       );
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
-      throw e;
     } finally {
       setSubmitting(false);
     }
@@ -860,7 +841,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const handleOpenCommitSheet = () => {
     if (!currentUserId) return;
-    setCommitSheetOpen(true);
+    onOpenCommitment?.({
+      tripTitle: trip?.title ?? null,
+      initialItems: myCommitmentItems,
+      initialNote: myCommitmentNote,
+    });
   };
 
   const patchParticipantsCache = (updater: (p: EnrichedParticipant) => EnrichedParticipant) => {
@@ -869,29 +854,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       prev =>
         prev ? { ...prev, participants: prev.participants.map(p => p.user_id === currentUserId ? updater(p) : p) } : prev
     );
-  };
-
-  const handleSubmitCommitment = async (items: CommitmentItem[], note: string) => {
-    if (!currentUserId) return;
-    const prior = { status: myCommitmentStatus, items: myCommitmentItems, note: myCommitmentNote };
-    patchParticipantsCache(p => ({
-      ...p,
-      commitment_status: 'pending',
-      commitment_items: items,
-      commitment_note: note || null,
-    }));
-    try {
-      await submitCommitment(tripId, currentUserId, items, note || null);
-    } catch (e: any) {
-      patchParticipantsCache(p => ({
-        ...p,
-        commitment_status: prior.status,
-        commitment_items: prior.items,
-        commitment_note: prior.note,
-      }));
-      Alert.alert('Could not submit', e?.message || 'Please try again.');
-      throw e;
-    }
   };
 
   const handleToggleGroupGearItem = async (itemName: string) => {
@@ -1046,10 +1008,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
   };
 
-  const handleApproveGearRequest = async (request: EnrichedGearRequest, neededQty: number) => {
+  const handleApproveGearRequest = async (request: EnrichedGearRequest, neededQty: number, itemName: string) => {
     setProcessingGearRequestId(request.id);
     try {
-      await approveGearRequest(request.id, neededQty);
+      await approveGearRequest(request.id, neededQty, itemName);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
@@ -1281,7 +1243,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       ((isHost || isApprovedMember) && !isCancelled) && {
         key: 'chat',
         icon: 'chatbubble-outline',
-        label: 'Chat Trip',
+        label: 'Trip Chat',
         group: 0,
         onPress: handleOpenGroupChat,
       },
@@ -1414,6 +1376,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             ) : null
           }
           bodyHidden={showPlan}
+          // Members who have the Plan tab now see the participants there (Figma
+          // 13455-38686), so drop the Overview Participants row for them. Locked
+          // trips (no Plan tab) and non-members keep it as the only member view.
+          hideParticipants={canSeePlan}
           // Host edit affordances (Figma admin view) — only while the trip is
           // still live (locked trips are read-only, mirroring the header pencil).
           isHost={isHost && !isLocked}
@@ -1473,12 +1439,29 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
+        {/* 1.5) Members — moved here from the Overview body (members-only;
+            non-members still see the simpler Participants row in Overview). */}
+        <View onLayout={registerSection('members')}>
+          <TripMemberSection
+            members={memberList}
+            participantCount={participants.length}
+            maxParticipants={trip.max_participants}
+            committedCount={committedCount}
+            onMemberPress={
+              onViewUserProfile
+                ? userId => {
+                    if (userId !== currentUserId) onViewUserProfile(userId);
+                  }
+                : undefined
+            }
+          />
+        </View>
+
         {/* 2) Recent admin updates — always shown (members see a read-only
-            "No updates yet" placeholder; only the host gets "+ Add update"). */}
+            "No updates yet" placeholder; only the host gets "+ Add update").
+            The Members section above provides the spacing under the toggle. */}
         {(
-          // Host has no commit pill above, so the updates sit right under the
-          // toggle — add a little breathing room there (members get it from the pill).
-          <View onLayout={registerSection('updates')} style={isHost && { marginTop: 16 }}>
+          <View onLayout={registerSection('updates')} style={{ marginTop: 16 }}>
             <AdminUpdatesCard
               updates={adminUpdates}
               isHost={isHost}
@@ -1538,8 +1521,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
         {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
 
-        {/* Gear requests (host) — review members' "request item" submissions.
-            Only shown when there are pending requests to act on. */}
+        {/* Gear suggestions (host) — review members' "suggest item" submissions.
+            Only shown when there are pending suggestions to act on. */}
         {isHost && gearRequests.length > 0 && (
           <View style={styles.planSection} onLayout={registerSection('gear-requests')}>
             <TouchableOpacity
@@ -1549,7 +1532,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             >
               <Ionicons name="notifications-outline" size={16} color="#222B30" />
               <Text style={styles.gearReqsBadgeText}>
-                {`${gearRequests.length} pending gear ${gearRequests.length === 1 ? 'request' : 'requests'}`}
+                {`${gearRequests.length} pending gear ${gearRequests.length === 1 ? 'suggestion' : 'suggestions'}`}
               </Text>
               <Ionicons name="chevron-forward" size={16} color="#222B30" />
             </TouchableOpacity>
@@ -1683,7 +1666,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             myRequest={myRequest}
             isFull={isFull}
             submitting={submitting}
-            onRequest={handleOpenJoinSheet}
+            onRequest={handleRequestToJoin}
             onWithdraw={handleWithdraw}
           />
         </Reanimated.View>
@@ -1752,20 +1735,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onApprove={handleApproveGearRequest}
         onDecline={handleDeclineGearRequest}
       />
-      <CommitmentSheet
-        visible={commitSheetOpen}
-        onClose={() => setCommitSheetOpen(false)}
-        initialItems={myCommitmentItems}
-        initialNote={myCommitmentNote}
-        onSubmit={handleSubmitCommitment}
-      />
-      <RequestToJoinSheet
-        visible={joinSheetOpen}
-        onClose={() => setJoinSheetOpen(false)}
-        profile={myJoinProfile}
-        onSubmit={handleSubmitJoinRequest}
-      />
-
       {/* Admin update — host writes/edits an announcement. Driven by the same
           addingUpdate / editingUpdateId state the list uses. */}
       <AdminUpdateSheet
@@ -1962,25 +1931,20 @@ const CtaButton: React.FC<{
     );
   }
   if (myRequest?.status === 'pending') {
+    // Already requested → yellow "Requested" button. Tapping it withdraws the
+    // pending request (no confirm sheet — same tap that sent it cancels it).
     return (
-      <View style={styles.ctaPendingRow}>
-        <View style={[styles.ctaBtn, styles.ctaPending, { flex: 1 }]}>
-          <Ionicons name="time-outline" size={18} color="#555" />
-          <Text style={styles.ctaPendingText}>Request pending</Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.ctaBtn, styles.ctaWithdraw]}
-          onPress={onWithdraw}
-          disabled={submitting}
-          activeOpacity={0.7}
-        >
-          {submitting ? (
-            <ActivityIndicator color="#555" />
-          ) : (
-            <Text style={styles.ctaWithdrawText}>Withdraw</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      <Pressable
+        style={({ pressed }) => [styles.ctaBtn, styles.ctaRequested, pressed && styles.ctaPressed]}
+        onPress={onWithdraw}
+        disabled={submitting}
+      >
+        {submitting ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.ctaPrimaryText}>Requested</Text>
+        )}
+      </Pressable>
     );
   }
   if (myRequest?.status === 'declined') {
@@ -1989,35 +1953,33 @@ const CtaButton: React.FC<{
     return (
       <View style={styles.ctaDeclinedRow}>
         <Text style={styles.ctaDeclinedNote}>Your last request was declined.</Text>
-        <TouchableOpacity
-          style={[styles.ctaBtn, styles.ctaPrimary]}
+        <Pressable
+          style={({ pressed }) => [styles.ctaBtn, styles.ctaPrimary, pressed && styles.ctaPressed]}
           onPress={onRequest}
           disabled={submitting}
-          activeOpacity={0.85}
         >
           {submitting ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <Text style={styles.ctaPrimaryText}>Request again</Text>
           )}
-        </TouchableOpacity>
+        </Pressable>
       </View>
     );
   }
   // No request yet, or withdrawn → allow new request
   return (
-    <TouchableOpacity
-      style={[styles.ctaBtn, styles.ctaPrimary]}
+    <Pressable
+      style={({ pressed }) => [styles.ctaBtn, styles.ctaPrimary, pressed && styles.ctaPressed]}
       onPress={onRequest}
       disabled={submitting}
-      activeOpacity={0.85}
     >
       {submitting ? (
         <ActivityIndicator color="#FFFFFF" />
       ) : (
         <Text style={styles.ctaPrimaryText}>Request to join</Text>
       )}
-    </TouchableOpacity>
+    </Pressable>
   );
 };
 
@@ -2290,6 +2252,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   ctaPrimary: { backgroundColor: '#212121' },
+  // Subtle press feedback — same scale dip used on the other trip buttons.
+  ctaPressed: { transform: [{ scale: 0.97 }], opacity: 0.9 },
   ctaChat: { backgroundColor: '#05BCD3' },
   ctaPrimaryText: {
     color: '#FFFFFF',
@@ -2297,11 +2261,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: ff('Montserrat', '600'),
   },
-  ctaPendingRow: { flexDirection: 'row', gap: 10 },
   ctaPending: { backgroundColor: '#F2F2F2' },
   ctaPendingText: { color: '#555', fontWeight: '600', fontSize: 14, marginLeft: 6 },
-  ctaWithdraw: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DDD', paddingHorizontal: 16 },
-  ctaWithdrawText: { color: '#555', fontWeight: '600', fontSize: 14 },
+  ctaRequested: { backgroundColor: '#FFB443' },
   ctaDeclined: { backgroundColor: '#F2F2F2' },
   ctaDeclinedText: { color: '#7B7B7B', fontWeight: '600', fontSize: 14 },
   ctaDeclinedRow: { gap: 8 },

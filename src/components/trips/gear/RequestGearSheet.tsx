@@ -18,6 +18,7 @@ import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 
 const NAME_MAX = 21;
+const NOTE_MAX = 200;
 
 interface Props {
   visible: boolean;
@@ -27,11 +28,13 @@ interface Props {
 
 export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }) => {
   const [name, setName] = useState('');
+  const [note, setNote] = useState('');
   const [qty, setQty] = useState(1);
   const [submitting, setSubmitting] = useState(false);
 
   const close = () => {
     setName('');
+    setNote('');
     setQty(1);
     onClose();
   };
@@ -40,8 +43,9 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
     if (!name.trim() || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit(name.trim(), '', qty);
+      await onSubmit(name.trim(), note.trim(), qty);
       setName('');
+      setNote('');
       setQty(1);
       onClose();
     } finally {
@@ -92,6 +96,22 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
           editable={!submitting}
           returnKeyType="done"
           onSubmitEditing={handleAdd}
+        />
+      </View>
+
+      {/* Why is this needed? — optional note the host sees when reviewing. */}
+      <Text style={styles.whyLabel}>Why is this needed?</Text>
+      <View style={styles.noteField}>
+        <TextInput
+          style={styles.noteInput}
+          value={note}
+          onChangeText={setNote}
+          placeholder="Any details you want to share..."
+          placeholderTextColor={SHEET.textMuted}
+          maxLength={NOTE_MAX}
+          multiline
+          editable={!submitting}
+          textAlignVertical="top"
         />
       </View>
 
@@ -160,12 +180,37 @@ const styles = StyleSheet.create({
     // Strip the default min height so the 56px field height holds on Android.
     paddingVertical: 0,
   },
+  whyLabel: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#333333',
+    marginTop: 24, // gap below the item input
+  },
+  noteField: {
+    minHeight: 88,
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: SHEET.hairline,
+    borderRadius: 12,
+    backgroundColor: SHEET.surface,
+  },
+  noteInput: {
+    flex: 1,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 20,
+    color: SHEET.inkBody,
+    paddingVertical: 0,
+  },
   qtyLabel: {
     fontFamily: ff('Inter', '700'),
     fontSize: 14,
     lineHeight: 18,
     color: '#333333',
-    marginTop: 32, // more gap below the item input
+    marginTop: 24, // gap below the note field
   },
   stepper: {
     flexDirection: 'row',

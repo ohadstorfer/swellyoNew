@@ -473,6 +473,9 @@ export interface TripDetailViewProps {
   /** When true, render only the hero + afterHeroSlot and hide the read-only
    *  overview body (used when the Plan tab is active). */
   bodyHidden?: boolean;
+  /** When true, hide the Overview Participants row. Members with the Plan tab
+   *  see participants there instead (Figma 13455-38686); non-members keep it. */
+  hideParticipants?: boolean;
   /** Tap the floating share button (top-left over the hero) → share the trip.
    *  When provided, a circular share FAB is rendered on the cover image. */
   onShare?: () => void;

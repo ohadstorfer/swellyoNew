@@ -11,6 +11,7 @@ import {
   View,
   Text,
   Image,
+  ScrollView,
   StyleSheet,
   Pressable,
   Animated,
@@ -18,11 +19,13 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image as CachedImage } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AdminUpdateRow, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
+import { getStorageThumbUrl } from '../../../services/media/imageService';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -192,6 +195,27 @@ const BadgeCheckIcon: React.FC<{ size?: number; color?: string }> = ({ size = 24
   </Svg>
 );
 
+// Passport-in-badge icon for the "Committed to trip" row (Figma 13455-38704):
+// a teal scalloped badge filled #05BCD3 with a white passport document inside.
+const CommittedPassportIcon: React.FC<{ size?: number }> = ({ size = 24 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M17.9012 4.99851C18.1071 5.49653 18.5024 5.8924 19.0001 6.09907L20.7452 6.82198C21.2433 7.02828 21.639 7.42399 21.8453 7.92206C22.0516 8.42012 22.0516 8.97974 21.8453 9.47781L21.1229 11.2218C20.9165 11.7201 20.9162 12.2803 21.1236 12.7783L21.8447 14.5218C21.9469 14.7685 21.9996 15.0329 21.9996 15.2999C21.9997 15.567 21.9471 15.8314 21.8449 16.0781C21.7427 16.3249 21.5929 16.549 21.4041 16.7378C21.2152 16.9266 20.991 17.0764 20.7443 17.1785L19.0004 17.9009C18.5023 18.1068 18.1065 18.5021 17.8998 18.9998L17.1769 20.745C16.9706 21.2431 16.575 21.6388 16.0769 21.8451C15.5789 22.0514 15.0193 22.0514 14.5212 21.8451L12.7773 21.1227C12.2792 20.9169 11.7198 20.9173 11.2221 21.1239L9.47689 21.8458C8.97912 22.0516 8.42001 22.0514 7.92237 21.8453C7.42473 21.6391 7.02925 21.2439 6.82281 20.7464L6.09972 19.0006C5.8938 18.5026 5.49854 18.1067 5.00085 17.9L3.25566 17.1771C2.75783 16.9709 2.36226 16.5754 2.15588 16.0777C1.94951 15.5799 1.94923 15.0205 2.1551 14.5225L2.87746 12.7786C3.08325 12.2805 3.08283 11.7211 2.8763 11.2233L2.15497 9.47678C2.0527 9.2301 2.00004 8.96568 2 8.69863C1.99996 8.43159 2.05253 8.16715 2.15472 7.92043C2.25691 7.67372 2.40671 7.44955 2.59557 7.26075C2.78442 7.07195 3.00862 6.92222 3.25537 6.8201L4.9993 6.09772C5.49687 5.89197 5.89248 5.4972 6.0993 5.00006L6.82218 3.25481C7.02848 2.75674 7.42418 2.36103 7.92222 2.15473C8.42027 1.94842 8.97987 1.94842 9.47792 2.15473L11.2218 2.87712C11.7199 3.08291 12.2793 3.08249 12.7771 2.87595L14.523 2.15585C15.021 1.94966 15.5804 1.9497 16.0784 2.15597C16.5763 2.36223 16.972 2.75783 17.1783 3.25576L17.9014 5.00153L17.9012 4.99851Z"
+      fill="#05BCD3"
+      stroke="#FFFFFF"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <Path
+      d="M11.166 13.6668H12.8327M10.666 16.1668H13.3327C14.0327 16.1668 14.3828 16.1668 14.6502 16.0306C14.8854 15.9107 15.0766 15.7195 15.1964 15.4843C15.3327 15.2169 15.3327 14.8669 15.3327 14.1668V9.8335C15.3327 9.13343 15.3327 8.7834 15.1964 8.51601C15.0766 8.28081 14.8854 8.08958 14.6502 7.96974C14.3828 7.8335 14.0327 7.8335 13.3327 7.8335H10.666C9.96595 7.8335 9.61592 7.8335 9.34853 7.96974C9.11332 8.08958 8.9221 8.28081 8.80226 8.51601C8.66602 8.7834 8.66602 9.13343 8.66602 9.8335V14.1668C8.66602 14.8669 8.66602 15.2169 8.80226 15.4843C8.9221 15.7195 9.11332 15.9107 9.34853 16.0306C9.61592 16.1668 9.96595 16.1668 10.666 16.1668ZM13.2493 10.7502C13.2493 11.4405 12.6897 12.0002 11.9993 12.0002C11.309 12.0002 10.7493 11.4405 10.7493 10.7502C10.7493 10.0598 11.309 9.50016 11.9993 9.50016C12.6897 9.50016 13.2493 10.0598 13.2493 10.7502Z"
+      stroke="#FFFFFF"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
+
 // ===========================================================================
 // 1) Commit pill (approved members only)
 export const CommitPill: React.FC<{
@@ -202,8 +226,10 @@ export const CommitPill: React.FC<{
   const pending = status === 'pending';
   return (
     <View style={styles.commitWrap}>
+      {/* Already committed (or pending) → no sheet on tap; PressableScale still
+          gives the scale-down press feedback. */}
       <PressableScale
-        onPress={pending ? undefined : onPress}
+        onPress={pending || approved ? undefined : onPress}
         style={[styles.commitPill, pending && styles.commitPillPending, approved && styles.commitPillApproved]}
         accessibilityLabel="Commitment"
       >
@@ -220,6 +246,111 @@ export const CommitPill: React.FC<{
             ? 'Waiting for host approval'
             : "Let the admin know how you're committed"}
       </Text>
+    </View>
+  );
+};
+
+// ===========================================================================
+// Members — avatar row + "Committed to trip" progress (Figma 13455-38686).
+// Lives in the Plan tab (members only); non-members keep the simpler
+// Participants row in the Overview body. The passport badge marks members who
+// have committed to the trip (commitment_status === 'approved').
+export type TripMember = {
+  id: string;
+  name: string | null;
+  avatarUrl: string | null;
+  committed: boolean;
+};
+
+export const TripMemberSection: React.FC<{
+  members: TripMember[];
+  participantCount: number;
+  maxParticipants?: number | null;
+  committedCount: number;
+  /** Tapping an avatar opens that member's profile. */
+  onMemberPress?: (id: string) => void;
+  /** When wired, the header count becomes a "View all (n/max)" link. The avatar
+   *  row already scrolls to reveal everyone, so this is optional. */
+  onViewAll?: () => void;
+}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll }) => {
+  // Header shows only the total (the trip cap), not "joined/cap" — e.g. "(12)".
+  const countLabel = maxParticipants ? `${maxParticipants}` : `${participantCount}`;
+  // Fill = committed out of the cap; with no cap we fall back to head-count so
+  // the bar still reads as "how many are locked in".
+  const denom = maxParticipants && maxParticipants > 0 ? maxParticipants : Math.max(participantCount, 1);
+  const fillPct = Math.max(0, Math.min(1, committedCount / denom));
+  return (
+    <View style={styles.memberSection}>
+      <SectionHeader
+        title="Members"
+        large
+        right={<LinkText label={`View all (${countLabel})`} onPress={onViewAll} />}
+      />
+
+      {members.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.memberScroll}
+          contentContainerStyle={styles.memberScrollContent}
+        >
+          {members.map(m => {
+            const thumb = getStorageThumbUrl(m.avatarUrl, 96) ?? m.avatarUrl;
+            return (
+              <Pressable
+                key={m.id}
+                onPress={onMemberPress ? () => onMemberPress(m.id) : undefined}
+                disabled={!onMemberPress}
+                style={styles.memberItem}
+                accessibilityRole="button"
+                accessibilityLabel={m.name ? `Open ${m.name}'s profile` : 'Open profile'}
+              >
+                <View>
+                  {thumb ? (
+                    <CachedImage
+                      source={{ uri: thumb }}
+                      style={styles.memberAvatar}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.memberAvatar, styles.memberAvatarEmpty]}>
+                      <Ionicons name="person" size={24} color="#FFFFFF" />
+                    </View>
+                  )}
+                  {m.committed ? (
+                    <View style={styles.memberBadge}>
+                      <CommittedPassportIcon size={22} />
+                    </View>
+                  ) : null}
+                </View>
+                <Text style={styles.memberName} numberOfLines={1}>
+                  {m.name ?? '—'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : (
+        <Text style={styles.empty}>No members yet</Text>
+      )}
+
+      {/* "Committed to trip" progress — committed head-count vs the cap. */}
+      <View style={styles.memberProgress}>
+        <View style={styles.memberProgressRow}>
+          <View style={styles.memberProgressLabelRow}>
+            <CommittedPassportIcon size={24} />
+            <Text style={styles.memberProgressLabel}>Committed to trip</Text>
+          </View>
+          <Text style={styles.memberProgressCount}>
+            {committedCount}
+            {maxParticipants ? `/${maxParticipants}` : ''}
+          </Text>
+        </View>
+        <View style={styles.memberProgressTrack}>
+          <View style={[styles.memberProgressFill, { width: `${fillPct * 100}%` }]} />
+        </View>
+      </View>
     </View>
   );
 };
@@ -625,6 +756,58 @@ const styles = StyleSheet.create({
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.muted, paddingVertical: 6 },
 
   rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: T.hairline },
+
+  // Members section (Figma 13455-38686) — header + scrollable avatar row +
+  // "Committed to trip" progress. Bottom hairline separates it from the next
+  // Plan block.
+  memberSection: {
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 24,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: T.cardBorder,
+  },
+  // Bleed edge-to-edge so avatars scroll to the screen edge.
+  memberScroll: { marginHorizontal: -16, marginTop: 16 },
+  memberScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'flex-start' },
+  memberItem: { width: 56, alignItems: 'center' },
+  memberAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#9CB6C0' },
+  memberAvatarEmpty: { alignItems: 'center', justifyContent: 'center' },
+  // Passport badge — the Figma scalloped teal badge (CommittedPassportIcon
+  // brings its own teal fill + white ring), notched into the avatar's
+  // bottom-right. This is just the positioning wrapper.
+  memberBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 22,
+    height: 22,
+  },
+  // Name caption (Body/B-4: Size/xs) — nudged to 11px for legibility under the avatar.
+  memberName: {
+    marginTop: 4,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 11,
+    lineHeight: 14,
+    color: '#A0A0A0',
+    textAlign: 'center',
+    width: 56,
+  },
+  memberProgress: { marginTop: 24, gap: 8 },
+  memberProgressRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  memberProgressLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  // Body/M B-2: Size/md 14 / Size/xl 18.
+  memberProgressLabel: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: T.muted },
+  // Body/B-3: Size/s 12 / 18.
+  memberProgressCount: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted },
+  memberProgressTrack: {
+    height: 6,
+    borderRadius: 2,
+    backgroundColor: T.border,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  memberProgressFill: { height: '100%', backgroundColor: T.accent, borderRadius: 2 },
 
   // Commit pill
   commitWrap: { paddingHorizontal: 16, marginTop: 32, marginBottom: 12 },

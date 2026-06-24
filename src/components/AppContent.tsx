@@ -24,6 +24,7 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { SwellyShaperScreen } from '../screens/SwellyShaperScreen';
 import { ConversationLoadingScreen } from '../components/ConversationLoadingScreen';
 import { JoinDecisionOverlay } from '../components/trips/joinRequest/JoinDecisionOverlay';
+import { JoinDeclinedOverlay } from '../components/trips/joinRequest/JoinDeclinedOverlay';
 import {
   listUnseenJoinDecisions,
   markJoinDecisionSeen,
@@ -1035,7 +1036,7 @@ export const AppContent: React.FC = () => {
 
           const { data: trip } = await supabase
             .from('group_trips')
-            .select('id, title, hero_image_url, start_date, end_date, destination:group_trip_destinations(name, short_label, country)')
+            .select('id, host_id, title, hero_image_url, start_date, end_date, destination:group_trip_destinations(name, short_label, country)')
             .eq('id', tripId)
             .maybeSingle();
           if (!trip) return;
@@ -1055,6 +1056,7 @@ export const AppContent: React.FC = () => {
               ),
               start_date: (trip as any).start_date ?? null,
               end_date: (trip as any).end_date ?? null,
+              host_id: (trip as any).host_id ?? null,
             },
           };
 
@@ -1916,12 +1918,27 @@ export const AppContent: React.FC = () => {
           onClose={() => setShowProfileEditor(false)}
           surfer={currentUserSurfer}
         />
-        <JoinDecisionOverlay
-          visible={!!activeJoinDecision}
-          decision={activeJoinDecision}
-          onPrimaryAction={handleJoinDecisionPrimary}
-          onDismiss={handleJoinDecisionDismiss}
-        />
+        {activeJoinDecision?.status === 'declined' ? (
+          <JoinDeclinedOverlay
+            visible={!!activeJoinDecision}
+            decision={activeJoinDecision}
+            onPrimaryAction={handleJoinDecisionPrimary}
+            onDismiss={handleJoinDecisionDismiss}
+            onMessageAdmin={(d) => {
+              advanceJoinDecisionQueue(d);
+              if (d.trip.host_id) {
+                handleStartConversation(d.trip.host_id, d.trip.host_name ?? undefined, d.trip.host_avatar ?? null);
+              }
+            }}
+          />
+        ) : (
+          <JoinDecisionOverlay
+            visible={!!activeJoinDecision}
+            decision={activeJoinDecision}
+            onPrimaryAction={handleJoinDecisionPrimary}
+            onDismiss={handleJoinDecisionDismiss}
+          />
+        )}
       </View>
       </MainNavProvider>
     );

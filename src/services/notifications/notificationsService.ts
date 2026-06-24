@@ -112,10 +112,19 @@ export function tripFocusForNotification(
 /** Ionicons name used for the row icon. */
 type IoniconName = string;
 
+/** A span of body text; `b` marks it bold (e.g. the action verb or group name). */
+export interface BodyPart {
+  t: string;
+  b?: boolean;
+}
+
 export interface RenderedNotification {
   title: string;
   body: string;
   icon: IoniconName;
+  /** Rich body broken into spans so the bell can bold the action + group.
+   *  When absent, the plain `body` string is rendered instead. */
+  bodyParts?: BodyPart[];
 }
 
 const TABLE = 'notifications';
@@ -342,7 +351,14 @@ export function renderNotification(n: NotificationRow): RenderedNotification {
       preview: d.preview || `New update in ${trip}.`,
       days: stage.includes('_') ? stage.split('_')[1] : '',
     };
-    return { ...base, title: fillTemplate(tpl.bell_title, vars), body: fillTemplate(tpl.bell_body, vars) };
+    // An admin-edited template is a single title/body string — it can't express
+    // the name/action split, so drop bodyParts and render it as plain text.
+    return {
+      ...base,
+      title: fillTemplate(tpl.bell_title, vars),
+      body: fillTemplate(tpl.bell_body, vars),
+      bodyParts: undefined,
+    };
   }
   return base;
 }
@@ -352,19 +368,34 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
   const d = n.data ?? {};
   const who = d.actor_name || 'Someone';
   const trip = d.trip_title ? `“${d.trip_title}”` : 'the trip';
+  // Bare trip name (no quotes) for the bold spans in the new name/action layout.
+  const tripName = d.trip_title || 'the trip';
   const decision = d.decision === 'approved' ? 'approved' : 'declined';
 
   switch (n.type) {
     case 'member_joined':
-      return { title: 'New member', body: `${who} joined ${trip}.`, icon: 'person-add-outline' };
-    case 'member_committed':
-      return { title: 'New commitment', body: `${who} committed to ${trip}.`, icon: 'checkmark-done-outline' };
-    case 'gear_claimed':
       return {
-        title: 'Gear claimed',
-        body: `${who} claimed ${d.qty ?? ''} ${d.gear_name ?? 'gear'}`.replace(/\s+/g, ' ').trim() + '.',
+        title: who,
+        body: `joined ${tripName}`,
+        bodyParts: [{ t: 'joined ' }, { t: tripName, b: true }],
+        icon: 'person-add-outline',
+      };
+    case 'member_committed':
+      return {
+        title: who,
+        body: `committed to ${tripName}`,
+        bodyParts: [{ t: 'committed to ' }, { t: tripName, b: true }],
+        icon: 'checkmark-done-outline',
+      };
+    case 'gear_claimed': {
+      const claimed = `${d.qty ?? ''} ${d.gear_name ?? 'gear'}`.replace(/\s+/g, ' ').trim();
+      return {
+        title: who,
+        body: `claimed ${claimed}`,
+        bodyParts: [{ t: 'claimed ' }, { t: claimed, b: true }],
         icon: 'cube-outline',
       };
+    }
     case 'admin_update_posted':
       return {
         title: 'New trip update',
@@ -394,13 +425,45 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: decision === 'approved' ? 'checkmark-circle-outline' : 'close-circle-outline',
       };
     case 'join_request_received':
-      return { title: 'New join request', body: `${who} asked to join ${trip}.`, icon: 'person-add-outline' };
-    case 'gear_request_received':
-      return { title: 'New gear request', body: `${who} requested ${d.item_name ?? 'gear'}.`, icon: 'cube-outline' };
+      return {
+        title: who,
+        body: `requested to join ${tripName}`,
+        bodyParts: [{ t: 'requested to ' }, { t: `join ${tripName}`, b: true }],
+        icon: 'person-add-outline',
+      };
+    case 'gear_request_received': {
+      const item = d.item_name ?? d.gear_name ?? 'gear';
+      return {
+        title: who,
+        body: `Suggested to add ${item} to Group Gear`,
+        bodyParts: [
+          { t: 'Suggested to add ' },
+          { t: item, b: true },
+          { t: ' to ' },
+          { t: 'Group Gear', b: true },
+        ],
+        icon: 'cube-outline',
+      };
+    }
     case 'commitment_request_received':
-      return { title: 'New commitment request', body: `${who} wants to commit to ${trip}.`, icon: 'hand-right-outline' };
+      return {
+        title: who,
+        body: `Wants to commit to ${tripName}`,
+        bodyParts: [
+          { t: 'Wants to ' },
+          { t: 'commit', b: true },
+          { t: ' to ' },
+          { t: tripName, b: true },
+        ],
+        icon: 'hand-right-outline',
+      };
     case 'member_left':
-      return { title: 'A member left', body: `${who} left ${trip}.`, icon: 'exit-outline' };
+      return {
+        title: who,
+        body: `left ${tripName}`,
+        bodyParts: [{ t: 'left ' }, { t: tripName, b: true }],
+        icon: 'exit-outline',
+      };
     case 'trip_cancelled':
       return { title: 'Trip cancelled', body: `${trip} was cancelled.`, icon: 'close-circle-outline' };
     case 'member_removed':

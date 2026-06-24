@@ -115,7 +115,7 @@ export interface CommitmentMetadata {
   trip_id: string;
   request_id: string;
   trip_title?: string | null;
-  items: string[];             // e.g. ['flight_booked', 'insurance_sorted', 'something_else']
+  items: string[];             // e.g. ['flight_booked', 'accommodation_booked', 'something_else']
   note?: string | null;
   status?: 'pending' | 'approved' | 'declined' | 'superseded'; // mirrors group_trip_commitment_requests.status
 }
