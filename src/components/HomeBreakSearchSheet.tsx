@@ -8,7 +8,9 @@ import {
   Platform,
   Dimensions,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
@@ -166,6 +168,38 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
   const requestSeqRef = useRef(0);
   const isMountedRef = useRef(true);
   const searchInputRef = useRef<TextInput>(null);
+
+  // Keyboard-aware height. The shell wraps us in a KeyboardAvoidingView that
+  // lifts this bottom-anchored sheet by the keyboard height — but the sheet is a
+  // fixed 80%-screen box, so once lifted its top (handle/header/search input)
+  // slides off the top of the screen and the input vanishes. Capping the height
+  // to the space above the keyboard makes the sheet SHRINK instead: the input
+  // stays pinned at the top and the results ScrollView (flex:1) gives up the room.
+  const insets = useSafeAreaInsets();
+  const screenH = Dimensions.get('window').height;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setKeyboardHeight(0);
+      return;
+    }
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: any) => setKeyboardHeight(e?.endCoordinates?.height ?? 0);
+    const onHide = () => setKeyboardHeight(0);
+    const showSub = Keyboard.addListener(showEvt, onShow);
+    const hideSub = Keyboard.addListener(hideEvt, onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible]);
+
+  const sheetHeight =
+    keyboardHeight > 0
+      ? Math.min(SHEET_HEIGHT, screenH - keyboardHeight - insets.top - 12)
+      : SHEET_HEIGHT;
 
   const debouncedQuery = useDebounce(query, DEBOUNCE_MS);
 
@@ -326,7 +360,7 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
       backdropColor="rgba(0, 0, 0, 0.5)"
     >
       {({ panHandlers }) => (
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { height: sheetHeight }]}>
           {/* Drag area — swipe down on the handle/header to dismiss */}
           <View {...panHandlers}>
             <View style={styles.handle} />

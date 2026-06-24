@@ -19,11 +19,13 @@ import {
   StyleSheet,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { TripBottomSheet, SHEET } from '../../components/trips/TripBottomSheet';
 import { CommitmentBadgeIcon } from '../../components/trips/commitment/CommitmentMessageBubble';
 import { COMMITMENT_OPTIONS } from '../../components/trips/commitment/commitmentOptions';
+import { CommitmentCardIcon } from '../../components/trips/commitment/CommitmentCardIcon';
 import { submitCommitment, type CommitmentItem } from '../../services/trips/groupTripsService';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
@@ -60,6 +62,7 @@ export default function CommitmentScreen({
   const [noteSheetOpen, setNoteSheetOpen] = useState(false);
   const [note, setNote] = useState(initialNote ?? '');
   const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const toggle = (k: CommitmentItem) => {
     if (submitting) return;
@@ -112,8 +115,10 @@ export default function CommitmentScreen({
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      {/* Header — back + trip name (mirrors the EditTrip sub-screen header). */}
+    <SafeAreaView style={styles.root} edges={['top']}>
+      {/* Header — dark trip chrome (Figma 13456:47018): back + left-aligned
+          trip name. Root paints the status-bar inset dark; the scroll body
+          below paints itself light with rounded top corners. */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onClose}
@@ -122,15 +127,14 @@ export default function CommitmentScreen({
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="chevron-back" size={28} color="#222B30" />
+          <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {tripTitle || 'Trip'}
         </Text>
-        <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         {/* Section title — teal badge + "Trip commitment". */}
         <View style={styles.sectionTitleRow}>
           <CommitmentBadgeIcon size={24} />
@@ -154,15 +158,17 @@ export default function CommitmentScreen({
                 accessibilityState={{ checked: isOn }}
                 accessibilityLabel={opt.label}
               >
-                <View style={styles.optionIconBox}>
-                  <Ionicons name={opt.icon} size={20} color="#222B30" />
-                </View>
-                <View style={styles.optionText}>
-                  <Text style={styles.optionLabel}>{opt.label}</Text>
-                  <Text style={styles.optionSubtitle}>{opt.subtitle}</Text>
+                <View style={styles.optionMain}>
+                  <View style={styles.optionIconBox}>
+                    <CommitmentCardIcon itemKey={opt.key} size={18} color="#222B30" />
+                  </View>
+                  <View style={styles.optionText}>
+                    <Text style={styles.optionLabel}>{opt.label}</Text>
+                    <Text style={styles.optionSubtitle}>{opt.subtitle}</Text>
+                  </View>
                 </View>
                 <View style={[styles.check, isOn && styles.checkOn]}>
-                  {isOn ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                  {isOn ? <Ionicons name="checkmark" size={13} color="#FFFFFF" /> : null}
                 </View>
               </TouchableOpacity>
             );
@@ -170,8 +176,14 @@ export default function CommitmentScreen({
         </View>
       </ScrollView>
 
-      {/* Footer — "Select" opens the note sheet (step 2). */}
-      <View style={styles.footer}>
+      {/* Footer — "Select" opens the note sheet (step 2). Gradient fade lets the
+          option list scroll out under the CTA (Figma 13459:49487). */}
+      <View style={[styles.footerWrap, { paddingBottom: insets.bottom + 8 }]} pointerEvents="box-none">
+        <LinearGradient
+          colors={['rgba(250,250,250,0)', '#FAFAFA']}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+        />
         <TouchableOpacity
           style={[styles.primaryBtn, !canSelect && styles.primaryBtnDisabled]}
           onPress={() => setNoteSheetOpen(true)}
@@ -209,41 +221,52 @@ export default function CommitmentScreen({
         }
       >
         <Text style={styles.heading}>How committed are you?</Text>
-        <TextInput
-          style={styles.input}
-          value={note}
-          onChangeText={setNote}
-          placeholder="Waiting for approval at work, booking soon"
-          placeholderTextColor={SHEET.textMuted}
-          multiline
-          editable={!submitting}
-        />
+        <View style={styles.inputWrap}>
+          <Ionicons name="pencil-outline" size={18} color="#9AA0A6" style={styles.inputIcon} />
+          <TextInput
+            style={styles.input}
+            value={note}
+            onChangeText={setNote}
+            placeholder="Waiting for approval at work, booking soon"
+            placeholderTextColor={SHEET.textMuted}
+            multiline
+            editable={!submitting}
+          />
+        </View>
       </TripBottomSheet>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#FAFAFA' },
+  root: { flex: 1, backgroundColor: '#212121' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor: '#212121',
     paddingHorizontal: 12,
     paddingTop: 8,
-    paddingBottom: 10,
+    paddingBottom: 28,
   },
   backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   headerTitle: {
     flex: 1,
-    textAlign: 'center',
+    textAlign: 'left',
+    marginLeft: 4,
     fontFamily: ff('Montserrat', '700'),
     fontWeight: '700',
     fontSize: 18,
-    color: '#222B30',
+    color: '#FFFFFF',
   },
-  headerSpacer: { width: 40 },
-  body: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 24 },
+  // Flush with the dark header (no rounded corners) so it reads as a screen,
+  // not a bottom sheet.
+  scroll: {
+    flex: 1,
+    backgroundColor: '#FAFAFA',
+  },
+  // paddingTop adds the breathing room above "Trip commitment" (Figma);
+  // paddingBottom clears the absolutely-positioned gradient footer.
+  body: { paddingHorizontal: 18, paddingTop: 28, paddingBottom: 150 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionTitle: {
     fontFamily: ff('Montserrat', '700'),
@@ -251,43 +274,46 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#212121',
   },
-  divider: { height: 1, backgroundColor: '#EEEEEE', marginTop: 16, marginBottom: 18 },
+  divider: { height: 1, backgroundColor: '#EEEEEE', marginTop: 24, marginBottom: 16 },
   heading: {
-    fontFamily: ff('Montserrat', '700'),
+    fontFamily: ff('Inter', '700'),
     fontWeight: '700',
-    fontSize: 18,
+    fontSize: 16,
     lineHeight: 24,
-    color: '#212121',
+    color: '#333333',
   },
+  // No gap below the heading — subtitle sits directly under it (Figma).
   subheading: {
     fontFamily: ff('Inter', '400'),
-    fontSize: 14,
+    fontSize: 12,
+    lineHeight: 18,
     color: '#7B7B7B',
-    marginTop: 6,
+    marginTop: 0,
   },
-  options: { marginTop: 18, gap: 12 },
+  options: { marginTop: 16, gap: 16 },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 16,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    // Box Shadow 01 — #596E7C26, offset(0,2), radius 16.
+    borderRadius: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    // Box Shadow 01 — #596E7C26, offset(0,2), blur 16.
     shadowColor: '#596E7C',
     shadowOpacity: 0.15,
-    shadowRadius: 12,
+    shadowRadius: 16,
     shadowOffset: { width: 0, height: 2 },
     elevation: 2,
   },
   optionOn: { borderColor: '#05BCD3' },
+  optionMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   optionIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 8,
     backgroundColor: '#F7F7F7',
     alignItems: 'center',
     justifyContent: 'center',
@@ -301,26 +327,34 @@ const styles = StyleSheet.create({
   },
   optionSubtitle: {
     fontFamily: ff('Inter', '400'),
-    fontSize: 13,
-    color: '#7B7B7B',
+    fontSize: 12,
+    color: '#333333',
     marginTop: 2,
   },
   check: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 1.5,
     borderColor: '#D5D7DA',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkOn: { borderColor: '#2BCCBD', backgroundColor: '#2BCCBD' },
-  footer: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 8 },
+  checkOn: { borderColor: '#05BCD3', backgroundColor: '#05BCD3' },
+  footerWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 40,
+    paddingTop: 48,
+    paddingBottom: 8,
+  },
   primaryBtn: {
     width: '100%',
     backgroundColor: '#212121',
     paddingVertical: 16,
-    borderRadius: 14,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -331,18 +365,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 15,
   },
-  input: {
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     borderWidth: 1,
     borderColor: '#E0E0E0',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 14,
     marginTop: 14,
+    backgroundColor: '#FFFFFF',
+    minHeight: 120,
+  },
+  inputIcon: { marginRight: 8, marginTop: 1 },
+  input: {
+    flex: 1,
+    padding: 0,
     fontFamily: ff('Inter', '400'),
     fontSize: 14,
     color: '#222B30',
-    backgroundColor: '#FFFFFF',
-    minHeight: 120,
     textAlignVertical: 'top',
   },
 });

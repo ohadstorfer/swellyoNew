@@ -90,11 +90,11 @@ export default function PackingAndGearScreen({ tripId, onBack, onEdit }: Props) 
     }
   };
 
-  const handleSubmitGearRequest = async (itemName: string, note: string, neededQty: number) => {
+  const handleSubmitGearRequest = async (itemName: string, note: string) => {
     if (!currentUserId) return;
     try {
-      await createGearRequest(tripId, currentUserId, itemName, note || undefined, neededQty);
-      Alert.alert('Request sent', 'The host will review your suggestion.');
+      await createGearRequest(tripId, currentUserId, itemName, note || undefined);
+      Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
       throw e;

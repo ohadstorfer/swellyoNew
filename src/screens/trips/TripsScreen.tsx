@@ -53,8 +53,7 @@ import {
 import { useNavigation, StackActions } from '@react-navigation/native';
 import { useTripsBottomNavControl, type TripsBottomNavControl } from '../../components/trips/TripsBottomNav';
 import { Images } from '../../assets/images';
-import { Logo } from '../../components/Logo';
-import { NotificationCenter } from '../../components/notifications/NotificationCenter';
+import { MainHeader } from '../../components/MainHeader';
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { neighbourHeroUrls } from './deckPrefetch';
@@ -1377,25 +1376,13 @@ export default function TripsScreen({ onBack, navControl: navControlProp }: Trip
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.tripsHeader}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.headerLeft}>
-            <TouchableOpacity
-              testID="trips-back-button"
-              onPress={onBack}
-              style={styles.backBtn}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="chevron-back" size={26} color="#FFFFFF" />
-            </TouchableOpacity>
-            <Logo size={40} iconOnly />
-            <Text style={styles.tripsHeaderTitle}>Trips</Text>
-          </View>
-          <NotificationCenter userId={currentUserId} bare />
-        </View>
-
-        <TripsHeaderTabs active={activeTab} onChange={goToTab} />
-      </View>
+      {/* Shared dark header (see MainHeader). "Trips" is the title slot and the
+          underline tabs are the `below` slot; no gradient hairline here. */}
+      <MainHeader
+        userId={currentUserId}
+        title={<Text style={styles.tripsHeaderTitle}>Trips</Text>}
+        below={<TripsHeaderTabs active={activeTab} onChange={goToTab} />}
+      />
 
       <View
         style={styles.body}
@@ -1540,7 +1527,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingLeft: 12,
+    paddingLeft: 16, // align logo with the 16px content gutter + the Lineup header
     paddingRight: 18,
     paddingVertical: 10,
   },
@@ -1565,7 +1552,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 12,
-    paddingBottom: 18,
+    paddingBottom: 12,
     paddingHorizontal: 8,
   },
   tabBtnActive: {
@@ -1576,7 +1563,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
-  tabLabel: { fontFamily: FONT_INTER, fontSize: 17, lineHeight: 21, fontWeight: '400', letterSpacing: 0.3 },
+  tabLabel: { fontFamily: FONT_INTER, fontSize: 14, lineHeight: 18, fontWeight: '400', letterSpacing: 0.3 },
   tabLabelActive: { color: '#05BCD3' },
   tabLabelInactive: { color: '#FFFFFF' },
 

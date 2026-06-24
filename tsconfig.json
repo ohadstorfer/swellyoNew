@@ -10,5 +10,6 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx"
-, "src/screens/c"  ]
+, "src/screens/c"  ],
+  "exclude": ["swellyo-invite-redirect"]
 }

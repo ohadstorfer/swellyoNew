@@ -7,7 +7,9 @@ import {
   StyleSheet,
   Platform,
   Dimensions,
+  Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
 import { BottomSheetShell } from './BottomSheetShell';
@@ -44,6 +46,37 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
     }
   }, [visible]);
 
+  // Keyboard-aware height. The shell lifts this bottom-anchored sheet by the
+  // keyboard height (avoidKeyboard); since the sheet is a fixed 80%-screen box,
+  // without capping its height the top (handle/header/search input) would slide
+  // off the top of the screen. Capping to the space above the keyboard makes the
+  // sheet SHRINK instead — input stays pinned, the list (flex:1) gives up room.
+  const insets = useSafeAreaInsets();
+  const screenH = Dimensions.get('window').height;
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!visible) {
+      setKeyboardHeight(0);
+      return;
+    }
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: any) => setKeyboardHeight(e?.endCoordinates?.height ?? 0);
+    const onHide = () => setKeyboardHeight(0);
+    const showSub = Keyboard.addListener(showEvt, onShow);
+    const hideSub = Keyboard.addListener(hideEvt, onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible]);
+
+  const sheetHeight =
+    keyboardHeight > 0
+      ? Math.min(SHEET_HEIGHT, screenH - keyboardHeight - insets.top - 12)
+      : SHEET_HEIGHT;
+
   // "USA" is surfaced as a convenience alias; picking it saves "United States"
   // so the value never diverges from the canonical country name.
   const filtered = ['USA', ...ONBOARDING_COUNTRIES].filter(c =>
@@ -54,10 +87,11 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
     <BottomSheetShell
       visible={visible}
       onClose={onClose}
+      avoidKeyboard
       backdropColor="rgba(0,0,0,0.5)"
     >
       {({ panHandlers }) => (
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { height: sheetHeight }]}>
           {/* Drag area — swipe down on the handle/header to dismiss */}
           <View {...panHandlers}>
             <View style={styles.handle} />

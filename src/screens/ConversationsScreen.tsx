@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../config/supabase';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
@@ -28,6 +27,7 @@ import { authService } from '../services/auth/authService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
+import { MainHeader } from '../components/MainHeader';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { CreateSurftripModal } from '../components/surftrips/CreateSurftripModal';
 import { TutorialOverlay, AnchorRect } from '../components/TutorialOverlay';
@@ -43,7 +43,6 @@ import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
 import { pushRootCard } from '../navigation/navigationRef';
 import { useTutorial } from '../context/TutorialContext';
-import { NotificationCenter } from '../components/notifications/NotificationCenter';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
 
 interface ConversationsScreenProps {
@@ -1138,55 +1137,31 @@ export default function ConversationsScreen({
     <ChatErrorBoundary>
     <Container style={styles.container} {...(Platform.OS !== 'web' && { edges: ['top'] as const })}>
       {/* Header - Dark background */}
-      <View style={styles.header}>
-        {/* Avatar + greeting are display-only — own profile opens from the
-            bottom nav's Profile root, not from here (nav migration). */}
-        <View testID="conversations-profile-button" style={styles.headerLeft}>
-          <LinearGradient
-            colors={['#05BCD3', '#DBCDBC']}
-            locations={[0, 0.7]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.headerAvatarBorder}
-          >
-            <ProfileImage
-              imageUrl={userAvatar}
-              name={headerDisplayName}
-              style={styles.headerAvatar}
-              showLoadingIndicator={false}
-            />
-          </LinearGradient>
+      {/* Shared dark header (see MainHeader). Greeting + dev kebab are the
+          Lineup-specific slots; the gradient hairline is the Lineup's. */}
+      <MainHeader
+        testID="conversations-profile-button"
+        userId={currentUserId}
+        bottomBorder
+        spaceBelow={24}
+        title={
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitleMain}>The Lineup</Text>
             <Text style={styles.headerTitleSub}>Yo {headerDisplayName}!</Text>
           </View>
-        </View>
-
-        <View style={styles.headerRight}>
-          {/* Notification center — bell + unread badge; opens the panel route */}
-          <NotificationCenter userId={currentUserId} />
-
-          <TouchableOpacity
-            testID="conversations-menu-button"
-            style={styles.headerButton}
-            onPress={() => {
-              console.log('Menu button pressed, showing menu');
-              setShowMenu(true);
-            }}
-          >
-            <ThreeDotsIcon />
-          </TouchableOpacity>
-        </View>
-
-        {/* Gradient border at bottom */}
-        <LinearGradient
-          colors={['#05BCD3', '#DBCDBC']}
-          locations={[0, 0.7]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.headerGradientBorder}
-        />
-      </View>
+        }
+        rightActions={
+          process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' ? (
+            <TouchableOpacity
+              testID="conversations-menu-button"
+              style={styles.headerButton}
+              onPress={() => setShowMenu(true)}
+            >
+              <ThreeDotsIcon />
+            </TouchableOpacity>
+          ) : undefined
+        }
+      />
 
       {/* Content area with light background and rounded corners - dark background visible around it */}
       <View style={styles.contentAreaWrapper}>
@@ -1370,23 +1345,9 @@ export default function ConversationsScreen({
               }}
             >
               <View style={styles.menuContainer}>
-                {/* My Profile */}
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    console.log('My Profile menu item pressed');
-                    setShowMenu(false);
-                    if (onProfilePress) {
-                      onProfilePress();
-                    }
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="person-outline" size={20} color="#222B30" />
-                  <Text style={styles.menuItemText}>My Profile</Text>
-                </TouchableOpacity>
-
+                {/* Dev-only shortcuts (LOCAL_MODE). The account actions that
+                    used to live here — My Profile, New Chat, Setting, Switch
+                    account, Logout — moved to Settings / the Profile tab. */}
                 {/* Trips — local mode only */}
                 {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
                   <TouchableOpacity
@@ -1479,78 +1440,6 @@ export default function ConversationsScreen({
                     <Text style={styles.menuItemText}>Replay surftrips tip</Text>
                   </TouchableOpacity>
                 )}
-
-                <View style={styles.menuDivider} />
-
-                {/* New Chat */}
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    console.log('New Chat menu item pressed');
-                    setShowMenu(false);
-                    // TODO: implement new chat action
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="create-outline" size={20} color="#222B30" />
-                  <Text style={styles.menuItemText}>New Chat</Text>
-                </TouchableOpacity>
-
-                <View style={styles.menuDivider} />
-
-                {/* Setting */}
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    console.log('Setting menu item pressed');
-                    setShowMenu(false);
-                    if (onSettingsPress) {
-                      onSettingsPress();
-                    }
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="settings-outline" size={20} color="#222B30" />
-                  <Text style={styles.menuItemText}>Setting</Text>
-                </TouchableOpacity>
-
-                {/* Switch Account */}
-                <TouchableOpacity
-                  style={[styles.menuItem, isLoggingOut && styles.menuItemDisabled]}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    if (isLoggingOut) return;
-                    console.log('Switch account pressed');
-                    handleSwitchAccount();
-                  }}
-                  activeOpacity={isLoggingOut ? 1 : 0.7}
-                  disabled={isLoggingOut}
-                >
-                  <Ionicons name="swap-horizontal-outline" size={20} color="#222B30" />
-                  <Text style={styles.menuItemText}>Switch account</Text>
-                </TouchableOpacity>
-
-                {/* Logout */}
-                <TouchableOpacity
-                  style={[styles.menuItem, isLoggingOut && styles.menuItemDisabled]}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    if (isLoggingOut) return;
-                    console.log('Logout menu item pressed');
-                    handleLogout();
-                  }}
-                  activeOpacity={isLoggingOut ? 1 : 0.7}
-                  disabled={isLoggingOut}
-                >
-                  {isLoggingOut ? (
-                    <ActivityIndicator size="small" color="#222B30" />
-                  ) : (
-                    <Ionicons name="log-in-outline" size={20} color="#222B30" />
-                  )}
-                  <Text style={styles.menuItemText}>Logout</Text>
-                </TouchableOpacity>
               </View>
             </TouchableOpacity>
           </TouchableOpacity>
@@ -1663,9 +1552,13 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#212121',
-    paddingTop: Platform.OS === 'web' ? 24 : 12,
+    // The notch/status-bar space (~44px in the Figma frame) is handled by the
+    // SafeAreaView top edge above; here we set comfortable in-header spacing
+    // and a taller min-height per the new header spec (min-height 120).
+    paddingTop: Platform.OS === 'web' ? 44 : 12,
     paddingBottom: 20,
     paddingHorizontal: 16,
+    minHeight: Platform.OS === 'web' ? 120 : 84,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

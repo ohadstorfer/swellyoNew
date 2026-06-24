@@ -566,20 +566,36 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const handleWithdraw = async () => {
     if (!myRequest) return;
-    setSubmitting(true);
+    const prevStatus = myRequest.status;
+    const reqId = myRequest.id;
+
+    // Flip the CTA to "Request to join" immediately, then fire the write in the
+    // background. Withdrawing a pending request is a fire-and-forget status
+    // change: server-side the UPDATE is ~10ms, but awaiting the REST round trip
+    // showed a 6-8s spinner whenever the call stalled (cold realtime socket /
+    // token-refresh auth-lock on RN). Optimistic update + rollback removes the
+    // wait without losing correctness — the realtime broadcast reconciles the
+    // cache once the write commits.
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+      tripsKeys.detail(tripId),
+      prev =>
+        prev && prev.myRequest
+          ? { ...prev, myRequest: { ...prev.myRequest, status: 'withdrawn' } }
+          : prev
+    );
+
     try {
-      await withdrawJoinRequest(myRequest.id);
+      await withdrawJoinRequest(reqId);
+    } catch (e: any) {
+      // Roll back so the CTA reflects reality (write never committed).
       queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
         tripsKeys.detail(tripId),
         prev =>
           prev && prev.myRequest
-            ? { ...prev, myRequest: { ...prev.myRequest, status: 'withdrawn' } }
+            ? { ...prev, myRequest: { ...prev.myRequest, status: prevStatus } }
             : prev
       );
-    } catch (e: any) {
       Alert.alert('Could not withdraw', e?.message || 'Please try again.');
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -979,11 +995,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   };
 
-  const handleSubmitGearRequest = async (itemName: string, note: string, neededQty: number) => {
+  const handleSubmitGearRequest = async (itemName: string, note: string) => {
     if (!currentUserId) return;
     try {
-      await createGearRequest(tripId, currentUserId, itemName, note || undefined, neededQty);
-      Alert.alert('Request sent', 'The host will review your suggestion.');
+      await createGearRequest(tripId, currentUserId, itemName, note || undefined);
+      Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
       Alert.alert('Could not send request', e?.message || 'Please try again.');
       throw e;

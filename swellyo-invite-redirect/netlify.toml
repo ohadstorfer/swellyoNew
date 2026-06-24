@@ -3,9 +3,16 @@
 #   1. /.well-known/apple-app-site-association   (Universal Links AASA)
 #   2. /.well-known/assetlinks.json              (Android App Links)
 #   3. /index.html                                (UA-detect → store redirect)
+#   4. netlify/edge-functions/og-inject.ts        (per-trip og:image on `/`)
 # When a user with the Swellyo app installed taps a link, the OS opens the app
 # directly via Universal Links/App Links — the page never loads. When the app
 # is not installed, index.html redirects to the appropriate store.
+#
+# The og-inject edge function runs on `/` (routed via its inline `config.path`):
+# for `/?grouptrip=<id>` it rewrites the og:image/og:title tags to the trip's
+# hero photo so link previews show the trip, not the logo. Fails open to the
+# static HTML. Crawlers don't run JS, so this MUST be server-side, not in the
+# page script.
 
 [build]
   publish = "."

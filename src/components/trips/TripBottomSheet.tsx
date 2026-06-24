@@ -63,6 +63,13 @@ interface Props {
   footerDivider?: boolean;
   /** Wrap children in a scroll view (default true). Set false for custom bodies. */
   scroll?: boolean;
+  /**
+   * When false, the keyboard overlays the (frozen) sheet instead of pushing the
+   * whole sheet up. Default true — the sheet rises so its footer clears the
+   * keyboard. Set false for short, top-aligned forms where you'd rather the
+   * sheet stay put and the keyboard cover the lower content.
+   */
+  avoidKeyboard?: boolean;
   children: React.ReactNode;
 }
 
@@ -76,6 +83,7 @@ export const TripBottomSheet: React.FC<Props> = ({
   footer,
   footerDivider = true,
   scroll = true,
+  avoidKeyboard = true,
   children,
 }) => {
   // Backdrop fades in; the sheet itself slides up (separate animations). The
@@ -87,7 +95,8 @@ export const TripBottomSheet: React.FC<Props> = ({
       {/* KAV wraps the whole bottom-anchored sheet so the ENTIRE sheet (incl. the
           footer) rises above the keyboard, not just the body. */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={avoidKeyboard ? (Platform.OS === 'ios' ? 'padding' : 'height') : undefined}
+        enabled={avoidKeyboard}
         style={styles.kavRoot}
       >
         <Pressable style={styles.container} onPress={onClose}>
@@ -186,7 +195,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontFamily: FONT_BODY,
     fontSize: 13,
-    color: SHEET.textMuted,
+    color: '#4A5565',
     marginTop: 2,
   },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },

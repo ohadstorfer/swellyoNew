@@ -9,6 +9,8 @@ import {
   ScrollView,
   Animated,
   Linking,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +20,7 @@ import { PrivacyPreferencesScreen } from './PrivacyPreferencesScreen';
 import { AnalyticsDashboardScreen } from './AnalyticsDashboardScreen';
 import { ReportBugOverlay } from '../components/ReportBugOverlay';
 import { isCurrentUserAdmin } from '../services/analytics/analyticsDashboardService';
+import { useOnboarding } from '../context/OnboardingContext';
 
 // Settings menu icons
 const iconPrivacyPreferences = require('../assets/icons/privacy-preferences.png');
@@ -41,6 +44,9 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
   const [showReportBug, setShowReportBug] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser } = useOnboarding();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const isLoggingOutRef = useRef(false);
   const slideAnim = useRef(new Animated.Value(600)).current;
 
   useEffect(() => {
@@ -55,6 +61,81 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
   useEffect(() => {
     isCurrentUserAdmin().then(setIsAdmin);
   }, []);
+
+  // Account actions — moved here from the old Lineup header 3-dots menu.
+  const handleLogout = async () => {
+    if (isLoggingOutRef.current) return;
+    try {
+      isLoggingOutRef.current = true;
+      setIsLoggingOut(true);
+      const { performLogout } = await import('../utils/logout');
+      const result = await performLogout({
+        resetOnboarding,
+        setUser,
+        setCurrentStep,
+        setIsDemoUser,
+      });
+      if (!result.success) {
+        Alert.alert('Error', `Failed to logout: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error in handleLogout:', error);
+    } finally {
+      isLoggingOutRef.current = false;
+      setIsLoggingOut(false);
+    }
+  };
+
+  const handleSwitchAccount = async () => {
+    try {
+      // Suppress the auth guard from bouncing to welcome mid-switch.
+      const { setIsSwitchingAccount } = require('../hooks/useAuthGuard');
+      setIsSwitchingAccount(true);
+
+      if (Platform.OS !== 'web') {
+        // Clear the Google cache so the account picker shows.
+        try {
+          const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+          await GoogleSignin.signOut();
+        } catch (e) { /* ignore */ }
+
+        const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+        await GoogleSignin.hasPlayServices();
+        const result = await GoogleSignin.signIn();
+        const idToken = result?.data?.idToken;
+        if (!idToken) throw new Error('No ID token');
+
+        const { supabase } = require('../config/supabase');
+        const { data: sessionData, error } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: idToken,
+        });
+        if (error) throw error;
+
+        const { convertSupabaseUserToAppUser } = require('../utils/userConversion');
+        const appUser = await convertSupabaseUserToAppUser(sessionData.session.user);
+        setUser(appUser);
+        // Return to the app on the freshly-switched account.
+        onBack();
+      } else {
+        // Web: sign out first so signInWithGoogle doesn't short-circuit, then
+        // redirect to Google with the account picker.
+        const { supabase } = require('../config/supabase');
+        await supabase.auth.signOut();
+        const { supabaseAuthService } = require('../services/auth/supabaseAuthService');
+        await supabaseAuthService.signInWithGoogle();
+      }
+    } catch (error: any) {
+      if (error?.message?.includes('cancelled') || error?.code === '12501' || error?.code === 'SIGN_IN_CANCELLED') {
+        // user cancelled the picker — no-op
+      } else {
+        console.error('Error in handleSwitchAccount:', error);
+      }
+    } finally {
+      const { setIsSwitchingAccount } = require('../hooks/useAuthGuard');
+      setIsSwitchingAccount(false);
+    }
+  };
 
   if (showAnalytics) {
     return <AnalyticsDashboardScreen onBack={() => setShowAnalytics(false)} />;
@@ -151,6 +232,28 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               <Text style={styles.menuRowText}>Analytics (admin)</Text>
             </TouchableOpacity>
           )}
+
+          {/* Account actions — moved here from the old Lineup header menu */}
+          <View style={styles.menuSectionDivider} />
+
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={handleSwitchAccount}>
+            <Ionicons name="swap-horizontal-outline" size={22} color="#333" style={styles.menuIcon} />
+            <Text style={styles.menuRowText}>Switch account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.menuRow, isLoggingOut && styles.menuRowDisabled]}
+            activeOpacity={0.7}
+            onPress={handleLogout}
+            disabled={isLoggingOut}
+          >
+            {isLoggingOut ? (
+              <ActivityIndicator size="small" color="#E5484D" style={styles.menuIcon} />
+            ) : (
+              <Ionicons name="log-out-outline" size={22} color="#E5484D" style={styles.menuIcon} />
+            )}
+            <Text style={[styles.menuRowText, styles.logoutText]}>Log out</Text>
+          </TouchableOpacity>
         </ScrollView>
       </Animated.View>
       <ReportBugOverlay visible={showReportBug} onClose={() => setShowReportBug(false)} />
@@ -282,5 +385,16 @@ const styles = StyleSheet.create({
   },
   linkText: {
     color: '#0788B0',
+  },
+  menuSectionDivider: {
+    height: 1,
+    backgroundColor: '#E3E3E3',
+    marginVertical: 8,
+  },
+  menuRowDisabled: {
+    opacity: 0.6,
+  },
+  logoutText: {
+    color: '#E5484D',
   },
 });
