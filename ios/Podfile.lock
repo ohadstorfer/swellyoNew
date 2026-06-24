@@ -240,7 +240,7 @@ PODS:
     - ExpoModulesCore
   - ExpoFileSystem (19.0.17):
     - ExpoModulesCore
-  - ExpoFont (14.0.9):
+  - ExpoFont (14.0.12):
     - ExpoModulesCore
   - ExpoImage (3.0.11):
     - ExpoModulesCore
@@ -295,6 +295,8 @@ PODS:
   - ExpoWebBrowser (15.0.9):
     - ExpoModulesCore
   - EXStructuredHeaders (5.0.0)
+  - ExtensionStorage (1.0.0):
+    - ExpoModulesCore
   - EXUpdates (29.0.17):
     - EASClient
     - EXManifests
@@ -2650,6 +2652,7 @@ DEPENDENCIES:
   - ExpoVideoThumbnails (from `../node_modules/expo-video-thumbnails/ios`)
   - ExpoWebBrowser (from `../node_modules/expo-web-browser/ios`)
   - EXStructuredHeaders (from `../node_modules/expo-structured-headers/ios`)
+  - "ExtensionStorage (from `../node_modules/@bacons/apple-targets/ios`)"
   - EXUpdates (from `../node_modules/expo-updates/ios`)
   - EXUpdatesInterface (from `../node_modules/expo-updates-interface/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
@@ -2829,6 +2832,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-web-browser/ios"
   EXStructuredHeaders:
     :path: "../node_modules/expo-structured-headers/ios"
+  ExtensionStorage:
+    :path: "../node_modules/@bacons/apple-targets/ios"
   EXUpdates:
     :path: "../node_modules/expo-updates/ios"
   EXUpdatesInterface:
@@ -3025,7 +3030,7 @@ SPEC CHECKSUMS:
   ExpoCrypto: 4c50a152f5939e16a2ca10be77b002a3a391c4d3
   ExpoDevice: 0773c782b055558ca9b40b74aa4a8133a66cd0d2
   ExpoFileSystem: 56f081328f5b48a6dcc8302eee51d4f2d9d0049b
-  ExpoFont: b881d43057dceb7b31ff767b24f612609e80f60f
+  ExpoFont: cc2be150f9c107bc8cd072eb0cd15388d6081479
   ExpoImage: f6bcd30bb98d4c484869668fbc32834bb3ee5bfb
   ExpoImageManipulator: 099b82d913588b3984253f186b84b129792cf2e3
   ExpoImagePicker: bd0a5c81d7734548f6908a480609257e85d19ea8
@@ -3039,6 +3044,7 @@ SPEC CHECKSUMS:
   ExpoVideoThumbnails: 9fccaa03acb8991317d1c26909003ea2bc064d73
   ExpoWebBrowser: 35223474c19e261c0661ecc7caa513d054244ab5
   EXStructuredHeaders: c951e77f2d936f88637421e9588c976da5827368
+  ExtensionStorage: 158434def6cd14146ecacf5ac2db6345f8644c2d
   EXUpdates: 7ea3de351b1a5dea13f835a9885caacd3107f990
   EXUpdatesInterface: 1436757deb0d574b84bba063bd024c315e0ec08b
   FBLazyVector: e95a291ad2dadb88e42b06e0c5fb8262de53ec12
@@ -3141,6 +3147,6 @@ SPEC CHECKSUMS:
   VideoTrim: edd440767455f703478e57c4b16e18fead630cb6
   Yoga: 5934998fbeaef7845dbf698f698518695ab4cd1a
 
-PODFILE CHECKSUM: d9b9ba3a15ce3e19bc2a85e529a8ec320c6d4927
+PODFILE CHECKSUM: 30f3ed9e6955bb8e12563afb2674f74c72605caf
 
 COCOAPODS: 1.16.2

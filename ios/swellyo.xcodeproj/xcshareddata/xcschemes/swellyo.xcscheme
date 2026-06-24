@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "swellyo.app"
-               BlueprintName = "swellyo"
-               ReferencedContainer = "container:swellyo.xcodeproj">
+               BuildableName = "Swellyo.app"
+               BlueprintName = "Swellyo"
+               ReferencedContainer = "container:Swellyo.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "swellyoTests.xctest"
-               BlueprintName = "swellyoTests"
-               ReferencedContainer = "container:swellyo.xcodeproj">
+               BuildableName = "SwellyoTests.xctest"
+               BlueprintName = "SwellyoTests"
+               ReferencedContainer = "container:Swellyo.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -55,9 +55,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "swellyo.app"
-            BlueprintName = "swellyo"
-            ReferencedContainer = "container:swellyo.xcodeproj">
+            BuildableName = "Swellyo.app"
+            BlueprintName = "Swellyo"
+            ReferencedContainer = "container:Swellyo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +72,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "swellyo.app"
-            BlueprintName = "swellyo"
-            ReferencedContainer = "container:swellyo.xcodeproj">
+            BuildableName = "Swellyo.app"
+            BlueprintName = "Swellyo"
+            ReferencedContainer = "container:Swellyo.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
