@@ -20,14 +20,13 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Image as CachedImage } from 'expo-image';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useTripCore, useTripRequests } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { removeParticipant } from '../../services/trips/groupTripsService';
 import type { EnrichedParticipant } from '../../services/trips/groupTripsService';
-import { getStorageThumbUrl } from '../../services/media/imageService';
+import Thumb from '../../components/Thumb';
 import { CommittedPassportIcon, AdminBadgeIcon } from '../../components/trips/plan/PlanSections';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { ff } from '../../theme/fonts';
@@ -176,9 +175,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
               </Text>
               <View style={styles.card}>
                 {pendingRequests.map((r, i) => {
-                  const thumb =
-                    getStorageThumbUrl(r.requester.profile_image_url, 96) ??
-                    r.requester.profile_image_url;
+                  const thumb = r.requester.profile_image_url;
                   const review = onReviewRequest
                     ? () => onReviewRequest(r.requester.user_id, r.id)
                     : undefined;
@@ -192,8 +189,9 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
                     >
                       <View style={styles.avatarWrap}>
                         {thumb ? (
-                          <CachedImage
-                            source={{ uri: thumb }}
+                          <Thumb
+                            uri={thumb}
+                            size={96}
                             style={styles.avatar}
                             contentFit="cover"
                             cachePolicy="memory-disk"
@@ -239,7 +237,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           ) : (
             <View style={styles.card}>
               {participants.map((p, i) => {
-                const thumb = getStorageThumbUrl(p.profile_image_url, 96) ?? p.profile_image_url;
+                const thumb = p.profile_image_url;
                 const showRemove =
                   canRemove && p.role !== 'host' && p.user_id !== currentUserId;
                 const tappable = !!onViewUserProfile && p.user_id !== currentUserId;
@@ -254,8 +252,9 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
                   >
                     <View style={styles.avatarWrap}>
                       {thumb ? (
-                        <CachedImage
-                          source={{ uri: thumb }}
+                        <Thumb
+                          uri={thumb}
+                          size={96}
                           style={styles.avatar}
                           contentFit="cover"
                           cachePolicy="memory-disk"

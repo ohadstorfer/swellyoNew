@@ -728,14 +728,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   {surfStyles.map(s => {
                     const board = BOARD_IMAGE_EVEN[s];
                     if (!board) return null;
-                    // All boards share one height (BOARD_H); width follows each
+                    // Boards share one height (BOARD_H); width follows each
                     // board's aspect ratio so the row reads as a uniform even set.
+                    // Exception: the shortboard PNG renders bulky, so squish it
+                    // to 90% width. 'stretch' (not 'contain') keeps the full
+                    // height — contain would scale the whole board down instead.
+                    const isShort = s === 'shortboard';
+                    const boardW = Math.round(BOARD_H * board.aspect * (isShort ? 0.9 : 1));
                     return (
                       <Image
                         key={s}
                         source={board.src}
-                        style={{ width: Math.round(BOARD_H * board.aspect), height: BOARD_H }}
-                        resizeMode="contain"
+                        style={{ width: boardW, height: BOARD_H }}
+                        resizeMode={isShort ? 'stretch' : 'contain'}
                       />
                     );
                   })}

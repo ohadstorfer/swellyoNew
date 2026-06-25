@@ -863,8 +863,8 @@ export default function ConversationsScreen({
       ? conv.other_user?.name || 'Unknown User'
       : conv.title || 'Group Chat';
     const avatarUrl = conv.is_direct ? conv.other_user?.profile_image_url : null;
-    // Group chats: cover photo as avatar, served via Supabase's render-time
-    // thumbnail transform (same mechanism as profile avatars — no stored thumb).
+    // Group chats: cover photo as avatar, served from the pre-generated static
+    // thumbnail (image-thumbnails bucket) via getStorageThumbUrl.
     const groupHeroThumb = !conv.is_direct
       ? getStorageThumbUrl(surftripHeroImages[conv.id], 144)
       : null;

@@ -42,15 +42,18 @@ function escAttr(s: string): string {
 // 864KB hero comes back ~370KB). Only rewrites Supabase public-object URLs;
 // anything else is passed through untouched.
 function toPreviewImage(url: string): string {
+  // Point at the pre-generated 1280px-wide static thumbnail (aspect preserved)
+  // in the image-thumbnails bucket instead of the metered /render/image/
+  // endpoint. After the backfill, every existing surftrip hero has a __1280w.jpg.
+  // Only rewrites Supabase public-object URLs; anything else passes through.
   const marker = "/storage/v1/object/public/";
   const i = url.indexOf(marker);
   if (i === -1) return url;
-  const rendered =
-    url.slice(0, i) +
-    "/storage/v1/render/image/public/" +
-    url.slice(i + marker.length);
-  const sep = rendered.includes("?") ? "&" : "?";
-  return `${rendered}${sep}width=1200&quality=80`;
+  const rest = url.slice(i + marker.length); // "<bucket>/<path>"
+  if (rest.startsWith("image-thumbnails/")) return url;
+  // ?v=2 busts crawler/CDN caches after the EXIF-orientation regen (keep in
+  // sync with THUMB_CACHE_VERSION in src/services/media/thumbnails.ts).
+  return `${url.slice(0, i)}${marker}image-thumbnails/${rest}__1280w.jpg?v=2`;
 }
 
 export default async function handler(

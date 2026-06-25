@@ -17,7 +17,6 @@ import {
   Modal,
   Pressable,
   KeyboardAvoidingView,
-  Platform,
   Animated,
   ScrollView,
   TextInput,
@@ -77,10 +76,9 @@ export const GearRequestsSheet: React.FC<Props> = ({
 
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={s.kavRoot}
-      >
+      {/* avoidKeyboard={false}: let the keyboard overlay the (frozen) sheet
+          instead of pushing it up. */}
+      <KeyboardAvoidingView behavior={undefined} enabled={false} style={s.kavRoot}>
         <Pressable style={s.container} onPress={onClose}>
           <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
           <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>

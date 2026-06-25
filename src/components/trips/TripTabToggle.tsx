@@ -5,7 +5,7 @@
 // members (host + approved); non-members never see it.
 
 import React, { useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -56,8 +56,10 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange }) => {
         accessibilityLabel="Overview"
       >
         <View style={styles.labelWrap}>
-          <Animated.Text style={[styles.label, styles.bold, ovBold]}>Overview</Animated.Text>
-          <Animated.Text style={[styles.label, styles.reg, styles.overlay, ovReg]}>
+          <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, ovBold]}>
+            Overview
+          </Animated.Text>
+          <Animated.Text numberOfLines={1} style={[styles.label, styles.reg, styles.overlay, ovReg]}>
             Overview
           </Animated.Text>
         </View>
@@ -72,8 +74,10 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange }) => {
         accessibilityLabel="Plan"
       >
         <View style={styles.labelWrap}>
-          <Animated.Text style={[styles.label, styles.bold, plBold]}>Plan</Animated.Text>
-          <Animated.Text style={[styles.label, styles.reg, styles.overlay, plReg]}>
+          <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, plBold]}>
+            Plan
+          </Animated.Text>
+          <Animated.Text numberOfLines={1} style={[styles.label, styles.reg, styles.overlay, plReg]}>
             Plan
           </Animated.Text>
         </View>
@@ -111,9 +115,29 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: '#333333',
     textAlign: 'center',
+    // Android clips the last glyph when the regular layer measures slightly
+    // wider than the bold-sized box (the overflow wraps to a hidden 2nd line).
+    // Killing the extra font padding tightens metrics; numberOfLines={1} keeps
+    // each layer on one line.
+    includeFontPadding: false,
   },
-  bold: { fontFamily: ff('Inter', '700'), fontWeight: '700' },
-  reg: { fontWeight: '400' },
+  // Weight is carried by the weight-specific family (Inter-Bold / Inter-Regular).
+  // On NATIVE we must NOT also set `fontWeight` — pairing a custom weight-
+  // specific family with a numeric `fontWeight` breaks Android font selection and
+  // the bold layer falls back to a narrower system font, so the box it sizes ends
+  // up too small and the regular layer gets clipped. On WEB `ff()` returns the
+  // plain CSS family, which DOES need `fontWeight` to render bold — so keep it
+  // there. The 4px gutter is a safety margin so neither weight's metrics ever
+  // touch the box edge.
+  bold: {
+    fontFamily: ff('Inter', '700'),
+    paddingHorizontal: 4,
+    ...(Platform.OS === 'web' ? { fontWeight: '700' as const } : null),
+  },
+  reg: {
+    fontFamily: ff('Inter', '400'),
+    ...(Platform.OS === 'web' ? { fontWeight: '400' as const } : null),
+  },
   overlay: {
     position: 'absolute',
     top: 0,

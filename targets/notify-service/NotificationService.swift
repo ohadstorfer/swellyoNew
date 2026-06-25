@@ -68,8 +68,10 @@ class NotificationService: UNNotificationServiceExtension {
           intent.setImage(img, forParameterNamed: \.speakableGroupName)
         }
       } else {
+        // 1:1 DM — recipients nil so iOS renders a clean WhatsApp-style header
+        // (sender avatar + sender name + message) with NO "To you & …" line.
         intent = INSendMessageIntent(
-          recipients: [sender],
+          recipients: nil,
           outgoingMessageType: .outgoingMessageText,
           content: messageText,
           speakableGroupName: nil,
@@ -78,6 +80,10 @@ class NotificationService: UNNotificationServiceExtension {
           sender: sender,
           attachments: nil
         )
+        // Pin the sender photo as the notification avatar.
+        if let img = avatarImage {
+          intent.setImage(img, forParameterNamed: \.sender)
+        }
       }
 
       let interaction = INInteraction(intent: intent, response: nil)

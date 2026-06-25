@@ -19,13 +19,12 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Image as CachedImage } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AdminUpdateRow, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
-import { getStorageThumbUrl } from '../../../services/media/imageService';
+import Thumb from '../../Thumb';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -337,7 +336,7 @@ export const TripMemberSection: React.FC<{
           contentContainerStyle={styles.memberScrollContent}
         >
           {members.map(m => {
-            const thumb = getStorageThumbUrl(m.avatarUrl, 96) ?? m.avatarUrl;
+            const thumb = m.avatarUrl;
             return (
               <Pressable
                 key={m.id}
@@ -349,8 +348,9 @@ export const TripMemberSection: React.FC<{
               >
                 <View>
                   {thumb ? (
-                    <CachedImage
-                      source={{ uri: thumb }}
+                    <Thumb
+                      uri={thumb}
+                      size={96}
                       style={styles.memberAvatar}
                       contentFit="cover"
                       cachePolicy="memory-disk"
