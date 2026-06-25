@@ -36,6 +36,26 @@ const parseISODate = (s: string | null): Date | null => {
   const d = new Date(`${s}T00:00:00`);
   return isNaN(d.getTime()) ? null : d;
 };
+// First day of a 'YYYY-MM' month, or null.
+const monthStart = (ym: string): Date | null => {
+  if (!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return null;
+  return new Date(y, m - 1, 1);
+};
+// Last day of a 'YYYY-MM' month (day 0 of the next month), or null.
+const monthEnd = (ym: string): Date | null => {
+  if (!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return null;
+  return new Date(y, m, 0);
+};
+const startOfToday = (): Date => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
 const expandMonthRange = (from: string, to: string, cap = 6): string[] => {
   if (!from) return to ? [to] : [];
   if (!to || to === from) return [from];
@@ -330,42 +350,63 @@ export interface EditDatesSheetProps {
 export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
   visible,
   initial,
-  lockCalendar,
   onClose,
   onSave,
 }) => {
-  const [mode, setMode] = useState<'months' | 'exact'>(initial.datesMode);
   const [startDate, setStartDate] = useState<Date | null>(parseISODate(initial.startDateISO));
   const [endDate, setEndDate] = useState<Date | null>(parseISODate(initial.endDateISO));
-  const [monthFrom, setMonthFrom] = useState(initial.monthFrom);
-  const [monthTo, setMonthTo] = useState(initial.monthTo);
-  const [durationDays, setDurationDays] = useState<number | null>(initial.durationDays);
   const [saving, setSaving] = useState(false);
+
+  // The loose months chosen at trip creation are fixed here — they can't be
+  // changed, only narrowed to exact dates inside them.
+  const monthFrom = initial.monthFrom;
+  const monthTo = initial.monthTo || initial.monthFrom;
 
   useEffect(() => {
     if (visible) {
-      setMode(initial.datesMode);
       setStartDate(parseISODate(initial.startDateISO));
       setEndDate(parseISODate(initial.endDateISO));
-      setMonthFrom(initial.monthFrom);
-      setMonthTo(initial.monthTo);
-      setDurationDays(initial.durationDays);
     }
   }, [visible, initial]);
 
-  const exactMode = lockCalendar ? true : mode === 'exact';
-  const valid = exactMode ? !!startDate : !!monthFrom && (durationDays ?? 0) >= 1;
+  // Calendar bounds = the loose window. Never let the start fall before today.
+  const looseStart = monthStart(monthFrom);
+  const today = startOfToday();
+  const minDate = looseStart ? (looseStart.getTime() < today.getTime() ? today : looseStart) : undefined;
+  const maxDate = monthEnd(monthTo) ?? undefined;
+
+  // Length window: the picked range must stay within ±DURATION_TOLERANCE days of
+  // the trip length chosen at creation (e.g. 14 days → 9–19 days).
+  const DURATION_TOLERANCE = 5;
+  const baseLen = initial.durationDays ?? null;
+  const minRangeDays = baseLen ? Math.max(1, baseLen - DURATION_TOLERANCE) : undefined;
+  const maxRangeDays = baseLen ? baseLen + DURATION_TOLERANCE : undefined;
+
+  // Need a full range; if a length window applies, the picked length must fit it.
+  const pickedLen =
+    startDate && endDate
+      ? Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+      : null;
+  const valid =
+    !!startDate &&
+    !!endDate &&
+    (minRangeDays == null || (pickedLen != null && pickedLen >= minRangeDays)) &&
+    (maxRangeDays == null || (pickedLen != null && pickedLen <= maxRangeDays));
 
   const handleSave = async () => {
     if (!valid) return;
-    const exactDates = exactMode;
-    const dateMonths = exactDates ? [] : expandMonthRange(monthFrom, monthTo);
+    const duration =
+      startDate && endDate
+        ? Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+        : initial.durationDays;
+    // Keep the loose window on the record so the constraint persists if re-opened.
+    const dateMonths = expandMonthRange(monthFrom, monthTo);
     const patch: DatesPatch = {
-      start_date: exactDates && startDate ? toISODate(startDate) : null,
-      end_date: exactDates && endDate ? toISODate(endDate) : null,
-      dates_set_in_stone: exactDates,
+      start_date: startDate ? toISODate(startDate) : null,
+      end_date: endDate ? toISODate(endDate) : null,
+      dates_set_in_stone: true,
       date_months: dateMonths.length ? dateMonths : null,
-      duration_days: durationDays,
+      duration_days: duration,
     };
     setSaving(true);
     try {
@@ -381,8 +422,12 @@ export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
   return (
     <WizardBottomSheet
       visible={visible}
-      title="Trip dates"
-      subtitle="When does this trip happen?"
+      title="Set trip dates"
+      subtitle={
+        minRangeDays && maxRangeDays
+          ? `Pick ${minRangeDays}-${maxRangeDays} days inside the months you chose.`
+          : 'Pick exact dates inside the months you chose.'
+      }
       largeTitle
       titleAlign="left"
       hideHeaderDivider
@@ -391,8 +436,10 @@ export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
       footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} label="Set dates" />}
     >
       <WhenSheetContent
-        mode={exactMode ? 'calendar' : 'months'}
-        onModeChange={m => setMode(m === 'calendar' ? 'exact' : 'months')}
+        // Calendar-only: the loose months are locked, you can only narrow to
+        // exact dates within them.
+        mode="calendar"
+        onModeChange={() => {}}
         startDate={startDate}
         endDate={endDate}
         onCalendarChange={({ startDate: s, endDate: e }) => {
@@ -401,13 +448,14 @@ export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
         }}
         monthFrom={monthFrom}
         monthTo={monthTo}
-        onMonthsChange={({ monthFrom: mf, monthTo: mt }) => {
-          setMonthFrom(mf);
-          setMonthTo(mt);
-        }}
-        durationDays={durationDays}
-        onDurationChange={setDurationDays}
-        lockCalendar={lockCalendar}
+        onMonthsChange={() => {}}
+        durationDays={initial.durationDays}
+        onDurationChange={() => {}}
+        lockCalendar
+        minDate={minDate}
+        maxDate={maxDate}
+        minRangeDays={minRangeDays}
+        maxRangeDays={maxRangeDays}
       />
     </WizardBottomSheet>
   );
