@@ -1675,7 +1675,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               />
             }
           >
-            <BlurView intensity={36} tint="light" style={StyleSheet.absoluteFill} />
+            <BlurView intensity={44} tint="light" style={StyleSheet.absoluteFill} />
           </MaskedView>
           {/* White shade on top — its own transparency gradient. Solid at the
               very bottom so the pill sits on a clean base. */}
@@ -2262,7 +2262,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 175,
+    height: 215,
     zIndex: 9,
     overflow: 'hidden',
     ...(Platform.OS === 'web' && {

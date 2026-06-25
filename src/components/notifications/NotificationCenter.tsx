@@ -19,7 +19,6 @@ import { Image as ExpoImage } from 'expo-image';
 import { useFocusEffect } from '@react-navigation/native';
 import { pushRootCard } from '../../navigation/navigationRef';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Path } from 'react-native-svg';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -81,23 +80,6 @@ const DECISION_STATUS_TYPES = new Set<NotificationRow['type']>([
 type Decision = 'approved' | 'declined';
 
 /**
- * Custom stroke bell icon for the Lineup header bell. Rebuilt as Svg+Path so
- * it matches the Figma spec exactly (24x24, 1.5 stroke) rather than relying on
- * the Ionicons outline glyph.
- */
-const BellIcon: React.FC<{ size?: number; color?: string }> = ({ size = 24, color = '#FFFFFF' }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path
-      d="M16.0627 18.3333V19.5C16.0627 21.433 14.4677 23 12.5002 23C10.5326 23 8.9376 21.433 8.9376 19.5V18.3333M16.0627 18.3333H8.9376M16.0627 18.3333H20.3265C20.7808 18.3333 21.009 18.3333 21.1929 18.2724C21.5443 18.1559 21.8192 17.8849 21.9377 17.5397C22 17.3583 22 17.1334 22 16.6836C22 16.4868 21.9998 16.3884 21.9841 16.2945C21.9545 16.1172 21.8844 15.9491 21.7777 15.8031C21.7214 15.726 21.6497 15.6556 21.5085 15.5168L21.0459 15.0623C20.8967 14.9157 20.8128 14.7168 20.8128 14.5095V10.1667C20.8128 5.65633 17.0911 1.99999 12.5002 2C7.90923 2.00001 4.18752 5.65635 4.18752 10.1667V14.5095C4.18752 14.7169 4.1035 14.9157 3.95425 15.0623L3.49171 15.5168C3.35003 15.6559 3.27912 15.7259 3.22266 15.8031C3.11597 15.9491 3.0453 16.1172 3.01568 16.2945C3 16.3884 3 16.4868 3 16.6836C3 17.1334 3 17.3583 3.06229 17.5397C3.1808 17.8849 3.45696 18.1559 3.8083 18.2724C3.99224 18.3333 4.2196 18.3333 4.67388 18.3333H8.9376"
-      stroke={color}
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </Svg>
-);
-
-/**
  * Bell button for screen headers. Shows the unread badge and OPENS the
  * notifications panel as a navigation route (`NotificationsPanel` on the
  * root stack) — the panel participates in back history, so a trip opened
@@ -155,11 +137,7 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
       accessibilityLabel="Notifications"
       accessibilityRole="button"
     >
-      {bare ? (
-        <Ionicons name="notifications-outline" size={30} color="#FFFFFF" />
-      ) : (
-        <BellIcon size={24} color="#FFFFFF" />
-      )}
+      <Ionicons name="notifications-outline" size={30} color="#FFFFFF" />
       {unread > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>

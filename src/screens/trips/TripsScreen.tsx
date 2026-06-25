@@ -1563,7 +1563,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
-  tabLabel: { fontFamily: FONT_INTER, fontSize: 14, lineHeight: 18, fontWeight: '400', letterSpacing: 0.3 },
+  tabLabel: { fontFamily: FONT_INTER, fontSize: 16, lineHeight: 20, fontWeight: '400', letterSpacing: 0.3 },
   tabLabelActive: { color: '#05BCD3' },
   tabLabelInactive: { color: '#FFFFFF' },
 

@@ -214,12 +214,12 @@ export const BUDGET_VIBE: Record<'low' | 'medium' | 'high', string> = {
   high: 'Premium',
 };
 
-/** "1500–2000$" / "1500$+" / "up to 2000$" from a min/max range. */
+/** "$1500-$2000" / "$1500+" / "up to $2000" from a min/max range. */
 export function formatBudgetRange(min: number | null, max: number | null): string | null {
   if (min == null && max == null) return null;
-  if (min != null && max != null) return `${min}-${max}$`;
-  if (min != null) return `${min}$+`;
-  return `up to ${max}$`;
+  if (min != null && max != null) return `$${min}-$${max}`;
+  if (min != null) return `$${min}+`;
+  return `up to $${max}`;
 }
 
 const MONTH_SHORT = [
@@ -574,7 +574,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
     overviewCards.push({
       icon: 'cash-outline',
       label: 'Price',
-      value: `${vm.costPerPerson}$`,
+      value: `$${vm.costPerPerson}`,
       highlight: true,
       footer: hasPriceDetail ? 'See what’s included' : undefined,
       onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,

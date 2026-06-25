@@ -22,13 +22,13 @@ const VIBES: readonly VibeMeta[] = [
   {
     key: 'improve_surf',
     title: 'Training Camp',
-    desc: 'Dawn drills, coaching and back-to-back sessions to level up fast.',
+    desc: 'Improve your surfing with coaching, drills and dawn sessions.',
     image: Images.tripVibes.trainingCamp,
   },
   {
     key: 'surf_focused',
     title: 'Surf-Focused',
-    desc: 'Early starts and lots of water time — the surf comes first.',
+    desc: 'Early starts and lots of water time - the surf comes first.',
     image: Images.tripVibes.surfFocused,
   },
   {

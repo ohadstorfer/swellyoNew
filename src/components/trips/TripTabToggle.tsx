@@ -107,8 +107,8 @@ const styles = StyleSheet.create({
   },
   label: {
     fontFamily: ff('Inter', '400'),
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 16,
+    lineHeight: 20,
     color: '#333333',
     textAlign: 'center',
   },

@@ -25,6 +25,7 @@ import { WizardBottomSheet } from './WizardBottomSheet';
 import { WhenSheetContent } from './sheets/WhenSheetContent';
 import { StayTypeSheetContent, type AccommodationKind } from './sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from './sheets/SpecificStaySheetContent';
+import { Images } from '../../assets/images';
 
 // Compact date helpers (mirror CreateTripFlowA — kept inline to avoid importing
 // from the wizard screen).
@@ -174,6 +175,9 @@ export const EditTextSheet: React.FC<EditTextSheetProps> = ({
       visible={visible}
       title={title}
       subtitle={subtitle}
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="auto"
       extendBehindKeyboard
@@ -192,17 +196,20 @@ export const EditTextSheet: React.FC<EditTextSheetProps> = ({
           </Text>
         ) : null}
       </View>
-      <TextInput
-        style={[styles.input, { minHeight: rows * 22 }]}
-        value={value}
-        onChangeText={t => setValue(maxLength ? t.slice(0, maxLength) : t)}
-        placeholder={placeholder}
-        placeholderTextColor={C.textFaint}
-        multiline
-        maxLength={maxLength}
-        textAlignVertical="top"
-        autoFocus
-      />
+      <View style={[styles.inputWrap, styles.inputWrapTextarea]}>
+        <Image source={Images.tripDeets.pencil} style={styles.inputPencil} resizeMode="contain" />
+        <TextInput
+          style={[styles.inputField, { minHeight: rows * 22 }]}
+          value={value}
+          onChangeText={t => setValue(maxLength ? t.slice(0, maxLength) : t)}
+          placeholder={placeholder}
+          placeholderTextColor={C.textFaint}
+          multiline
+          maxLength={maxLength}
+          textAlignVertical="top"
+          autoFocus
+        />
+      </View>
     </WizardBottomSheet>
   );
 };
@@ -256,6 +263,9 @@ export const EditCoverSheet: React.FC<EditCoverSheetProps> = ({
       visible={visible}
       title="Edit cover"
       subtitle="This photo shows at the top of your trip."
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="auto"
       footer={<SaveButton onPress={handleSave} loading={saving} disabled={!pickedUri} />}
@@ -373,6 +383,9 @@ export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
       visible={visible}
       title="Trip dates"
       subtitle="When does this trip happen?"
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="full"
       footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} label="Set dates" />}
@@ -463,35 +476,15 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
   return (
     <WizardBottomSheet
       visible={visible}
-      // specificOnly mirrors the create-trip "Stay details" sheet EXACTLY:
-      // left title, no header divider, no subtitle, dark Save button.
       title={specificOnly ? 'Stay details' : 'Accommodation'}
-      titleAlign={specificOnly ? 'left' : undefined}
-      hideHeaderDivider={specificOnly || undefined}
       subtitle={specificOnly ? undefined : 'Pick the stay type and add the specific place.'}
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="full"
       extendBehindKeyboard
-      footer={
-        specificOnly ? (
-          <TouchableOpacity
-            onPress={handleSave}
-            activeOpacity={0.85}
-            disabled={!valid || saving}
-            style={[styles.staySaveBtn, (!valid || saving) && styles.saveBtnDisabled]}
-            accessibilityRole="button"
-            accessibilityLabel="Save stay details and close"
-          >
-            {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.staySaveBtnText}>Save</Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <SaveButton onPress={handleSave} loading={saving} disabled={!valid} />
-        )
-      }
+      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} />}
     >
       {!specificOnly && (
         <>
@@ -514,41 +507,29 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
 };
 
 const styles = StyleSheet.create({
-  // Save button (footer)
+  // Footer button — mirrors the create-trip "Select" footer button exactly
+  // (CreateTripFlowA localStyles.sheetSelectBtn): dark pill, 62 tall, radius 16,
+  // 28px side margins, Montserrat 16/600.
   saveBtn: {
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: C.accent,
+    backgroundColor: '#212121',
+    height: 62,
+    borderRadius: 16,
+    marginHorizontal: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnDisabled: {
     opacity: 0.4,
   },
-  // Matches the create-trip "Stay details" sheet Save button exactly
-  // (CreateTripFlowA localStyles.sheetSetBtn).
-  staySaveBtn: {
-    backgroundColor: '#212121',
-    paddingVertical: 16,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  staySaveBtnText: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
   saveBtnText: {
     fontFamily: FONT_MONTSERRAT,
     fontSize: 16,
+    lineHeight: 24,
     fontWeight: '600',
     color: C.white,
   },
 
-  // Text field
+  // Text field — mirrors the create-trip Description field.
   fieldLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -557,25 +538,42 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '600',
-    color: C.ink,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: '#222B30',
   },
   counter: {
     fontFamily: FONT_INTER,
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
   },
-  input: {
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: '#EEEEEE',
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: C.white,
+  },
+  inputWrapTextarea: {
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+  },
+  inputPencil: {
+    width: 22,
+    height: 22,
+  },
+  inputField: {
+    flex: 1,
     fontFamily: FONT_INTER,
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 22,
-    color: C.ink,
-    backgroundColor: C.surfaceMuted,
+    color: '#222B30',
+    textAlignVertical: 'top',
   },
 
   // Cover preview

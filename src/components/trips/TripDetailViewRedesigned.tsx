@@ -347,7 +347,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     chips.push({
       icon: 'currency-dollar-circle',
       label: 'Price',
-      value: `${vm.costPerPerson}$`,
+      value: `$${vm.costPerPerson}`,
       highlight: true,
       footer: hasPriceDetail ? 'What’s included' : undefined,
       onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,
