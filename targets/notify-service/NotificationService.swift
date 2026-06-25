@@ -24,6 +24,11 @@ class NotificationService: UNNotificationServiceExtension {
     }
 
     NSLog("[SwellyoNSE] didReceive fired. userInfo keys: \(Array(request.content.userInfo.keys))")
+    // DIAG (temporary): prove the extension ran. This marker is ONLY visible if
+    // we end up falling back to a plain notification — on success the avatar UI
+    // replaces the title. So: avatar = success; "🟢" prefix = ran-but-fell-back;
+    // no "🟢" at all = the extension never ran (mutable-content never arrived).
+    bestAttempt.title = "🟢 " + bestAttempt.title
 
     let data = Self.extractData(from: request.content.userInfo)
     NSLog("[SwellyoNSE] extracted data keys: \(Array(data.keys))")
@@ -94,6 +99,9 @@ class NotificationService: UNNotificationServiceExtension {
         contentHandler(updated)
       } catch {
         NSLog("[SwellyoNSE] updating(from:) FAILED: \(error.localizedDescription) — falling back to plain")
+        // DIAG (temporary): surface the failure reason + whether an image URL was
+        // present, right in the notification body so it's readable without a Mac.
+        bestAttempt.body = "NSE-FAIL: \(error.localizedDescription) | url=\(avatarUrl ?? "nil")"
         contentHandler(bestAttempt) // graceful fallback → plain notification
       }
     }
