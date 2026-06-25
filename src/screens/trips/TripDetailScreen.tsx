@@ -19,6 +19,19 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Reanimated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { easeGradient } from 'react-native-easing-gradient';
+
+// Eased alpha ramp for the sticky-CTA blur mask. Band-free transparent→opaque
+// so the frosted strip dissolves into the screen instead of ending on a hard
+// line. Computed once at module load (easeGradient is a pure function).
+const { colors: BLUR_MASK_COLORS, locations: BLUR_MASK_LOCATIONS } = easeGradient({
+  colorStops: {
+    0: { color: 'rgba(0,0,0,0)' },
+    1: { color: 'rgba(0,0,0,1)' },
+  },
+});
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
@@ -1647,9 +1660,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           colour + label. */}
       {stickyCtaVisible && (
         <View style={styles.ctaOverlay} pointerEvents="none">
+          {/* One equal blur over the whole strip, MASKED by a gradient so its
+              opacity ramps 0→full from top→bottom. The blur dissolves into the
+              sharp screen instead of ending on a hard line — fully smooth, no
+              banding (a single uniform blur, only its visibility is gradiented).
+              GPU/UI-thread only, so it never touches the JS thread. */}
+          <MaskedView
+            style={StyleSheet.absoluteFill}
+            maskElement={
+              <LinearGradient
+                style={StyleSheet.absoluteFill}
+                colors={BLUR_MASK_COLORS}
+                locations={BLUR_MASK_LOCATIONS}
+              />
+            }
+          >
+            <BlurView intensity={36} tint="light" style={StyleSheet.absoluteFill} />
+          </MaskedView>
+          {/* White shade on top — its own transparency gradient. Solid at the
+              very bottom so the pill sits on a clean base. */}
           <LinearGradient
-            colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.82)', 'rgba(250, 250, 250, 0.82)', '#FAFAFA']}
-            locations={[0, 0.22, 0.78, 1]}
+            colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
+            locations={[0, 0.4, 0.72, 1]}
             style={styles.ctaOverlayGradient}
           />
         </View>

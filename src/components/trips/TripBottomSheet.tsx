@@ -57,6 +57,8 @@ interface Props {
   onBack?: () => void;
   /** Optional node on the right of the header (e.g. a Host tag). */
   headerRight?: React.ReactNode;
+  /** Hide the top-right close (X) button. Backdrop tap + swipe-down still close. */
+  hideClose?: boolean;
   /** Sticky footer pinned to the bottom (e.g. primary action button). */
   footer?: React.ReactNode;
   /** Hairline divider above the footer (default true). */
@@ -80,6 +82,7 @@ export const TripBottomSheet: React.FC<Props> = ({
   subtitle,
   onBack,
   headerRight,
+  hideClose = false,
   footer,
   footerDivider = true,
   scroll = true,
@@ -127,9 +130,11 @@ export const TripBottomSheet: React.FC<Props> = ({
               </View>
               <View style={styles.headerRight}>
                 {headerRight}
-                <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.closeBtn}>
-                  <Ionicons name="close" size={20} color={SHEET.inkBody} />
-                </TouchableOpacity>
+                {hideClose ? null : (
+                  <TouchableOpacity onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+                    <Ionicons name="close" size={20} color={SHEET.inkBody} />
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
 

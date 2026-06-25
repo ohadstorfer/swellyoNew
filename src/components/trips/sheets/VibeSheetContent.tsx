@@ -1,17 +1,54 @@
-// VibeSheetContent — wraps TripTagPicker with trip_vibe options + a short header.
-import React from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
-import { TripTagPicker } from '../TripTagPicker';
+// VibeSheetContent — single-select trip-vibe option cards. Same visual language
+// as LevelsSheetContent: photo thumbnail left, title + description, cyan-border
+// + check when selected. Order top→bottom = most surf → most chill.
+import React, { useCallback } from 'react';
+import { View, StyleSheet } from 'react-native';
+import { SheetOptionCard } from './SheetOptionCard';
+import { Images } from '../../../assets/images';
 import {
   TRIP_VIBE_OPTIONS,
   type TripVibeSlug,
 } from '../../../services/trips/groupTripsService';
 
-const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
+interface VibeMeta {
+  key: TripVibeSlug;
+  title: string;
+  desc: string;
+  image: any;
+}
 
-const C = {
-  textMuted: '#7B7B7B',
-};
+// Copy is intentionally short (2-line max desc) to match the level cards.
+const VIBES: readonly VibeMeta[] = [
+  {
+    key: 'improve_surf',
+    title: 'Training Camp',
+    desc: 'Dawn drills, coaching and back-to-back sessions to level up fast.',
+    image: Images.tripVibes.trainingCamp,
+  },
+  {
+    key: 'surf_focused',
+    title: 'Surf-Focused',
+    desc: 'Early starts and lots of water time — the surf comes first.',
+    image: Images.tripVibes.surfFocused,
+  },
+  {
+    key: 'explore',
+    title: 'Surf & Explore',
+    desc: 'Good waves balanced with local food, culture and side trips.',
+    image: Images.tripVibes.explore,
+  },
+  {
+    key: 'vacation',
+    title: 'Vacation Style',
+    desc: 'Relaxed pace, loose surf and plenty of lay-days to unwind.',
+    image: Images.tripVibes.vacation,
+  },
+];
+
+// Keep card order in sync with the canonical option list (most→least surf).
+const ORDERED_VIBES: readonly VibeMeta[] = TRIP_VIBE_OPTIONS.map(
+  o => VIBES.find(v => v.key === o.slug)!,
+).filter(Boolean);
 
 export interface VibeSheetContentProps {
   selected: TripVibeSlug[];
@@ -22,45 +59,35 @@ export const VibeSheetContent: React.FC<VibeSheetContentProps> = ({
   selected,
   onChange,
 }) => {
+  // Single-select: tapping a card replaces the selection (tapping the active
+  // one clears it).
+  const pick = useCallback(
+    (key: TripVibeSlug) => {
+      onChange(selected.includes(key) ? [] : [key]);
+    },
+    [selected, onChange],
+  );
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>What's the energy of this trip?</Text>
-      <Text style={styles.scaleHint}>Most surf at the top → most chill at the bottom.</Text>
-      <TripTagPicker<TripVibeSlug>
-        options={TRIP_VIBE_OPTIONS}
-        selected={selected}
-        onChange={onChange}
-        singleSelect
-        accessibilityLabel="Trip vibe"
-        style={styles.picker}
-      />
+    <View style={styles.stack}>
+      {ORDERED_VIBES.map(vibe => (
+        <SheetOptionCard
+          key={vibe.key}
+          title={vibe.title}
+          description={vibe.desc}
+          image={vibe.image}
+          selected={selected.includes(vibe.key)}
+          onPress={() => pick(vibe.key)}
+        />
+      ))}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    // Pull the subtext up so it sits close under the sheet title.
-    marginTop: -30,
-  },
-  header: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '400',
-    color: C.textMuted,
-  },
-  scaleHint: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '500',
-    color: C.textMuted,
-    marginTop: 2,
-  },
-  picker: {
-    // Clear gap between the subtext and the first selection bubble.
-    marginTop: 36,
+  stack: {
+    gap: 16,
+    marginHorizontal: 8,
   },
 });
 

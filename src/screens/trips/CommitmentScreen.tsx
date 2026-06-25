@@ -8,7 +8,7 @@
 // host DM — see submitCommitment) and pops back to the trip. The trip's
 // CommitPill is flipped to "Commitment request sent" optimistically via the
 // react-query cache so it's already correct when the card dismisses.
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,12 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
+  Image,
   Alert,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { TripBottomSheet, SHEET } from '../../components/trips/TripBottomSheet';
 import { CommitmentBadgeIcon } from '../../components/trips/commitment/CommitmentMessageBubble';
 import { COMMITMENT_OPTIONS } from '../../components/trips/commitment/commitmentOptions';
@@ -30,6 +31,7 @@ import { submitCommitment, type CommitmentItem } from '../../services/trips/grou
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
+import { Images } from '../../assets/images';
 
 type TripCoreData = import('../../hooks/trips/useTripDetail').TripCoreData;
 
@@ -63,6 +65,15 @@ export default function CommitmentScreen({
   const [note, setNote] = useState(initialNote ?? '');
   const [submitting, setSubmitting] = useState(false);
   const insets = useSafeAreaInsets();
+  const noteInputRef = useRef<TextInput>(null);
+
+  // Open the note sheet with the keyboard already up + cursor in the box. The
+  // delay lets the sheet mount/lay out first so the keyboard rises with it.
+  useEffect(() => {
+    if (!noteSheetOpen) return;
+    const t = setTimeout(() => noteInputRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, [noteSheetOpen]);
 
   const toggle = (k: CommitmentItem) => {
     if (submitting) return;
@@ -142,8 +153,8 @@ export default function CommitmentScreen({
         </View>
         <View style={styles.divider} />
 
-        <Text style={styles.heading}>How committed are you?</Text>
-        <Text style={styles.subheading}>Let the group know how ready you are</Text>
+        <Text style={styles.heading}>In what way did you commit to the trip?</Text>
+        <Text style={styles.subheading}>Let the admin know how did you commit yourself</Text>
 
         <View style={styles.options}>
           {COMMITMENT_OPTIONS.map(opt => {
@@ -168,7 +179,7 @@ export default function CommitmentScreen({
                   </View>
                 </View>
                 <View style={[styles.check, isOn && styles.checkOn]}>
-                  {isOn ? <Ionicons name="checkmark" size={13} color="#FFFFFF" /> : null}
+                  {isOn ? <MaterialCommunityIcons name="check-bold" size={14} color="#FFFFFF" /> : null}
                 </View>
               </TouchableOpacity>
             );
@@ -185,27 +196,29 @@ export default function CommitmentScreen({
           pointerEvents="none"
         />
         <TouchableOpacity
-          style={[styles.primaryBtn, !canSelect && styles.primaryBtnDisabled]}
+          style={[styles.selectBtn, !canSelect && styles.primaryBtnDisabled]}
           onPress={() => setNoteSheetOpen(true)}
           disabled={!canSelect}
           activeOpacity={0.9}
           accessibilityRole="button"
           accessibilityLabel="Select"
         >
-          <Text style={styles.primaryBtnText}>Select</Text>
+          <Text style={styles.selectBtnText}>Select</Text>
         </TouchableOpacity>
       </View>
 
       {/* Step 2 — note bottom sheet. */}
       <TripBottomSheet
         visible={noteSheetOpen}
+        hideClose
+        footerDivider={false}
         onClose={() => {
           if (!submitting) setNoteSheetOpen(false);
         }}
         title="Trip commitment"
         footer={
           <TouchableOpacity
-            style={styles.primaryBtn}
+            style={[styles.selectBtn, styles.sendBtn]}
             onPress={handleSend}
             disabled={submitting}
             activeOpacity={0.9}
@@ -215,19 +228,21 @@ export default function CommitmentScreen({
             {submitting ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.primaryBtnText}>Send</Text>
+              <Text style={styles.selectBtnText}>Send</Text>
             )}
           </TouchableOpacity>
         }
       >
-        <Text style={styles.heading}>How committed are you?</Text>
+        <Text style={[styles.heading, styles.noteHeading]}>Please explain.</Text>
+        <Text style={styles.subheading}>Let the admin know how did you commit yourself</Text>
         <View style={styles.inputWrap}>
-          <Ionicons name="pencil-outline" size={18} color="#9AA0A6" style={styles.inputIcon} />
+          <Image source={Images.tripDeets.pencil} style={styles.inputPencil} resizeMode="contain" />
           <TextInput
+            ref={noteInputRef}
             style={styles.input}
             value={note}
             onChangeText={setNote}
-            placeholder="Waiting for approval at work, booking soon"
+            placeholder="e.g. Flights are booked and I've paid the deposit on our stay"
             placeholderTextColor={SHEET.textMuted}
             multiline
             editable={!submitting}
@@ -301,15 +316,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingVertical: 16,
     paddingHorizontal: 12,
-    // Box Shadow 01 — #596E7C26, offset(0,2), blur 16.
+    // Box Shadow 01 — #596E7C26, offset(0,2), blur 8 (matches the create-trip
+    // "Yes/No" gate cards this view mirrors).
     shadowColor: '#596E7C',
     shadowOpacity: 0.15,
-    shadowRadius: 16,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    elevation: 4,
   },
   optionOn: { borderColor: '#05BCD3' },
-  optionMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  optionMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 16 },
   optionIconBox: {
     width: 38,
     height: 38,
@@ -318,25 +334,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  optionText: { flex: 1 },
+  optionText: { flex: 1, gap: 4 },
   optionLabel: {
-    fontFamily: ff('Inter', '600'),
-    fontWeight: '600',
-    fontSize: 15,
-    color: '#212121',
+    fontFamily: ff('Inter', '700'),
+    fontWeight: '700',
+    fontSize: 16,
+    lineHeight: 22,
+    color: '#222B30',
   },
   optionSubtitle: {
     fontFamily: ff('Inter', '400'),
     fontSize: 12,
-    color: '#333333',
-    marginTop: 2,
+    lineHeight: 18,
+    color: '#7B7B7B',
   },
   check: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: '#D5D7DA',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -350,21 +368,28 @@ const styles = StyleSheet.create({
     paddingTop: 48,
     paddingBottom: 8,
   },
-  primaryBtn: {
+  primaryBtnDisabled: { opacity: 0.4 },
+  // Mirrors the create-trip "Select" footer button (sheetSelectBtn) — dark pill,
+  // 62 tall, radius 16, Montserrat 16/600.
+  selectBtn: {
     width: '100%',
     backgroundColor: '#212121',
-    paddingVertical: 16,
-    borderRadius: 12,
+    height: 62,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primaryBtnDisabled: { opacity: 0.4 },
-  primaryBtnText: {
+  selectBtnText: {
+    fontFamily: ff('Montserrat', '600'),
+    fontWeight: '600',
+    fontSize: 16,
+    lineHeight: 24,
     color: '#FFFFFF',
-    fontFamily: ff('Inter', '700'),
-    fontWeight: '700',
-    fontSize: 15,
   },
+  // Send sits in the sheet footer (18px pad) vs Select's footer (40px pad) — drop
+  // the 100% width and add 22px margins so it stretches to the same width as
+  // Select (100% + margins would overflow and shove the button right).
+  sendBtn: { width: 'auto', marginHorizontal: 22 },
   inputWrap: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -373,11 +398,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    marginTop: 14,
+    marginTop: 24,
     backgroundColor: '#FFFFFF',
     minHeight: 120,
   },
-  inputIcon: { marginRight: 8, marginTop: 1 },
+  // Note sheet: extra breathing room below the "Trip commitment" sheet title.
+  noteHeading: { marginTop: 12 },
+  inputPencil: { width: 22, height: 22, marginRight: 8, marginTop: 1 },
   input: {
     flex: 1,
     padding: 0,

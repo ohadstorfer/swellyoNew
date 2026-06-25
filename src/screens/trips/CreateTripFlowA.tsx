@@ -3287,7 +3287,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
-        heightMode="full"
+        heightMode="auto"
         footer={sheetSelectFooter}
       >
         <HowItWorksSheetContent
@@ -3298,11 +3298,13 @@ export default function CreateTripFlowA({
 
       <WizardBottomSheet
         visible={openSheet === 'vibe'}
-        title="Vibe"
+        title="Trip Vibe"
+        subtitle="Most surf at the top → most chill at the bottom"
+        largeTitle
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
-        heightMode="full"
+        heightMode="auto"
         footer={sheetSelectFooter}
       >
         <VibeSheetContent
@@ -3324,6 +3326,8 @@ export default function CreateTripFlowA({
           onChange={k => {
             update('accommodationKind', k);
             if (errors.accommodationKind) setError('accommodationKind', null);
+            // Single-select — picking a type confirms it, so close the sheet.
+            closeSheet();
           }}
           error={errors.accommodationKind ?? undefined}
         />
