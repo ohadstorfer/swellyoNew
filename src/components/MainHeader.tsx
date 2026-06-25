@@ -6,7 +6,6 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  withSequence,
   Easing,
 } from 'react-native-reanimated';
 import { HeaderLogoIcon } from './HeaderLogoIcon';
@@ -48,26 +47,28 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   spaceBelow = 8,
   testID,
 }) => {
-  // The title fades + slides in each time the screen gains focus, so switching
-  // between Lineup and Trips reads as a smooth title change. Best-practice
-  // entrance: opacity + a small translate, ease-out, under 300ms. Logo and bell
-  // stay put — only the text animates.
-  const titleAnim = useSharedValue(0);
+  // The title gently fades in each time the screen gains focus, so switching
+  // between Lineup and Trips reads as a soft title change. A single shared-value
+  // opacity fade — no remount, no React state, no movement — so nothing re-
+  // renders the page. The trick that avoids any flicker: we fade IN on focus and
+  // reset to 0 on BLUR (the cleanup), i.e. while the screen is off-screen. So the
+  // title is never snapped to 0 while visible — by the time you see this screen
+  // again it's already at 0 and only ever animates upward. On first mount it
+  // starts at 0 and fades in once.
+  const titleOpacity = useSharedValue(0);
   useFocusEffect(
     useCallback(() => {
-      // withSequence guarantees the reset-then-animate REPLAYS on every focus.
-      // A bare `value = 0; value = withTiming(1)` can collapse to a no-op when
-      // the value is already 1, so the entrance wouldn't re-play on tab switch.
-      titleAnim.value = withSequence(
-        withTiming(0, { duration: 0 }),
-        withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) }),
-      );
-    }, [titleAnim])
+      titleOpacity.value = withTiming(1, {
+        duration: 550,
+        easing: Easing.inOut(Easing.ease),
+      });
+      return () => {
+        // Runs on blur, while this screen is hidden — invisible reset.
+        titleOpacity.value = 0;
+      };
+    }, [titleOpacity])
   );
-  const titleStyle = useAnimatedStyle(() => ({
-    opacity: titleAnim.value,
-    transform: [{ translateY: (1 - titleAnim.value) * 8 }],
-  }));
+  const titleStyle = useAnimatedStyle(() => ({ opacity: titleOpacity.value }));
 
   return (
     <View style={styles.container}>
