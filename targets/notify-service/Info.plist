@@ -6,6 +6,14 @@
     <dict>
       <key>NSExtensionAttributes</key>
       <dict>
+        <!-- Required for Communication Notifications: the extension must declare
+             it supports INSendMessageIntent (pairs with NSUserActivityTypes in
+             the host app's Info.plist). Without BOTH, iOS silently skips the
+             communication styling and the push shows the plain app icon. -->
+        <key>IntentsSupported</key>
+        <array>
+          <string>INSendMessageIntent</string>
+        </array>
         <key>NSExtensionActivationRule</key>
         <string>TRUEPREDICATE</string>
       </dict>
