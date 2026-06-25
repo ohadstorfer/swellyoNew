@@ -23,7 +23,10 @@ class NotificationService: UNNotificationServiceExtension {
       return
     }
 
+    NSLog("[SwellyoNSE] didReceive fired. userInfo keys: \(Array(request.content.userInfo.keys))")
+
     let data = Self.extractData(from: request.content.userInfo)
+    NSLog("[SwellyoNSE] extracted data keys: \(Array(data.keys))")
 
     let senderName = (data["senderName"] as? String) ?? bestAttempt.title
     let senderId = (data["senderId"] as? String) ?? senderName
@@ -32,6 +35,7 @@ class NotificationService: UNNotificationServiceExtension {
     let groupName = data["groupName"] as? String
     let messageText = (data["message"] as? String) ?? bestAttempt.body
     let avatarUrl = data["avatarUrl"] as? String
+    NSLog("[SwellyoNSE] isGroup=\(isGroup) sender=\(senderName) avatarUrl=\(avatarUrl ?? "nil")")
 
     // In a Communication Notification iOS shows the sender name itself, so the
     // body must be the raw message only. (The edge function's "Sender: message"
@@ -86,8 +90,10 @@ class NotificationService: UNNotificationServiceExtension {
 
       do {
         let updated = try bestAttempt.updating(from: intent)
+        NSLog("[SwellyoNSE] updating(from:) succeeded — delivering communication notification")
         contentHandler(updated)
       } catch {
+        NSLog("[SwellyoNSE] updating(from:) FAILED: \(error.localizedDescription) — falling back to plain")
         contentHandler(bestAttempt) // graceful fallback → plain notification
       }
     }
