@@ -67,6 +67,10 @@
     <string>Swellyo uses your microphone to record voice messages and capture audio for video clips.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats.</string>
+    <key>NSUserActivityTypes</key>
+    <array>
+      <string>INSendMessageIntent</string>
+    </array>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UILaunchStoryboardName</key>
