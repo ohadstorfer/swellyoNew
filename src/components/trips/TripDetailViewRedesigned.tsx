@@ -263,6 +263,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   aboutHost = null,
   onEditCover,
   onEditAboutHost,
+  onAboutHostPress,
   onEditDescription,
   onEditDates,
   onEditAccommodation,
@@ -282,7 +283,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     : `${vm.participantCount} going`;
 
   const vibeLabel = vm.vibeSlug
-    ? TRIP_VIBE_OPTIONS.find(v => v.slug === vm.vibeSlug)?.label ?? null
+    ? // Show only the short title (e.g. "Surf-focused"), dropping the
+      // " - wake up early, surf a lot" description.
+      TRIP_VIBE_OPTIONS.find(v => v.slug === vm.vibeSlug)?.label.split(' - ')[0] ?? null
     : null;
 
   // Fixed left-to-right display order for the pills + boards illustration:
@@ -297,10 +300,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     .sort((a, b) => orderRank(a) - orderRank(b));
   // Pill font scales with how much room the boards illustration leaves: with all
   // 4 boards it eats ~half the row, so drop to 10px to keep the pills in 2 lines.
-  // 3 or fewer boards → narrower illustration → 14px still fits in 2 lines.
-  // Boards sit beside the pills, so 4 long labels ("Mid - Length") only fit two
-  // rows at a small size; fewer boards leave room to stay big.
-  const surfPillFontSize = surfStyles.length >= 4 ? 10 : surfStyles.length === 3 ? 14 : 18;
+  // 3 or fewer boards → narrower illustration → pills keep their normal 14px
+  // (don't balloon to a bigger size when there's only one board).
+  const surfPillFontSize = surfStyles.length >= 4 ? 10 : 14;
   const structures = vm.structureSlugs.filter(s => STRUCTURE_DISPLAY[s]);
 
   const waveSizeLabel =
@@ -402,7 +404,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   chips.push({ icon: 'users-02', label: 'Participants', value: participantsLabel });
   // Trip type is now shown as the coloured tag above the countdown card, so it's
   // no longer repeated as a chip here.
-  if (vibeLabel) chips.push({ icon: 'sun-setting-03', label: 'Focus vibe', value: vibeLabel });
+  if (vibeLabel) chips.push({ icon: 'sun-setting-03', label: 'Trip Vibe', value: vibeLabel });
   if (waveSizeLabel) chips.push({ icon: 'ruler', label: 'Wave size', value: waveSizeLabel });
   if (vm.waveShapeLabel)
     chips.push({ icon: 'waves', label: 'Wave shape', value: vm.waveShapeLabel });
@@ -549,7 +551,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                     <Text style={styles.chipLabel} numberOfLines={1}>
                       {c.label}
                     </Text>
-                    <Text style={styles.chipValue} numberOfLines={1}>
+                    <Text style={styles.chipValue} numberOfLines={2}>
                       {c.value}
                     </Text>
                     {c.footer ? (
@@ -591,25 +593,34 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           (aboutHost.bio || isHost || hasHostBadges || hostFamiliarity.length > 0) ? (
             <View style={styles.section}>
               <View style={styles.aboutHostHeader}>
-                {aboutHost.avatarUrl ? (
-                  <CachedImage
-                    source={{ uri: aboutHost.avatarUrl }}
-                    style={styles.aboutHostAvatar}
-                    contentFit="cover"
-                    cachePolicy="memory-disk"
-                  />
-                ) : (
-                  <View style={[styles.aboutHostAvatar, styles.aboutHostAvatarEmpty]}>
-                    <Ionicons name="person" size={22} color="#FFFFFF" />
-                  </View>
-                )}
-                <Text style={styles.aboutHostName} numberOfLines={1}>
-                  {aboutHost.name
-                    ? `About ${aboutHost.name}`
-                    : isOperator
-                      ? 'About the operator'
-                      : 'About the Captain'}
-                </Text>
+                <TouchableOpacity
+                  style={styles.aboutHostIdentity}
+                  onPress={onAboutHostPress}
+                  disabled={!onAboutHostPress}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={aboutHost.name ? `Open ${aboutHost.name}'s profile` : undefined}
+                >
+                  {aboutHost.avatarUrl ? (
+                    <CachedImage
+                      source={{ uri: aboutHost.avatarUrl }}
+                      style={styles.aboutHostAvatar}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.aboutHostAvatar, styles.aboutHostAvatarEmpty]}>
+                      <Ionicons name="person" size={22} color="#FFFFFF" />
+                    </View>
+                  )}
+                  <Text style={styles.aboutHostName} numberOfLines={1}>
+                    {aboutHost.name
+                      ? `About ${aboutHost.name}`
+                      : isOperator
+                        ? 'About the operator'
+                        : 'About the Captain'}
+                  </Text>
+                </TouchableOpacity>
                 {isHost ? <EditPill label="Edit Profile" onPress={onEditAboutHost} /> : null}
               </View>
               {hasHostBadges ? (
@@ -1364,6 +1375,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     marginBottom: 12,
+  },
+  // Avatar + name → tappable identity (opens the host's profile). Kept separate
+  // from the Edit Profile pill so only the identity is the touch target.
+  aboutHostIdentity: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   aboutHostAvatar: {
     width: 53,

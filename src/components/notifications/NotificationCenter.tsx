@@ -36,6 +36,7 @@ import {
   approveGearRequest,
   declineGearRequest,
   listGearRequests,
+  getCommitmentStatusesByRequestIds,
   type EnrichedGearRequest,
 } from '../../services/trips/groupTripsService';
 import { messagingService } from '../../services/messaging/messagingService';
@@ -221,6 +222,53 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
     loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Latest items for the focus reconcile below (avoids re-subscribing on change).
+  const itemsRef = useRef<NotificationRow[]>(items);
+  itemsRef.current = items;
+
+  // ── Reconcile commit-request rows on focus ──────────────────────────────────
+  // A commitment approved/declined from the chat bubble doesn't flip this
+  // notification's handled_at, so on return the bell would still offer the
+  // action. On focus, read each open commit request's real status and stamp the
+  // resolved ones handled so their controls clear (and persist it server-side).
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      let cancelled = false;
+      (async () => {
+        const open = itemsRef.current.filter(
+          (n) => n.type === 'commitment_request_received' && !n.handled_at && !!n.entity_id
+        );
+        if (!open.length) return;
+        const statusMap = await getCommitmentStatusesByRequestIds(
+          open.map((n) => n.entity_id as string)
+        );
+        if (cancelled || !Object.keys(statusMap).length) return;
+        const nowIso = new Date().toISOString();
+        setItems((prev) =>
+          prev.map((n) => {
+            if (
+              n.type === 'commitment_request_received' &&
+              !n.handled_at &&
+              n.entity_id &&
+              statusMap[n.entity_id] &&
+              statusMap[n.entity_id] !== 'pending'
+            ) {
+              const decision: Decision =
+                statusMap[n.entity_id] === 'approved' ? 'approved' : 'declined';
+              notificationsService.markHandled(n.id); // persist so it stays cleared
+              return { ...n, handled_at: nowIso, data: { ...(n.data ?? {}), decision } };
+            }
+            return n;
+          })
+        );
+      })().catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [userId])
+  );
 
   // The route pop animates the slide-out natively.
   const closePanel = onClose;

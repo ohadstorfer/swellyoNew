@@ -133,14 +133,14 @@ export const CommitmentMessageBubble: React.FC<Props> = ({
   const resolved: 'approved' | 'declined' | null =
     decided ?? (status === 'approved' ? 'approved' : status === 'declined' ? 'declined' : null);
 
-  const pick = async (choice: 'approved' | 'declined') => {
-    if (decided) return;
-    setDecided(choice); // optimistic — the other button collapses, this one grows
+  // Fire the actual approve/decline. Optimistically hides the buttons; reverts on error.
+  const runDecision = async (choice: 'approved' | 'declined') => {
+    setDecided(choice); // optimistic — buttons fade out, header conveys the outcome
     try {
       if (choice === 'approved') await onApprove?.();
       else await onDecline?.();
     } catch (e: any) {
-      setDecided(null); // revert the animation on failure
+      setDecided(null); // revert on failure → buttons come back
       Alert.alert(
         choice === 'approved' ? 'Could not approve' : 'Could not reject',
         e?.message || 'Please try again.'
@@ -148,13 +148,35 @@ export const CommitmentMessageBubble: React.FC<Props> = ({
     }
   };
 
+  // Native "are you sure?" confirmation before committing to the decision.
+  const pick = (choice: 'approved' | 'declined') => {
+    if (decided) return;
+    const isApprove = choice === 'approved';
+    Alert.alert(
+      isApprove ? 'Approve commitment?' : 'Decline commitment?',
+      isApprove
+        ? 'They’ll appear as committed to everyone on the trip.'
+        : 'Their commitment will be rejected and they’ll be notified.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: isApprove ? 'Approve' : 'Decline',
+          style: isApprove ? 'default' : 'destructive',
+          onPress: () => {
+            void runDecision(choice);
+          },
+        },
+      ]
+    );
+  };
+
   // Header label, colour and badge follow the resolved outcome (fresh tap wins).
   const headerState: 'pending' | 'approved' | 'declined' =
     resolved === 'approved' ? 'approved' : resolved === 'declined' ? 'declined' : 'pending';
   const headerCfg = HEADER_BY_STATE[headerState];
-  // Approve/Decline render only while actionable or mid-resolution. Once a
-  // decision is persisted the header alone conveys it — no button (matches Figma).
-  const showButtons = canModerate || !!decided;
+  // Approve/Decline render only while actionable and undecided. Once a decision
+  // is made (or already persisted) the header alone conveys it — no status button.
+  const showButtons = canModerate && !decided;
   // Lead-in ("X claimed that…") shows only on an open request.
   const showClaim = headerState === 'pending' && status !== 'superseded';
   const claimText = senderName ? `${senderName} claimed that…` : 'How you’re committed';
@@ -202,56 +224,40 @@ export const CommitmentMessageBubble: React.FC<Props> = ({
           </View>
         ) : null}
 
-        {/* Actions → tapping one collapses the other (FadeOut) while the chosen
-            button slides + grows to full width (layout), label → Approved/Declined. */}
-        {showButtons && status !== 'superseded' ? (
+        {/* Actions (host, open request only). After a decision both fade out and
+            the header alone conveys the outcome — no lingering status button. */}
+        {showButtons ? (
           <View style={styles.buttons}>
-            {resolved !== 'declined' && (
-              <Reanimated.View
-                key="approve"
-                style={styles.btnFlex}
-                layout={LinearTransition.duration(320)}
-                exiting={FadeOut.duration(160)}
+            <Reanimated.View
+              key="approve"
+              style={styles.btnFlex}
+              layout={LinearTransition.duration(320)}
+              exiting={FadeOut.duration(160)}
+            >
+              <TouchableOpacity
+                style={styles.approveBtn}
+                onPress={() => pick('approved')}
+                disabled={!!decided}
+                activeOpacity={0.85}
               >
-                {resolved === 'approved' ? (
-                  <View style={styles.approveBtn}>
-                    <Text style={styles.approveText}>Approved</Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.approveBtn}
-                    onPress={() => pick('approved')}
-                    disabled={!!decided}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.approveText}>Approve</Text>
-                  </TouchableOpacity>
-                )}
-              </Reanimated.View>
-            )}
-            {resolved !== 'approved' && (
-              <Reanimated.View
-                key="decline"
-                style={styles.btnFlex}
-                layout={LinearTransition.duration(320)}
-                exiting={FadeOut.duration(160)}
+                <Text style={styles.approveText}>Approve</Text>
+              </TouchableOpacity>
+            </Reanimated.View>
+            <Reanimated.View
+              key="decline"
+              style={styles.btnFlex}
+              layout={LinearTransition.duration(320)}
+              exiting={FadeOut.duration(160)}
+            >
+              <TouchableOpacity
+                style={styles.declineBtn}
+                onPress={() => pick('declined')}
+                disabled={!!decided}
+                activeOpacity={0.85}
               >
-                {resolved === 'declined' ? (
-                  <View style={styles.declineBtn}>
-                    <Text style={styles.declineText}>Declined</Text>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.declineBtn}
-                    onPress={() => pick('declined')}
-                    disabled={!!decided}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.declineText}>Decline</Text>
-                  </TouchableOpacity>
-                )}
-              </Reanimated.View>
-            )}
+                <Text style={styles.declineText}>Decline</Text>
+              </TouchableOpacity>
+            </Reanimated.View>
           </View>
         ) : status === 'superseded' ? (
           <View style={styles.statusWrap}>

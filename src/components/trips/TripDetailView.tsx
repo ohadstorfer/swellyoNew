@@ -508,6 +508,9 @@ export interface TripDetailViewProps {
   onEditCover?: () => void;
   /** Host taps "Edit Profile" → open the about-host (host_lead_note) edit sheet. */
   onEditAboutHost?: () => void;
+  /** Tap the host avatar/name in the "About <host>" block → open their profile.
+   *  Omitted when the host is the viewer (they get "Edit Profile" instead). */
+  onAboutHostPress?: () => void;
   /** Host taps "Edit" on "About this trip" → open the description edit sheet. */
   onEditDescription?: () => void;
   /** Host taps "Set dates" → open the dates edit sheet (A/B trips without exact dates). */

@@ -53,8 +53,22 @@ class NotificationService: UNNotificationServiceExtension {
       let intent: INSendMessageIntent
       if isGroup {
         let speakable = INSpeakableString(spokenPhrase: groupName ?? "Group")
+        // iOS only renders this as a GROUP (group name + group image) when the
+        // intent has >= 2 recipients. With `recipients: nil` it degrades to a
+        // 1:1 and shows the sender name + no image (the app icon). We don't have
+        // the member list in the extension, so pass the sender + a "You"
+        // placeholder; `speakableGroupName` takes precedence over recipient
+        // names, so the group name is what's shown.
+        let me = INPerson(
+          personHandle: INPersonHandle(value: "swellyo-self", type: .unknown),
+          nameComponents: nil,
+          displayName: "You",
+          image: nil,
+          contactIdentifier: nil,
+          customIdentifier: nil
+        )
         intent = INSendMessageIntent(
-          recipients: nil,
+          recipients: [sender, me],
           outgoingMessageType: .outgoingMessageText,
           content: messageText,
           speakableGroupName: speakable,
@@ -63,7 +77,8 @@ class NotificationService: UNNotificationServiceExtension {
           sender: sender,
           attachments: nil
         )
-        // For groups the big thumbnail is the GROUP image.
+        // For groups the big thumbnail is the GROUP image (sender image is never
+        // shown for groups — it must go on speakableGroupName).
         if let img = avatarImage {
           intent.setImage(img, forParameterNamed: \.speakableGroupName)
         }

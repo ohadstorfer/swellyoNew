@@ -1350,17 +1350,32 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     getCommitmentStatusesByMessageIds(ids)
       .then((statusMap) => {
         if (cancelled || !Object.keys(statusMap).length) return;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.type === 'commitment_request' &&
-            m.id &&
-            statusMap[m.id] &&
-            m.commitment_metadata &&
-            m.commitment_metadata.status !== statusMap[m.id]
-              ? { ...m, commitment_metadata: { ...m.commitment_metadata, status: statusMap[m.id] } }
-              : m
-          )
-        );
+        setMessages((prev) => {
+          let changed = false;
+          const next = prev.map((m) => {
+            if (
+              m.type === 'commitment_request' &&
+              m.id &&
+              statusMap[m.id] &&
+              m.commitment_metadata &&
+              m.commitment_metadata.status !== statusMap[m.id]
+            ) {
+              changed = true;
+              return {
+                ...m,
+                commitment_metadata: { ...m.commitment_metadata, status: statusMap[m.id] },
+              };
+            }
+            return m;
+          });
+          // Persist so the next open reads the correct status straight from cache
+          // (no flash) — the message-row write-back is RLS-blocked, so the cached
+          // message would otherwise stay stale on every reopen.
+          if (changed && currentConversationId) {
+            chatHistoryCache.saveMessages(currentConversationId, next).catch(() => {});
+          }
+          return next;
+        });
       })
       .catch((err) => {
         console.warn('[DirectMessageScreen] hydrate commitment statuses failed:', err);
@@ -1395,16 +1410,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Optimistically patches the local message so the bubble's status flips
   // immediately without waiting for realtime.
   const patchCommitmentStatus = (requestId: string, status: 'approved' | 'declined') => {
-    setMessages((prev) =>
-      prev.map((m) =>
+    setMessages((prev) => {
+      const next = prev.map((m) =>
         m.type === 'commitment_request' && m.commitment_metadata?.request_id === requestId
           ? {
               ...m,
               commitment_metadata: { ...m.commitment_metadata, status },
             }
           : m
-      )
-    );
+      );
+      // Persist the corrected status so reopening the chat doesn't flash the
+      // stale 'pending' state — the message-row write-back is RLS-blocked for
+      // the host, so the cached message would otherwise keep the old status.
+      if (currentConversationId) {
+        chatHistoryCache.saveMessages(currentConversationId, next).catch(() => {});
+      }
+      return next;
+    });
     setPendingCommitments((prev) => prev.filter((r) => r.id !== requestId));
   };
 

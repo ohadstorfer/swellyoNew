@@ -3079,6 +3079,20 @@ export default function CreateTripFlowA({
     </TouchableOpacity>
   );
 
+  // Same button as the Select footer, labeled "Set" — used by the Flow C
+  // "What's included" sheets. Confirms + closes the sheet.
+  const sheetSetFooter = (
+    <TouchableOpacity
+      onPress={closeSheet}
+      activeOpacity={0.85}
+      style={localStyles.sheetSelectBtn}
+      accessibilityRole="button"
+      accessibilityLabel="Set"
+    >
+      <Text style={localStyles.sheetSelectBtnText}>Set</Text>
+    </TouchableOpacity>
+  );
+
   // Post-publish: show the Published / invite-friends screen until Done.
   if (published) {
     return (
@@ -3420,6 +3434,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <TripTagPicker<string>
           options={[...MEALS_OPTIONS]}
@@ -3435,6 +3450,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <TripTagPicker<string>
           options={[...ACCOMMODATION_INCL_OPTIONS]}
@@ -3450,6 +3466,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <TripTagPicker<string>
           options={[...TRANSPORTATION_OPTIONS]}
@@ -3465,6 +3482,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <TripTagPicker<string>
           options={[...SURF_SESSIONS_OPTIONS]}
@@ -3480,6 +3498,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <TripTagPicker<string>
           options={[...SURF_EQUIPMENT_OPTIONS]}
@@ -3495,6 +3514,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <SurfFilmSheetContent
           value={state.priceInclusions.surfFilm ?? {}}
@@ -3508,6 +3528,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <VideoAnalysisSheetContent
           value={state.priceInclusions.videoAnalysis ?? {}}
@@ -3521,6 +3542,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <ActivitiesSheetContent
           value={state.priceInclusions.activities ?? []}
@@ -3534,6 +3556,7 @@ export default function CreateTripFlowA({
         titleAlign="left"
         hideHeaderDivider
         onClose={closeSheet}
+        footer={sheetSetFooter}
       >
         <WellnessSheetContent
           value={state.priceInclusions.wellness ?? []}
