@@ -326,7 +326,12 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
             <View
               style={[
                 styles.footer,
-                { paddingBottom: Math.max(insets.bottom, 12) },
+                // When the sheet extends behind the keyboard, lift the footer
+                // above the keyboard so the action button stays tappable
+                // (otherwise it would render at the screen bottom, hidden).
+                extendBehindKeyboard && keyboardHeight > 0
+                  ? { marginBottom: keyboardHeight, paddingBottom: 12 }
+                  : { paddingBottom: Math.max(insets.bottom, 12) },
               ]}
             >
               {footer}

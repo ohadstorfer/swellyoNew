@@ -21,6 +21,7 @@ import {
   Alert,
   Image,
   ImageSourcePropType,
+  Keyboard,
   Platform,
   StyleSheet,
   Text,
@@ -1246,6 +1247,13 @@ export default function CreateTripFlowA({
   // ---- Sheet management --------------------------------------------------
   const [openSheet, setOpenSheet] = useState<SheetKey | null>(null);
 
+  // Opening any sheet (Where, When, etc.) drops the keyboard if a text field
+  // left it up — so tapping a sheet-opening row never leaves the keyboard
+  // floating behind the sheet.
+  useEffect(() => {
+    if (openSheet) Keyboard.dismiss();
+  }, [openSheet]);
+
   // ---- Keyboard avoidance for inline text fields -------------------------
   // The chrome scrolls whichever input is in `focusedInputRef` clear of the
   // keyboard + floating footer on keyboard-show.
@@ -2175,6 +2183,7 @@ export default function CreateTripFlowA({
             accessibilityRole="button"
             accessibilityLabel="Decrease max participants"
             onPress={() => {
+              Keyboard.dismiss();
               const n = parseInt(state.maxParticipants || '0', 10);
               update('maxParticipants', n <= 2 ? '' : String(n - 1));
             }}
@@ -2197,6 +2206,7 @@ export default function CreateTripFlowA({
             accessibilityRole="button"
             accessibilityLabel="Increase max participants"
             onPress={() => {
+              Keyboard.dismiss();
               const n = parseInt(state.maxParticipants || '0', 10);
               update('maxParticipants', String(n < 2 ? 2 : Math.min(n + 1, 50)));
             }}
@@ -2225,6 +2235,7 @@ export default function CreateTripFlowA({
             ]);
           }}
           onPress={async () => {
+            Keyboard.dismiss();
             const uri = await pickImage([1, 1]);
             if (uri) {
               update('heroImageUri', uri);
@@ -3093,6 +3104,40 @@ export default function CreateTripFlowA({
     </TouchableOpacity>
   );
 
+  // Footer for the "Add your own" sheet — "Set" (routed through
+  // closeCustomSheet so it prunes empty rows + resets the edit index), with
+  // "Remove" stacked below it.
+  const customSetFooter = (
+    <View style={localStyles.customFooterStack}>
+      <TouchableOpacity
+        onPress={closeCustomSheet}
+        activeOpacity={0.85}
+        style={localStyles.sheetSelectBtn}
+        accessibilityRole="button"
+        accessibilityLabel="Set"
+      >
+        <Text style={localStyles.sheetSelectBtnText}>Set</Text>
+      </TouchableOpacity>
+      {customEditIndex != null ? (
+        <TouchableOpacity
+          onPress={() => {
+            if (customEditIndex == null) return;
+            setInclusions({ custom: customList.filter((_, j) => j !== customEditIndex) });
+            setCustomEditIndex(null);
+            setOpenSheet(null);
+          }}
+          activeOpacity={0.85}
+          style={localStyles.customRemoveBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Remove this item"
+        >
+          <Ionicons name="trash-outline" size={18} color="#C0392B" />
+          <Text style={localStyles.customRemoveBtnText}>Remove</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+
   // Post-publish: show the Published / invite-friends screen until Done.
   if (published) {
     return (
@@ -3572,6 +3617,7 @@ export default function CreateTripFlowA({
         onClose={closeCustomSheet}
         heightMode="full"
         extendBehindKeyboard
+        footer={customSetFooter}
       >
         <CustomInclusionSheetContent
           value={
@@ -3584,12 +3630,6 @@ export default function CreateTripFlowA({
             setInclusions({
               custom: customList.map((c, j) => (j === customEditIndex ? next : c)),
             });
-          }}
-          onRemove={() => {
-            if (customEditIndex == null) return;
-            setInclusions({ custom: customList.filter((_, j) => j !== customEditIndex) });
-            setCustomEditIndex(null);
-            setOpenSheet(null);
           }}
         />
       </WizardBottomSheet>
@@ -3672,6 +3712,23 @@ const localStyles = StyleSheet.create({
     lineHeight: 24,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // "Add your own" footer — "Set" with "Remove" stacked beneath it.
+  customFooterStack: {
+    gap: 4,
+  },
+  customRemoveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  customRemoveBtnText: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#C0392B',
   },
   // Common
   labelRow: {
