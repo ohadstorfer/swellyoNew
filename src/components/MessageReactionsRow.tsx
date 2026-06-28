@@ -7,6 +7,9 @@ interface Props {
   reactions: AggregatedReaction[];
   ownAlignment: 'left' | 'right';
   onPress?: (emoji: string) => void;
+  // Left offset (px) for left-aligned rows so the badge lines up with the
+  // bubble's left edge instead of the avatar lane in group chats.
+  leftInset?: number;
 }
 
 /**
@@ -17,6 +20,7 @@ export const MessageReactionsRow: React.FC<Props> = ({
   reactions,
   ownAlignment,
   onPress,
+  leftInset,
 }) => {
   if (reactions.length === 0) return null;
 
@@ -25,6 +29,7 @@ export const MessageReactionsRow: React.FC<Props> = ({
       style={[
         styles.row,
         ownAlignment === 'right' ? styles.alignRight : styles.alignLeft,
+        ownAlignment === 'left' && leftInset != null && { marginLeft: leftInset },
       ]}
     >
       {reactions.map(r => {

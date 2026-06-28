@@ -47,6 +47,7 @@ import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
 import { MessageBubbleHighlight } from '../components/MessageBubbleHighlight';
 import { SwipeToReplyWrapper } from '../components/SwipeToReplyWrapper';
 import { useMessaging } from '../context/MessagingProvider';
+import { useUserProfile } from '../context/UserProfileContext';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
@@ -64,6 +65,7 @@ import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { logEventThrottled } from '../services/analytics/eventLogger';
 import { ReportUserScreen, ReportedMessageContext } from './ReportUserScreen';
 import { ReportMessageSheet } from '../components/ReportMessageSheet';
+import { ReactionsDetailSheet, ReactorInfo } from '../components/ReactionsDetailSheet';
 import { withTimeout } from '../services/messaging/withTimeout';
 import { sanitizeMessage } from '../services/messaging/messageSanitizer';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
@@ -360,6 +362,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
+  // Current user's avatar — used for own voice-message bubbles (optimistic rows
+  // have no enriched sender_avatar yet).
+  const { profile: myProfile } = useUserProfile();
   
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showChatMenu, setShowChatMenu] = useState(false);
@@ -370,6 +375,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [reportTarget, setReportTarget] = useState<{ userId: string; name: string } | null>(null);
   // Message reports use an in-chat bottom sheet (the whole-user report still uses the full ReportUserScreen).
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  // "Who reacted" sheet — opened by tapping a reaction pill under a message.
+  const [reactionsSheet, setReactionsSheet] = useState<{ messageId: string; emoji: string } | null>(null);
   const [showMuteModal, setShowMuteModal] = useState(false);
   // Composer (input bar) height — measured via onLayout. Passed to
   // KeyboardGestureArea's `offset` prop so the interactive-dismiss zone
@@ -3120,7 +3127,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         ? { ...m, upload_state: 'failed', upload_error: errorMessage }
         : m
     ));
-    Alert.alert('No se pudo reenviar', errorMessage);
+    Alert.alert('Could not resend', errorMessage);
   };
 
   // Remove a failed (never-delivered) message from the UI, outbox, and cache.
@@ -3180,7 +3187,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       try {
         const result = await messagingService.getMessagesAround(currentConversationId, parentMessageId, 20);
         if (result.messages.length === 0) {
-          Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
+          Alert.alert('Message not available', 'We couldn’t find the original message.');
           return;
         }
         setMessages(result.messages);
@@ -3191,7 +3198,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         await new Promise<void>((r) => setTimeout(r, 0)); // let the new window lay out
         invertedIndex = findInvertedIndex(parentMessageId);
       } catch {
-        Alert.alert('Mensaje no disponible', 'No pudimos encontrar el mensaje original.');
+        Alert.alert('Message not available', 'We couldn’t find the original message.');
         return;
       } finally {
         setResolvingReplyJumpId(null);
@@ -3252,13 +3259,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // fail. Offer Retry / Delete (local) / Copy instead.
     if (isOwnMessage && message.upload_state === 'failed') {
       Alert.alert(
-        'Mensaje sin enviar',
+        'Message not sent',
         message.body || '',
         [
-          { text: 'Reenviar', onPress: () => handleRetryTextMessage(message) },
-          { text: 'Copiar texto', onPress: () => handleCopyMessageText(message) },
-          { text: 'Borrar', style: 'destructive', onPress: () => handleDeleteFailedMessage(message) },
-          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Resend', onPress: () => handleRetryTextMessage(message) },
+          { text: 'Copy text', onPress: () => handleCopyMessageText(message) },
+          { text: 'Delete', style: 'destructive', onPress: () => handleDeleteFailedMessage(message) },
+          { text: 'Cancel', style: 'cancel' },
         ]
       );
       return;
@@ -3286,8 +3293,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // `!isLastInRun` override). The cutout must mirror that or the dim peeks past
     // the rounded corner of a tail-less bubble.
     const tailCorner = isLastInRun ? 2 : 16;
+    // Mirror the bubble's real tail corner: own bubbles are pointy at
+    // bottom-right (userMessageBubble borderBottomRightRadius: 2), other
+    // bubbles at bottom-left (botMessageBubble borderBottomLeftRadius: 2).
     const radii = isOwnMessage
-      ? { topLeft: 16, topRight: tailCorner, bottomLeft: 16, bottomRight: 16 }
+      ? { topLeft: 16, topRight: 16, bottomLeft: 16, bottomRight: tailCorner }
       : { topLeft: 16, topRight: 16, bottomLeft: tailCorner, bottomRight: 16 };
     // Remember it so the edit-mode re-measure keeps the same tail/no-tail cutout.
     editDimRadiiRef.current = radii;
@@ -3414,7 +3424,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             <Animated.View style={[styles.typingDot, { opacity: opacity2 }]} />
             <Animated.View style={[styles.typingDot, { opacity: opacity3 }]} />
             {typingCount > 1 && (
-              <Text style={styles.typingCountText}>{typingCount} personas escribiendo…</Text>
+              <Text style={styles.typingCountText}>{typingCount} people typing…</Text>
             )}
           </View>
         </View>
@@ -3441,6 +3451,26 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     }
     return map;
   }, [messages]);
+
+  // user_id -> { name, avatar } for the reactions sheet. Message senders give
+  // avatars for anyone who has posted; conversation members are authoritative
+  // (covers reactors who haven't sent a message in the loaded window).
+  const reactorInfoById = useMemo(() => {
+    const map = new Map<string, ReactorInfo>();
+    for (const m of messages) {
+      if (m.sender_id && !map.has(m.sender_id)) {
+        map.set(m.sender_id, {
+          name: m.sender_name || m.sender?.name,
+          avatar: m.sender_avatar || m.sender?.avatar || undefined,
+        });
+      }
+    }
+    const conv = providerConversations.find(c => c.id === currentConversationId);
+    for (const mem of conv?.members ?? []) {
+      map.set(mem.user_id, { name: mem.name, avatar: mem.profile_image_url });
+    }
+    return map;
+  }, [messages, providerConversations, currentConversationId]);
 
   // FlatList helpers for inverted list
   const renderItem = useCallback(({ item, index }: { item: Message; index: number }) => {
@@ -3582,6 +3612,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // otherUserAvatar (in a group that's the group cover, which would wrongly show
     // as a member's avatar). No photo → initials placeholder (the default avatar).
     const senderAvatar = message.sender_avatar || message.sender?.avatar || null;
+    // Group received messages show the sender avatar OUTSIDE on the left (last of
+    // a run). Audio bubbles additionally render an inside avatar (WhatsApp-style),
+    // so group voice notes intentionally show both — per product decision.
     const showAvatar = isGroupReceived && isLastInRun && (message.sender_name || message.sender_avatar);
     const showAvatarSpacer = isGroupReceived && !isLastInRun;
     const showSenderName = isGroupReceived && isFirstInRun && !!senderName;
@@ -3681,7 +3714,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               activeOpacity={0.7}
               style={[
                 styles.groupSenderNameTouchable,
+                // Photo/video are padding-0; a small inset keeps the name off the
+                // corner. Audio is padding-0 too, but its content sits at 10px, so
+                // align the name to 10px to match the waveform start + normal messages.
                 isPhotoOrVideo && styles.groupSenderNameTouchableMedia,
+                message.type === 'audio' && styles.groupSenderNameTouchableAudio,
               ]}
             >
               <Text
@@ -3694,13 +3731,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           )}
           {message.reply_to_snapshot && !message.deleted && (
             <View
-              style={
+              style={[
+                // Stretch to the full bubble width so the grey quote bubble
+                // reaches the end (matches the body container's width:100%).
+                // QuotedMessagePreview's own alignSelf:'stretch' can only fill
+                // this wrapper, so the wrapper itself must span the bubble.
+                styles.quotedPreviewWrap,
                 (message.type === 'image' || message.image_metadata ||
                  message.type === 'video' || message.video_metadata ||
-                 message.type === 'audio')
-                  ? styles.quotedPreviewMediaWrap
-                  : undefined
-              }
+                 message.type === 'audio') && styles.quotedPreviewMediaWrap,
+              ]}
             >
               <QuotedMessagePreview
                 snapshot={message.reply_to_snapshot}
@@ -3724,6 +3764,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 message={message}
                 isOwn={isOwnMessage}
                 onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
+                avatarUrl={isOwnMessage ? (senderAvatar || myProfile?.profile_image_url || null) : (senderAvatar || otherUserAvatar)}
+                senderName={isOwnMessage ? (myProfile?.name || undefined) : (message.sender_name || message.sender?.name || otherUserName || undefined)}
+                timeText={formatTime(message.created_at)}
+                receipt={isOwnMessage && !message.deleted ? (
+                  <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
+                ) : undefined}
               />
               {isOwnMessage && message.upload_state === 'failed' && !message.deleted && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 12, paddingHorizontal: 10, paddingBottom: 6 }}>
@@ -4067,7 +4113,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                       ]}>
                         {formatTime(message.created_at)}
                         {message.edited && !message.deleted && (
-                          <Text style={styles.editedBadge}>  (edited)</Text>
+                          <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                         )}
                       </Text>
                       {isOwnMessage && (
@@ -4141,7 +4187,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                       ]}>
                         {formatTime(message.created_at)}
                         {message.edited && !message.deleted && (
-                          <Text style={styles.editedBadge}>  (edited)</Text>
+                          <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                         )}
                       </Text>
                       {isOwnMessage && (
@@ -4169,7 +4215,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     <Text style={[styles.timestamp, styles.userTimestamp]}>
                       {formatTime(message.created_at)}
                       {message.edited && !message.deleted && (
-                        <Text style={styles.editedBadge}>  (edited)</Text>
+                        <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                       )}
                     </Text>
                     {!message.deleted && !isEditing && (
@@ -4181,7 +4227,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     <Text style={[styles.timestamp, styles.botTimestamp]}>
                       {formatTime(message.created_at)}
                       {message.edited && !message.deleted && (
-                        <Text style={styles.editedBadge}>  (edited)</Text>
+                        <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                       )}
                     </Text>
                   </View>
@@ -4211,14 +4257,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         <MessageReactionsRow
           reactions={message.reactions}
           ownAlignment={isOwnMessage ? 'right' : 'left'}
-          onPress={(emoji) => {
-            const mine = message.reactions?.find(r => r.hasMine);
-            if (mine?.emoji === emoji) {
-              removeReaction(message.id);
-            } else {
-              setReaction(message.id, emoji);
-            }
-          }}
+          // Group incoming bubbles are offset by the avatar lane (32 + 8);
+          // align the badge to the bubble's left edge, not the avatar.
+          leftInset={isDirect ? 2 : 42}
+          // Tapping a reaction pill opens the WhatsApp-style "who reacted" sheet
+          // (add/remove happens inside it), instead of toggling inline.
+          onPress={(emoji) => setReactionsSheet({ messageId: message.id, emoji })}
         />
       )}
       </SwipeToReplyWrapper>
@@ -4635,6 +4679,21 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           setReportTarget(null);
           onBack?.();
         }}
+      />
+
+      {/* WhatsApp-style "who reacted" sheet. Reactions are re-derived from the
+          live message so add/remove inside the sheet updates it in place. */}
+      <ReactionsDetailSheet
+        visible={!!reactionsSheet}
+        onClose={() => setReactionsSheet(null)}
+        reactions={
+          (reactionsSheet && messages.find(m => m.id === reactionsSheet.messageId)?.reactions) || []
+        }
+        currentUserId={currentUserId}
+        membersById={reactorInfoById}
+        initialEmoji={reactionsSheet?.emoji}
+        onRemoveOwn={() => reactionsSheet && removeReaction(reactionsSheet.messageId)}
+        onAddReaction={(emoji) => reactionsSheet && setReaction(reactionsSheet.messageId, emoji)}
       />
 
       {/* Delete Confirmation Modal (Web only) */}
@@ -5259,6 +5318,12 @@ const styles = StyleSheet.create({
     paddingBottom: 5,
     paddingHorizontal: 7,
   },
+  // Audio: name left-aligned at 10px to match the waveform/avatar start and the
+  // inset of normal (text) messages.
+  groupSenderNameTouchableAudio: {
+    paddingTop: 6,
+    paddingHorizontal: 10,
+  },
   messageAvatar: {
     width: 32,
     height: 32,
@@ -5342,6 +5407,9 @@ const styles = StyleSheet.create({
     paddingRight: 3,
     paddingBottom: 3,
     paddingLeft: 3,
+  },
+  quotedPreviewWrap: {
+    alignSelf: 'stretch',
   },
   quotedPreviewMediaWrap: {
     paddingHorizontal: 6,
@@ -5478,9 +5546,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },
+  // Own (celeste) bubbles: keep "(edited)" white like the timestamp.
+  editedBadgeOwn: {
+    color: 'rgba(255, 255, 255, 0.85)',
+  },
   deletedMessageText: {
     fontStyle: 'italic',
     opacity: 0.6,
+    fontSize: 14,
+    lineHeight: 19,
   },
   deletedMessageTextContainer: {
     width: '100%', // Ensure container can expand
@@ -5499,7 +5573,14 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
   },
   messageImage: {
+    // Fill the bubble's content box exactly via stretch (no percentage-width
+    // rounding) and never exceed it, so the 3px frame stays symmetric on all
+    // sides. width:'100%' could resolve a hair wider than the content box and
+    // get clipped on the right by the bubble's overflow:hidden — eating the
+    // right frame on short/wide images.
+    alignSelf: 'stretch',
     width: '100%',
+    maxWidth: '100%',
     minHeight: 200,
     maxHeight: 500,
     backgroundColor: colors.backgroundGray,

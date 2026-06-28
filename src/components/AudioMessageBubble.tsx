@@ -1,10 +1,14 @@
 /**
  * AudioMessageBubble
  *
- * Self-contained voice-message bubble. Renders a play/pause button, waveform
- * progress, and duration. Subscribes to the global audioPlaybackService so
- * starting a new bubble automatically pauses any other voice message currently
- * playing.
+ * Self-contained voice-message bubble (WhatsApp-style). Renders, per row:
+ *   row 1: [inner-side avatar] play/pause · waveform progress
+ *   row 2: duration (under the waveform start) · clock time + receipt (right)
+ *
+ * The avatar sits on the bubble's INNER side (own → left, received → right)
+ * with a small mic badge, vertically centered on the waveform row. Subscribes
+ * to the global audioPlaybackService so starting a new bubble auto-pauses any
+ * other voice message currently playing.
  *
  * Rendered by both DirectMessageScreen and DirectGroupChat for messages with
  * type === 'audio'.
@@ -22,6 +26,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from './Text';
+import { ProfileImage } from './ProfileImage';
 import { colors } from '../styles/theme';
 import { audioPlaybackService, PlaybackState } from '../services/messaging/audioPlaybackService';
 import type { Message } from '../services/messaging/messagingService';
@@ -29,10 +34,17 @@ import type { Message } from '../services/messaging/messagingService';
 const MAX_BAR_COUNT = 50;
 const BAR_WIDTH = 2;
 const BAR_GAP = 2;
-// Horizontal chrome inside the audio container: paddingH (20) + play button (36) +
-// play marginRight (8) + time marginLeft (12) + time minWidth (32).
-const CHROME_WIDTH = 108;
-const BUBBLE_IDEAL_WIDTH = MAX_BAR_COUNT * (BAR_WIDTH + BAR_GAP) + CHROME_WIDTH; // ~308
+const AVATAR_SIZE = 44;
+const AVATAR_MARGIN = 8;
+const PLAY_SIZE = 36;
+const PLAY_MARGIN = 8;
+// Duration on row 2 sits exactly under the waveform start (i.e. after the play
+// button), so this is the play button's footprint.
+const WAVEFORM_INSET = PLAY_SIZE + PLAY_MARGIN;
+// Horizontal chrome inside the audio container that is NOT waveform:
+// paddingH (20) + avatar (44) + avatar margin (8) + play button (36) + play margin (8).
+const CHROME_WIDTH = 20 + AVATAR_SIZE + AVATAR_MARGIN + PLAY_SIZE + PLAY_MARGIN;
+const BUBBLE_IDEAL_WIDTH = MAX_BAR_COUNT * (BAR_WIDTH + BAR_GAP) + CHROME_WIDTH;
 // Must stay in sync with MESSAGE_BUBBLE_MAX_WIDTH in the chat screens (window.width - 106).
 // Otherwise the audio container's fixed width overflows the bubble's maxWidth and gets clipped
 // by `overflow: 'hidden'` on imageMessageBubble.
@@ -50,6 +62,14 @@ interface AudioMessageBubbleProps {
   message: Message;
   isOwn: boolean;
   onLongPress?: (event: GestureResponderEvent) => void;
+  /** Resolved avatar URL for the sender (own → current user, received → sender). */
+  avatarUrl?: string | null;
+  /** Sender display name — drives the initials placeholder when no avatar. */
+  senderName?: string;
+  /** Pre-formatted clock time (e.g. "14:22") shown bottom-right, like normal messages. */
+  timeText?: string;
+  /** Read-receipt node (own messages only); rendered next to the clock time. */
+  receipt?: React.ReactNode;
 }
 
 function formatTime(ms: number): string {
@@ -63,6 +83,10 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
   message,
   isOwn,
   onLongPress,
+  avatarUrl,
+  senderName,
+  timeText,
+  receipt,
 }) => {
   const { id, audio_metadata, upload_state, _localPreviewUri } = message;
   const [playback, setPlayback] = useState<PlaybackState>({
@@ -128,9 +152,17 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
     }
   };
 
-  const renderLeftButton = () => {
+  // Theme per side so the waveform/time stay legible on the celeste (own) vs
+  // white (received) outer bubble. No filled play-button circle (WhatsApp-style)
+  // — just the triangle. Own: bright white waveform + icon on celeste.
+  const accentColor = isOwn ? '#FFFFFF' : colors.brandTeal;             // played bars
+  const unplayedColor = isOwn ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.22)';
+  const iconColor = isOwn ? '#FFFFFF' : 'rgba(0,0,0,0.45)';            // play/pause glyph
+  const metaColor = isOwn ? 'rgba(255,255,255,0.85)' : 'rgba(60,60,60,0.75)';
+
+  const renderPlayIcon = () => {
     if (isUploading || playback.isLoading) {
-      return <ActivityIndicator size="small" color="#FFFFFF" />;
+      return <ActivityIndicator size="small" color={iconColor} />;
     }
     if (isFailed) {
       return <Ionicons name="alert-circle" size={28} color="#E74C3C" />;
@@ -139,57 +171,93 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
     return (
       <Ionicons
         name={iconName}
-        size={20}
-        color="#FFFFFF"
-        style={!playback.isPlaying ? { marginLeft: 2 } : undefined}
+        size={26}
+        color={iconColor}
+        style={!playback.isPlaying ? { marginLeft: 1 } : undefined}
       />
     );
   };
 
-  // Both own and other chat bubbles in Swellyo are white, so we don't theme
-  // the audio content per side — accent everything in brand teal. The outer
-  // bubble's asymmetric corners + position handle own/other visual distinction.
-  const playButtonBg = colors.brandTeal;
-  const playedColor = colors.brandTeal;
-  const unplayedColor = 'rgba(0,0,0,0.22)';
-  const timeColor = colors.textSecondary;
+  // Avatar with a mic badge on the side that faces the waveform (own → badge
+  // bottom-right, received → bottom-left). Vertically centered on the waveform
+  // row via a negative top margin (the play button defines that row's height).
+  const renderAvatar = () => (
+    <View
+      style={[
+        styles.avatarWrap,
+        // Own: inherit the container's center alignment (centered on the whole
+        // bubble). Received: pin to the top and nudge up so the avatar centers on
+        // the waveform row instead (the play button defines that row's height).
+        isOwn
+          // marginBottom cancels the asymmetric container padding (8 top / 2
+          // bottom = 6) so the avatar stays centered on the FULL bubble, not the
+          // padding-shifted content box.
+          ? { marginRight: AVATAR_MARGIN, marginBottom: 6 }
+          : { marginLeft: AVATAR_MARGIN, alignSelf: 'flex-start', marginTop: (PLAY_SIZE - AVATAR_SIZE) / 2 },
+      ]}
+    >
+      <ProfileImage
+        imageUrl={avatarUrl || undefined}
+        name={senderName || 'User'}
+        style={styles.avatar}
+        showOnlineIndicator={false}
+      />
+      <View style={[styles.micBadge, isOwn ? { right: -2 } : { left: -2 }]}>
+        <Ionicons name="mic" size={10} color={colors.brandTeal} />
+      </View>
+    </View>
+  );
 
   return (
     <Pressable
       onLongPress={(e) => onLongPress?.(e)}
       delayLongPress={350}
     >
-      <View style={styles.container}>
-        <TouchableOpacity
-          style={[styles.playButton, { backgroundColor: playButtonBg }]}
-          onPress={handlePlayPress}
-          disabled={isUploading || !playUrl}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          {renderLeftButton()}
-        </TouchableOpacity>
+      <View style={[styles.container, isOwn ? styles.containerOwn : styles.containerReceived]}>
+        {isOwn && renderAvatar()}
 
-        <View style={styles.waveform}>
-          {waveform.map((sample, i) => {
-            const height = MIN_BAR_HEIGHT + sample * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT);
-            const color = i < playedBarIndex ? playedColor : unplayedColor;
-            return (
-              <View
-                key={i}
-                style={{
-                  width: BAR_WIDTH,
-                  height,
-                  marginRight: i === waveform.length - 1 ? 0 : BAR_GAP,
-                  backgroundColor: color,
-                  borderRadius: BAR_WIDTH / 2,
-                }}
-              />
-            );
-          })}
+        <View style={styles.column}>
+          <View style={styles.topRow}>
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={handlePlayPress}
+              disabled={isUploading || !playUrl}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              {renderPlayIcon()}
+            </TouchableOpacity>
+
+            <View style={styles.waveform}>
+              {waveform.map((sample, i) => {
+                const height = MIN_BAR_HEIGHT + sample * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT);
+                const color = i < playedBarIndex ? accentColor : unplayedColor;
+                return (
+                  <View
+                    key={i}
+                    style={{
+                      width: BAR_WIDTH,
+                      height,
+                      marginRight: i === waveform.length - 1 ? 0 : BAR_GAP,
+                      backgroundColor: color,
+                      borderRadius: BAR_WIDTH / 2,
+                    }}
+                  />
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.bottomRow}>
+            <Text style={[styles.duration, { color: metaColor }]}>{formatTime(displayMs)}</Text>
+            <View style={styles.metaRight}>
+              {!!timeText && <Text style={[styles.time, { color: metaColor }]}>{timeText}</Text>}
+              {receipt}
+            </View>
+          </View>
         </View>
 
-        <Text style={[styles.time, { color: timeColor }]}>{formatTime(displayMs)}</Text>
+        {!isOwn && renderAvatar()}
       </View>
     </Pressable>
   );
@@ -199,18 +267,38 @@ const styles = StyleSheet.create({
   container: {
     width: BUBBLE_WIDTH,
     flexDirection: 'row',
+    // Center the avatar vertically within the whole bubble (both rows).
     alignItems: 'center',
-    paddingVertical: 8,
+    // Tight vertical padding so the sender name (above) and the time/duration
+    // (below) sit close to the waveform.
+    paddingVertical: 3,
     paddingHorizontal: 10,
     backgroundColor: 'transparent',
   },
+  // Sent bubbles: a bit more breathing room above the waveform, tighter below.
+  containerOwn: {
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  // Received bubbles: tight top padding so the waveform sits close under the
+  // sender name. (Avatar is on the right, so it never collides with the name.)
+  containerReceived: {
+    paddingTop: 0,
+  },
+  column: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   playButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: PLAY_SIZE,
+    height: PLAY_SIZE,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: PLAY_MARGIN,
   },
   waveform: {
     flex: 1,
@@ -218,11 +306,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: MAX_BAR_HEIGHT + 2,
   },
-  time: {
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    // Push the duration to start under the waveform (past the play button).
+    paddingLeft: WAVEFORM_INSET,
+    marginTop: 0,
+  },
+  duration: {
     fontSize: 12,
     fontWeight: '500',
-    marginLeft: 12,
-    minWidth: 32,
-    textAlign: 'right',
+  },
+  metaRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  time: {
+    fontSize: 13,
+    fontWeight: '300',
+  },
+  avatarWrap: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    position: 'relative',
+  },
+  avatar: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+  },
+  micBadge: {
+    position: 'absolute',
+    bottom: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
   },
 });
