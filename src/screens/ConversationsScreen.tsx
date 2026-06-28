@@ -448,12 +448,10 @@ export default function ConversationsScreen({
     };
   };
 
-  // A conversation is visible at all if it passes the base gating: group chats
-  // (group trips) are gated to local mode while the feature is hidden; direct
-  // chats require an enriched other_user.
+  // A conversation is visible at all if it passes the base gating: group trip
+  // chats require an enriched title; direct chats require an enriched other_user.
   const isConversationVisible = (conv: Conversation) => {
-    const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
-    if (conv.is_direct === false) return isLocalMode && !!conv.title;
+    if (conv.is_direct === false) return !!conv.title;
     return !!conv.other_user?.name;
   };
 
