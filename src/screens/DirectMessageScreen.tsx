@@ -47,6 +47,7 @@ import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
 import { MessageBubbleHighlight } from '../components/MessageBubbleHighlight';
 import { SwipeToReplyWrapper } from '../components/SwipeToReplyWrapper';
 import { useMessaging } from '../context/MessagingProvider';
+import { useUserProfile } from '../context/UserProfileContext';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
@@ -369,6 +370,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
+  // Current user's avatar — used for own voice-message bubbles (optimistic rows
+  // have no enriched sender_avatar yet).
+  const { profile: myProfile } = useUserProfile();
   
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   // "Before you approve" heads-up — shown once, ~1s after opening from a
@@ -3850,6 +3854,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 message={message}
                 isOwn={isOwnMessage}
                 onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
+                avatarUrl={isOwnMessage ? (message.sender_avatar || message.sender?.avatar || myProfile?.profile_image_url || null) : senderAvatar}
+                senderName={isOwnMessage ? (myProfile?.name || undefined) : (message.sender_name || message.sender?.name || otherUserName || undefined)}
+                timeText={formatTime(message.created_at)}
+                receipt={isOwnMessage && !message.deleted ? (
+                  <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
+                ) : undefined}
               />
               {isOwnMessage && message.upload_state === 'failed' && !message.deleted && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-end', gap: 12, paddingHorizontal: 10, paddingBottom: 6 }}>
