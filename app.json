@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
       "appleTeamId": "683UA9HZYT",
-      "buildNumber": "38",
+      "buildNumber": "39",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -114,7 +114,8 @@
           "organization": "swellyo"
         }
       ],
-      "@bacons/apple-targets"
+      "@bacons/apple-targets",
+      "react-native-bottom-tabs"
     ],
     "extra": {
       "eas": {

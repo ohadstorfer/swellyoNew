@@ -1299,9 +1299,9 @@ export default function ConversationsScreen({
       </View>
       </View>
 
-      {/* Swelly floating button is rendered in the nav layer (FloatingTabBar in
-          RootNavigator) so it sits ABOVE the bottom-nav frost instead of behind
-          it. See styles.swellyFloating there. */}
+      {/* Swelly floating button is rendered in the nav layer (HomeTabsExtras in
+          RootNavigator, swellyFloatingStyles) so it sits above the bottom nav
+          on the Lineup tab. */}
 
       {/* One-time "Surf Trips tab" coach-mark */}
       <TutorialOverlay

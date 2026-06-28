@@ -1,10 +1,10 @@
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, InteractionManager, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { StackActions } from '@react-navigation/native';
+import { StackActions, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
-import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
 import ConversationsStack from './ConversationsStack';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { DirectGroupChat } from '../screens/DirectGroupChat';
@@ -25,7 +25,7 @@ import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
-import TripsBottomNav, { NavKey } from '../components/trips/TripsBottomNav';
+import type { NavKey } from '../components/trips/TripsBottomNav';
 import { Images } from '../assets/images';
 import { useMainNav } from './MainNavContext';
 import { useOnboarding } from '../context/OnboardingContext';
@@ -33,6 +33,7 @@ import { queryClient } from '../lib/queryClient';
 import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { approveJoinRequest, declineJoinRequest } from '../services/trips/groupTripsService';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
+import { navigationRef, pushRootCard } from './navigationRef';
 
 /**
  * The real navigation tree (nav migration Phase 1+):
@@ -45,7 +46,7 @@ import type { MainTabsParamList, RootStackParamList } from './navigationRef';
  * what preserves each root's scroll/pager state across switches, and keeps
  * the Trips/conversations realtime subscriptions alive.
  */
-const Tab = createBottomTabNavigator<MainTabsParamList>();
+const Tab = createNativeBottomTabNavigator<MainTabsParamList>();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 // ⏱ TEMP perf instrumentation (dev only). Profiler.onRender fires on every
@@ -401,127 +402,71 @@ const KEY_FOR_ROUTE: Record<string, NavKey> = {
 };
 
 /**
- * Adapter between react-navigation's tabBar contract and TripsBottomNav.
- * Emits tabPress (cancelable) per the custom-tab-bar contract; never calls
- * popToTop manually (react-navigation issue #9424 — wrong-stack bug).
+ * Extras rendered alongside the NATIVE tab navigator (which has no custom
+ * tabBar slot). Lives inside HomeTabs → inside both NavigationContainer and
+ * MainNavProvider, so it can read context and drive navigation:
+ *   • mirrors the active tab back into AppContent (Profile back button)
+ *   • consumes programmatic tab switches + trip-card opens
+ *   • renders the Swelly floating avatar (Lineup tab only)
  */
-function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
+function HomeTabsExtras() {
   const {
-    navControl, barSuppressed, onTabChange,
+    barSuppressed, onTabChange,
     requestedTab, onRequestedTabConsumed,
     requestedTripCard, onRequestedTripCardConsumed,
     lineupProps,
   } = useMainNav();
-  const active = KEY_FOR_ROUTE[state.routes[state.index].name] ?? 'lineup';
 
-  // Mirror the active tab into AppContent for the legacy reads that still
-  // branch on "which page is showing" (deleted in Phase 5).
+  // Active tab name read from the nested HomeTabs state on the root stack.
+  const activeRoute = useNavigationState(state => {
+    const home = state.routes.find(r => r.name === 'HomeTabs');
+    const tabState = home?.state as { index?: number; routes: { name: string }[] } | undefined;
+    if (!tabState || tabState.index == null) return 'Trips';
+    return tabState.routes[tabState.index]?.name ?? 'Trips';
+  });
+  const active = (KEY_FOR_ROUTE[activeRoute] ?? 'trips') as NavKey;
+
+  // Mirror the active tab into AppContent (legacy reads + Profile back button).
   useEffect(() => {
     onTabChange(active);
   }, [active, onTabChange]);
 
   // Programmatic switches (deep links, join-decision overlay, group-chat
-  // exits) arrive as a requested tab; consuming them here is mount-safe by
-  // construction — the bar only renders when the navigator exists.
+  // exits). Target the nested tab via the container ref — mount-safe.
   useEffect(() => {
     if (!requestedTab) return;
-    if (requestedTab !== active) {
-      navigation.navigate(ROUTE_FOR_KEY[requestedTab]);
+    if (requestedTab !== active && navigationRef.isReady()) {
+      navigationRef.navigate('HomeTabs', { screen: ROUTE_FOR_KEY[requestedTab] });
     }
     onRequestedTabConsumed();
-  }, [requestedTab, active, navigation, onRequestedTabConsumed]);
+  }, [requestedTab, active, onRequestedTabConsumed]);
 
-  // Pre-warm the OTHER tabs in the background so the FIRST switch to them is
-  // instant (no lazy mount blocking the tap — that was the `Trips mount 270ms` /
-  // `Profile mount` in the perf logs). preload() (react-navigation v7) renders a
-  // lazy screen without focusing it; deferred via InteractionManager so it never
-  // competes with the initial Lineup paint. detachInactiveScreens={false} keeps
-  // them mounted afterwards, so every later switch stays instant.
-  useEffect(() => {
-    const nav = navigation as unknown as { preload?: (name: string) => void };
-    if (typeof nav.preload !== 'function') return;
-    const task = InteractionManager.runAfterInteractions(() => {
-      try {
-        nav.preload?.('Trips');
-        nav.preload?.('Profile');
-      } catch { /* noop */ }
-    });
-    return () => task.cancel();
-  }, [navigation]);
-
-  // Programmatic trip-card opens (deep links). Pushed on the PARENT root
-  // stack — the card covers the tabs and the bar.
+  // Programmatic trip-card opens (deep links) — pushed on the root stack so the
+  // card covers the tabs and the native bar.
   useEffect(() => {
     if (!requestedTripCard) return;
-    navigation
-      .getParent()
-      ?.dispatch(StackActions.push('TripDetail', {
-        tripId: requestedTripCard.tripId,
-        focus: requestedTripCard.focus ?? null,
-      }));
-    onRequestedTripCardConsumed();
-  }, [requestedTripCard, navigation, onRequestedTripCardConsumed]);
-
-  const pressTab = (key: NavKey) => {
-    const index = state.routes.findIndex(r => r.name === ROUTE_FOR_KEY[key]);
-    if (index < 0) return;
-    const route = state.routes[index];
-    const event = navigation.emit({
-      type: 'tabPress',
-      target: route.key,
-      canPreventDefault: true,
+    pushRootCard('TripDetail', {
+      tripId: requestedTripCard.tripId,
+      focus: requestedTripCard.focus ?? null,
     });
-    if (state.index !== index && !event.defaultPrevented) {
-      // ⏱ TEMP perf instrumentation (dev only). t0 = tap. "first frame" =
-      // when the JS thread freed up enough to paint once; "interactions done"
-      // = when all scheduled work (animations, runAfterInteractions tasks,
-      // refetches that use it) settled. A big gap to "interactions done" with
-      // a small Profiler duration => the cost is async loading, not rendering.
-      if (__DEV__) {
-        const t0 = Date.now();
-        console.log(`[TAB-PERF] press ${key}`);
-        requestAnimationFrame(() => {
-          console.log(`[TAB-PERF] first frame ${key}: ${Date.now() - t0}ms`);
-        });
-        InteractionManager.runAfterInteractions(() => {
-          console.log(`[TAB-PERF] interactions done ${key}: ${Date.now() - t0}ms`);
-        });
-      }
-      navigation.navigate(route.name);
-    }
-  };
+    onRequestedTripCardConsumed();
+  }, [requestedTripCard, onRequestedTripCardConsumed]);
 
-  // ⚠ Keep ALL hooks above this line — this early return runs every render
-  // while an overlay covers the roots (Rules of Hooks).
-  if (barSuppressed) return null;
-
+  // Swelly floating avatar — Lineup tab only, hidden while an overlay is up.
+  if (active !== 'lineup' || barSuppressed || !lineupProps.onSwellyPress) return null;
   return (
-    <>
-      <TripsBottomNav
-        control={navControl}
-        active={active}
-        onLineupPress={() => pressTab('lineup')}
-        onTripsPress={() => pressTab('trips')}
-        onProfilePress={() => pressTab('profile')}
+    <TouchableOpacity
+      testID="conversations-swelly-button"
+      onPress={() => lineupProps.onSwellyPress?.()}
+      activeOpacity={0.85}
+      style={swellyFloatingStyles.button}
+    >
+      <Image
+        source={Images.swellyPopout}
+        style={swellyFloatingStyles.image}
+        resizeMode="contain"
       />
-      {/* Swelly floating avatar — lives in the nav layer (rendered AFTER the
-          bar) so it sits ABOVE the nav frost/fade instead of behind it. Only
-          on the Lineup tab. */}
-      {active === 'lineup' && lineupProps.onSwellyPress && (
-        <TouchableOpacity
-          testID="conversations-swelly-button"
-          onPress={() => lineupProps.onSwellyPress?.()}
-          activeOpacity={0.85}
-          style={swellyFloatingStyles.button}
-        >
-          <Image
-            source={Images.swellyPopout}
-            style={swellyFloatingStyles.image}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-      )}
-    </>
+    </TouchableOpacity>
   );
 }
 
@@ -529,11 +474,9 @@ const swellyFloatingStyles = StyleSheet.create({
   button: {
     position: 'absolute',
     right: 12,
-    // Fixed 13px above the nav bar's top edge. The bar sits at a fixed offset
-    // from the screen bottom: paddingBottom (44) + bar height (item 66 +
-    // padding 8*2 = 82) = top at 126px → +13 = 139. Asset is tight-cropped so
-    // the box bottom maps 1:1 to the avatar's bottom.
-    bottom: 139,
+    // Sits just above the native tab bar (~49pt bar + bottom safe area).
+    // Tuned visually on device — adjust if it overlaps the bar.
+    bottom: 96,
     width: 80,
     height: 85,
     alignItems: 'center',
@@ -546,36 +489,45 @@ const swellyFloatingStyles = StyleSheet.create({
   },
 });
 
-const renderTabBar = (props: BottomTabBarProps) => <FloatingTabBar {...props} />;
-
 function HomeTabs() {
+  // barSuppressed hides the entire native bar while a full-screen JS overlay
+  // (match-loading, Swelly shaper, own-profile, profile editor) is up — those
+  // overlays are NOT nav cards, so they don't cover the OS-level bar on their
+  // own.
+  const { barSuppressed } = useMainNav();
   return (
-    <Tab.Navigator
-      initialRouteName="Trips"
-      // Hardware back must not jump between tabs (platform convention —
-      // Instagram/WhatsApp behavior). Each root handles its own back.
-      backBehavior="none"
-      // Keep visited tabs mounted so scroll positions and the trips pager
-      // survive tab switches (instant back). NOTE: screens stay mounted but do
-      // NOT keep doing work while blurred — realtime subscriptions are
-      // focus-gated via useFocusEffect (useTripRealtime / useTripsListRealtime /
-      // SurftripDetailScreen) so only the focused screen holds a live channel.
-      // Without that gating, mounted-forever screens pile up open realtime
-      // channels and saturate the socket. lazy keeps first launch cheap.
-      detachInactiveScreens={false}
-      tabBar={renderTabBar}
-      screenOptions={{
-        headerShown: false,
-        lazy: true,
-        // Bug guard: freezeOnBlur on tab navigators has a known FPS/memory
-        // issue (react-native-screens #2971) — keep it off.
-        freezeOnBlur: false,
-      }}
-    >
-      <Tab.Screen name="Lineup" component={LineupTabScreen} />
-      <Tab.Screen name="Trips" component={TripsTabScreen} />
-      <Tab.Screen name="Profile" component={ProfileTabScreen} />
-    </Tab.Navigator>
+    <>
+      <Tab.Navigator
+        initialRouteName="Trips"
+        backBehavior="none"
+        // Brand teal active, muted inactive. On iOS 26 the bar itself is
+        // Liquid Glass (background OS-controlled); the tint + icons are ours.
+        tabBarActiveTintColor="#05BCD3"
+        tabBarInactiveTintColor="#8A9BA3"
+        // iOS 26: collapse to a pill on scroll-down (the behavior Eyal chose).
+        minimizeBehavior="onScrollDown"
+        labeled
+        hapticFeedbackEnabled
+        tabBarHidden={barSuppressed}
+      >
+        <Tab.Screen
+          name="Lineup"
+          component={LineupTabScreen}
+          options={{ title: 'The Lineup', tabBarIcon: () => Images.nav.theLineup }}
+        />
+        <Tab.Screen
+          name="Trips"
+          component={TripsTabScreen}
+          options={{ title: 'Trips', tabBarIcon: () => Images.nav.trips }}
+        />
+        <Tab.Screen
+          name="Profile"
+          component={ProfileTabScreen}
+          options={{ title: 'Profile', tabBarIcon: () => Images.nav.profile }}
+        />
+      </Tab.Navigator>
+      <HomeTabsExtras />
+    </>
   );
 }
 
