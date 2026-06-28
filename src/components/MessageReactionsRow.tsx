@@ -24,6 +24,12 @@ export const MessageReactionsRow: React.FC<Props> = ({
 }) => {
   if (reactions.length === 0) return null;
 
+  // Merge every reaction into ONE WhatsApp-style pill: the distinct emojis
+  // shown side by side, with the total count to the right when it's >1.
+  const total = reactions.reduce((sum, r) => sum + r.count, 0);
+  const anyMine = reactions.some(r => r.hasMine);
+  const Pill = onPress ? TouchableOpacity : View;
+
   return (
     <View
       style={[
@@ -32,26 +38,21 @@ export const MessageReactionsRow: React.FC<Props> = ({
         ownAlignment === 'left' && leftInset != null && { marginLeft: leftInset },
       ]}
     >
-      {reactions.map(r => {
-        const showCount = r.count > 1;
-        const Pill = onPress ? TouchableOpacity : View;
-        return (
-          <Pill
-            key={r.emoji}
-            style={[styles.pill, r.hasMine && styles.pillMine]}
-            {...(onPress
-              ? { activeOpacity: 0.7, onPress: () => onPress(r.emoji) }
-              : {})}
-          >
-            <Text style={styles.emoji}>{r.emoji}</Text>
-            {showCount ? (
-              <Text style={[styles.count, r.hasMine && styles.countMine]}>
-                {r.count}
-              </Text>
-            ) : null}
-          </Pill>
-        );
-      })}
+      <Pill
+        style={[styles.pill, anyMine && styles.pillMine]}
+        {...(onPress
+          ? { activeOpacity: 0.7, onPress: () => onPress(reactions[0].emoji) }
+          : {})}
+      >
+        {reactions.map(r => (
+          <Text key={r.emoji} style={styles.emoji}>
+            {r.emoji}
+          </Text>
+        ))}
+        {total > 1 ? (
+          <Text style={[styles.count, anyMine && styles.countMine]}>{total}</Text>
+        ) : null}
+      </Pill>
     </View>
   );
 };
@@ -101,7 +102,9 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   pillMine: {
-    backgroundColor: '#D9D9D9',
+    // Always white behind the emoji (own reactions previously used a gray
+    // fill). The bold/darker count (countMine) still marks it as yours.
+    backgroundColor: '#FFFFFF',
     borderColor: 'rgba(0, 0, 0, 0.08)',
   },
   emoji: {
@@ -109,7 +112,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   count: {
-    fontSize: 11,
+    fontSize: 13,
     color: '#444',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
   },

@@ -41,6 +41,8 @@ import { loadCachedConversationList, saveCachedConversationList } from '../servi
 import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu, type BubbleRadii } from '../components/MessageActionsMenu';
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
+import { JumboEmojiMessage, jumboBubbleStyle } from '../components/JumboEmojiMessage';
+import { getEmojiOnlyInfo } from '../utils/emoji';
 import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
@@ -3594,6 +3596,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
+    // Jumbo emoji (WhatsApp-style): an emoji-only body (≤3 emoji), with no reply
+    // and not deleted, renders large with no bubble.
+    const jumbo = getEmojiOnlyInfo(message.body);
+    const isJumbo = jumbo.isJumbo && !message.deleted && !message.reply_to_snapshot;
     const canEdit = canEditMessage(message);
     // English/LTR sticks left, Hebrew/Arabic sticks right. Computed once
     // per message and applied to every Text that renders the body content.
@@ -3706,6 +3712,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               maxWidth: Dimensions.get('window').width - 120, // Screen width minus padding
               alignSelf: 'flex-start',
             },
+            // Jumbo emoji: strip the bubble (transparent, no padding/shadow).
+            isJumbo && jumboBubbleStyle,
           ]}
         >
           {showSenderName && (
@@ -4059,6 +4067,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 </View>
               );
             })()
+          ) : isJumbo ? (
+            <JumboEmojiMessage
+              body={message.body || ''}
+              count={jumbo.count}
+              isOwn={isOwnMessage}
+              timeText={formatTime(message.created_at)}
+              receipt={isOwnMessage ? (
+                <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
+              ) : undefined}
+            />
           ) : (
             // Text message
             <>
