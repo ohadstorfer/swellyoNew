@@ -25,6 +25,7 @@ import { WizardBottomSheet } from './WizardBottomSheet';
 import { WhenSheetContent } from './sheets/WhenSheetContent';
 import { StayTypeSheetContent, type AccommodationKind } from './sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from './sheets/SpecificStaySheetContent';
+import { Images } from '../../assets/images';
 
 // Compact date helpers (mirror CreateTripFlowA — kept inline to avoid importing
 // from the wizard screen).
@@ -35,6 +36,26 @@ const parseISODate = (s: string | null): Date | null => {
   const d = new Date(`${s}T00:00:00`);
   return isNaN(d.getTime()) ? null : d;
 };
+// First day of a 'YYYY-MM' month, or null.
+const monthStart = (ym: string): Date | null => {
+  if (!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return null;
+  return new Date(y, m - 1, 1);
+};
+// Last day of a 'YYYY-MM' month (day 0 of the next month), or null.
+const monthEnd = (ym: string): Date | null => {
+  if (!ym) return null;
+  const [y, m] = ym.split('-').map(Number);
+  if (!y || !m) return null;
+  return new Date(y, m, 0);
+};
+const startOfToday = (): Date => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
 const expandMonthRange = (from: string, to: string, cap = 6): string[] => {
   if (!from) return to ? [to] : [];
   if (!to || to === from) return [from];
@@ -174,6 +195,9 @@ export const EditTextSheet: React.FC<EditTextSheetProps> = ({
       visible={visible}
       title={title}
       subtitle={subtitle}
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="auto"
       extendBehindKeyboard
@@ -192,17 +216,20 @@ export const EditTextSheet: React.FC<EditTextSheetProps> = ({
           </Text>
         ) : null}
       </View>
-      <TextInput
-        style={[styles.input, { minHeight: rows * 22 }]}
-        value={value}
-        onChangeText={t => setValue(maxLength ? t.slice(0, maxLength) : t)}
-        placeholder={placeholder}
-        placeholderTextColor={C.textFaint}
-        multiline
-        maxLength={maxLength}
-        textAlignVertical="top"
-        autoFocus
-      />
+      <View style={[styles.inputWrap, styles.inputWrapTextarea]}>
+        <Image source={Images.tripDeets.pencil} style={styles.inputPencil} resizeMode="contain" />
+        <TextInput
+          style={[styles.inputField, { minHeight: rows * 22 }]}
+          value={value}
+          onChangeText={t => setValue(maxLength ? t.slice(0, maxLength) : t)}
+          placeholder={placeholder}
+          placeholderTextColor={C.textFaint}
+          multiline
+          maxLength={maxLength}
+          textAlignVertical="top"
+          autoFocus
+        />
+      </View>
     </WizardBottomSheet>
   );
 };
@@ -256,6 +283,9 @@ export const EditCoverSheet: React.FC<EditCoverSheetProps> = ({
       visible={visible}
       title="Edit cover"
       subtitle="This photo shows at the top of your trip."
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="auto"
       footer={<SaveButton onPress={handleSave} loading={saving} disabled={!pickedUri} />}
@@ -320,42 +350,63 @@ export interface EditDatesSheetProps {
 export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
   visible,
   initial,
-  lockCalendar,
   onClose,
   onSave,
 }) => {
-  const [mode, setMode] = useState<'months' | 'exact'>(initial.datesMode);
   const [startDate, setStartDate] = useState<Date | null>(parseISODate(initial.startDateISO));
   const [endDate, setEndDate] = useState<Date | null>(parseISODate(initial.endDateISO));
-  const [monthFrom, setMonthFrom] = useState(initial.monthFrom);
-  const [monthTo, setMonthTo] = useState(initial.monthTo);
-  const [durationDays, setDurationDays] = useState<number | null>(initial.durationDays);
   const [saving, setSaving] = useState(false);
+
+  // The loose months chosen at trip creation are fixed here — they can't be
+  // changed, only narrowed to exact dates inside them.
+  const monthFrom = initial.monthFrom;
+  const monthTo = initial.monthTo || initial.monthFrom;
 
   useEffect(() => {
     if (visible) {
-      setMode(initial.datesMode);
       setStartDate(parseISODate(initial.startDateISO));
       setEndDate(parseISODate(initial.endDateISO));
-      setMonthFrom(initial.monthFrom);
-      setMonthTo(initial.monthTo);
-      setDurationDays(initial.durationDays);
     }
   }, [visible, initial]);
 
-  const exactMode = lockCalendar ? true : mode === 'exact';
-  const valid = exactMode ? !!startDate : !!monthFrom && (durationDays ?? 0) >= 1;
+  // Calendar bounds = the loose window. Never let the start fall before today.
+  const looseStart = monthStart(monthFrom);
+  const today = startOfToday();
+  const minDate = looseStart ? (looseStart.getTime() < today.getTime() ? today : looseStart) : undefined;
+  const maxDate = monthEnd(monthTo) ?? undefined;
+
+  // Length window: the picked range must stay within ±DURATION_TOLERANCE days of
+  // the trip length chosen at creation (e.g. 14 days → 9–19 days).
+  const DURATION_TOLERANCE = 5;
+  const baseLen = initial.durationDays ?? null;
+  const minRangeDays = baseLen ? Math.max(1, baseLen - DURATION_TOLERANCE) : undefined;
+  const maxRangeDays = baseLen ? baseLen + DURATION_TOLERANCE : undefined;
+
+  // Need a full range; if a length window applies, the picked length must fit it.
+  const pickedLen =
+    startDate && endDate
+      ? Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+      : null;
+  const valid =
+    !!startDate &&
+    !!endDate &&
+    (minRangeDays == null || (pickedLen != null && pickedLen >= minRangeDays)) &&
+    (maxRangeDays == null || (pickedLen != null && pickedLen <= maxRangeDays));
 
   const handleSave = async () => {
     if (!valid) return;
-    const exactDates = exactMode;
-    const dateMonths = exactDates ? [] : expandMonthRange(monthFrom, monthTo);
+    const duration =
+      startDate && endDate
+        ? Math.round((endDate.getTime() - startDate.getTime()) / 86400000) + 1
+        : initial.durationDays;
+    // Keep the loose window on the record so the constraint persists if re-opened.
+    const dateMonths = expandMonthRange(monthFrom, monthTo);
     const patch: DatesPatch = {
-      start_date: exactDates && startDate ? toISODate(startDate) : null,
-      end_date: exactDates && endDate ? toISODate(endDate) : null,
-      dates_set_in_stone: exactDates,
+      start_date: startDate ? toISODate(startDate) : null,
+      end_date: endDate ? toISODate(endDate) : null,
+      dates_set_in_stone: true,
       date_months: dateMonths.length ? dateMonths : null,
-      duration_days: durationDays,
+      duration_days: duration,
     };
     setSaving(true);
     try {
@@ -371,15 +422,24 @@ export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
   return (
     <WizardBottomSheet
       visible={visible}
-      title="Trip dates"
-      subtitle="When does this trip happen?"
+      title="Set trip dates"
+      subtitle={
+        minRangeDays && maxRangeDays
+          ? `Pick ${minRangeDays}-${maxRangeDays} days inside the months you chose.`
+          : 'Pick exact dates inside the months you chose.'
+      }
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="full"
       footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} label="Set dates" />}
     >
       <WhenSheetContent
-        mode={exactMode ? 'calendar' : 'months'}
-        onModeChange={m => setMode(m === 'calendar' ? 'exact' : 'months')}
+        // Calendar-only: the loose months are locked, you can only narrow to
+        // exact dates within them.
+        mode="calendar"
+        onModeChange={() => {}}
         startDate={startDate}
         endDate={endDate}
         onCalendarChange={({ startDate: s, endDate: e }) => {
@@ -388,13 +448,14 @@ export const EditDatesSheet: React.FC<EditDatesSheetProps> = ({
         }}
         monthFrom={monthFrom}
         monthTo={monthTo}
-        onMonthsChange={({ monthFrom: mf, monthTo: mt }) => {
-          setMonthFrom(mf);
-          setMonthTo(mt);
-        }}
-        durationDays={durationDays}
-        onDurationChange={setDurationDays}
-        lockCalendar={lockCalendar}
+        onMonthsChange={() => {}}
+        durationDays={initial.durationDays}
+        onDurationChange={() => {}}
+        lockCalendar
+        minDate={minDate}
+        maxDate={maxDate}
+        minRangeDays={minRangeDays}
+        maxRangeDays={maxRangeDays}
       />
     </WizardBottomSheet>
   );
@@ -463,35 +524,15 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
   return (
     <WizardBottomSheet
       visible={visible}
-      // specificOnly mirrors the create-trip "Stay details" sheet EXACTLY:
-      // left title, no header divider, no subtitle, dark Save button.
       title={specificOnly ? 'Stay details' : 'Accommodation'}
-      titleAlign={specificOnly ? 'left' : undefined}
-      hideHeaderDivider={specificOnly || undefined}
       subtitle={specificOnly ? undefined : 'Pick the stay type and add the specific place.'}
+      largeTitle
+      titleAlign="left"
+      hideHeaderDivider
       onClose={onClose}
       heightMode="full"
       extendBehindKeyboard
-      footer={
-        specificOnly ? (
-          <TouchableOpacity
-            onPress={handleSave}
-            activeOpacity={0.85}
-            disabled={!valid || saving}
-            style={[styles.staySaveBtn, (!valid || saving) && styles.saveBtnDisabled]}
-            accessibilityRole="button"
-            accessibilityLabel="Save stay details and close"
-          >
-            {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.staySaveBtnText}>Save</Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <SaveButton onPress={handleSave} loading={saving} disabled={!valid} />
-        )
-      }
+      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!valid} />}
     >
       {!specificOnly && (
         <>
@@ -514,41 +555,29 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
 };
 
 const styles = StyleSheet.create({
-  // Save button (footer)
+  // Footer button — mirrors the create-trip "Select" footer button exactly
+  // (CreateTripFlowA localStyles.sheetSelectBtn): dark pill, 62 tall, radius 16,
+  // 28px side margins, Montserrat 16/600.
   saveBtn: {
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: C.accent,
+    backgroundColor: '#212121',
+    height: 62,
+    borderRadius: 16,
+    marginHorizontal: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnDisabled: {
     opacity: 0.4,
   },
-  // Matches the create-trip "Stay details" sheet Save button exactly
-  // (CreateTripFlowA localStyles.sheetSetBtn).
-  staySaveBtn: {
-    backgroundColor: '#212121',
-    paddingVertical: 16,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  staySaveBtnText: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
   saveBtnText: {
     fontFamily: FONT_MONTSERRAT,
     fontSize: 16,
+    lineHeight: 24,
     fontWeight: '600',
     color: C.white,
   },
 
-  // Text field
+  // Text field — mirrors the create-trip Description field.
   fieldLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -557,25 +586,42 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '600',
-    color: C.ink,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '700',
+    color: '#222B30',
   },
   counter: {
     fontFamily: FONT_INTER,
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
   },
-  input: {
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: '#EEEEEE',
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: C.white,
+  },
+  inputWrapTextarea: {
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+  },
+  inputPencil: {
+    width: 22,
+    height: 22,
+  },
+  inputField: {
+    flex: 1,
     fontFamily: FONT_INTER,
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 22,
-    color: C.ink,
-    backgroundColor: C.surfaceMuted,
+    color: '#222B30',
+    textAlignVertical: 'top',
   },
 
   // Cover preview

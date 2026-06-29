@@ -55,6 +55,13 @@ export interface WhenSheetContentProps {
   onDurationChange: (days: number | null) => void;
   /** Flow C — exact dates only. Hides the SPECIFIC/LOOSE toggle and forces calendar. */
   lockCalendar?: boolean;
+  /** Calendar bounds — restrict selectable days to a window (e.g. the loose
+   *  months chosen at trip creation, when editing dates after the fact). */
+  minDate?: Date;
+  maxDate?: Date;
+  /** Constrain the picked range length (inclusive days). */
+  minRangeDays?: number;
+  maxRangeDays?: number;
 }
 
 interface MonthEntry {
@@ -102,6 +109,10 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
   durationDays,
   onDurationChange,
   lockCalendar,
+  minDate,
+  maxDate,
+  minRangeDays,
+  maxRangeDays,
 }) => {
   const months = useMemo(() => buildMonthsThisYearForward(), []);
   // Flow C is calendar-only — collapse to the calendar regardless of `mode`.
@@ -218,6 +229,10 @@ export const WhenSheetContent: React.FC<WhenSheetContentProps> = ({
         <CalendarRangePicker
           startDate={startDate}
           endDate={endDate}
+          minDate={minDate}
+          maxDate={maxDate}
+          minRangeDays={minRangeDays}
+          maxRangeDays={maxRangeDays}
           onChange={onCalendarChange}
           clampPastMonths
           alwaysOpen

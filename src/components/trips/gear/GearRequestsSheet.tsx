@@ -6,7 +6,7 @@
 // Used in two places: the trip Plan tab (host's pending list) and the bell
 // "Review suggestion" action (a single suggestion). Motion is the shared sheet
 // transition — backdrop FADES while the sheet SLIDES up; swipe-down to dismiss.
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,12 @@ import {
   Modal,
   Pressable,
   KeyboardAvoidingView,
-  Platform,
   Animated,
   ScrollView,
   TextInput,
   Dimensions,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SHEET } from '../TripBottomSheet';
@@ -62,6 +63,54 @@ export const GearRequestsSheet: React.FC<Props> = ({
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
 
+  // Lift the WHOLE sheet (not its inner scroll) just enough that the focused
+  // input clears the keyboard, leaving ~4px visible below it. Keeps the header
+  // intact (no internal scroll). Recompute on BOTH keyboard-show and focus so it
+  // works regardless of which fires first (and when switching inputs).
+  const GAP_BELOW_INPUT = 4;
+  const inputRefs = useRef<Record<string, TextInput | null>>({});
+  const focusedId = useRef<string | null>(null);
+  const kbTopRef = useRef(SCREEN_H); // keyboard top in window coords (SCREEN_H = hidden)
+  const liftRef = useRef(0); // currently-applied lift in px (positive = up)
+  const kbLift = useRef(new Animated.Value(0)).current;
+
+  const animateLift = useCallback(
+    (lift: number) => {
+      liftRef.current = lift;
+      Animated.timing(kbLift, { toValue: -lift, duration: 220, useNativeDriver: true }).start();
+    },
+    [kbLift]
+  );
+
+  const recomputeLift = useCallback(() => {
+    const id = focusedId.current;
+    const input = id ? inputRefs.current[id] : null;
+    if (!input || kbTopRef.current >= SCREEN_H) return;
+    // measureInWindow returns the position WITH the current lift applied — add it
+    // back to recover the resting bottom, so re-measures while lifted stay correct.
+    input.measureInWindow((_x, y, _w, h) => {
+      const restingBottom = y + h + liftRef.current;
+      animateLift(Math.max(0, restingBottom + GAP_BELOW_INPUT - kbTopRef.current));
+    });
+  }, [animateLift]);
+
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = Keyboard.addListener(showEvt, e => {
+      kbTopRef.current = e.endCoordinates?.screenY ?? SCREEN_H;
+      recomputeLift();
+    });
+    const onHide = Keyboard.addListener(hideEvt, () => {
+      kbTopRef.current = SCREEN_H;
+      animateLift(0);
+    });
+    return () => {
+      onShow.remove();
+      onHide.remove();
+    };
+  }, [recomputeLift, animateLift]);
+
   // Reset staged edits whenever the sheet (re)opens so a fresh suggestion isn't
   // pre-seeded with a previous one's edited name.
   useEffect(() => {
@@ -77,13 +126,15 @@ export const GearRequestsSheet: React.FC<Props> = ({
 
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={s.kavRoot}
-      >
+      {/* avoidKeyboard={false}: let the keyboard overlay the (frozen) sheet
+          instead of pushing it up. */}
+      <KeyboardAvoidingView behavior={undefined} enabled={false} style={s.kavRoot}>
         <Pressable style={s.container} onPress={onClose}>
           <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
-          <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+          <Animated.View
+            style={{ transform: [{ translateY }, { translateY: kbLift }] }}
+            onLayout={onSheetLayout}
+          >
             <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
               {/* Grabber */}
               <View style={s.grabberRow} {...panHandlers}>
@@ -147,9 +198,16 @@ export const GearRequestsSheet: React.FC<Props> = ({
                         <View style={s.field}>
                           <TripIcon name="edit-03" size={24} color="#333333" />
                           <TextInput
+                            ref={el => {
+                              inputRefs.current[r.id] = el;
+                            }}
                             style={s.input}
                             value={name}
                             onChangeText={t => setNames(prev => ({ ...prev, [r.id]: t }))}
+                            onFocus={() => {
+                              focusedId.current = r.id;
+                              recomputeLift();
+                            }}
                             placeholder="Item name"
                             placeholderTextColor={SHEET.textMuted}
                             maxLength={NAME_MAX}
@@ -256,7 +314,7 @@ const s = StyleSheet.create({
 
   body: { maxHeight: SCREEN_H * 0.7, marginTop: 16 },
   bodySingle: { marginTop: 0 },
-  bodyContent: { paddingBottom: 8 },
+  bodyContent: { paddingBottom: 0 },
   empty: {
     color: SHEET.textMuted,
     fontFamily: SHEET.fontBody,
@@ -265,7 +323,7 @@ const s = StyleSheet.create({
     paddingVertical: 24,
   },
 
-  card: { paddingBottom: 4 },
+  card: { paddingBottom: 0 },
   cardBordered: {
     borderWidth: 1,
     borderColor: SHEET.border,
@@ -289,7 +347,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 20,
+    marginTop: 24,
   },
   label: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: '#333333' },
   counter: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: SHEET.textMuted },
@@ -319,12 +377,12 @@ const s = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     color: '#333333',
-    marginTop: 20,
+    marginTop: 24,
   },
   note: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, color: SHEET.inkBody, marginTop: 6 },
 
   // "How many needed?" stepper (mirrors the member-side suggest sheet)
-  qtyLabel: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: '#333333', marginTop: 20 },
+  qtyLabel: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 18, color: '#333333', marginTop: 24 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   stepBtn: {
     width: 56,
@@ -355,10 +413,10 @@ const s = StyleSheet.create({
     backgroundColor: SHEET.inkDark,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
+    marginTop: 32,
   },
   addDisabled: { opacity: 0.35 },
   addText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, lineHeight: 24, color: '#FFFFFF' },
-  decline: { alignItems: 'center', justifyContent: 'center', paddingVertical: 14, marginTop: 4 },
+  decline: { alignItems: 'center', justifyContent: 'center', paddingTop: 14, paddingBottom: 0, marginTop: 4 },
   declineText: { fontFamily: ff('Inter', '600'), fontSize: 14, lineHeight: 20, color: '#333333' },
 });

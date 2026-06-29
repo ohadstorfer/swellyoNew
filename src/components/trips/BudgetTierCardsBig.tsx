@@ -61,7 +61,7 @@ const CARD_SUBTITLE = 'Accommodation & Meals';
 
 const formatMoney = (n: number): string => {
   if (!Number.isFinite(n)) return '-';
-  return Math.round(n).toLocaleString('en-US') + '$';
+  return '$' + Math.round(n).toLocaleString('en-US');
 };
 
 const formatRange = (r: BudgetTierRange): string => {

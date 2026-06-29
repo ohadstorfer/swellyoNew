@@ -214,12 +214,12 @@ export const BUDGET_VIBE: Record<'low' | 'medium' | 'high', string> = {
   high: 'Premium',
 };
 
-/** "1500–2000$" / "1500$+" / "up to 2000$" from a min/max range. */
+/** "$1500-$2000" / "$1500+" / "up to $2000" from a min/max range. */
 export function formatBudgetRange(min: number | null, max: number | null): string | null {
   if (min == null && max == null) return null;
-  if (min != null && max != null) return `${min}-${max}$`;
-  if (min != null) return `${min}$+`;
-  return `up to ${max}$`;
+  if (min != null && max != null) return `$${min}-$${max}`;
+  if (min != null) return `$${min}+`;
+  return `up to $${max}`;
 }
 
 const MONTH_SHORT = [
@@ -508,6 +508,9 @@ export interface TripDetailViewProps {
   onEditCover?: () => void;
   /** Host taps "Edit Profile" → open the about-host (host_lead_note) edit sheet. */
   onEditAboutHost?: () => void;
+  /** Tap the host avatar/name in the "About <host>" block → open their profile.
+   *  Omitted when the host is the viewer (they get "Edit Profile" instead). */
+  onAboutHostPress?: () => void;
   /** Host taps "Edit" on "About this trip" → open the description edit sheet. */
   onEditDescription?: () => void;
   /** Host taps "Set dates" → open the dates edit sheet (A/B trips without exact dates). */
@@ -574,7 +577,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
     overviewCards.push({
       icon: 'cash-outline',
       label: 'Price',
-      value: `${vm.costPerPerson}$`,
+      value: `$${vm.costPerPerson}`,
       highlight: true,
       footer: hasPriceDetail ? 'See what’s included' : undefined,
       onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,

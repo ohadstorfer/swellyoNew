@@ -70,10 +70,35 @@ async function sendReactionPush(
 
   const { data: reactorSurfer } = await supabase
     .from('surfers')
-    .select('name')
+    .select('name, profile_image_url')
     .eq('user_id', reactorId)
     .single();
   const reactorName = reactorSurfer?.name || 'Someone';
+  const reactorAvatarUrl: string | null = reactorSurfer?.profile_image_url ?? null;
+
+  // Resolve conversation kind + the image the push should show — mirrors
+  // send-push-notification's buildMessageContext: DM → reactor's photo,
+  // group → group hero image. (iOS stamps the Swellyo badge corner itself.)
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('is_direct, title, metadata')
+    .eq('id', conversationId)
+    .single();
+  const isGroup = conv ? conv.is_direct === false : false;
+  const groupName: string | null = isGroup ? (conv?.title ?? null) : null;
+  let groupImageUrl: string | null = null;
+  if (isGroup) {
+    const tripId = conv?.metadata?.trip_id;
+    if (tripId) {
+      const { data: trip } = await supabase
+        .from('group_trips')
+        .select('hero_image_url')
+        .eq('id', tripId)
+        .single();
+      groupImageUrl = trip?.hero_image_url ?? null;
+    }
+  }
+  const avatarUrl = isGroup ? groupImageUrl : reactorAvatarUrl;
 
   // Snippet of the reacted-to message so the recipient knows which one.
   const { data: msg } = await supabase
@@ -112,10 +137,22 @@ async function sendReactionPush(
       title,
       body,
       sound: 'default',
+      // High priority so it reliably wakes the iOS Notification Service Extension.
+      priority: 'high',
+      // mutableContent lets the iOS extension intercept and rebuild the push as a
+      // Communication Notification (big avatar). Without it iOS shows the app icon.
+      mutableContent: true,
+      // Android: same avatar/hero as the notification's large icon. iOS ignores
+      // this and builds the rich avatar from `data` instead.
+      ...(avatarUrl ? { richContent: { image: avatarUrl } } : {}),
       data: {
         kind: 'reaction',
         conversationId,
         senderId: reactorId,
+        senderName: reactorName,
+        isGroup,
+        groupName: groupName ?? '',
+        avatarUrl: avatarUrl ?? '',
         messageId,
         emoji,
       },

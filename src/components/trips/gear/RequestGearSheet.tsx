@@ -4,7 +4,7 @@
 // quantity at approval time. The item name is capped at 21 chars to match the
 // design's counter, plus an optional short "why" note for the host.
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,16 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const nameRef = useRef<TextInput>(null);
   const noteRef = useRef<TextInput>(null);
+
+  // Open with the keyboard already up + cursor in the first field. The delay
+  // lets the sheet mount/lay out so the keyboard rises with it.
+  useEffect(() => {
+    if (!visible) return;
+    const t = setTimeout(() => nameRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, [visible]);
 
   const close = () => {
     setName('');
@@ -57,10 +66,10 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
     <TripBottomSheet
       visible={visible}
       onClose={close}
-      title="Request item"
-      subtitle="Host will review your request"
+      title="Suggest item"
+      subtitle="Admin will review your suggestion"
+      hideClose
       footerDivider={false}
-      avoidKeyboard={false}
       footer={
         <TouchableOpacity
           style={[styles.submit, disabled && styles.submitDisabled]}
@@ -71,7 +80,7 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
           {submitting ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.submitText}>Request</Text>
+            <Text style={styles.submitText}>Suggest</Text>
           )}
         </TouchableOpacity>
       }
@@ -86,6 +95,7 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
       <View style={styles.field}>
         <TripIcon name="edit-03" size={24} color="#333333" />
         <TextInput
+          ref={nameRef}
           style={styles.input}
           value={name}
           onChangeText={setName}
@@ -112,7 +122,7 @@ export const RequestGearSheet: React.FC<Props> = ({ visible, onClose, onSubmit }
           style={styles.input}
           value={note}
           onChangeText={setNote}
-          placeholder="Add a note to help the host decide..."
+          placeholder="Add a note to help the admin decide..."
           placeholderTextColor={SHEET.textMuted}
           maxLength={NOTE_MAX}
           editable={!submitting}
@@ -131,8 +141,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 24, // 24px gap between field blocks (Figma: gap-24)
   },
-  // Body already pads 18 below the header divider; +6 ≈ Figma's 24px to the first label.
-  firstLabelRow: { marginTop: 6 },
+  // Extra top breathing room under the sheet title, matching our other sheets
+  // (body pads 18 + 12 ≈ 30 to the first label).
+  firstLabelRow: { marginTop: 12 },
   label: {
     fontFamily: ff('Inter', '700'),
     fontSize: 14,
@@ -162,12 +173,20 @@ const styles = StyleSheet.create({
     fontFamily: ff('Inter', '400'),
     fontSize: 14,
     color: SHEET.inkBody,
-    // Strip the default min height so the 56px field height holds on Android.
-    paddingVertical: 0,
+    // Small vertical padding so descenders (g, y, p) aren't clipped. The field
+    // is a fixed 56px row with the input centered, so this won't grow the field.
+    paddingVertical: 6,
+    // Pin alignment LTR so the placeholder / text doesn't jump to the right when
+    // the user switches to an RTL keyboard (e.g. Hebrew).
+    textAlign: 'left',
+    writingDirection: 'ltr',
   },
+  // Matches the create-trip / commitment "Select" footer button — dark pill,
+  // 62 tall, radius 16, with 22px side margins (footer pads 18 → 40 total inset).
   submit: {
-    height: 56,
-    borderRadius: 12,
+    height: 62,
+    borderRadius: 16,
+    marginHorizontal: 22,
     backgroundColor: SHEET.inkDark,
     alignItems: 'center',
     justifyContent: 'center',

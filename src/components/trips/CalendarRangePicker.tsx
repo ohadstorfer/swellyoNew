@@ -7,6 +7,11 @@ interface CalendarRangePickerProps {
   startDate: Date | null;
   endDate: Date | null;
   minDate?: Date;
+  maxDate?: Date;
+  /** Constrain the picked range length (inclusive days). Once a start is chosen,
+   *  end days outside [minRangeDays, maxRangeDays] are disabled. */
+  minRangeDays?: number;
+  maxRangeDays?: number;
   onChange: (range: { startDate: Date | null; endDate: Date | null }) => void;
   placeholder?: string;
   // When true, disable navigating to months before the current month.
@@ -42,6 +47,9 @@ const isBetween = (d: Date, start: Date, end: Date) => {
   const t = startOfDay(d).getTime();
   return t > startOfDay(start).getTime() && t < startOfDay(end).getTime();
 };
+// Inclusive day count between two dates (Aug 1 → Aug 5 = 5).
+const rangeLen = (a: Date, b: Date) =>
+  Math.abs(Math.round((startOfDay(b).getTime() - startOfDay(a).getTime()) / 86400000)) + 1;
 const formatRangeSummary = (start: Date | null, end: Date | null): string => {
   if (!start) return '';
   const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
@@ -59,6 +67,9 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
   startDate,
   endDate,
   minDate,
+  maxDate,
+  minRangeDays,
+  maxRangeDays,
   onChange,
   placeholder = 'Pick dates',
   clampPastMonths = false,
@@ -66,7 +77,7 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
 }) => {
   const [open, setOpen] = useState(alwaysOpen);
   const [viewMonth, setViewMonth] = useState<Date>(() =>
-    startOfMonth(startDate ?? new Date())
+    startOfMonth(startDate ?? minDate ?? new Date())
   );
 
   const effectiveMinDate = minDate
@@ -75,12 +86,21 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
       ? startOfMonth(new Date())
       : null;
   const min = effectiveMinDate ? startOfDay(effectiveMinDate) : null;
-  const minMonth = clampPastMonths ? startOfMonth(new Date()) : null;
+  const max = maxDate ? startOfDay(maxDate) : null;
+  const minMonth = minDate
+    ? startOfMonth(minDate)
+    : clampPastMonths
+      ? startOfMonth(new Date())
+      : null;
+  const maxMonth = maxDate ? startOfMonth(maxDate) : null;
   const isAtMinMonth =
     !!minMonth && viewMonth.getTime() <= minMonth.getTime();
+  const isAtMaxMonth =
+    !!maxMonth && viewMonth.getTime() >= maxMonth.getTime();
 
   const handleDayTap = (day: Date) => {
     if (min && startOfDay(day).getTime() < min.getTime()) return;
+    if (max && startOfDay(day).getTime() > max.getTime()) return;
     // No selection yet, or full range already → start fresh from this day.
     if (!startDate || (startDate && endDate)) {
       onChange({ startDate: day, endDate: null });
@@ -91,6 +111,10 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
       onChange({ startDate: null, endDate: null });
       return;
     }
+    // Enforce the allowed range length (±tolerance around the trip length).
+    const len = rangeLen(startDate, day);
+    if (minRangeDays && len < minRangeDays) return;
+    if (maxRangeDays && len > maxRangeDays) return;
     if (startOfDay(day).getTime() < startOfDay(startDate).getTime()) {
       onChange({ startDate: day, endDate: startDate });
     } else {
@@ -148,7 +172,8 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
             <TouchableOpacity
               onPress={() => setViewMonth(addMonths(viewMonth, 1))}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              style={styles.navBtn}
+              style={[styles.navBtn, isAtMaxMonth && styles.navBtnDisabled]}
+              disabled={isAtMaxMonth}
             >
               <Ionicons name="chevron-forward" size={22} color="#222B30" />
             </TouchableOpacity>
@@ -168,7 +193,18 @@ export const CalendarRangePicker: React.FC<CalendarRangePickerProps> = ({
                 if (!day) {
                   return <View key={ci} style={styles.cell} />;
                 }
-                const disabled = !!min && startOfDay(day).getTime() < min.getTime();
+                // Once a start is picked (end not yet), grey out days that would
+                // make the range too short / too long. The start day itself stays
+                // tappable so it can be deselected.
+                const lenFromStart =
+                  startDate && !endDate && !sameDay(day, startDate)
+                    ? rangeLen(startDate, day)
+                    : null;
+                const disabled =
+                  (!!min && startOfDay(day).getTime() < min.getTime()) ||
+                  (!!max && startOfDay(day).getTime() > max.getTime()) ||
+                  (lenFromStart != null && !!minRangeDays && lenFromStart < minRangeDays) ||
+                  (lenFromStart != null && !!maxRangeDays && lenFromStart > maxRangeDays);
                 const isStart = !!startDate && sameDay(day, startDate);
                 const isEnd = !!endDate && sameDay(day, endDate);
                 const isMid =

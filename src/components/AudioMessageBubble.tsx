@@ -135,12 +135,15 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
   }, [audio_metadata?.waveform]);
 
   const totalDurationMs = audio_metadata?.duration_ms ?? playback.durationMs ?? 0;
-  const progressMs = playback.isPlaying ? playback.positionMs : 0;
+  // Use positionMs directly so the played bars + countdown STAY where you paused.
+  // The service preserves positionMs on pause and resets it to 0 on finish/idle,
+  // so this is correct for all states (idle 0, playing ticking, paused held).
+  const progressMs = playback.positionMs;
   const progressFraction = totalDurationMs > 0 ? progressMs / totalDurationMs : 0;
   const playedBarIndex = Math.floor(progressFraction * waveform.length);
 
-  const displayMs = playback.isPlaying
-    ? Math.max(0, totalDurationMs - playback.positionMs)
+  const displayMs = progressMs > 0
+    ? Math.max(0, totalDurationMs - progressMs)
     : totalDurationMs;
 
   const handlePlayPress = () => {
@@ -155,8 +158,10 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
   // Theme per side so the waveform/time stay legible on the celeste (own) vs
   // white (received) outer bubble. No filled play-button circle (WhatsApp-style)
   // — just the triangle. Own: bright white waveform + icon on celeste.
-  const accentColor = isOwn ? '#FFFFFF' : colors.brandTeal;             // played bars
-  const unplayedColor = isOwn ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.22)';
+  // Own: played bars paint DARK GRAY against the white unplayed bars so playback
+  // progress is clearly visible (pure white vs 85% white read as the same color).
+  const accentColor = isOwn ? '#3A3A3A' : colors.brandTeal;            // played bars
+  const unplayedColor = isOwn ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.22)';
   const iconColor = isOwn ? '#FFFFFF' : 'rgba(0,0,0,0.45)';            // play/pause glyph
   const metaColor = isOwn ? 'rgba(255,255,255,0.85)' : 'rgba(60,60,60,0.75)';
 
@@ -248,7 +253,7 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
             </View>
           </View>
 
-          <View style={styles.bottomRow}>
+          <View style={[styles.bottomRow, isOwn && styles.bottomRowOwn]}>
             <Text style={[styles.duration, { color: metaColor }]}>{formatTime(displayMs)}</Text>
             <View style={styles.metaRight}>
               {!!timeText && <Text style={[styles.time, { color: metaColor }]}>{timeText}</Text>}
@@ -313,6 +318,10 @@ const styles = StyleSheet.create({
     // Push the duration to start under the waveform (past the play button).
     paddingLeft: WAVEFORM_INSET,
     marginTop: 0,
+  },
+  // Sent bubbles: pull the duration/time row up tighter under the waveform.
+  bottomRowOwn: {
+    marginTop: -3,
   },
   duration: {
     fontSize: 12,

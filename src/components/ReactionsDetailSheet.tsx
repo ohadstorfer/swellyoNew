@@ -122,13 +122,18 @@ export function ReactionsDetailSheet({
     <BottomSheetShell visible={visible} onClose={onClose} backdropColor="rgba(33,33,33,0.6)">
       {({ panHandlers }) => (
         <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-          <View style={styles.handleContainer} {...panHandlers}>
-            <View style={styles.handle} />
-          </View>
+          {/* Drag zone for swipe-down-to-dismiss: the whole header (handle +
+              title), so it's an easy grab target that sits above the scrolling
+              tabs/list (which would otherwise fight a downward drag). */}
+          <View {...panHandlers}>
+            <View style={styles.handleContainer}>
+              <View style={styles.handle} />
+            </View>
 
-          <Text style={styles.header}>
-            {total} {total === 1 ? 'Reaction' : 'Reactions'}
-          </Text>
+            <Text style={styles.header}>
+              {total} {total === 1 ? 'Reaction' : 'Reactions'}
+            </Text>
+          </View>
 
           {/* Filter tabs: add-reaction pill, optional "All", then one per emoji. */}
           <ScrollView
@@ -292,6 +297,9 @@ const styles = StyleSheet.create({
   },
   pickerEmoji: {
     fontSize: 24,
+    // Emoji are taller than the cap height; without headroom the inherited
+    // body lineHeight (22) clips the glyph's top. ~1.35x clears it.
+    lineHeight: 32,
   },
   list: {
     marginTop: 12,
@@ -333,6 +341,7 @@ const styles = StyleSheet.create({
   },
   reactorEmoji: {
     fontSize: 22,
+    lineHeight: 30,
     marginLeft: 8,
   },
 });

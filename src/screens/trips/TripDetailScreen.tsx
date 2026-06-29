@@ -1457,6 +1457,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 : null,
             };
           })()}
+          onAboutHostPress={
+            onViewUserProfile && trip.host_id && trip.host_id !== currentUserId
+              ? () => onViewUserProfile(trip.host_id)
+              : undefined
+          }
           onShare={handleShare}
           onEditCover={() => setEditSheet('cover')}
           onEditAboutHost={() => setEditSheet('about')}
@@ -1647,9 +1652,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           colour + label. */}
       {stickyCtaVisible && (
         <View style={styles.ctaOverlay} pointerEvents="none">
+          {/* Plain white fade (mirrors the profile "Connect to …" overlay) —
+              content dissolves into the background behind the button. A blurred
+              variant was tried but read blotchy over the colourful hero/avatars,
+              so we keep the clean gradient. */}
           <LinearGradient
-            colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.82)', 'rgba(250, 250, 250, 0.82)', '#FAFAFA']}
-            locations={[0, 0.22, 0.78, 1]}
+            colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
+            locations={[0, 0.4, 0.72, 1]}
             style={styles.ctaOverlayGradient}
           />
         </View>
@@ -2230,7 +2239,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 175,
+    height: 215,
     zIndex: 9,
     overflow: 'hidden',
     ...(Platform.OS === 'web' && {

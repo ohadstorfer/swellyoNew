@@ -155,6 +155,11 @@ async function sendPushNotification(
       // mutableContent lets the iOS Notification Service Extension intercept the
       // push and rebuild it as a Communication Notification (big avatar + badge).
       mutableContent: true,
+      // Android: show the same avatar/hero as the notification's large icon
+      // (rounded thumbnail). expo-notifications maps richContent.image →
+      // FCM notification.image → setLargeIcon. iOS ignores this; its extension
+      // builds the rich avatar from `data` instead.
+      ...(avatarUrl ? { richContent: { image: avatarUrl } } : {}),
       data: {
         type: 'message',
         conversationId,

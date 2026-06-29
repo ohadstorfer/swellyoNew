@@ -20,19 +20,19 @@ export const COMMITMENT_OPTIONS: CommitmentOption[] = [
   {
     key: 'flight_booked',
     label: 'Flight booked',
-    subtitle: "You're locked in and ready to go",
+    subtitle: "You're locked in and ready to fly",
     icon: 'ticket-outline',
   },
   {
     key: 'accommodation_booked',
     label: 'Accommodation booked',
-    subtitle: 'Covered and good to go',
+    subtitle: "Covered the spot you'll stay at",
     icon: 'home-outline',
   },
   {
     key: 'something_else',
     label: 'Something else',
-    subtitle: 'Share your situation with the group',
+    subtitle: 'Share your commitment with the group',
     icon: 'chatbubble-ellipses-outline',
   },
 ];

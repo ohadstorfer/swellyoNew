@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../../config/supabase';
+import { toThumbUrl } from './thumbnails';
 
 /**
  * Image Service
@@ -530,10 +531,10 @@ export const getLifestyleImageFromPexels = async (lifestyleKeyword: string): Pro
  * Return public bucket URL for a known lifestyle image filename (from LLM lifestyle_keyword_images).
  * Returns null if filename is not in the allowed set.
  *
- * Uses Supabase Storage image transforms (`/render/image/...?width=...`) so
- * thumbnails are served at the size we actually render. The transform endpoint
- * also responds with `cache-control: max-age=3600` (the raw `/object/` route
- * sends `no-cache`), so we get browser/CDN caching for free.
+ * Returns a pre-generated static square thumbnail from the `image-thumbnails`
+ * bucket (no `/render/image/` transform — that endpoint bills per distinct
+ * origin image per cycle and does not scale). Lifestyle images are backfilled
+ * into the thumbnail ladder; long-lived `cache-control` is set at upload time.
  *
  * `size` defaults to 300 (matches a 110px card on @2.5x density). Pass a
  * smaller value (e.g. 24) when you only need a tiny placeholder for blur-up.
@@ -546,26 +547,31 @@ export const getLifestyleImageBucketUrlForFilename = (
   const trimmed = bucketFilename.trim();
   if (!LIFESTYLE_BUCKET_IMAGE_FILENAMES.has(trimmed)) return null;
   const path = `${LIFESTYLE_IMAGES_BUCKET}/${encodeURIComponent(trimmed)}`;
-  return `${SUPABASE_URL}/storage/v1/render/image/public/${path}?width=${size}&height=${size}&resize=cover&quality=75`;
+  // Static square thumbnail (image-thumbnails bucket) instead of the metered
+  // /render/image/ endpoint. Lifestyle images are backfilled into the ladder.
+  const objectUrl = `${SUPABASE_URL}/storage/v1/object/public/${path}`;
+  return toThumbUrl(objectUrl, size, SUPABASE_URL);
 };
 
 /**
- * Rewrite a public Supabase Storage URL (`/storage/v1/object/public/...`) into a
- * square, server-resized thumbnail (`/render/image/public/...?width=...`).
+ * Rewrite a public Supabase Storage URL (`/storage/v1/object/public/...`) into
+ * its pre-generated static square thumbnail in the `image-thumbnails` bucket.
  *
- * Why: a full profile/hero JPG is ~300 KB; the transform endpoint serves a
- * ~3 KB thumbnail at the size we actually render AND sends `cache-control:
- * max-age` (the raw `/object/` route is `no-cache`), so small avatars load near
- * instantly and stay cached. Non-Supabase URLs (e.g. Google avatars) and
- * already-transformed URLs are returned unchanged.
+ * Why: a full profile/hero JPG is ~300 KB; the static thumbnail is a few KB at
+ * the size we actually render. We no longer use the `/render/image/` transform
+ * endpoint (it bills per distinct origin image per cycle and does not scale).
+ * Thumbnails are generated server-side on upload (generate-thumbnail edge fn);
+ * the <Thumb> wrapper falls back to the original if one isn't ready yet.
+ * Non-Supabase URLs (e.g. Google avatars) and already-thumbnail URLs are
+ * returned unchanged.
  */
 export const getStorageThumbUrl = (url?: string | null, size = 96): string | null => {
-  if (!url) return null;
-  const marker = '/storage/v1/object/public/';
-  if (!url.includes(marker)) return url; // not a Supabase public object — leave as-is
-  const rendered = url.replace(marker, '/storage/v1/render/image/public/');
-  const sep = rendered.includes('?') ? '&' : '?';
-  return `${rendered}${sep}width=${size}&height=${size}&resize=cover&quality=70`;
+  // Static thumbnail from the image-thumbnails bucket. We no longer hit the
+  // metered /render/image/ endpoint (it bills per distinct origin image per
+  // cycle and does not scale). Non-Supabase URLs (e.g. Google avatars) are
+  // returned unchanged. Thumbnails are generated server-side on upload; the
+  // <Thumb> wrapper falls back to the original if a thumb isn't ready yet.
+  return toThumbUrl(url, size, SUPABASE_URL);
 };
 
 /**

@@ -11,6 +11,11 @@
 module.exports = {
   type: 'notification-service',
   name: 'SwellyoNotifyService',
+  // Match the main app (15.1). Without this the target defaults to iOS 18, and
+  // the extension silently won't load on any device below iOS 18 — the push
+  // then falls back to the plain app-icon notification. The Communication
+  // Notification APIs used here all exist since iOS 15.
+  deploymentTarget: '15.1',
   // Communication Notifications require this entitlement on BOTH the app target
   // (set in app.json) and this extension target.
   entitlements: {

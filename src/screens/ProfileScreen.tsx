@@ -21,6 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { useIsFocused } from '@react-navigation/native';
 import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
@@ -243,13 +244,23 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   
   // Track initial mount to ensure replaceAsync is called on first render
   const isInitialMountRef = useRef(true);
-  
+
+  // Pause the surf-level clip whenever this card isn't actually on screen.
+  // The Profile tab is preloaded at startup and kept mounted, so without this
+  // the muted, looping video would decode forever — on other tabs and even in
+  // the background — burning battery + a hardware video decoder for nothing.
+  const isFocused = useIsFocused();
+  const shouldPlayRef = useRef(isFocused);
+  useEffect(() => {
+    shouldPlayRef.current = isFocused;
+  }, [isFocused]);
+
   // Create video player - DO NOT attempt play here, wait for replaceAsync
   const videoPlayer = useVideoPlayer(
     videoUrl || '',
     (player: any) => {
       if (player) {
-        player.staysActiveInBackground = true;
+        player.staysActiveInBackground = false; // don't decode while app is backgrounded
         player.loop = true;
         player.muted = true; // Critical for Safari autoplay
         player.audioMixingMode = 'mixWithOthers'; // Don't interrupt Spotify/other audio
@@ -261,6 +272,20 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
       }
     }
   );
+
+  // Drive playback from focus: play when the card is visible, pause when it's
+  // not (other tab, pushed screen, or app backgrounded). The monitoring effect
+  // below enforces the same desired state on its 2s poll.
+  useEffect(() => {
+    if (!videoPlayer) return;
+    try {
+      if (isFocused) {
+        videoPlayer.play?.();
+      } else {
+        videoPlayer.pause?.();
+      }
+    } catch {}
+  }, [isFocused, videoPlayer]);
 
   // Listen for statusChange to detect when video is ready to play
   useEffect(() => {
@@ -286,7 +311,8 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         videoPlayer.muted = true;
         videoPlayer.loop = true;
         
-        // Attempt to play
+        // Attempt to play (only if this card is on screen)
+        if (!shouldPlayRef.current) return;
         const playPromise = videoPlayer.play();
         if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
           (playPromise as any).catch((error: any) => {
@@ -442,7 +468,8 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
             // Wait for video to be ready, then play
             waitForVideoReady().then(() => {
               if (!videoPlayer) return;
-              
+              if (!shouldPlayRef.current) return; // skip autoplay when off screen
+
               // Best Practice: Set properties before play
               videoPlayer.loop = true;
               videoPlayer.muted = true;
@@ -516,7 +543,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
 
     // Small delay to ensure player is initialized
     const timeoutId = setTimeout(() => {
-      if (videoPlayer) {
+      if (videoPlayer && shouldPlayRef.current) {
         videoPlayer.muted = true;
         videoPlayer.loop = true;
         
@@ -545,7 +572,15 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     // Function to force play the video
     const forcePlay = async () => {
       if (!isMounted || !videoPlayer) return;
-      
+
+      // Respect focus — when the card is off screen, enforce paused instead of
+      // forcing it back to life (this is what stops the 2s poll + status
+      // listeners from resurrecting the video on other tabs).
+      if (!shouldPlayRef.current) {
+        try { if (videoPlayer.playing) videoPlayer.pause?.(); } catch {}
+        return;
+      }
+
       try {
         // Ensure properties are set
         videoPlayer.loop = true;

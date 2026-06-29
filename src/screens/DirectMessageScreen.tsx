@@ -41,6 +41,8 @@ import { loadCachedConversationList, saveCachedConversationList } from '../servi
 import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu, type BubbleRadii } from '../components/MessageActionsMenu';
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
+import { JumboEmojiMessage, jumboBubbleStyle } from '../components/JumboEmojiMessage';
+import { getEmojiOnlyInfo } from '../utils/emoji';
 import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
@@ -1354,17 +1356,32 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     getCommitmentStatusesByMessageIds(ids)
       .then((statusMap) => {
         if (cancelled || !Object.keys(statusMap).length) return;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.type === 'commitment_request' &&
-            m.id &&
-            statusMap[m.id] &&
-            m.commitment_metadata &&
-            m.commitment_metadata.status !== statusMap[m.id]
-              ? { ...m, commitment_metadata: { ...m.commitment_metadata, status: statusMap[m.id] } }
-              : m
-          )
-        );
+        setMessages((prev) => {
+          let changed = false;
+          const next = prev.map((m) => {
+            if (
+              m.type === 'commitment_request' &&
+              m.id &&
+              statusMap[m.id] &&
+              m.commitment_metadata &&
+              m.commitment_metadata.status !== statusMap[m.id]
+            ) {
+              changed = true;
+              return {
+                ...m,
+                commitment_metadata: { ...m.commitment_metadata, status: statusMap[m.id] },
+              };
+            }
+            return m;
+          });
+          // Persist so the next open reads the correct status straight from cache
+          // (no flash) — the message-row write-back is RLS-blocked, so the cached
+          // message would otherwise stay stale on every reopen.
+          if (changed && currentConversationId) {
+            chatHistoryCache.saveMessages(currentConversationId, next).catch(() => {});
+          }
+          return next;
+        });
       })
       .catch((err) => {
         console.warn('[DirectMessageScreen] hydrate commitment statuses failed:', err);
@@ -1399,16 +1416,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Optimistically patches the local message so the bubble's status flips
   // immediately without waiting for realtime.
   const patchCommitmentStatus = (requestId: string, status: 'approved' | 'declined') => {
-    setMessages((prev) =>
-      prev.map((m) =>
+    setMessages((prev) => {
+      const next = prev.map((m) =>
         m.type === 'commitment_request' && m.commitment_metadata?.request_id === requestId
           ? {
               ...m,
               commitment_metadata: { ...m.commitment_metadata, status },
             }
           : m
-      )
-    );
+      );
+      // Persist the corrected status so reopening the chat doesn't flash the
+      // stale 'pending' state — the message-row write-back is RLS-blocked for
+      // the host, so the cached message would otherwise keep the old status.
+      if (currentConversationId) {
+        chatHistoryCache.saveMessages(currentConversationId, next).catch(() => {});
+      }
+      return next;
+    });
     setPendingCommitments((prev) => prev.filter((r) => r.id !== requestId));
   };
 
@@ -3716,6 +3740,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
 
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
+    // Jumbo emoji (WhatsApp-style): an emoji-only body (≤3 emoji), with no reply
+    // and not deleted, renders large with no bubble.
+    const jumbo = getEmojiOnlyInfo(message.body);
+    const isJumbo = jumbo.isJumbo && !message.deleted && !message.reply_to_snapshot;
     const canEdit = canEditMessage(message);
     // English/LTR sticks left, Hebrew/Arabic sticks right. Computed once
     // per message and applied to every Text that renders the body content.
@@ -3811,6 +3839,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               maxWidth: Dimensions.get('window').width - 120, // Screen width minus padding
               alignSelf: 'flex-start',
             },
+            // Jumbo emoji: strip the bubble (transparent, no padding/shadow).
+            isJumbo && jumboBubbleStyle,
           ]}
         >
           {showSenderName && (
@@ -4149,6 +4179,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 </View>
               );
             })()
+          ) : isJumbo ? (
+            <JumboEmojiMessage
+              body={message.body || ''}
+              count={jumbo.count}
+              isOwn={isOwnMessage}
+              timeText={formatTime(message.created_at)}
+              receipt={isOwnMessage ? (
+                <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
+              ) : undefined}
+            />
           ) : (
             // Text message
             <>

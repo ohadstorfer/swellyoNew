@@ -448,12 +448,10 @@ export default function ConversationsScreen({
     };
   };
 
-  // A conversation is visible at all if it passes the base gating: group chats
-  // (group trips) are gated to local mode while the feature is hidden; direct
-  // chats require an enriched other_user.
+  // A conversation is visible at all if it passes the base gating: group trip
+  // chats require an enriched title; direct chats require an enriched other_user.
   const isConversationVisible = (conv: Conversation) => {
-    const isLocalMode = process.env.EXPO_PUBLIC_LOCAL_MODE === 'true';
-    if (conv.is_direct === false) return isLocalMode && !!conv.title;
+    if (conv.is_direct === false) return !!conv.title;
     return !!conv.other_user?.name;
   };
 
@@ -863,8 +861,8 @@ export default function ConversationsScreen({
       ? conv.other_user?.name || 'Unknown User'
       : conv.title || 'Group Chat';
     const avatarUrl = conv.is_direct ? conv.other_user?.profile_image_url : null;
-    // Group chats: cover photo as avatar, served via Supabase's render-time
-    // thumbnail transform (same mechanism as profile avatars — no stored thumb).
+    // Group chats: cover photo as avatar, served from the pre-generated static
+    // thumbnail (image-thumbnails bucket) via getStorageThumbUrl.
     const groupHeroThumb = !conv.is_direct
       ? getStorageThumbUrl(surftripHeroImages[conv.id], 144)
       : null;
@@ -1301,9 +1299,9 @@ export default function ConversationsScreen({
       </View>
       </View>
 
-      {/* Swelly floating button is rendered in the nav layer (FloatingTabBar in
-          RootNavigator) so it sits ABOVE the bottom-nav frost instead of behind
-          it. See styles.swellyFloating there. */}
+      {/* Swelly floating button is rendered in the nav layer (HomeTabsExtras in
+          RootNavigator, swellyFloatingStyles) so it sits above the bottom nav
+          on the Lineup tab. */}
 
       {/* One-time "Surf Trips tab" coach-mark */}
       <TutorialOverlay

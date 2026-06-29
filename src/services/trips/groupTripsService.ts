@@ -1378,6 +1378,32 @@ export async function getCommitmentStatusesByMessageIds(
 }
 
 /**
+ * Resolve the CURRENT status of commitment requests keyed by their request id.
+ * Used by the notifications bell to reconcile commit-request rows whose decision
+ * was made elsewhere (e.g. in the chat bubble) — those don't flip the
+ * notification's handled_at, so the bell needs the request's real status to know
+ * the action is no longer pending.
+ */
+export async function getCommitmentStatusesByRequestIds(
+  requestIds: string[]
+): Promise<Record<string, 'pending' | 'approved' | 'declined' | 'superseded'>> {
+  if (!requestIds.length) return {};
+  const { data, error } = await supabase
+    .from('group_trip_commitment_requests')
+    .select('id, status')
+    .in('id', requestIds);
+  if (error || !data) {
+    if (error) console.warn('[groupTripsService] getCommitmentStatusesByRequestIds:', error);
+    return {};
+  }
+  const out: Record<string, 'pending' | 'approved' | 'declined' | 'superseded'> = {};
+  for (const r of data as any[]) {
+    if (r.id && r.status) out[r.id] = r.status;
+  }
+  return out;
+}
+
+/**
  * Member self-leaves a trip. Removes from group_trip_participants and from the
  * linked group conversation, and clears their join_request row so the
  * "Request to join" CTA re-appears if they ever want to rejoin.

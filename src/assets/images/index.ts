@@ -37,6 +37,13 @@ export const Images = {
     level3: require('./travel-levels/travel-333.png'),
     level4: require('./travel-levels/travel-444.png'),
   },
+  // Trip-vibe card thumbnails (Unsplash, free commercial license).
+  tripVibes: {
+    trainingCamp: require('./trip-vibes/training-camp.jpg'),
+    surfFocused: require('./trip-vibes/surf-focused.jpg'),
+    explore: require('./trip-vibes/explore.jpg'),
+    vacation: require('./trip-vibes/vacation.jpg'),
+  },
   budget: {
     low: require('./budget/low_budget.png'),
     medium: require('./budget/medium_budget.png'),
