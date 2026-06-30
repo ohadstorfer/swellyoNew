@@ -61,3 +61,6 @@ ios/sentry.properties
 .sentryclirc
 scripts/.jwt
 .claude/worktrees/
+
+# Visual brainstorming companion (local mockups)
+.superpowers/
