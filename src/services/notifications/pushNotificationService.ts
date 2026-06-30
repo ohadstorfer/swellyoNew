@@ -15,6 +15,34 @@ export interface NotificationTapPayload {
   decision?: string;
 }
 
+/**
+ * Pure decision for whether a received notification should surface a banner /
+ * sound / badge.
+ *
+ * Rule:
+ *  • message notifications  → show UNLESS they belong to the currently-open
+ *    conversation (so you get a banner for every other chat, foreground or not).
+ *  • all other types        → keep the legacy behavior: suppress while the app
+ *    is in the foreground, show when backgrounded.
+ *
+ * Exported (not on the class) so it can be unit-tested without a real client.
+ */
+export function shouldShowForegroundNotification(args: {
+  notificationType: string | undefined;
+  conversationId: string | null | undefined;
+  currentConversationId: string | null;
+  isForeground: boolean;
+}): boolean {
+  const isMessage = args.notificationType === 'message';
+  const isSameConversation =
+    !!args.conversationId && args.conversationId === args.currentConversationId;
+
+  if (isMessage) {
+    return !isSameConversation;
+  }
+  return !args.isForeground && !isSameConversation;
+}
+
 class PushNotificationService {
   private static instance: PushNotificationService;
   private currentToken: string | null = null;
@@ -174,28 +202,35 @@ class PushNotificationService {
     this.getCurrentConversationId = getCurrentConversationId;
     this.onNotificationTap = onNotificationTap;
 
-    // Foreground: decide whether to show the notification.
+    // Decide whether a received notification surfaces a banner / sound / badge.
     //
-    // Rule: if the app is in the foreground (AppState 'active'), NEVER show a
-    // heads-up banner / play a sound — the user is already in the app and an
-    // in-app indicator (unread badge, conversation list refresh) is enough.
-    // We still let the notification be delivered to data listeners so things
-    // like unread counts can update.
+    // Message notifications now show in the FOREGROUND too — a native heads-up
+    // banner for any chat that isn't the one currently open (in-app message
+    // banners). The currently-open conversation stays suppressed so you don't
+    // get a banner for the chat you're already reading.
     //
-    // Additionally, if we can read the currently-open conversation and the
-    // payload is for that same conversation, suppress regardless of AppState
-    // (defensive — should already be covered by the AppState check).
+    // Non-message notifications (trip reminders, requests, gear) keep the
+    // legacy rule: suppressed while foregrounded, shown when backgrounded.
     //
     // Note: expo-notifications SDK 54 deprecated `shouldShowAlert` in favor of
     // `shouldShowBanner` + `shouldShowList`. We set all three for safety so
     // this keeps working across upgrades.
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
-        const conversationId = notification.request.content.data?.conversationId as string | undefined;
-        const currentId = this.getCurrentConversationId?.();
+        const data = notification.request.content.data as
+          | { type?: string; conversationId?: string }
+          | undefined;
+        const conversationId = data?.conversationId;
+        const notificationType = data?.type;
+        const currentId = this.getCurrentConversationId?.() ?? null;
         const isForeground = AppState.currentState === 'active';
-        const isSameConversation = !!conversationId && conversationId === currentId;
-        const shouldShow = !isForeground && !isSameConversation;
+
+        const shouldShow = shouldShowForegroundNotification({
+          notificationType,
+          conversationId,
+          currentConversationId: currentId,
+          isForeground,
+        });
         return {
           // Legacy key (pre-SDK 54) — kept for backwards compat
           shouldShowAlert: shouldShow,
