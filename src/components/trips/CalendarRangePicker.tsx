@@ -329,7 +329,10 @@ const styles = StyleSheet.create({
   },
   // Range rail behind in-range and endpoint cells. The endpoint cells get caps
   // (rounded corners on the outer side) so the rail looks like a continuous pill.
-  cellRail: { backgroundColor: '#E6F4F8' },
+  // overflow:'hidden' is required on Android (esp. Fabric): a View's
+  // backgroundColor ignores borderRadius without it and renders as a square —
+  // iOS clips by default. Harmless on the square mid-cells (nothing to clip).
+  cellRail: { backgroundColor: '#E6F4F8', overflow: 'hidden' },
   cellRailStartCap: { borderTopLeftRadius: 999, borderBottomLeftRadius: 999 },
   cellRailEndCap: { borderTopRightRadius: 999, borderBottomRightRadius: 999 },
 
@@ -339,6 +342,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    // Without overflow:'hidden' the teal endpoint fill renders as a SQUARE on
+    // Android (backgroundColor doesn't respect borderRadius there) — the circle
+    // only showed on iOS. This makes the start/end markers round on both.
+    overflow: 'hidden',
   },
   cellEndpointInner: { backgroundColor: '#05BCD3' },
 
