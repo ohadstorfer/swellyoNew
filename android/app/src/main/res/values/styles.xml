@@ -3,7 +3,13 @@
        Normally applied by the library's Expo config plugin, but this project commits
        native folders and skips prebuild, so it's set here manually. -->
   <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
-    <item name="android:enforceNavigationBarContrast" tools:targetApi="29">true</item>
+    <!-- Fully transparent button (3-button) nav bar: drop the semi-opaque grey
+         contrast scrim so the light app content blends behind it edge-to-edge.
+         windowLightNavigationBar=true → dark nav icons, readable on our light
+         (#FAFAFA/white) content. Kept in sync with app.json androidNavigationBar,
+         but this file is what the build uses (native folders committed, prebuild skipped). -->
+    <item name="android:enforceNavigationBarContrast" tools:targetApi="29">false</item>
+    <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
     <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     <item name="colorPrimary">@color/colorPrimary</item>
     <item name="android:statusBarColor">#ffffff</item>
