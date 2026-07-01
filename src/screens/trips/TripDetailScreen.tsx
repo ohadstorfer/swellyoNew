@@ -1339,9 +1339,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         }
       />
 
+      {/* This scroll body has NO TextInput of its own (all inputs live in the
+          gear/suggest/wizard Modal sheets), so this KAV is only needed on iOS's
+          'padding' path — and it is actively harmful on Android: behavior='height'
+          reacts to GLOBAL keyboard events, so when a sheet's keyboard opens/closes
+          the background viewport reflows and the ScrollView never re-pins to its
+          exact-bottom rest. That leaves real content parked under the always-on
+          bottom `ctaOverlay` fog, so the fog reads as a persistent grey veil after
+          any sheet interaction. Disabling the KAV on Android keeps content at rest
+          in the #FAFAFA clearance buffer, where the fog is invisible as designed. */}
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS === 'ios'}
       >
       <Animated.ScrollView
         ref={scrollRef}

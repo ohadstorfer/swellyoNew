@@ -15,10 +15,10 @@ import {
   StyleSheet,
   Modal,
   Pressable,
-  KeyboardAvoidingView,
   Platform,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';

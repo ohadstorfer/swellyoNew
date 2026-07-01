@@ -11,10 +11,10 @@ import {
   Pressable,
   TouchableOpacity,
   StyleSheet,
-  KeyboardAvoidingView,
   Platform,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';

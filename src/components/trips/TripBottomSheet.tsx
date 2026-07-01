@@ -17,11 +17,11 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  KeyboardAvoidingView,
   Platform,
   Dimensions,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../../hooks/useSheetTransition';

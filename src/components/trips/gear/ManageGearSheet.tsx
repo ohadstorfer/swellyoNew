@@ -9,10 +9,10 @@ import {
   Alert,
   Modal,
   Pressable,
-  KeyboardAvoidingView,
   Platform,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import type { EnrichedGearItem } from '../../../services/trips/groupTripsService';
 import { TripBottomSheet, SHEET } from '../TripBottomSheet';

@@ -10,8 +10,8 @@ import {
   Image,
   ScrollView,
   Platform,
-  KeyboardAvoidingView,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
 import {

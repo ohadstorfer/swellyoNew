@@ -9,12 +9,12 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   Dimensions,
   Image,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 

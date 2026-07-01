@@ -16,10 +16,10 @@ import {
   StyleSheet,
   Modal,
   Pressable,
-  KeyboardAvoidingView,
   Platform,
   Animated,
 } from 'react-native';
+import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
