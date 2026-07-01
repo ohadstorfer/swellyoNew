@@ -41,6 +41,13 @@ export interface SheetOptionCardProps {
   imageBackground?: boolean;
   /** Scale factor on the thumbnail (>1 zooms in, cropping via overflow). Default 1. */
   imageZoom?: number;
+  /**
+   * Optional fixed card height. When set (Android short-screen flows), the card
+   * shrinks below its natural 112 — the thumbnail scales down and the
+   * description collapses to one line so all options fit without scrolling.
+   * Omit on iOS / tall screens to keep the full design.
+   */
+  height?: number;
 }
 
 export const SheetOptionCard: React.FC<SheetOptionCardProps> = ({
@@ -52,7 +59,12 @@ export const SheetOptionCard: React.FC<SheetOptionCardProps> = ({
   imageResizeMode = 'cover',
   imageBackground = true,
   imageZoom = 1,
+  height,
 }) => {
+  // Compact mode: a fixed height shrinks the thumbnail (padding is 14 each side)
+  // and drops the description to one line so the card stays readable when short.
+  const compact = height != null;
+  const imgSize = compact ? Math.min(84, height - 28) : undefined;
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -60,9 +72,15 @@ export const SheetOptionCard: React.FC<SheetOptionCardProps> = ({
       accessibilityRole="checkbox"
       accessibilityState={{ checked: selected }}
       accessibilityLabel={title}
-      style={[styles.card, selected && styles.cardSelected]}
+      style={[styles.card, selected && styles.cardSelected, compact && { height, minHeight: 0 }]}
     >
-      <View style={[styles.imageWrap, !imageBackground && styles.imageWrapPlain]}>
+      <View
+        style={[
+          styles.imageWrap,
+          !imageBackground && styles.imageWrapPlain,
+          imgSize != null && { width: imgSize, height: imgSize },
+        ]}
+      >
         <Image
           source={image}
           style={[styles.image, imageZoom !== 1 && { transform: [{ scale: imageZoom }] }]}
@@ -74,7 +92,7 @@ export const SheetOptionCard: React.FC<SheetOptionCardProps> = ({
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        <Text style={styles.desc} numberOfLines={2}>
+        <Text style={styles.desc} numberOfLines={compact && height < 96 ? 1 : 2}>
           {description}
         </Text>
       </View>

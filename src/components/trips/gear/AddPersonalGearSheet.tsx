@@ -20,6 +20,7 @@ import {
   Platform,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 import { TripIcon } from '../tripIcons';
@@ -44,6 +45,8 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
+  const insets = useSafeAreaInsets();
 
   // Reset input + error each time the sheet opens.
   useEffect(() => {
@@ -82,7 +85,10 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
         <Pressable style={s.container} onPress={onClose}>
           <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
           <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
-            <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
+            <Pressable
+              style={[s.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
+              onPress={e => e.stopPropagation()}
+            >
               {/* Grabber */}
               <View style={s.grabberRow} {...panHandlers}>
                 <View style={s.grabber} />

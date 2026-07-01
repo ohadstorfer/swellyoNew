@@ -13,6 +13,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../Text';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
 import type { AddableDmPartner } from '../../services/surftrips/surftripsService';
@@ -56,6 +57,8 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
   // Slide + swipe-to-dismiss, shared with every other bottom sheet.
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, submitting ? () => {} : onClose);
+  // Android: pad past the system nav/gesture bar (iOS keeps its static 28).
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!visible) return;
@@ -138,7 +141,7 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dim, { opacity: backdropOpacity }]} />
         <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
         <Pressable
-          style={styles.sheet}
+          style={[styles.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 16) }]}
           onPress={e => e.stopPropagation()}
         >
           <View style={styles.handleZone} {...panHandlers}>

@@ -2299,6 +2299,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             onSend={sendMessage}
             disabled={isLoading || hasUnresolvedActionRow || isAwaitingFilterRemovalResponse}
             placeholder={hasUnresolvedActionRow ? 'Choose an option above to continue' : 'Type your message..'}
+            autoFitPlaceholder
             maxLength={500}
             primaryColor="#B72DF2"
           />

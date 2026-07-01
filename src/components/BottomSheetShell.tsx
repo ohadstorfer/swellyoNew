@@ -26,6 +26,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../hooks/useSheetTransition';
 
 /** Gesture props to spread onto a drag handle (returned via the render-prop form). */
@@ -61,6 +62,22 @@ export function BottomSheetShell({
 }: Props) {
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
+  const insets = useSafeAreaInsets();
+
+  // Android edge-to-edge: the RN Modal draws in its OWN window and anchors content to
+  // the SAFE AREA (window height excludes the nav bar), so a bottom-anchored sheet
+  // floats `insets.bottom` above the physical bottom and the screen behind shows
+  // through. The "correct" native fix (`navigationBarTranslucent` on the Modal) does
+  // NOT work on Expo SDK 54 — verified broken in BOTH Expo Go AND a dev build, and it
+  // matches the open Expo bug expo/expo#39749 (RN Modal forces the nav-bar inset). So we
+  // nudge the sheet down into the nav-bar region on ALL Android with a transform
+  // (transform, not margin, so measured height — and thus the slide-out animation — is
+  // unaffected). Individual sheets pad `insets.bottom` to keep content clear of the nav
+  // bar. When #39749 is fixed, drop this nudge and use navigationBarTranslucent instead.
+  const androidNavBarNudge =
+    Platform.OS === 'android' && insets.bottom > 0
+      ? { transform: [{ translateY: insets.bottom }] }
+      : undefined;
 
   const isRenderProp = typeof children === 'function';
   const content = isRenderProp
@@ -77,7 +94,11 @@ export function BottomSheetShell({
       />
       <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
         {/* Whole-sheet swipe only when NOT using the render-prop (caller places it). */}
-        <Pressable onPress={e => e.stopPropagation()} {...(swipeToDismiss && !isRenderProp ? panHandlers : {})}>
+        <Pressable
+          onPress={e => e.stopPropagation()}
+          style={androidNavBarNudge}
+          {...(swipeToDismiss && !isRenderProp ? panHandlers : {})}
+        >
           {content}
         </Pressable>
       </Animated.View>
@@ -85,7 +106,17 @@ export function BottomSheetShell({
   );
 
   return (
-    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={mounted}
+      transparent
+      animationType="none"
+      onRequestClose={onClose}
+      // statusBarTranslucent (Android, no-op on iOS) lets the modal draw behind the
+      // status bar — this one DOES work. navigationBarTranslucent is intentionally NOT
+      // set: it's broken on SDK 54 (expo/expo#39749), so the bottom is handled by
+      // `androidNavBarNudge` above instead.
+      statusBarTranslucent
+    >
       {avoidKeyboard ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

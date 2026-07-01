@@ -18,6 +18,7 @@ import type { EnrichedGearItem } from '../../../services/trips/groupTripsService
 import { TripBottomSheet, SHEET } from '../TripBottomSheet';
 import { HostTag } from '../HostTag';
 import { TripIcon } from '../tripIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 
@@ -85,6 +86,8 @@ export const ManageGearSheet: React.FC<Props> = ({
   // Sheet motion — fade the backdrop, slide the sheet (matches every other
   // bottom sheet; the formOnly Modal below consumes it).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
+  const insets = useSafeAreaInsets();
 
   const beginAdd = () => setView({ mode: 'add' });
   const beginEdit = (item: EnrichedGearItem) => setView({ mode: 'edit', item });
@@ -151,7 +154,10 @@ export const ManageGearSheet: React.FC<Props> = ({
           <Pressable style={fs.container} onPress={onClose}>
             <Animated.View pointerEvents="none" style={[fs.backdrop, { opacity: backdropOpacity }]} />
             <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
-              <Pressable style={fs.sheet} onPress={e => e.stopPropagation()}>
+              <Pressable
+                style={[fs.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
+                onPress={e => e.stopPropagation()}
+              >
               {/* Grabber */}
               <View style={fs.grabberRow} {...panHandlers}>
                 <View style={fs.grabber} />

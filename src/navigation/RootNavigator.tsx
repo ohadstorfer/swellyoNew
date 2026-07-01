@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -416,6 +416,11 @@ function HomeTabsExtras() {
     requestedTripCard, onRequestedTripCardConsumed,
     lineupProps,
   } = useMainNav();
+  // Android draws the system nav bar inside the layout, so the floating Swelly
+  // avatar must clear it on top of the tab bar. iOS keeps the tuned 96 (the
+  // home-indicator inset is already baked into that value). Called before the
+  // early return below so the hook order stays stable.
+  const insets = useSafeAreaInsets();
 
   // Active tab name read from the nested HomeTabs state on the root stack.
   const activeRoute = useNavigationState(state => {
@@ -459,7 +464,10 @@ function HomeTabsExtras() {
       testID="conversations-swelly-button"
       onPress={() => lineupProps.onSwellyPress?.()}
       activeOpacity={0.85}
-      style={swellyFloatingStyles.button}
+      style={[
+        swellyFloatingStyles.button,
+        Platform.OS === 'android' && { bottom: insets.bottom + 90 },
+      ]}
     >
       <Image
         source={Images.swellyPopout}

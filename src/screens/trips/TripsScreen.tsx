@@ -26,8 +26,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 const NOISE_TEXTURE = require('../../../assets/textures/noise.png');
-const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
-const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 import { useOnboarding } from '../../context/OnboardingContext';
 import {
   GroupTrip,
@@ -43,6 +41,7 @@ import { useExploreTrips, useMyTrips, tripsKeys, type ExploreFilterKey } from '.
 import { fetchTripCore } from '../../hooks/trips/useTripDetail';
 import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
+import { ff, fs } from '../../theme/fonts';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
 import { FadeInView } from '../../components/FadeInView';
 import { WIZARD_STATE_VERSION } from './CreateTripFlowA';
@@ -1297,6 +1296,17 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
   // the resume prompt). Reset to false for a fresh start.
   const [resumeDraft, setResumeDraft] = useState(false);
 
+  // Create chooser (Android): if the 3 role cards overflow the visible area they
+  // get cut off at the bottom. We measure the scroll viewport vs. the content's
+  // natural height and, only when it overflows, switch the cards to a compact
+  // layout so all three fit without scrolling. Screens where they already fit —
+  // iOS and tall Android — are left at their natural sizes. `naturalH` is
+  // recorded only while NOT compact, so it can't oscillate (compact→fits→un-compact).
+  const [chooserVpH, setChooserVpH] = useState(0);
+  const [chooserNaturalH, setChooserNaturalH] = useState(0);
+  const chooserCompact =
+    Platform.OS === 'android' && chooserVpH > 0 && chooserNaturalH > chooserVpH + 2;
+
   const createModalVisible = pendingStyle !== null;
 
   // Tapping a flow card: if there's a saved draft for THIS flow, ask whether to
@@ -1428,34 +1438,46 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
                 </View>
 
                 <ScrollView
-                  contentContainerStyle={styles.chooserScroll}
+                  contentContainerStyle={[styles.chooserScroll, chooserCompact && styles.chooserScrollCompact]}
                   showsVerticalScrollIndicator={false}
                   onScroll={handleCreateNavScroll}
                   scrollEventThrottle={16}
+                  onLayout={e => setChooserVpH(e.nativeEvent.layout.height)}
+                  onContentSizeChange={(_w, h) => {
+                    // Record the natural (uncompressed) content height only while
+                    // NOT compact — see chooserCompact note above.
+                    if (!chooserCompact) setChooserNaturalH(h);
+                  }}
                 >
                   <Text
-                    style={styles.chooserHeading}
+                    style={[styles.chooserHeading, chooserCompact && styles.chooserHeadingCompact]}
                     numberOfLines={1}
                     adjustsFontSizeToFit
                   >
                     Create a surf trip
                   </Text>
-                  <Text style={styles.chooserSubheading}>
+                  <Text style={[styles.chooserSubheading, chooserCompact && styles.chooserSubheadingCompact]}>
                     Plan your next adventure and invite{'\n'}surfers to join you
                   </Text>
                   {HOSTING_STYLE_OPTIONS.map(opt => (
                     <TouchableOpacity
                       key={opt.key}
-                      style={styles.chooserCard}
+                      style={[styles.chooserCard, chooserCompact && styles.chooserCardCompact]}
                       onPress={() => void onPickStyle(opt.key)}
                       activeOpacity={0.85}
                       accessibilityRole="button"
                       accessibilityLabel={`${opt.title}. ${opt.desc}`}
                     >
-                      <Image source={opt.image} style={styles.chooserThumb} resizeMode="cover" />
+                      <Image
+                        source={opt.image}
+                        style={[styles.chooserThumb, chooserCompact && styles.chooserThumbCompact]}
+                        resizeMode="cover"
+                      />
                       <View style={styles.chooserBody}>
                         <Text style={styles.chooserCardTitle}>{opt.title}</Text>
-                        <Text style={styles.chooserCardDesc}>{opt.desc}</Text>
+                        <Text style={[styles.chooserCardDesc, chooserCompact && styles.chooserCardDescCompact]}>
+                          {opt.desc}
+                        </Text>
                       </View>
                       <Ionicons
                         name="chevron-forward"
@@ -1538,8 +1560,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   tripsHeaderTitle: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontFamily: ff('Inter', '700'),
+    fontSize: fs(22),
+    fontWeight: Platform.OS === 'web' ? '700' : undefined,
+    includeFontPadding: false,
     color: '#FFFFFF',
   },
 
@@ -1563,7 +1587,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
-  tabLabel: { fontFamily: FONT_INTER, fontSize: 16, lineHeight: 20, fontWeight: '400', letterSpacing: 0.3 },
+  tabLabel: { fontFamily: ff('Inter', '400'), fontSize: fs(14), lineHeight: 18, fontWeight: '400', letterSpacing: 0.3, includeFontPadding: false },
   tabLabelActive: { color: '#05BCD3' },
   tabLabelInactive: { color: '#FFFFFF' },
 
@@ -1574,9 +1598,10 @@ const styles = StyleSheet.create({
 
   // Explore section title (Figma — Montserrat 24/600, 140% line-height).
   exploreTitle: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 31,
-    fontWeight: '600',
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: fs(31),
+    fontWeight: Platform.OS === 'web' ? '600' : undefined,
+    includeFontPadding: false,
     lineHeight: 40,
     color: '#333',
     paddingHorizontal: 16,
@@ -1591,9 +1616,10 @@ const styles = StyleSheet.create({
   exHeader: { paddingTop: 14 },
   // "Popular" section label above the trips carousel (Figma 11966:32390).
   exSectionTitle: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 22,
-    fontWeight: '700',
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: fs(22),
+    fontWeight: Platform.OS === 'web' ? '700' : undefined,
+    includeFontPadding: false,
     lineHeight: 28,
     color: '#333333',
     paddingLeft: 16,
@@ -1622,15 +1648,17 @@ const styles = StyleSheet.create({
     borderColor: '#EEEEEE',
   },
   exFilterTextActive: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(12),
     lineHeight: 16,
+    includeFontPadding: false,
     color: '#FFFFFF',
   },
   exFilterTextInactive: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(12),
     lineHeight: 16,
+    includeFontPadding: false,
     color: '#333333',
   },
 
@@ -1663,7 +1691,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  filterText: { fontFamily: FONT_INTER, fontSize: 12, lineHeight: 16, textAlign: 'center' },
+  filterText: { fontFamily: ff('Inter', '400'), fontSize: fs(12), lineHeight: 16, textAlign: 'center', includeFontPadding: false },
   filterTextActive: { color: '#FFFFFF' },
   filterTextInactive: { color: '#333333' },
   filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },
@@ -1712,9 +1740,11 @@ const styles = StyleSheet.create({
   hostAvatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   hostName: {
     flex: 1,
+    fontFamily: ff('Inter', '600'),
     color: '#FFFFFF',
-    fontSize: 17,
-    fontWeight: '600',
+    fontSize: fs(17),
+    fontWeight: Platform.OS === 'web' ? '600' : undefined,
+    includeFontPadding: false,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -1750,20 +1780,22 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cardTitle: {
-    fontFamily: FONT_MONTSERRAT,
+    fontFamily: ff('Montserrat', '700'),
     color: '#FFFFFF',
-    fontSize: 25,
+    fontSize: fs(25),
     lineHeight: 34,
-    fontWeight: '700',
+    fontWeight: Platform.OS === 'web' ? '700' : undefined,
+    includeFontPadding: false,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
   cardDesc: {
-    fontFamily: FONT_INTER,
+    fontFamily: ff('Inter', '400'),
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: fs(15),
     lineHeight: 20,
+    includeFontPadding: false,
     // Reserve room for the bottom-right participant cluster so the description
     // truncates a touch earlier instead of running behind the badge. The title
     // sits above the cluster, so only the description needs the inset.
@@ -1803,11 +1835,12 @@ const styles = StyleSheet.create({
   avatarClusterCount: { gap: 4, paddingLeft: 8 },
   clusterMore: {
     marginLeft: 1,
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 14,
+    fontFamily: ff('Montserrat', '400'),
+    fontSize: fs(14),
     lineHeight: 18,
     color: '#7B7B7B',
     fontWeight: '400',
+    includeFontPadding: false,
   },
 
   statusBadge: {
@@ -1833,8 +1866,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingRight: 8,
   },
-  statusLabel: { fontFamily: FONT_INTER, color: '#0A0A0A', fontSize: 13, lineHeight: 19, fontWeight: '500' },
-  statusDate: { fontFamily: FONT_INTER, color: '#4A5565', fontSize: 13, lineHeight: 19, fontWeight: '500' },
+  statusLabel: { fontFamily: ff('Inter', '500'), color: '#0A0A0A', fontSize: fs(13), lineHeight: 19, fontWeight: Platform.OS === 'web' ? '500' : undefined, includeFontPadding: false },
+  statusDate: { fontFamily: ff('Inter', '500'), color: '#4A5565', fontSize: fs(13), lineHeight: 19, fontWeight: Platform.OS === 'web' ? '500' : undefined, includeFontPadding: false },
 
   // Explore snap-carousel (Figma 11966:32391) — centered card, peeking neighbours.
   deckRoot: {
@@ -1875,7 +1908,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  tripTypeLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  tripTypeLabel: { fontFamily: ff('Inter', '700'), color: '#FFFFFF', fontSize: fs(13), fontWeight: Platform.OS === 'web' ? '700' : undefined, includeFontPadding: false },
   exBottom: {
     position: 'absolute',
     left: 0,
@@ -1898,10 +1931,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   exInfoLeft: { gap: 8, flexShrink: 1, marginTop: 6 },
-  exPrice: { color: '#FFFFFF', fontSize: 22, lineHeight: 26, fontWeight: '600' },
-  exDates: { color: '#FFFFFF', fontSize: 17, lineHeight: 24 },
+  exPrice: { fontFamily: ff('Inter', '600'), color: '#FFFFFF', fontSize: fs(22), lineHeight: 26, fontWeight: Platform.OS === 'web' ? '600' : undefined, includeFontPadding: false },
+  exDates: { fontFamily: ff('Inter', '400'), color: '#FFFFFF', fontSize: fs(17), lineHeight: 24, includeFontPadding: false },
   exInfoRight: { alignItems: 'flex-end', gap: 8 },
-  exSpots: { color: '#FFFFFF', fontSize: 15, lineHeight: 20, fontWeight: '400' },
+  exSpots: { fontFamily: ff('Inter', '400'), color: '#FFFFFF', fontSize: fs(15), lineHeight: 20, fontWeight: '400', includeFontPadding: false },
   exCluster: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1914,7 +1947,7 @@ const styles = StyleSheet.create({
 
   fillFlex: { flex: 1 },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 64 },
-  emptyText: { fontSize: 14, color: '#7B7B7B', marginTop: 12, textAlign: 'center' },
+  emptyText: { fontFamily: ff('Inter', '400'), fontSize: fs(14), color: '#7B7B7B', marginTop: 12, textAlign: 'center', includeFontPadding: false },
   emptyCta: {
     marginTop: 16,
     paddingHorizontal: 20,
@@ -1922,7 +1955,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#0788B0',
   },
-  emptyCtaText: { color: '#FFFFFF', fontWeight: '600' },
+  emptyCtaText: { fontFamily: ff('Inter', '600'), color: '#FFFFFF', fontWeight: Platform.OS === 'web' ? '600' : undefined, includeFontPadding: false },
 
   // Inline hosting-style chooser (moved out of CreateTripWizard).
   createRoot: { flex: 1 },
@@ -1944,25 +1977,46 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 32,
   },
+  // Compact overrides (Android only, applied when the 3 cards would overflow):
+  // trims vertical whitespace + slightly smaller thumb / line-height so all
+  // three fit without scrolling. No font-size or text truncation changes.
+  chooserScrollCompact: {
+    paddingTop: 4,
+    paddingBottom: 14,
+  },
   chooserHeading: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontFamily: ff('Inter', '600'),
     // Native: big starting size; adjustsFontSizeToFit shrinks it so the single
     // line always spans the 60%-width container. Web has no font auto-fit, so
     // it gets a fixed size that fits one line on typical widths.
-    fontSize: Platform.OS === 'web' ? 36 : 64,
-    fontWeight: '600',
+    fontSize: Platform.OS === 'web' ? 36 : fs(64),
+    // Weight is baked into the family on native (Inter-SemiBold). Setting
+    // fontWeight there makes Android synth-bold on top → heavier than iOS. So
+    // only web (which uses the CSS family) needs the numeric weight.
+    fontWeight: Platform.OS === 'web' ? '600' : undefined,
+    // Android adds extra vertical font padding by default → text block reads
+    // bigger than iOS. Remove it (no-op on iOS/web) so sizing matches.
+    includeFontPadding: false,
     color: '#333333',
     width: '64%',
     marginTop: 24,
     marginBottom: 16,
   },
+  chooserHeadingCompact: {
+    marginTop: 10,
+    marginBottom: 8,
+  },
   chooserSubheading: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 15,
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(15),
     lineHeight: 20,
     fontWeight: '400',
+    includeFontPadding: false,
     color: '#333333',
     marginBottom: 32,
+  },
+  chooserSubheadingCompact: {
+    marginBottom: 14,
   },
   chooserCard: {
     flexDirection: 'row',
@@ -1981,29 +2035,45 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
+  chooserCardCompact: {
+    minHeight: 80,
+    marginBottom: 10,
+    paddingVertical: 9,
+  },
   chooserThumb: {
     width: 84,
     height: 70,
     borderRadius: 8,
     backgroundColor: '#EEF2F4',
   },
+  chooserThumbCompact: {
+    width: 76,
+    height: 62,
+  },
   chooserBody: {
     flex: 1,
     gap: 4,
   },
   chooserCardTitle: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 18,
+    fontFamily: ff('Inter', '700'),
+    fontSize: fs(18),
     lineHeight: 22,
-    fontWeight: '700',
+    // Native weight is baked into Inter-Bold; a numeric fontWeight would make
+    // Android synth-bold on top (heavier than iOS). Web needs it though.
+    fontWeight: Platform.OS === 'web' ? '700' : undefined,
+    includeFontPadding: false,
     color: '#333333',
   },
   chooserCardDesc: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 12,
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(12),
     lineHeight: 18,
     fontWeight: '400',
+    includeFontPadding: false,
     color: '#333333',
+  },
+  chooserCardDescCompact: {
+    lineHeight: 16,
   },
   chooserChevron: {
     marginRight: 4,

@@ -100,6 +100,17 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
   extraContent,
 }) => {
   const { width: screenW, height: screenH } = Dimensions.get('window');
+  // Android edge-to-edge: `window` height excludes the system bars, so a
+  // window-height backdrop stops short of the physical bottom and leaves the
+  // nav-bar / composer region undimmed. `screen` is the full device height.
+  // The Modal's own window still reaches the physical bottom (same as the
+  // BottomSheetShell nudge), so drawing this tall paints over it. Anchor coords
+  // come from measureInWindow (from the top), so only the fill height changes —
+  // cutout/tooltip positioning is untouched. navigationBarTranslucent is NOT an
+  // option: broken on Expo SDK 54 (expo/expo#39749).
+  const backdropH = Platform.OS === 'android'
+    ? Dimensions.get('screen').height
+    : screenH;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const holeCoverOpacity = useRef(new Animated.Value(0)).current;
   const contentOpacity = useRef(new Animated.Value(0)).current;
@@ -339,18 +350,21 @@ export const TutorialOverlay: React.FC<TutorialOverlayProps> = ({
             box can swallow taps meant for the tooltip's Next button — same
             issue called out in TutorialTooltipCard's gradient border. */}
         <Animated.View
-          style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}
+          style={[
+            { position: 'absolute', top: 0, left: 0, right: 0, height: backdropH },
+            { opacity: backdropOpacity },
+          ]}
           pointerEvents="auto"
         >
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, webPointerEventsNone]}>
             <Svg
               width={screenW}
-              height={screenH}
+              height={backdropH}
               style={[StyleSheet.absoluteFill, webPointerEventsNone] as any}
               pointerEvents="none"
             >
               <Path
-                d={buildCutoutPath(screenW, screenH, cutout.hole, cutoutRadius)}
+                d={buildCutoutPath(screenW, backdropH, cutout.hole, cutoutRadius)}
                 fill={BACKDROP_COLOR}
                 fillRule="evenodd"
               />

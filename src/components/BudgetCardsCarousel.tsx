@@ -21,6 +21,11 @@ const FIGMA_OUTER_RADIUS = 21;
 const FIGMA_INNER_RADIUS = 14;
 // Fallback card height, used until the available space has been measured.
 const FALLBACK_HEIGHT = 368;
+// Upper bound so the card doesn't become oversized on very tall screens.
+const MAX_CARD_HEIGHT = 460;
+// Small gap kept between the card frame and the bottom of the carousel area so
+// the frame's rounded corners aren't flush against (or clipped by) the edge.
+const CARD_V_BREATHING = 12;
 const FIGMA_SHADOW = {
   shadowColor: 'rgba(89, 110, 124, 0.15)',
   shadowOffset: { width: 0, height: 1.8 },
@@ -148,9 +153,19 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   const itemWidth = cardWidth + CARD_GAP;
   // Pad so a card at scroll offset i*itemWidth ends up centred in the carousel.
   const sidePad = Math.max(0, (carouselSize.width - cardWidth) / 2);
-  // Centre card fills 70% of the available height (subtitle → Next button).
+  // Top padding above the card inside the carousel area (kept small so the card
+  // gets most of the vertical space).
+  const cardTopPad = carouselSize.height > 0 ? Math.round(carouselSize.height * 0.02) : 0;
+  // The card FILLS the measured carousel area (minus the top pad and a little
+  // breathing room) instead of a fixed height. A fixed height can't win here: too
+  // small clips the content (title + Select button), too big clips the card FRAME
+  // top/bottom because the horizontal FlatList clips its cards to the container's
+  // vertical bounds — both were seen on Android. Filling the measured space adapts
+  // to any screen; MAX_CARD_HEIGHT just keeps it sensible on very tall screens.
   const cardHeight =
-    carouselSize.height > 0 ? Math.round(carouselSize.height * 0.7) : FALLBACK_HEIGHT;
+    carouselSize.height > 0
+      ? Math.min(carouselSize.height - cardTopPad - CARD_V_BREATHING, MAX_CARD_HEIGHT)
+      : FALLBACK_HEIGHT;
 
   const initialReal = initialSelection
     ? Math.max(0, BUDGET_ITEMS.findIndex((b) => b.value === initialSelection))
@@ -218,7 +233,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
 
   return (
     <View
-      style={[styles.container, { paddingTop: Math.round(carouselSize.height * 0.06) }]}
+      style={[styles.container, { paddingTop: cardTopPad }]}
       onLayout={(e) => {
         const { width, height } = e.nativeEvent.layout;
         setCarouselSize((prev) =>
@@ -426,6 +441,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     width: '100%',
     marginBottom: 18,
+    // Android's default includeFontPadding inflates every line box, pushing the
+    // fixed-height card's content (title…Select button) past the height iOS fits
+    // into — clipping the title at the top and the Select button at the bottom.
+    // Disabling it matches iOS metrics (no-op on iOS/web).
+    includeFontPadding: false,
   },
   structuredCardCoin: {
     width: 122,
@@ -448,6 +468,7 @@ const styles = StyleSheet.create({
     minWidth: 228,
     maxWidth: 228,
     marginBottom: 6,
+    includeFontPadding: false,
   },
   structuredCardDescription: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
@@ -458,6 +479,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 228,
     marginBottom: 18,
+    includeFontPadding: false,
   },
   structuredCardSelectButton: {
     backgroundColor: '#FFFFFF',
@@ -477,6 +499,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     lineHeight: 20,
     color: '#333',
+    includeFontPadding: false,
   },
   // Selected state: filled dark button so the user sees their pick.
   structuredCardSelectButtonSelected: {

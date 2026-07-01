@@ -3447,7 +3447,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // the rounded corner of a tail-less bubble.
     const tailCorner = isLastInRun ? 2 : 16;
     const radii = isOwnMessage
-      ? { topLeft: 16, topRight: tailCorner, bottomLeft: 16, bottomRight: 16 }
+      ? { topLeft: 16, topRight: 16, bottomLeft: 16, bottomRight: tailCorner }
       : { topLeft: 16, topRight: 16, bottomLeft: tailCorner, bottomRight: 16 };
     // Remember it so the edit-mode re-measure keeps the same tail/no-tail cutout.
     editDimRadiiRef.current = radii;
@@ -3853,13 +3853,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           )}
           {message.reply_to_snapshot && !message.deleted && (
             <View
-              style={
+              style={[
+                // Stretch to the full bubble width so the grey quote bubble
+                // reaches the end (matches the body container's width:100%).
+                // QuotedMessagePreview's own alignSelf:'stretch' can only fill
+                // this wrapper, so the wrapper itself must span the bubble.
+                styles.quotedPreviewWrap,
                 (message.type === 'image' || message.image_metadata ||
                  message.type === 'video' || message.video_metadata ||
-                 message.type === 'audio')
-                  ? styles.quotedPreviewMediaWrap
-                  : undefined
-              }
+                 message.type === 'audio') && styles.quotedPreviewMediaWrap,
+              ]}
             >
               <QuotedMessagePreview
                 snapshot={message.reply_to_snapshot}
@@ -5483,6 +5486,9 @@ const styles = StyleSheet.create({
     paddingRight: 3,
     paddingBottom: 3,
     paddingLeft: 3,
+  },
+  quotedPreviewWrap: {
+    alignSelf: 'stretch',
   },
   quotedPreviewMediaWrap: {
     paddingHorizontal: 6,

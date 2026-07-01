@@ -15,6 +15,7 @@ import {
   Platform,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
@@ -69,6 +70,8 @@ export const EditGearItemSheet: React.FC<Props> = ({
   };
 
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
@@ -85,7 +88,10 @@ export const EditGearItemSheet: React.FC<Props> = ({
             style={{ transform: [{ translateY }] }}
             onLayout={onSheetLayout}
           >
-            <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
+            <Pressable
+              style={[styles.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
+              onPress={e => e.stopPropagation()}
+            >
             {/* Grabber */}
             <View style={styles.grabberWrap} {...panHandlers}>
               <View style={styles.grabber} />

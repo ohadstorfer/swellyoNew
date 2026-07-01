@@ -23,6 +23,7 @@ import {
   Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
 
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.9;
@@ -93,6 +94,11 @@ export const TripBottomSheet: React.FC<Props> = ({
   // grabber + header double as the swipe-down-to-dismiss drag zone.
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
+  // Android: pad the bottom-most element (footer if present, else body) past the
+  // system nav/gesture bar. iOS keeps the static design values (no change).
+  const insets = useSafeAreaInsets();
+  const androidFooterPad = Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 22) };
+  const androidBodyPad = Platform.OS === 'android' && !footer && { paddingBottom: Math.max(insets.bottom, 18) };
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       {/* KAV wraps the whole bottom-anchored sheet so the ENTIRE sheet (incl. the
@@ -140,18 +146,18 @@ export const TripBottomSheet: React.FC<Props> = ({
 
             {scroll ? (
               <ScrollView
-                contentContainerStyle={styles.body}
+                contentContainerStyle={[styles.body, androidBodyPad]}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
               >
                 {children}
               </ScrollView>
             ) : (
-              <View style={styles.body}>{children}</View>
+              <View style={[styles.body, androidBodyPad]}>{children}</View>
             )}
 
             {footer ? (
-              <View style={[styles.footer, !footerDivider && styles.footerNoDivider]}>{footer}</View>
+              <View style={[styles.footer, !footerDivider && styles.footerNoDivider, androidFooterPad]}>{footer}</View>
             ) : null}
             </Pressable>
           </Animated.View>

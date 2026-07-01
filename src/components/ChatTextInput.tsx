@@ -123,6 +123,11 @@ export interface ChatTextInputProps {
    * `leftAccessory`, the message body as `value`, and `onSaveEdit` to commit. */
   editMode?: boolean;
   onSaveEdit?: () => void;
+  /** When true, the placeholder is rendered as a single-line overlay that
+   * shrinks its font to fit the available width instead of wrapping to a
+   * second line. Use for long placeholders (e.g. "Choose an option above to
+   * continue"). Only applies while the field is empty. */
+  autoFitPlaceholder?: boolean;
 }
 
 export interface ChatTextInputRef {
@@ -150,6 +155,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     onCameraPress,
     editMode = false,
     onSaveEdit,
+    autoFitPlaceholder = false,
   },
   ref
 ) {
@@ -465,6 +471,24 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                   </Text>
                 </View>
               )}
+              {/* Single-line auto-shrinking placeholder. Rendered as an overlay
+                  (instead of the native placeholder) so a long string fits on one
+                  line, scaling its font down when width is tight. */}
+              {autoFitPlaceholder && !value && (
+                <View style={styles.autoFitPlaceholder} pointerEvents="none">
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.6}
+                    style={[
+                      styles.autoFitPlaceholderText,
+                      { color: placeholderColor ?? colors.textSecondary },
+                    ]}
+                  >
+                    {placeholder}
+                  </Text>
+                </View>
+              )}
               <TextInput
                 ref={inputRef}
                 nativeID={nativeID}
@@ -486,7 +510,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                     ...(textColor ? { color: textColor } : null),
                   },
                 ]}
-                placeholder={placeholder}
+                placeholder={autoFitPlaceholder ? '' : placeholder}
                 placeholderTextColor={placeholderColor ?? colors.textSecondary}
                 value={value}
                 onChangeText={onChangeText}
@@ -675,6 +699,28 @@ const styles = StyleSheet.create({
   textWrapper: {
     flex: 1,
     position: 'relative',
+  },
+  // Overlay placeholder — occupies the same box as the TextInput's first line
+  // so it visually replaces the native placeholder (paddingLeft 8 / paddingTop
+  // 12 mirror the inputText style). justifyContent keeps it on one baseline.
+  autoFitPlaceholder: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    paddingLeft: 8,
+    paddingRight: 4,
+    paddingTop: 12,
+    justifyContent: 'flex-start',
+    zIndex: 1,
+  },
+  autoFitPlaceholderText: {
+    fontSize: 17,
+    fontWeight: '400',
+    lineHeight: LINE_HEIGHT,
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
   },
   webMeasureMirror: {
     position: 'absolute',

@@ -360,7 +360,15 @@ export const HomeBreakSearchSheet: React.FC<HomeBreakSearchSheetProps> = ({
       backdropColor="rgba(0, 0, 0, 0.5)"
     >
       {({ panHandlers }) => (
-        <View style={[styles.sheet, { height: sheetHeight }]}>
+        <View
+          style={[
+            styles.sheet,
+            { height: sheetHeight },
+            // Content clearance for the nav bar (BottomSheetShell handles reaching the
+            // physical bottom — natively via navigationBarTranslucent, or an Expo Go nudge).
+            Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) },
+          ]}
+        >
           {/* Drag area — swipe down on the handle/header to dismiss */}
           <View {...panHandlers}>
             <View style={styles.handle} />

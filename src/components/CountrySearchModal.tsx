@@ -38,13 +38,18 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
   const searchRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    if (visible) {
-      setQuery('');
-      // Raise the keyboard as the sheet slides in.
-      const focusTimer = setTimeout(() => searchRef.current?.focus(), 350);
-      return () => clearTimeout(focusTimer);
-    }
+    if (visible) setQuery('');
   }, [visible]);
+
+  // NOTE: we deliberately do NOT auto-focus the search input on open.
+  // This sheet is a transparent Modal presented from INSIDE another transparent
+  // Modal (onboarding wraps the destination sheet in its own Modal; profile-edit
+  // does the same). On iOS, raising the keyboard while that nested presentation
+  // is still settling races the presentation and kicks the sheet straight back
+  // closed on the FIRST open (second open works only because the keyboard is
+  // already up, so there's no transition to race). Letting the user tap the
+  // search field to bring up the keyboard avoids the race entirely — by then the
+  // sheet is fully presented and stable.
 
   // Keyboard-aware height. The shell lifts this bottom-anchored sheet by the
   // keyboard height (avoidKeyboard); since the sheet is a fixed 80%-screen box,
@@ -91,7 +96,7 @@ export const CountrySearchModal: React.FC<CountrySearchModalProps> = ({
       backdropColor="rgba(0,0,0,0.5)"
     >
       {({ panHandlers }) => (
-        <View style={[styles.sheet, { height: sheetHeight }]}>
+        <View style={[styles.sheet, { height: sheetHeight }, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}>
           {/* Drag area — swipe down on the handle/header to dismiss */}
           <View {...panHandlers}>
             <View style={styles.handle} />

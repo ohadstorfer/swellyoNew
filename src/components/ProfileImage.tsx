@@ -7,6 +7,15 @@ import { Images } from '../assets/images';
 
 interface ProfileImageProps {
   imageUrl?: string | null;
+  /**
+   * Optional second URL to try if `imageUrl` fails to load. Used when `imageUrl`
+   * is a (best-effort) thumbnail — e.g. a trip cover served from the
+   * `image-thumbnails` bucket — that may not exist yet or ever (the server-side
+   * generator can OOM on very large photos). We fall back to the full original
+   * instead of dropping straight to the silhouette. `<Thumb>` does the same for
+   * non-avatar images; this brings the circular avatar in line.
+   */
+  fallbackImageUrl?: string | null;
   name?: string;
   style?: any;
   showLoadingIndicator?: boolean;
@@ -15,6 +24,30 @@ interface ProfileImageProps {
   isOnline?: boolean;
   showOnlineIndicator?: boolean;
 }
+
+const isUsable = (url?: string | null): url is string =>
+  !!url && url.trim() !== '';
+
+export type AvatarStage = 'primary' | 'fallback' | 'placeholder';
+
+/**
+ * Pick which URL the avatar should render given what has failed so far.
+ * Pure + exported so the fallback logic is unit-tested without rendering
+ * expo-image. A fallback identical to the primary is ignored (retrying it would
+ * just fail again). Empty/whitespace/null are treated as "no image".
+ */
+export const resolveAvatarSource = (
+  primary: string | null | undefined,
+  fallback: string | null | undefined,
+  primaryFailed: boolean,
+  fallbackFailed: boolean,
+): { url: string | null; stage: AvatarStage } => {
+  if (isUsable(primary) && !primaryFailed) return { url: primary, stage: 'primary' };
+  if (isUsable(fallback) && fallback !== primary && !fallbackFailed) {
+    return { url: fallback, stage: 'fallback' };
+  }
+  return { url: null, stage: 'placeholder' };
+};
 
 /**
  * ProfileImage Component
@@ -29,6 +62,7 @@ interface ProfileImageProps {
  */
 export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
   imageUrl,
+  fallbackImageUrl,
   name = 'User',
   style,
   showLoadingIndicator = false,
@@ -37,19 +71,36 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
   isOnline = false,
   showOnlineIndicator = true,
 }) => {
-  const [imageError, setImageError] = useState(false);
+  // Two failure flags instead of one: the primary (usually a thumbnail) can fail
+  // while the fallback (the full original) still loads. See resolveAvatarSource.
+  const [primaryFailed, setPrimaryFailed] = useState(false);
+  const [fallbackFailed, setFallbackFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const currentImageUrlRef = useRef<string | null | undefined>(imageUrl);
+  const currentFallbackRef = useRef<string | null | undefined>(fallbackImageUrl);
 
-  // Reset error state when the URL changes. `isLoading` is driven by expo-image's
-  // onLoadStart/onLoad callbacks — forcing it to true here would flash the
-  // silhouette overlay on memory-cache hits (where onLoadStart never fires).
+  // Reset error state when either URL changes. `isLoading` is driven by
+  // expo-image's onLoadStart/onLoad callbacks — forcing it to true here would
+  // flash the silhouette overlay on memory-cache hits (where onLoadStart never
+  // fires).
   useEffect(() => {
-    if (currentImageUrlRef.current !== imageUrl) {
+    if (
+      currentImageUrlRef.current !== imageUrl ||
+      currentFallbackRef.current !== fallbackImageUrl
+    ) {
       currentImageUrlRef.current = imageUrl;
-      setImageError(false);
+      currentFallbackRef.current = fallbackImageUrl;
+      setPrimaryFailed(false);
+      setFallbackFailed(false);
     }
-  }, [imageUrl]);
+  }, [imageUrl, fallbackImageUrl]);
+
+  const { url: effectiveUrl, stage } = resolveAvatarSource(
+    imageUrl,
+    fallbackImageUrl,
+    primaryFailed,
+    fallbackFailed,
+  );
 
   // Extract size from style to calculate borderRadius and fontSize
   // Use a stable reference to avoid unnecessary recalculations
@@ -77,17 +128,30 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
   }, []);
 
   const handleError = useCallback((error: any) => {
-    console.error('ProfileImage: Error loading image:', error, 'URL:', imageUrl);
-    setImageError(true);
-    setIsLoading(false);
-    if (onError) {
-      onError();
+    // A missing best-effort thumbnail is expected (the server generator can OOM
+    // on huge photos and never write one), so this is a warn, not an error —
+    // and only when we've exhausted every source. Failing the primary just
+    // advances to the fallback below.
+    if (stage === 'fallback') {
+      console.warn('ProfileImage: image failed (thumb + original):', 'URL:', effectiveUrl, error);
+      setFallbackFailed(true);
+      setIsLoading(false);
+      if (onError) onError();
+    } else {
+      // stage === 'primary' (or placeholder, which can't render an <Image>).
+      setPrimaryFailed(true);
+      const willFallBack = resolveAvatarSource(imageUrl, fallbackImageUrl, true, false).stage === 'fallback';
+      if (!willFallBack) {
+        console.warn('ProfileImage: image failed to load:', 'URL:', effectiveUrl, error);
+        setIsLoading(false);
+        if (onError) onError();
+      }
+      // else: keep isLoading true through the fallback attempt (no flash).
     }
-  }, [imageUrl, onError]);
+  }, [stage, effectiveUrl, imageUrl, fallbackImageUrl, onError]);
 
   const handleLoad = useCallback(() => {
     setIsLoading(false);
-    setImageError(false);
     if (onLoad) {
       onLoad();
     }
@@ -97,7 +161,7 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
     setIsLoading(true);
   }, []);
 
-  const hasValidImage = imageUrl && imageUrl.trim() !== '' && !imageError;
+  const hasValidImage = !!effectiveUrl;
 
   return (
     <View style={styles.wrapper}>
@@ -111,11 +175,11 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
         ]}
       >
       {/* Always render Image if we have a valid URL (so onLoad can fire) */}
-      {hasValidImage && Platform.OS === 'web' && imageUrl?.includes('googleusercontent.com') ? (
+      {hasValidImage && Platform.OS === 'web' && effectiveUrl?.includes('googleusercontent.com') ? (
         // Use native img tag for Google images on web to handle CORS properly
         // eslint-disable-next-line jsx-a11y/alt-text
         <img
-          src={imageUrl!}
+          src={effectiveUrl!}
           alt={name}
           style={{
             width: '100%',
@@ -134,12 +198,12 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
         />
       ) : hasValidImage ? (
         <Image
-          source={{ uri: imageUrl! }}
+          source={{ uri: effectiveUrl! }}
           style={[styles.image, { borderRadius }]}
           contentFit="cover"
           cachePolicy="memory-disk"
           transition={200}
-          recyclingKey={imageUrl || undefined}
+          recyclingKey={effectiveUrl || undefined}
           onError={handleError}
           onLoad={handleLoad}
           onLoadStart={handleLoadStart}
@@ -176,6 +240,7 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
   // Custom comparison function for React.memo
   return (
     prevProps.imageUrl === nextProps.imageUrl &&
+    prevProps.fallbackImageUrl === nextProps.fallbackImageUrl &&
     prevProps.name === nextProps.name &&
     prevProps.style === nextProps.style &&
     prevProps.showLoadingIndicator === nextProps.showLoadingIndicator &&

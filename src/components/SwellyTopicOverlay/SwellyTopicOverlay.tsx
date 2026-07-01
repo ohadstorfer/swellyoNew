@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Images } from '../../assets/images';
+import { ff } from '../../theme/fonts';
 
 export type SwellyTopicId = 'travel_advice' | 'like_minded_travellers' | 'travel_partners' | 'guidance';
 
@@ -262,19 +263,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#7B7B7B',
   },
   avatarImage: {
-    width: 175,
-    height: 175,
-    marginTop: 4,
-    marginBottom: 8,
+    width: 128,
+    height: 128,
+    marginTop: 0,
+    marginBottom: 4,
   },
   title: {
     fontSize: 18,
     lineHeight: 24,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     color: '#212121',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+    // iOS + web render exactly as before. Android switches to the real loaded
+    // Montserrat (tighter metrics than the Roboto fallback), drops the
+    // synth-bold fontWeight, and removes includeFontPadding — reclaiming the
+    // vertical space that was squeezing the card images vs iOS.
+    ...Platform.select({
+      web: { fontFamily: 'Montserrat, sans-serif', fontWeight: '700' },
+      ios: { fontFamily: 'Montserrat', fontWeight: '700' },
+      android: { fontFamily: ff('Montserrat', '700'), includeFontPadding: false },
+    }),
   },
   content: {
     flex: 1,
@@ -286,7 +294,7 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     rowGap: 12,
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 12,
   },
   gridRow: {
     flex: 1,
@@ -325,17 +333,20 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 8,
   },
   cardTitleWrap: {
-    paddingTop: 12,
-    minHeight: 46,
+    paddingTop: 8,
+    minHeight: 40,
     justifyContent: 'flex-start',
   },
   cardTitle: {
     fontSize: 13,
     lineHeight: 19,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#333333',
     textAlign: 'left',
+    ...Platform.select({
+      web: { fontFamily: 'Inter, sans-serif', fontWeight: '700' },
+      ios: { fontFamily: 'Inter', fontWeight: '700' },
+      android: { fontFamily: ff('Inter', '700'), includeFontPadding: false },
+    }),
   },
   checkbox: {
     position: 'absolute',
@@ -358,11 +369,14 @@ const styles = StyleSheet.create({
   subtext: {
     fontSize: 16,
     lineHeight: 24,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     color: '#7B7B7B',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
+    ...Platform.select({
+      web: { fontFamily: 'Inter, sans-serif', fontWeight: '400' },
+      ios: { fontFamily: 'Inter', fontWeight: '400' },
+      android: { fontFamily: ff('Inter', '400'), includeFontPadding: false },
+    }),
   },
   cta: {
     backgroundColor: '#212121',
@@ -380,10 +394,13 @@ const styles = StyleSheet.create({
   ctaText: {
     fontSize: 18,
     lineHeight: 24,
-    fontWeight: '600',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     color: '#FFFFFF',
     textAlign: 'center',
+    ...Platform.select({
+      web: { fontFamily: 'Montserrat, sans-serif', fontWeight: '600' },
+      ios: { fontFamily: 'Montserrat', fontWeight: '600' },
+      android: { fontFamily: ff('Montserrat', '600'), includeFontPadding: false },
+    }),
   },
 });
 

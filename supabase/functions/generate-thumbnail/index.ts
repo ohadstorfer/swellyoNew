@@ -36,6 +36,18 @@ const HERO_BUCKETS = new Set(["trip-images", "surftrip-images"]);
 const SQUARE_LADDER = [48, 320]; // keep in sync with src/services/media/thumbnails.ts
 const WIDTH_VARIANT = 1280;
 
+// The long edge we shrink the source to BEFORE cropping/laddering. The largest
+// output is the 1280w variant, so nothing bigger is ever needed. Doing the
+// shrink first keeps every subsequent full-bitmap clone (`square`, the 1280w
+// clone) at ~1280px instead of the full source — this is what prevents the OOM:
+// a 3648×3648 photo decodes to ~53 MB RGBA and was cloned ~3× at full res
+// (~160-210 MB) → over the isolate limit. Shrinking first caps peak at ~tens MB.
+const WORK_MAX_EDGE = WIDTH_VARIANT; // 1280
+// Above this the single decode buffer alone (w*h*4 bytes) is too big to allocate
+// safely, so we skip before decode. ~40 MP ≈ 160 MB RGBA. The client (<Thumb> /
+// ProfileImage fallbackImageUrl) falls back to the original for skipped images.
+const MAX_DECODE_MEGAPIXELS = 40;
+
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { persistSession: false },
 });
@@ -105,6 +117,42 @@ function readExifOrientation(buf: Uint8Array): number {
 }
 
 /**
+ * Read pixel dimensions from a JPEG's SOF marker without decoding (cheap header
+ * scan). ImageScript decodes to uncompressed RGBA (w*h*4 bytes) and clones the
+ * bitmap several times while laddering, so a high-megapixel source can OOM the
+ * isolate even when the *compressed* file is small — the 5 MB byte guard doesn't
+ * catch it (a 3648×3648 photo is <1 MB compressed but ~53 MB decoded, ×clones).
+ * Returns null for non-JPEG / parse error (caller then relies on the byte guard).
+ */
+function readJpegDimensions(buf: Uint8Array): { w: number; h: number } | null {
+  try {
+    const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    if (v.getUint16(0, false) !== 0xffd8) return null; // not a JPEG
+    let o = 2;
+    while (o + 8 <= v.byteLength) {
+      if (v.getUint8(o) !== 0xff) { o++; continue; }
+      const marker = v.getUint8(o + 1);
+      // SOF0..SOF15 carry the frame dimensions, except DHT(C4)/JPG(C8)/DAC(CC).
+      if (
+        marker >= 0xc0 && marker <= 0xcf &&
+        marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+      ) {
+        return { h: v.getUint16(o + 5, false), w: v.getUint16(o + 7, false) };
+      }
+      // Standalone markers (SOI/EOI/RSTn) have no length payload.
+      if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
+        o += 2;
+        continue;
+      }
+      o += 2 + v.getUint16(o + 2, false); // skip this segment by its length
+    }
+  } catch {
+    /* malformed → unknown */
+  }
+  return null;
+}
+
+/**
  * Normalize an ImageScript image to upright per its EXIF orientation.
  * ImageScript `rotate(deg)` is COUNTER-clockwise for positive deg, so a 90° CW
  * correction (orientation 6) is `rotate(270)`.
@@ -157,6 +205,14 @@ serve(async (req) => {
     // New uploads are compressed at upload time, so this is rare/legacy-only.
     if (srcBytes.length > 5_000_000) return ok({ skipped: true, reason: "too_large" });
 
+    // Dimension guard: a small file can still be too many megapixels to even
+    // decode (RGBA = w*h*4). Cheap header read, no decode. Non-JPEG → null → we
+    // fall through to the byte guard + decode.
+    const dims = readJpegDimensions(srcBytes);
+    if (dims && dims.w * dims.h > MAX_DECODE_MEGAPIXELS * 1_000_000) {
+      return ok({ skipped: true, reason: "too_many_pixels", w: dims.w, h: dims.h });
+    }
+
     // ImageScript auto-detects JPEG/PNG. A non-image (e.g. mp4) throws → fail safe.
     let base: Image;
     try {
@@ -170,6 +226,17 @@ serve(async (req) => {
     // crop/resize so both the square ladder and the 1280w variant come out
     // upright. PNGs and orientation-1 JPEGs are no-ops.
     applyExifOrientation(base, readExifOrientation(srcBytes));
+
+    // Shrink the working bitmap to WORK_MAX_EDGE on its long edge BEFORE any
+    // clone. ImageScript resize() mutates in place, so the square crop and the
+    // 1280w clone below then operate on a ~1280px bitmap instead of the full
+    // source — this is the OOM fix. Never upscales; EXIF is already baked in so
+    // width/height are display-oriented.
+    const longEdge = Math.max(base.width, base.height);
+    if (longEdge > WORK_MAX_EDGE) {
+      if (base.width >= base.height) base.resize(WORK_MAX_EDGE, Image.RESIZE_AUTO);
+      else base.resize(Image.RESIZE_AUTO, WORK_MAX_EDGE);
+    }
 
     let generated = 0;
 

@@ -20,6 +20,7 @@ import {
   Animated,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 import { AnnouncementIcon } from '../AdminUpdateUI';
@@ -85,6 +86,9 @@ export const AdminUpdateSheet: React.FC<Props> = ({
   };
 
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Android: pad past the system nav/gesture bar so the CTA + "Maybe later" clear
+  // it. iOS keeps the static 24 (no change). See styles.sheet.
+  const insets = useSafeAreaInsets();
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -100,7 +104,10 @@ export const AdminUpdateSheet: React.FC<Props> = ({
             style={{ transform: [{ translateY }] }}
             onLayout={onSheetLayout}
           >
-            <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
+            <Pressable
+              style={[styles.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
+              onPress={e => e.stopPropagation()}
+            >
             {/* Grabber */}
             <View style={styles.grabberRow} {...panHandlers}>
               <View style={styles.grabber} />

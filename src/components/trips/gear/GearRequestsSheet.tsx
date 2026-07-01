@@ -25,6 +25,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SHEET } from '../TripBottomSheet';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
@@ -62,6 +63,8 @@ export const GearRequestsSheet: React.FC<Props> = ({
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
+  const insets = useSafeAreaInsets();
 
   // Lift the WHOLE sheet (not its inner scroll) just enough that the focused
   // input clears the keyboard, leaving ~4px visible below it. Keeps the header
@@ -135,7 +138,10 @@ export const GearRequestsSheet: React.FC<Props> = ({
             style={{ transform: [{ translateY }, { translateY: kbLift }] }}
             onLayout={onSheetLayout}
           >
-            <Pressable style={s.sheet} onPress={e => e.stopPropagation()}>
+            <Pressable
+              style={[s.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
+              onPress={e => e.stopPropagation()}
+            >
               {/* Grabber */}
               <View style={s.grabberRow} {...panHandlers}>
                 <View style={s.grabber} />

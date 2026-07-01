@@ -261,6 +261,10 @@ export default function ConversationsScreen({
   const surftripsTipFiredRef = useRef(false);
 
   useEffect(() => {
+    // Disabled: the "Surf Trips" coach-mark no longer opens automatically.
+    // It can still be shown manually via the "Replay surftrips tip" menu item.
+    return;
+    // eslint-disable-next-line no-unreachable
     if (surftripsTipFiredRef.current) return;
     if (isMVPMode) return;
     if (!tutorial.isHydrated || tutorial.surftripsTipSeen) return;
@@ -916,6 +920,10 @@ export default function ConversationsScreen({
             ) : groupHeroThumb ? (
               <ProfileImage
                 imageUrl={groupHeroThumb}
+                // Thumbnails are best-effort (the generator can OOM on huge
+                // photos and never write one). Fall back to the full original
+                // so a missing thumb shows the cover, not the silhouette.
+                fallbackImageUrl={surftripHeroImages[conv.id]}
                 name={displayName}
                 style={styles.avatar}
                 showLoadingIndicator={false}

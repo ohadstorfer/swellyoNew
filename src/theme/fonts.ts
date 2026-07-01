@@ -61,3 +61,32 @@ const SUFFIX: Record<FontWeight, string> = {
  */
 export const ff = (family: FontFamily, weight: FontWeight = '400'): string =>
   Platform.OS === 'web' ? `${family}, sans-serif` : `${family}-${SUFFIX[weight]}`;
+
+/**
+ * Android renders a given `fontSize` slightly larger than iOS — a genuine
+ * font-metric overshoot (same Inter, bigger glyphs; NOT the user's font-scale,
+ * which we disable globally). The overshoot is within tolerance on large text
+ * (titles look right at nominal size) but conspicuous on small, tightly-packed
+ * text like filter chips. So `fs()` leaves large sizes untouched and tapers
+ * only small sizes down, on Android only. iOS + web are returned unchanged.
+ *
+ * Empirically (Trips tabs): sizes >= 13 look right at nominal; the 12px Explore
+ * filter chips read too big. Hence the default band below.
+ *
+ * Tuning:
+ *  - FS_NONE_AT     ↑ to also correct slightly-larger text (e.g. 14) if it reads big.
+ *  - FS_FULL_AT     is where the full reduction kicks in (and below).
+ *  - FS_SMALL_SCALE ↓ for a stronger shrink on small text.
+ */
+const FS_FULL_AT = 11;      // Android sizes <= this get the full FS_SMALL_SCALE
+const FS_NONE_AT = 13;      // Android sizes >= this are untouched (look right)
+const FS_SMALL_SCALE = 0.92;
+
+export const fs = (size: number): number => {
+  if (Platform.OS !== 'android') return size;
+  if (size >= FS_NONE_AT) return size;
+  if (size <= FS_FULL_AT) return size * FS_SMALL_SCALE;
+  // Linear taper of the scale from FS_SMALL_SCALE (at FS_FULL_AT) up to 1 (at FS_NONE_AT).
+  const t = (size - FS_FULL_AT) / (FS_NONE_AT - FS_FULL_AT);
+  return size * (FS_SMALL_SCALE + (1 - FS_SMALL_SCALE) * t);
+};

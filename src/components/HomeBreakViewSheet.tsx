@@ -7,6 +7,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from './Text';
 import { colors, spacing } from '../styles/theme';
 import { InlineMapView } from './MapPickerModal';
@@ -72,6 +73,8 @@ function getPreviewMapHtml(apiKey: string, lat: number, lng: number, label: stri
 
 export const HomeBreakViewSheet: React.FC<Props> = ({ visible, onClose, name, full, lat, lng }) => {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+  // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
+  const insets = useSafeAreaInsets();
 
   const previewHtml =
     apiKey && typeof lat === 'number' && typeof lng === 'number'
@@ -81,7 +84,7 @@ export const HomeBreakViewSheet: React.FC<Props> = ({ visible, onClose, name, fu
   return (
     <BottomSheetShell visible={visible} onClose={onClose} backdropColor="rgba(0,0,0,0.5)">
       {({ panHandlers }) => (
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}>
           <View {...panHandlers}>
             <View style={styles.handle} />
             <View style={styles.header}>

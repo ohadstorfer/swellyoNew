@@ -3991,7 +3991,8 @@ const styles = StyleSheet.create({
   },
   surfSkillVideoContainer: {
     width: '100%',
-    height: 275,
+    height: 235,
+    maxHeight: 235,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: '#000',
