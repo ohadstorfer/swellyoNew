@@ -43,6 +43,7 @@ import {
   withdrawRequest,
 } from '../../services/surftrips/surftripsService';
 import { supabase } from '../../config/supabase';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 import type {
   EnrichedSurftripMember,
   EnrichedSurftripRequest,
@@ -260,7 +261,7 @@ export default function SurftripDetailScreen({
       setRequestNote('');
       await load();
     } catch (e: any) {
-      Alert.alert('Could not send request', e?.message || 'Please try again.');
+      Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -273,7 +274,7 @@ export default function SurftripDetailScreen({
       await withdrawRequest(myRequest.id);
       await load();
     } catch (e: any) {
-      Alert.alert('Could not withdraw', e?.message || 'Please try again.');
+      Alert.alert('Could not withdraw', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -295,7 +296,7 @@ export default function SurftripDetailScreen({
               await leaveGroup(groupId, currentUserId);
               onBack();
             } catch (e: any) {
-              Alert.alert('Could not leave', e?.message || 'Please try again.');
+              Alert.alert('Could not leave', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
               setSubmitting(false);
             }
@@ -311,7 +312,7 @@ export default function SurftripDetailScreen({
     try {
       url = await getSurftripInviteUrl(group.id);
     } catch (e: any) {
-      Alert.alert('Could not create invite link', e?.message || 'Please try again.');
+      Alert.alert('Could not create invite link', friendlyErrorMessage(e, 'Please try again.'));
       return;
     }
     const message = `Join "${group.name}" on Swellyo: ${url}`;
@@ -359,7 +360,7 @@ export default function SurftripDetailScreen({
               await deleteSurftripGroup(groupId);
               onBack();
             } catch (e: any) {
-              Alert.alert('Could not delete', e?.message || 'Please try again.');
+              Alert.alert('Could not delete', friendlyErrorMessage(e, 'Please try again.'));
             }
           },
         },
@@ -375,7 +376,7 @@ export default function SurftripDetailScreen({
       await approveRequest(requestId);
       await load();
     } catch (e: any) {
-      Alert.alert('Could not approve', e?.message || 'Please try again.');
+      Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingRequestId(null);
     }
@@ -387,7 +388,7 @@ export default function SurftripDetailScreen({
       await declineRequest(requestId);
       await load();
     } catch (e: any) {
-      Alert.alert('Could not decline', e?.message || 'Please try again.');
+      Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingRequestId(null);
     }
@@ -400,7 +401,7 @@ export default function SurftripDetailScreen({
       await promoteToAdmin(groupId, userId);
       await load();
     } catch (e: any) {
-      Alert.alert('Could not promote', e?.message || 'Please try again.');
+      Alert.alert('Could not promote', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -409,7 +410,7 @@ export default function SurftripDetailScreen({
       await demoteToMember(groupId, userId);
       await load();
     } catch (e: any) {
-      Alert.alert('Could not change role', e?.message || 'Please try again.');
+      Alert.alert('Could not change role', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -427,7 +428,7 @@ export default function SurftripDetailScreen({
               await removeMember(groupId, userId);
               await load();
             } catch (e: any) {
-              Alert.alert('Could not remove', e?.message || 'Please try again.');
+              Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
             }
           },
         },

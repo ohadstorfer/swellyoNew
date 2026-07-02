@@ -28,6 +28,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnboarding } from '../context/OnboardingContext';
 import { getImageUrl } from '../services/media/imageService';
 import { useIsMobile, responsiveWidth } from '../utils/responsive';
+import { friendlyErrorMessage } from '../utils/friendlyError';
 import { ONBOARDING_WELCOME_IMAGE_URLS } from './OnboardingWelcomeScreen';
 import { calculateAgeFromDOB, dateToISOString } from '../utils/ageCalculation';
 import { ageGateService } from '../services/ageGate/ageGateService';
@@ -478,7 +479,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
             console.error('Legacy OAuth return error:', error);
             Alert.alert(
               'Sign In Failed',
-              error.message || 'An error occurred during sign in. Please try again.',
+              friendlyErrorMessage(error, 'An error occurred during sign in. Please try again.'),
               [{ text: 'OK' }]
             );
           } finally {
@@ -630,7 +631,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
           } else if (error?.message && !error.message.includes('redirect')) {
             // Don't show error if it's a redirect (page will navigate away)
             console.error('Google Sign-In error:', error);
-            Alert.alert('Sign-In Error', error.message || 'Failed to sign in with Google. Please try again.');
+            Alert.alert('Sign-In Error', friendlyErrorMessage(error, 'Failed to sign in with Google. Please try again.'));
           }
         }
       } else {
@@ -721,7 +722,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
       } else {
         Alert.alert(
           'Sign In Failed',
-          errorMessage,
+          friendlyErrorMessage(error, 'Something went wrong signing you in. Please try again.'),
           [{ text: 'OK' }]
         );
       }
@@ -825,7 +826,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         return;
       }
       console.error('Apple Sign-In error:', error);
-      Alert.alert('Sign-In Error', error?.message || 'Failed to sign in with Apple. Please try again.');
+      Alert.alert('Sign-In Error', friendlyErrorMessage(error, 'Failed to sign in with Apple. Please try again.'));
     }
   };
 

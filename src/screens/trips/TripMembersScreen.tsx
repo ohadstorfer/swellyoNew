@@ -30,6 +30,7 @@ import Thumb from '../../components/Thumb';
 import { CommittedPassportIcon, AdminBadgeIcon } from '../../components/trips/plan/PlanSections';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { ff } from '../../theme/fonts';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 // Tokens mirror the sibling "view all" screens (TripUpdates / PackingAndGear).
 const T = {
@@ -128,7 +129,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
               // Refetch trip core (participants + counts) for every surface.
               await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
             } catch (e: any) {
-              Alert.alert('Could not remove', e?.message || 'Please try again.');
+              Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
               setRemovingId(null);
             }

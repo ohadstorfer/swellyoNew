@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../Text';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
 import type { AddableDmPartner } from '../../services/surftrips/surftripsService';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 interface AddMembersSheetProps {
   visible: boolean;
@@ -72,7 +73,7 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
         if (!cancelled) setPartners(rows);
       })
       .catch((e: any) => {
-        if (!cancelled) setErrorMsg(e?.message || 'Could not load chats');
+        if (!cancelled) setErrorMsg(friendlyErrorMessage(e, 'Could not load chats'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -117,7 +118,7 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
       const applied = await commitSelection(ids);
       onCommitted(applied);
     } catch (e: any) {
-      setErrorMsg(e?.message || 'Could not add members');
+      setErrorMsg(friendlyErrorMessage(e, 'Could not add members'));
     } finally {
       setSubmitting(false);
     }

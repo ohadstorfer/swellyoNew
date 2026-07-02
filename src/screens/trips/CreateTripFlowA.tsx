@@ -59,6 +59,7 @@ import { CreateTripWizardChrome } from '../../components/trips/CreateTripWizardC
 import { useTripWizardDraft } from '../../hooks/useTripWizardDraft';
 import { useFieldErrors } from '../../hooks/useFieldErrors';
 import { useDiscardConfirm } from '../../hooks/useDiscardConfirm';
+import { showErrorAlert } from '../../utils/friendlyError';
 
 // Stream A — bottom sheet shell + the new wave-shape slider + big budget cards
 import { WizardBottomSheet } from '../../components/trips/WizardBottomSheet';
@@ -151,8 +152,12 @@ type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'aboutYou' | 'previe
 // leader describes their familiarity with them.
 const STEPS_BASE: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview'];
 
-// DB constraint: minimum age-range span per hosting style.
-const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 5, C: 2 };
+// Minimum age-range span — uniform 4 years for every hosting style. Must stay
+// in sync with the DB CHECK constraint `group_trips_age_window_min`
+// (migration 20260701000000_uniform_age_window_4.sql). These values drifted
+// once (client said A:4 while the DB required A:7) and hosts saw a raw
+// Postgres error on publish — keep both sides identical.
+const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 4, C: 4 };
 
 // Step heading + subtitle copy.
 const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
@@ -1875,9 +1880,12 @@ export default function CreateTripFlowA({
       }
     } catch (e: any) {
       console.error('[CreateTripFlowA] submit error:', e);
-      Alert.alert(
+      showErrorAlert(
         editMode ? 'Could not save trip' : 'Could not publish',
-        e?.message || 'Unknown error',
+        e,
+        editMode
+          ? 'Something went wrong while saving your trip. Please try again.'
+          : 'Something went wrong while publishing your trip. Please try again.',
       );
     } finally {
       setSubmitting(false);

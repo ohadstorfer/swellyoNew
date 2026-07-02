@@ -23,6 +23,7 @@ import {
 import { uploadSurftripImage } from '../../services/storage/storageService';
 import type { SurftripGroup } from '../../types/surftrips';
 import { AddMembersSheet } from './AddMembersSheet';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 interface CreateSurftripModalProps {
   visible: boolean;
@@ -206,7 +207,7 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
     } catch (e: any) {
       Alert.alert(
         editMode ? 'Could not save changes' : 'Could not create surftrip',
-        e?.message || 'Please try again.'
+        friendlyErrorMessage(e, 'Please try again.')
       );
     } finally {
       setSubmitting(false);

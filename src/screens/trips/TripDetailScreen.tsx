@@ -118,6 +118,7 @@ import {
 } from '../../hooks/trips/useTripDetail';
 import { useTripRealtime } from '../../hooks/trips/useTripRealtime';
 import { TripDetailSkeleton } from '../../components/skeletons';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 interface TripDetailScreenProps {
   tripId: string;
@@ -563,7 +564,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         prev => (prev ? { ...prev, myRequest: newReq } : prev)
       );
     } catch (e: any) {
-      Alert.alert('Could not send request', e?.message || 'Please try again.');
+      Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -600,7 +601,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             ? { ...prev, myRequest: { ...prev.myRequest, status: prevStatus } }
             : prev
       );
-      Alert.alert('Could not withdraw', e?.message || 'Please try again.');
+      Alert.alert('Could not withdraw', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -612,7 +613,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(tripId) });
       queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
     } catch (e: any) {
-      Alert.alert('Could not approve', e?.message || 'Please try again.');
+      Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingRequestId(null);
     }
@@ -638,7 +639,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         tripId: trip.id,
       });
     } catch (e: any) {
-      Alert.alert('Could not open chat', e?.message || 'Please try again.');
+      Alert.alert('Could not open chat', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setOpeningChat(false);
     }
@@ -662,7 +663,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         }
       );
     } catch (e: any) {
-      Alert.alert('Could not decline', e?.message || 'Please try again.');
+      Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingRequestId(null);
     }
@@ -689,7 +690,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   prev ? { ...prev, participants: prev.participants.filter(p => p.user_id !== userId) } : prev
               );
             } catch (e: any) {
-              Alert.alert('Could not remove', e?.message || 'Please try again.');
+              Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
               setRemovingUserId(null);
             }
@@ -719,7 +720,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
               queryClient.invalidateQueries({ queryKey: tripsKeys.explore });
             } catch (e: any) {
-              Alert.alert('Could not cancel', e?.message || 'Please try again.');
+              Alert.alert('Could not cancel', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
               setCancelling(false);
             }
@@ -749,7 +750,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
               setActiveTab('overview');
             } catch (e: any) {
-              Alert.alert('Could not complete', e?.message || 'Please try again.');
+              Alert.alert('Could not complete', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
               setCompleting(false);
             }
@@ -780,7 +781,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               );
               queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
             } catch (e: any) {
-              Alert.alert('Could not leave', e?.message || 'Please try again.');
+              Alert.alert('Could not leave', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
               setLeaving(false);
             }
@@ -895,7 +896,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await setMyGroupGear(tripId, currentUserId, next);
     } catch (e: any) {
       patchParticipantsCache(p => ({ ...p, personal_gear_by_host: current }));
-      Alert.alert('Could not update', e?.message || 'Please try again.');
+      Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -909,7 +910,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await setMyPersonalGearList(tripId, currentUserId, next);
     } catch (e: any) {
       patchParticipantsCache(p => ({ ...p, personal_gear_by_me: previous }));
-      Alert.alert('Could not update', e?.message || 'Please try again.');
+      Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -957,7 +958,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       patchParticipantsCache(p => ({ ...p, personal_gear_by_me: next }));
       handleCancelAddPersonalItem();
     } catch (e: any) {
-      Alert.alert('Could not add', e?.message || 'Please try again.');
+      Alert.alert('Could not add', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSavingPersonalItem(false);
     }
@@ -988,7 +989,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       setEditingPacking(false);
       setGroupGearDraft('');
     } catch (e: any) {
-      Alert.alert('Could not save list', e?.message || 'Please try again.');
+      Alert.alert('Could not save list', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSavingPacking(false);
     }
@@ -1003,7 +1004,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await setMyGearClaim(itemId, currentUserId, quantity);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
     } catch (e: any) {
-      Alert.alert('Could not update', e?.message || 'Please try again.');
+      Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -1013,7 +1014,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await createGearRequest(tripId, currentUserId, itemName, note || undefined);
       Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
-      Alert.alert('Could not send request', e?.message || 'Please try again.');
+      Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
       throw e;
     }
   };
@@ -1043,7 +1044,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
-      Alert.alert('Could not approve', e?.message || 'Please try again.');
+      Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingGearRequestId(null);
     }
@@ -1055,7 +1056,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await declineGearRequest(request.id);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
-      Alert.alert('Could not decline', e?.message || 'Please try again.');
+      Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingGearRequestId(null);
     }
@@ -1103,7 +1104,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             patchUpdatesCache(prev => prev.filter(u => u.id !== update.id));
             if (editingUpdateId === update.id) handleCancelUpdateDraft();
           } catch (e: any) {
-            Alert.alert('Could not delete', e?.message || 'Please try again.');
+            Alert.alert('Could not delete', friendlyErrorMessage(e, 'Please try again.'));
           }
         },
       },
@@ -1142,7 +1143,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       }
       handleCancelUpdateDraft();
     } catch (e: any) {
-      Alert.alert('Could not save update', e?.message || 'Please try again.');
+      Alert.alert('Could not save update', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSavingUpdate(false);
     }
@@ -1163,7 +1164,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       patchParticipantsCache(p => ({ ...p, personal_gear_by_me: next }));
       setAddPersonalSheetOpen(false);
     } catch (e: any) {
-      Alert.alert('Could not add', e?.message || 'Please try again.');
+      Alert.alert('Could not add', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSavingPersonalItem(false);
     }

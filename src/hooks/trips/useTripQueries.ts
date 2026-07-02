@@ -74,11 +74,22 @@ export function useExploreTrips(filterKey: ExploreFilterKey = EMPTY_EXPLORE_FILT
   const q = useInfiniteQuery({
     queryKey: tripsKeys.exploreFiltered(filterKey),
     queryFn: ({ pageParam, signal }) =>
-      exploreFeed(EXPLORE_PAGE_LIMIT + 1, pageParam?.created_at ?? null, pageParam?.id ?? null, signal, rpcFilters),
-    initialPageParam: null as { created_at: string; id: string } | null,
+      exploreFeed(
+        EXPLORE_PAGE_LIMIT + 1,
+        pageParam?.created_at ?? null,
+        pageParam?.id ?? null,
+        pageParam?.participant_count ?? null,
+        signal,
+        rpcFilters,
+      ),
+    initialPageParam: null as { participant_count: number; created_at: string; id: string } | null,
     getNextPageParam: (last: ExploreFeedRow[]) =>
       last.length > EXPLORE_PAGE_LIMIT
-        ? { created_at: last[EXPLORE_PAGE_LIMIT - 1].created_at, id: last[EXPLORE_PAGE_LIMIT - 1].id }
+        ? {
+            participant_count: last[EXPLORE_PAGE_LIMIT - 1].participant_count,
+            created_at: last[EXPLORE_PAGE_LIMIT - 1].created_at,
+            id: last[EXPLORE_PAGE_LIMIT - 1].id,
+          }
         : undefined,
     maxPages: 10,
     refetchOnMount: false,

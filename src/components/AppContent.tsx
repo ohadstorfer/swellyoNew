@@ -55,6 +55,7 @@ import Constants from 'expo-constants';
 const APP_OPENED_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
 const APP_OPENED_STORAGE_KEY_PREFIX = 'last_app_open_logged_'; // suffix is the user id so different users on the same device don't block each other
 import { useAuthGuard } from '../hooks/useAuthGuard';
+import { friendlyErrorMessage } from '../utils/friendlyError';
 import { isFirstVideoReadyForBoardType } from '../services/media/videoPreloadService';
 import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
 import { ageGateService } from '../services/ageGate/ageGateService';
@@ -244,7 +245,7 @@ export const AppContent: React.FC = () => {
         }
       } catch (e: any) {
         console.warn('[AppContent] acceptSurftripInvite failed:', e);
-        Alert.alert('Could not open invite', e?.message || 'Please try again.');
+        Alert.alert('Could not open invite', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setPendingInviteGroupId(null);
         setPendingInviteToken(null);
@@ -1577,7 +1578,7 @@ export const AppContent: React.FC = () => {
         // exploreFiltered(EMPTY_EXPLORE_FILTER_KEY), not the bare `explore` prefix).
         queryKey: tripsKeys.exploreFiltered(EMPTY_EXPLORE_FILTER_KEY),
         queryFn: ({ pageParam, signal }: any) =>
-          exploreFeed(11, pageParam?.created_at ?? null, pageParam?.id ?? null, signal), // 11 = EXPLORE_PAGE_LIMIT(10) + 1 probe row, matches useExploreTrips
+          exploreFeed(11, pageParam?.created_at ?? null, pageParam?.id ?? null, pageParam?.participant_count ?? null, signal), // 11 = EXPLORE_PAGE_LIMIT(10) + 1 probe row, matches useExploreTrips
         initialPageParam: null,
       })
       .then(() => {
@@ -2017,7 +2018,19 @@ export const AppContent: React.FC = () => {
   // OnboardingScaffold so the header + Next button stay fixed and content slides
   // between them. Returning the same <OnboardingScaffold> element across these steps
   // keeps it mounted so the animations run.
-  if (currentStep >= 0 && currentStep <= 7) {
+  // Step 0 — the onboarding welcome splash ("Yo! Let's Travel."). Full-bleed
+  // (torn-paper photos to the screen edges + its own CTA), so it renders on its
+  // own rather than through the OnboardingScaffold chrome that wraps steps 1–7.
+  if (currentStep === 0) {
+    return (
+      <OnboardingWelcomeScreen
+        onNext={() => setCurrentStep(1)}
+        onBack={handleWelcomeBack}
+      />
+    );
+  }
+
+  if (currentStep >= 1 && currentStep <= 7) {
     const loadingByStep: Record<number, boolean> = {
       0: false,
       1: isSavingStep1,
@@ -2034,15 +2047,7 @@ export const AppContent: React.FC = () => {
         showVideoUploadStep={showVideoUploadStep}
         isLoading={loadingByStep[currentStep] ?? false}
         renderStepContent={(key) => {
-          if (key === 'welcome') {
-            return (
-              <OnboardingWelcomeScreen
-                onNext={() => setCurrentStep(1)}
-                onBack={handleWelcomeBack}
-                updateFormData={updateFormData}
-              />
-            );
-          }
+          // 'welcome' (step 0) is rendered full-bleed above, not through the scaffold.
           if (key === 'step1') {
             return (
               <OnboardingStep1Screen

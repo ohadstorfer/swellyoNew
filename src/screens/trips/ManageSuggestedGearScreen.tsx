@@ -29,6 +29,7 @@ import { NotificationCenter } from '../../components/notifications/NotificationC
 import { StickyGradientFooter } from '../../components/trips/plan/PlanSections';
 import { EditGearItemSheet } from '../../components/trips/gear/EditGearItemSheet';
 import { TripIcon } from '../../components/trips/tripIcons';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 const T = {
   accent: '#05BCD3',
@@ -91,7 +92,7 @@ export default function ManageSuggestedGearScreen({ tripId, onBack }: Props) {
       queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
       onBack();
     } catch (e: any) {
-      Alert.alert('Could not save list', e?.message || 'Please try again.');
+      Alert.alert('Could not save list', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -112,7 +113,7 @@ export default function ManageSuggestedGearScreen({ tripId, onBack }: Props) {
       queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
     } catch (e: any) {
       setDraft(prev); // snap back to the pre-drag order
-      Alert.alert('Could not reorder', e?.message || 'Please try again.');
+      Alert.alert('Could not reorder', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -134,7 +135,7 @@ export default function ManageSuggestedGearScreen({ tripId, onBack }: Props) {
             queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
           } catch (e: any) {
             setDraft(prev);
-            Alert.alert('Could not delete', e?.message || 'Please try again.');
+            Alert.alert('Could not delete', friendlyErrorMessage(e, 'Please try again.'));
           }
         },
       },

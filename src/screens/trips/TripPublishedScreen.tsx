@@ -23,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ff } from '../../theme/fonts';
 import { getGroupTripInviteUrl } from '../../services/trips/groupTripsService';
 import { logEvent } from '../../services/analytics/eventLogger';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 // Full "Your trip is live!" doodle illustration (line + icons) — Figma node
 // 13451:18152, exported at the design's native 391×756. Its baked background is
@@ -99,7 +100,7 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
       logEvent('trip_invite_shared', { tripId });
     } catch (e: any) {
       if (e?.message && !/cancel/i.test(e.message)) {
-        Alert.alert('Could not share', e.message);
+        Alert.alert('Could not share', friendlyErrorMessage(e, 'Please try again.'));
       }
     } finally {
       setSharing(false);

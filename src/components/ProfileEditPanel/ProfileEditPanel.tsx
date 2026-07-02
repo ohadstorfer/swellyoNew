@@ -61,6 +61,7 @@ import { HomeBreakSearchSheet, HomeBreakSelection } from '../HomeBreakSearchShee
 import AvatarCropModal from '../AvatarCropModal';
 import { DateOfBirthSheet } from '../DateOfBirthSheet';
 import { calculateAgeFromDOB } from '../../utils/ageCalculation';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 type Props = {
   visible: boolean;
@@ -283,7 +284,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         updateProfile(updated);
       } catch (err: any) {
         console.error('[ProfileEditPanel] Cover upload failed:', err);
-        Alert.alert('Could not update cover photo', err?.message || 'Please try again.');
+        Alert.alert('Could not update cover photo', friendlyErrorMessage(err, 'Please try again.'));
       } finally {
         setSavingTarget(null);
       }
@@ -403,7 +404,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         updateProfile(updated);
       } catch (err: any) {
         console.error('[ProfileEditPanel] Avatar upload failed:', err);
-        Alert.alert('Could not update profile picture', err?.message || 'Please try again.');
+        Alert.alert('Could not update profile picture', friendlyErrorMessage(err, 'Please try again.'));
       } finally {
         setSavingTarget(null);
       }

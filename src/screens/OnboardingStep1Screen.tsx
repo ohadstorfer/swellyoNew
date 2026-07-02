@@ -204,7 +204,7 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 
       {/* Subtitle */}
       <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
-        <Text style={styles.subtitle}>Sharing the board you ride creates more aligned connections.</Text>
+        <Text style={styles.subtitle}>Pick your go-to board.</Text>
       </View>
 
       {/* Board Carousel — fills remaining space; its height drives the board size. */}

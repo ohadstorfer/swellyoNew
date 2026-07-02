@@ -55,7 +55,8 @@ import { Images } from '../../assets/images';
 import { MainHeader } from '../../components/MainHeader';
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
 import { getStorageThumbUrl } from '../../services/media/imageService';
-import { neighbourHeroUrls } from './deckPrefetch';
+import Thumb from '../../components/Thumb';
+import { neighbourHeroUrls, neighbourAvatarUrls } from './deckPrefetch';
 import { isNearEnd, isAppend } from './exploreDeckPagination';
 import Reanimated, {
   Easing,
@@ -183,6 +184,20 @@ const STATUS_BADGE: Record<
   completed: { bg: '#F7F7F7', icon: 'checkmark-circle-outline', label: 'Completed' },
 };
 
+// Card avatars render the static square thumbnail (few KB) instead of the
+// full-resolution profile photo (~300 KB+). 96 covers the 40–52px circles at
+// any density; must match the size passed to the deck's avatar prefetch so the
+// warmed URL is the one <Thumb> actually requests.
+const AVATAR_THUMB_PX = 96;
+
+/** Prefetch the exact URLs <Thumb size={AVATAR_THUMB_PX}> will render. */
+const warmAvatarThumbs = (avatarUrls: string[]) => {
+  avatarUrls.forEach(u => {
+    const t = getStorageThumbUrl(u, AVATAR_THUMB_PX) ?? u;
+    CachedImage.prefetch(t);
+  });
+};
+
 const TripCard: React.FC<{
   trip: GroupTrip;
   status: TripCardStatus;
@@ -221,8 +236,9 @@ const TripCard: React.FC<{
         {/* Host row (top-left) */}
         <View style={styles.hostRow}>
           {meta?.hostAvatar ? (
-            <CachedImage
-              source={{ uri: meta.hostAvatar }}
+            <Thumb
+              uri={meta.hostAvatar}
+              size={AVATAR_THUMB_PX}
               style={styles.hostAvatar}
               contentFit="cover"
               cachePolicy="memory-disk"
@@ -265,9 +281,12 @@ const TripCard: React.FC<{
         {avatars.length > 0 ? (
           <View style={[styles.avatarCluster, overflow <= 0 && styles.avatarClusterTight]}>
             {avatars.map((uri, i) => (
-              <Image
+              <Thumb
                 key={`${uri}-${i}`}
-                source={{ uri }}
+                uri={uri}
+                size={AVATAR_THUMB_PX}
+                contentFit="cover"
+                cachePolicy="memory-disk"
                 style={[
                   styles.clusterAvatar,
                   i > 0 && styles.clusterAvatarOverlap,
@@ -428,8 +447,9 @@ const ExploreTripCard: React.FC<{
       {/* Host row (top-left) */}
       <View style={styles.hostRow}>
         {meta?.hostAvatar ? (
-          <CachedImage
-            source={{ uri: meta.hostAvatar }}
+          <Thumb
+            uri={meta.hostAvatar}
+            size={AVATAR_THUMB_PX}
             style={styles.hostAvatar}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -497,9 +517,12 @@ const ExploreTripCard: React.FC<{
                 <View style={styles.exCluster}>
                   {avatars.length > 0 ? (
                     avatars.map((uri, i) => (
-                      <Image
+                      <Thumb
                         key={`${uri}-${i}`}
-                        source={{ uri }}
+                        uri={uri}
+                        size={AVATAR_THUMB_PX}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
                         style={[
                           styles.clusterAvatar,
                           i > 0 && styles.clusterAvatarOverlap,
@@ -587,12 +610,12 @@ const TripDeck: React.FC<{
     });
   }, [queryClient, userId]);
 
-  const liveRef = useRef({ trips, prefetchDetail });
-  liveRef.current = { trips, prefetchDetail };
+  const liveRef = useRef({ trips, meta, prefetchDetail });
+  liveRef.current = { trips, meta, prefetchDetail };
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 150 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
-    const { trips: liveTrips, prefetchDetail: livePrefetch } = liveRef.current;
+    const { trips: liveTrips, meta: liveMeta, prefetchDetail: livePrefetch } = liveRef.current;
     for (const v of viewableItems) {
       const i = v.index;
       if (i == null) continue;
@@ -600,6 +623,7 @@ const TripDeck: React.FC<{
         const t = liveTrips[k];
         if (t) { livePrefetch(t.id); if (t.hero_image_url) CachedImage.prefetch(t.hero_image_url); }
       }
+      warmAvatarThumbs(neighbourAvatarUrls(liveTrips, liveMeta, i));
     }
   }).current;
 
@@ -615,10 +639,12 @@ const TripDeck: React.FC<{
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [trips, scrollX, isAppendingPage]);
 
-  // Warm the first card + right neighbours as soon as the deck mounts/changes.
+  // Warm the first card + right neighbours as soon as the deck mounts/changes —
+  // heroes AND avatar thumbs, so the whole card appears at once.
   useEffect(() => {
     neighbourHeroUrls(trips, 0).forEach(u => { CachedImage.prefetch(u); });
-  }, [trips]);
+    warmAvatarThumbs(neighbourAvatarUrls(trips, meta, 0));
+  }, [trips, meta]);
 
   const renderItem = useCallback(
     ({ item, index }: { item: GroupTrip; index: number }) => {
@@ -729,6 +755,7 @@ const TripDeck: React.FC<{
         onMomentumScrollEnd={e => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / DECK_ITEM_W);
           neighbourHeroUrls(trips, idx).forEach(u => { CachedImage.prefetch(u); });
+          warmAvatarThumbs(neighbourAvatarUrls(trips, meta, idx));
           if (isNearEnd(idx, trips.length)) onEndReachedNearby?.();
         }}
         ListFooterComponent={loadingMore ? (

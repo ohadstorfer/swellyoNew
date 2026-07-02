@@ -63,9 +63,11 @@ export const TOPIC_SEEDS: string[] = TOPICS.map((t) => t.seed);
 type Props = {
   visible: boolean;
   onSelect: (topicId: SwellyTopicId, seedMessage: string) => void;
+  /** Dismiss the sheet and leave the Swelly chat — returns to The Lineup. */
+  onClose?: () => void;
 };
 
-export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
+export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose }) => {
   const { height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(false);
@@ -167,6 +169,19 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect }) => {
             <View style={styles.handle} />
           </View>
 
+          {onClose && (
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={onClose}
+              activeOpacity={0.7}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="Go back to The Lineup"
+            >
+              <Ionicons name="chevron-back" size={26} color="#212121" />
+            </TouchableOpacity>
+          )}
+
           <View style={styles.content}>
             <Image
               source={Images.swellyWaving as ImageSourcePropType}
@@ -255,6 +270,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 8,
     width: '100%',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
   },
   handle: {
     width: 80,

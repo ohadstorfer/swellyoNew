@@ -1,4 +1,6 @@
-// AgeSheetContent — side-by-side Min/Max number cubes with validation against an ageWindow span.
+// AgeSheetContent — side-by-side Min/Max number cubes. If the typed pair
+// is closer together than `ageWindow`, the field NOT just edited is pushed
+// out to close the gap automatically (never blocks with an error).
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -101,13 +103,35 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
     }
   };
 
-  // Final normalization on commit — clamps to ABS_MIN/MAX. Called when the
-  // user blurs a field or when the sheet auto-dismisses.
-  const emitNormalized = (rawMin: string, rawMax: string) => {
+  // Final normalization on commit — clamps to ABS_MIN/MAX and enforces the
+  // minimum span. Called when the user blurs a field, or when a field hits
+  // its 2-digit length. `editedField` is whichever value the user just
+  // typed — if the span comes up short, we push the *other* field out to
+  // close the gap instead of showing a blocking error, so the pair is
+  // always valid the moment both fields have a value. When min is the
+  // field just typed, max is what moves (and vice versa); if a field is
+  // pinned at an ABS bound and can't move far enough, the just-typed field
+  // gives way instead so the window is always satisfied.
+  const emitNormalized = (
+    rawMin: string,
+    rawMax: string,
+    editedField: 'min' | 'max' = 'max',
+  ) => {
     const parsedMin = parseAge(rawMin);
     const parsedMax = parseAge(rawMax);
-    const nextMin = parsedMin != null ? clamp(parsedMin, ABS_MIN, ABS_MAX) : null;
-    const nextMax = parsedMax != null ? clamp(parsedMax, ABS_MIN, ABS_MAX) : null;
+    let nextMin = parsedMin != null ? clamp(parsedMin, ABS_MIN, ABS_MAX) : null;
+    let nextMax = parsedMax != null ? clamp(parsedMax, ABS_MIN, ABS_MAX) : null;
+
+    if (nextMin != null && nextMax != null && nextMax - nextMin < ageWindow) {
+      if (editedField === 'min') {
+        nextMax = clamp(nextMin + ageWindow, ABS_MIN, ABS_MAX);
+        if (nextMax - nextMin < ageWindow) nextMin = clamp(nextMax - ageWindow, ABS_MIN, ABS_MAX);
+      } else {
+        nextMin = clamp(nextMax - ageWindow, ABS_MIN, ABS_MAX);
+        if (nextMax - nextMin < ageWindow) nextMax = clamp(nextMin + ageWindow, ABS_MIN, ABS_MAX);
+      }
+    }
+
     if (nextMin !== ageMin || nextMax !== ageMax) {
       onChange({ ageMin: nextMin, ageMax: nextMax });
     }
@@ -141,13 +165,18 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
               const cleaned = t.replace(/[^0-9]/g, '');
               setMinStr(cleaned);
               emitLive(cleaned, maxStr);
-              // Auto-jump to Max once Min has 2 digits.
-              if (cleaned.length === 2) maxRef.current?.focus();
+              // Once Min has 2 digits: if Max is already set (e.g. editing an
+              // existing trip) and the pair is now too close, push Max out to
+              // close the gap. Then auto-jump to Max.
+              if (cleaned.length === 2) {
+                emitNormalized(cleaned, maxStr, 'min');
+                maxRef.current?.focus();
+              }
             }}
             onFocus={() => setFocused('min')}
             onBlur={() => {
               setFocused(null);
-              emitNormalized(minStr, maxStr);
+              emitNormalized(minStr, maxStr, 'min');
             }}
             style={styles.cubeInput}
             accessibilityLabel="Minimum age"
@@ -177,17 +206,26 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
               const cleaned = t.replace(/[^0-9]/g, '');
               setMaxStr(cleaned);
               emitLive(minStr, cleaned);
-              // Both fields filled (Min has any digits, Max hit 2 digits)
-              // → commit normalized values and dismiss the sheet.
+              // Both fields filled (Min has any digits, Max hit 2 digits).
+              // If the typed Max is too close to Min, correct it (push it
+              // out to close the gap) but keep the sheet open so the host
+              // sees the corrected number land — only auto-dismiss when the
+              // typed value was already valid as-is.
               if (cleaned.length === 2) {
-                emitNormalized(minStr, cleaned);
-                onClose?.();
+                const parsedMin = parseAge(minStr);
+                const parsedMax = parseAge(cleaned);
+                const needsCorrection =
+                  parsedMin != null &&
+                  parsedMax != null &&
+                  clamp(parsedMax, ABS_MIN, ABS_MAX) - clamp(parsedMin, ABS_MIN, ABS_MAX) < ageWindow;
+                emitNormalized(minStr, cleaned, 'max');
+                if (!needsCorrection) onClose?.();
               }
             }}
             onFocus={() => setFocused('max')}
             onBlur={() => {
               setFocused(null);
-              emitNormalized(minStr, maxStr);
+              emitNormalized(minStr, maxStr, 'max');
             }}
             style={styles.cubeInput}
             accessibilityLabel="Maximum age"

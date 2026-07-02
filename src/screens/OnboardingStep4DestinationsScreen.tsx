@@ -140,7 +140,7 @@ export const OnboardingStep4DestinationsScreen: React.FC<Props> = ({
         <View style={styles.headerCopy}>
           <Text style={styles.titleAccent}>Where have you traveled?</Text>
           <Text style={styles.subtitle}>
-            Connect to people who align with your surf journey.
+            Give others a look into your travel experience.
           </Text>
         </View>
 

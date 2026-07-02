@@ -43,6 +43,7 @@ import { MessageActionsMenu, type BubbleRadii } from '../components/MessageActio
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
 import { JumboEmojiMessage, jumboBubbleStyle } from '../components/JumboEmojiMessage';
 import { getEmojiOnlyInfo } from '../utils/emoji';
+import { friendlyErrorMessage } from '../utils/friendlyError';
 import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
@@ -1810,13 +1811,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         }
       } catch (error: any) {
         console.error('Error creating conversation:', error);
-        const errorMessage = error?.message || 'Failed to create conversation. Please try again.';
+        const errorMessage = friendlyErrorMessage(error, 'Failed to create conversation. Please try again.');
         // The message never made it off-device — remove it, restore the input,
         // and surface the error. Do not enqueue to the outbox in this branch.
         setMessages((prev) => prev.filter(msg => msg.id !== clientId));
         setInputText(messageText); // Restore input text
         chatInputRef.current?.focus?.();
-        Alert.alert('Error', errorMessage);
+        Alert.alert('Could not create conversation', errorMessage);
         setIsLoading(false);
         setLoadingMessage('');
         return;
@@ -2012,7 +2013,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       setEditingText('');
     } catch (error: any) {
       console.error('Error editing message:', error);
-      Alert.alert('Error', error?.message || 'Failed to edit message');
+      Alert.alert('Could not edit message', friendlyErrorMessage(error, 'Failed to edit message'));
       // Rollback optimistic update
       loadMessages();
     }
@@ -2144,7 +2145,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         messageId,
       });
       
-      Alert.alert('Error', error?.message || 'Failed to delete message');
+      Alert.alert('Could not delete message', friendlyErrorMessage(error, 'Failed to delete message'));
       
       // Rollback optimistic update by reloading messages
       console.log('[DirectMessageScreen] Rolling back optimistic update');
@@ -2622,7 +2623,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
         return next;
       });
-      Alert.alert('Error', error?.message || 'Failed to send image');
+      Alert.alert('Could not send photo', friendlyErrorMessage(error, 'Failed to send image'));
     } finally {
       inFlightUploads.delete(clientId);
     }
@@ -2716,7 +2717,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     } catch (error: any) {
       console.error('Error processing video:', error);
       inFlightUploads.delete(clientId);
-      Alert.alert('Error', error?.message || 'Failed to send video');
+      Alert.alert('Could not send video', friendlyErrorMessage(error, 'Failed to send video'));
       return;
     }
 
@@ -2791,7 +2792,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
         return next;
       });
-      Alert.alert('Error', error?.message || 'Failed to send video');
+      Alert.alert('Could not send video', friendlyErrorMessage(error, 'Failed to send video'));
     } finally {
       inFlightUploads.delete(clientId);
     }
@@ -2944,7 +2945,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
         return next;
       });
-      Alert.alert('Error', error?.message || 'Failed to send voice message');
+      Alert.alert('Could not send voice message', friendlyErrorMessage(error, 'Failed to send voice message'));
     } finally {
       inFlightUploads.delete(clientId);
     }
@@ -3035,7 +3036,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         chatHistoryCache.saveMessages(convId, next).catch(() => {});
         return next;
       });
-      Alert.alert('Error', error?.message || 'Failed to send media');
+      Alert.alert('Could not send media', friendlyErrorMessage(error, 'Failed to send media'));
     } finally {
       inFlightUploads.delete(mid);
     }
@@ -3119,11 +3120,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // result.reason === 'send_failed' — restore the failed indicator and
     // surface the real error so the user (and us, debugging) can see why.
     console.error('[DirectMessageScreen] retry failed', result.error);
-    const errorMessage =
-      (result.error instanceof Error && result.error.message) ||
-      (typeof result.error === 'object' && result.error !== null && 'message' in (result.error as any)
-        ? String((result.error as any).message)
-        : String(result.error));
+    const errorMessage = friendlyErrorMessage(result.error, 'Could not resend. Please try again.');
     setMessages((prev) => prev.map(m =>
       m.id === message.id
         ? { ...m, upload_state: 'failed', upload_error: errorMessage }

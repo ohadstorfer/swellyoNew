@@ -44,6 +44,7 @@ import { GearRequestsSheet } from '../trips/gear/GearRequestsSheet';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 interface Props {
   /** Current user id — used for the realtime filter. Null while logged out. */
@@ -327,7 +328,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
       } catch (e: any) {
         // Revert the optimistic stamp so the buttons come back.
         setItems((prev) => prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r)));
-        Alert.alert('Could not complete', e?.message || 'Please try again.');
+        Alert.alert('Could not complete', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setActing(null);
       }
@@ -349,7 +350,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         invalidateTrip(n.trip_id);
       } catch (e: any) {
         setItems((prev) => prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r)));
-        Alert.alert('Could not decline', e?.message || 'Please try again.');
+        Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setActing(null);
       }
@@ -376,7 +377,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
           reviewCommitment: true,
         });
       } catch (e: any) {
-        Alert.alert('Could not open chat', e?.message || 'Please try again.');
+        Alert.alert('Could not open chat', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setActing(null);
       }
@@ -406,7 +407,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         setGearSheet({ request: found, notifId: n.id, tripId: n.trip_id });
         setGearVisible(true);
       } catch (e: any) {
-        Alert.alert('Could not load suggestion', e?.message || 'Please try again.');
+        Alert.alert('Could not load suggestion', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setActing(null);
       }
@@ -427,7 +428,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         invalidateTrip(n.trip_id);
       } catch (e: any) {
         setItems((prev) => prev.map((r) => (r.id === n.id ? { ...r, handled_at: null } : r)));
-        Alert.alert('Could not decline', e?.message || 'Please try again.');
+        Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setActing(null);
       }
@@ -446,7 +447,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         invalidateTrip(gearSheet.tripId);
         setGearVisible(false);
       } catch (e: any) {
-        Alert.alert('Could not approve', e?.message || 'Please try again.');
+        Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setGearProcessing(null);
       }
@@ -465,7 +466,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         invalidateTrip(gearSheet.tripId);
         setGearVisible(false);
       } catch (e: any) {
-        Alert.alert('Could not decline', e?.message || 'Please try again.');
+        Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
         setGearProcessing(null);
       }

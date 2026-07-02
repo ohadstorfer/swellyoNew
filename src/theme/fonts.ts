@@ -28,6 +28,7 @@ import {
   Montserrat_500Medium,
   Montserrat_600SemiBold,
   Montserrat_700Bold,
+  Montserrat_800ExtraBold_Italic,
 } from '@expo-google-fonts/montserrat';
 
 /** Load all app font weights. Returns [loaded, error] like expo-font's useFonts. */
@@ -41,6 +42,10 @@ export const useAppFonts = () =>
     'Montserrat-Medium': Montserrat_500Medium,
     'Montserrat-SemiBold': Montserrat_600SemiBold,
     'Montserrat-Bold': Montserrat_700Bold,
+    // Hero title on the onboarding welcome splash ("Yo! Let's Travel.") — the
+    // only place that needs the ExtraBold Italic cut. Referenced directly by
+    // family name (ff() only covers the 400–700 upright weights).
+    'Montserrat-ExtraBoldItalic': Montserrat_800ExtraBold_Italic,
   });
 
 export type FontFamily = 'Inter' | 'Montserrat';

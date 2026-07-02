@@ -2586,6 +2586,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
       <SwellyTopicOverlay
         visible={showTopicOverlay}
         onSelect={handleTopicSelected}
+        onClose={() => {
+          setShowTopicOverlay(false);
+          onChatComplete?.();
+        }}
       />
       <ReportAISheet
         visible={reportSheetVisible}

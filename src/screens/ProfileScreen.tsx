@@ -15,6 +15,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   PanResponder,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -38,6 +39,7 @@ import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
 import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/storageService';
 import { validateVideoComplete } from '../utils/videoValidation';
 import { ProfileImage } from '../components/ProfileImage';
+import { ProfilePhotoViewer } from '../components/ProfilePhotoViewer';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { logEvent } from '../services/analytics/eventLogger';
 import { getSurfLevelMappingFromEnum } from '../utils/surfLevelMapping';
@@ -55,6 +57,7 @@ import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS, Easi
 import { Gesture, GestureDetector, ScrollView as RNGHScrollView } from 'react-native-gesture-handler';
 import { ScrollView as RNScrollView } from 'react-native';
 import { LIFESTYLE_ICON_MAP } from '../utils/lifestyleIconMap';
+import { friendlyErrorMessage } from '../utils/friendlyError';
 import { JoinRequestActionBar, JoinRequestActionState } from '../components/trips/JoinRequestActionBar';
 import { getIncomingJoinRequest, approveJoinRequest, declineJoinRequest, IncomingJoinRequest } from '../services/trips/groupTripsService';
 
@@ -877,6 +880,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showBlockOverlay, setShowBlockOverlay] = useState(false);
   const [showReportOverlay, setShowReportOverlay] = useState(false);
+
+  // WhatsApp-style fullscreen photo viewer (tap the avatar to open).
+  const avatarRef = useRef<View>(null);
+  const [photoViewer, setPhotoViewer] = useState<{
+    visible: boolean;
+    rect: { x: number; y: number; width: number; height: number } | null;
+  }>({ visible: false, rect: null });
   const [showDestinationsSheet, setShowDestinationsSheet] = useState(false);
   const [showHomeBreakViewSheet, setShowHomeBreakViewSheet] = useState(false);
   const destinationsSheetOverlayAnim = useRef(new Animated.Value(0)).current;
@@ -911,6 +921,27 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     })
   ).current;
   const [profileData, setProfileData] = useState<SupabaseSurfer | null>(null);
+
+  // Measure the avatar's on-screen rect so the fullscreen viewer can morph out
+  // of it. Inset by the wrapper's white border (profilePictureWrapper.borderWidth)
+  // so the morph starts from the actual photo circle, not the border.
+  const openPhotoViewer = useCallback(() => {
+    if (!profileData?.profile_image_url) return;
+    const node = avatarRef.current;
+    if (!node) return;
+    const BORDER = 6;
+    node.measureInWindow((x, y, width, height) => {
+      setPhotoViewer({
+        visible: true,
+        rect: {
+          x: x + BORDER,
+          y: y + BORDER,
+          width: width - BORDER * 2,
+          height: height - BORDER * 2,
+        },
+      });
+    });
+  }, [profileData?.profile_image_url]);
   const [loading, setLoading] = useState(true);
   const [authChecking, setAuthChecking] = useState(false);
   const [profileNotFound, setProfileNotFound] = useState(false);
@@ -1534,7 +1565,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           } catch (error) {
             console.error('Error uploading video:', error);
             setIsUploadingVideo(false);
-            const errorMessage = error instanceof Error ? error.message : 'Failed to upload video. Please try again.';
+            const errorMessage = friendlyErrorMessage(error, 'Failed to upload video. Please try again.');
             setUploadFailureError(errorMessage);
             // Keep modal open to show error and allow retry
           } finally {
@@ -1664,13 +1695,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         const errorMessage = result.error || 'Failed to upload video';
         console.error('Upload failed:', errorMessage);
         setIsUploadingVideo(false);
-        setUploadFailureError(errorMessage);
+        setUploadFailureError(friendlyErrorMessage(result.error, 'Failed to upload video'));
         // Keep modal open to show error and allow retry
       }
     } catch (error) {
       console.error('Error uploading profile video:', error);
       setIsUploadingVideo(false);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to upload video. Please try again.';
+      const errorMessage = friendlyErrorMessage(error, 'Failed to upload video. Please try again.');
       setUploadFailureError(errorMessage);
       // Keep modal open to show error and allow retry
     }
@@ -2422,17 +2453,38 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>
-          <View style={styles.profilePictureWrapper}>
+          <Pressable
+            ref={avatarRef}
+            style={[
+              styles.profilePictureWrapper,
+              // Hidden while the fullscreen viewer is open so the morphing
+              // overlay lands seamlessly back onto the avatar on close.
+              photoViewer.visible && styles.profilePictureHidden,
+            ]}
+            onPress={openPhotoViewer}
+            disabled={!profileData.profile_image_url}
+          >
             <ProfileImage
               imageUrl={profileData.profile_image_url}
               name={profileData.name || 'User'}
               style={styles.profilePicture}
               showLoadingIndicator={false}
             />
-          </View>
+          </Pressable>
           {/* Photo upload moved to the Edit Profile screen — no inline plus
               icon on the profile view anymore. */}
         </View>
+
+        {/* WhatsApp-style fullscreen photo viewer. Kept mounted with the last
+            measured rect so the close morph can play; `visible` drives it. */}
+        {photoViewer.rect && (
+          <ProfilePhotoViewer
+            visible={photoViewer.visible}
+            imageUrl={profileData.profile_image_url || ''}
+            originRect={photoViewer.rect}
+            onClose={() => setPhotoViewer((p) => ({ ...p, visible: false }))}
+          />
+        )}
 
         {/* Profile Info Section - Board and Name Row */}
         <View style={styles.profileInfoSection}>
@@ -3398,6 +3450,9 @@ const styles = StyleSheet.create({
     borderColor: colors.white,
     overflow: 'hidden',
     backgroundColor: colors.white,
+  },
+  profilePictureHidden: {
+    opacity: 0,
   },
   profilePicture: {
     width: '100%',

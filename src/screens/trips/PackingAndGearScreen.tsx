@@ -29,6 +29,7 @@ import { TripIcon } from '../../components/trips/tripIcons';
 import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
 import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
 import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 // Tokens mirror the Figma frame (accent #05BCD3, dark #212121, muted greys).
 const T = {
@@ -86,7 +87,7 @@ export default function PackingAndGearScreen({ tripId, onBack, onEdit }: Props) 
       await setMyGearClaim(itemId, currentUserId, quantity);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
     } catch (e: any) {
-      Alert.alert('Could not update', e?.message || 'Please try again.');
+      Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -96,7 +97,7 @@ export default function PackingAndGearScreen({ tripId, onBack, onEdit }: Props) 
       await createGearRequest(tripId, currentUserId, itemName, note || undefined);
       Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
-      Alert.alert('Could not send request', e?.message || 'Please try again.');
+      Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
       throw e;
     }
   };

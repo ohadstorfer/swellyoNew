@@ -35,6 +35,7 @@ import { NotificationCenter } from '../../components/notifications/NotificationC
 import { StickyGradientFooter } from '../../components/trips/plan/PlanSections';
 import { TripIcon } from '../../components/trips/tripIcons';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 const T = {
   accent: '#05BCD3',
@@ -113,7 +114,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
         await setMyGroupGear(tripId, currentUserId, next);
       } catch (e: any) {
         patchMe(p => ({ ...p, personal_gear_by_host: myGroupGear }));
-        Alert.alert('Could not update', e?.message || 'Please try again.');
+        Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
       }
     } else {
       const next = myPersonalGear.map(it =>
@@ -124,7 +125,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
         await setMyPersonalGearList(tripId, currentUserId, next);
       } catch (e: any) {
         patchMe(p => ({ ...p, personal_gear_by_me: myPersonalGear }));
-        Alert.alert('Could not update', e?.message || 'Please try again.');
+        Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
       }
     }
   };
@@ -137,7 +138,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
       await setMyPersonalGearList(tripId, currentUserId, next);
     } catch (e: any) {
       patchMe(p => ({ ...p, personal_gear_by_me: myPersonalGear }));
-      Alert.alert('Could not remove', e?.message || 'Please try again.');
+      Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
@@ -154,7 +155,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
       await setMyPersonalGearList(tripId, currentUserId, next);
     } catch (e: any) {
       patchMe(p => ({ ...p, personal_gear_by_me: myPersonalGear }));
-      Alert.alert('Could not add', e?.message || 'Please try again.');
+      Alert.alert('Could not add', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 

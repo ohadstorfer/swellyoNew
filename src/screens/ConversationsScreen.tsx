@@ -39,6 +39,7 @@ import { DirectMessageScreen } from './DirectMessageScreen';
 import { DirectGroupChat } from './DirectGroupChat';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
 import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
+import { OnboardingWelcomeScreen } from './OnboardingWelcomeScreen';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
 import { pushRootCard } from '../navigation/navigationRef';
@@ -242,6 +243,8 @@ export default function ConversationsScreen({
   const [surftripHeroImages, setSurftripHeroImages] = useState<Record<string, string | null>>({});
   const [showSwellyShaper, setShowSwellyShaper] = useState(false);
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
+  // Dev-menu preview of the onboarding welcome splash, without starting onboarding.
+  const [showWelcomePreview, setShowWelcomePreview] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
   const scrollViewRef = useRef<FlatList<Conversation>>(null);
@@ -1386,6 +1389,24 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
+                {/* Onboarding welcome splash — local mode only. Opens the new
+                    "Yo! Let's Travel." splash standalone for design review,
+                    without starting an onboarding flow. */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      setShowWelcomePreview(true);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="rocket-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>Onboarding Welcome</Text>
+                  </TouchableOpacity>
+                )}
+
                 {/* Replay welcome guide — local mode only. Clears the
                     completed flag so the guide fires again the next time the
                     user enters Swelly chat. */}
@@ -1449,6 +1470,23 @@ export default function ConversationsScreen({
               </View>
             </TouchableOpacity>
           </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Onboarding Welcome preview (dev only) — full-screen splash, both the
+          CTA and hardware back just close the preview. */}
+      {showWelcomePreview && (
+        <Modal
+          visible={showWelcomePreview}
+          animationType="slide"
+          statusBarTranslucent
+          navigationBarTranslucent
+          onRequestClose={() => setShowWelcomePreview(false)}
+        >
+          <OnboardingWelcomeScreen
+            onNext={() => setShowWelcomePreview(false)}
+            onBack={() => setShowWelcomePreview(false)}
+          />
         </Modal>
       )}
 

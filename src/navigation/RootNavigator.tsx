@@ -34,6 +34,7 @@ import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { approveJoinRequest, declineJoinRequest } from '../services/trips/groupTripsService';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
 import { navigationRef, pushRootCard } from './navigationRef';
+import { friendlyErrorMessage } from '../utils/friendlyError';
 
 /**
  * The real navigation tree (nav migration Phase 1+):
@@ -315,7 +316,7 @@ function ProfileCardScreen({ route, navigation }: NativeStackScreenProps<RootSta
             queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
             navigation.goBack();
           } catch (e: any) {
-            Alert.alert('Could not approve', e?.message || 'Please try again.');
+            Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
           }
         },
         onDecline: async () => {
@@ -324,7 +325,7 @@ function ProfileCardScreen({ route, navigation }: NativeStackScreenProps<RootSta
             queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(joinRequest.tripId) });
             navigation.goBack();
           } catch (e: any) {
-            Alert.alert('Could not decline', e?.message || 'Please try again.');
+            Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
           }
         },
       }

@@ -39,8 +39,20 @@ export function useTripRealtime(tripId: string) {
     };
 
     // Catch up on anything that changed while this screen was blurred (and its
-    // channel was closed). invalidateQueries refetches the mounted detail keys.
-    invalidate([...tripsKeys.detail(tripId)]);
+    // channel was closed). Must cover EVERY key the broadcast handler below can
+    // touch — the event that would have invalidated it was missed while the
+    // channel was down, and this screen stays mounted in the card stack so
+    // there's no refetch-on-mount to save us. (A host once didn't see a pending
+    // join request for this exact reason: only `detail` was caught up here, so
+    // the Plan tab's requests section stayed stale indefinitely.) Invalidating
+    // is only a fetch for keys with a mounted observer; the rest just go stale.
+    invalidate(
+      [...tripsKeys.detail(tripId)],
+      [...tripsKeys.detailRequests(tripId)],
+      [...tripsKeys.detailUpdates(tripId)],
+      [...tripsKeys.detailGear(tripId)],
+      [...tripsKeys.detailGearRequests(tripId)],
+    );
 
     const channel = supabase
       .channel(tripTopic(tripId), { config: { private: true } })

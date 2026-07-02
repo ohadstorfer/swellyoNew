@@ -5,6 +5,7 @@ import Svg, { Path, G } from 'react-native-svg';
 import Reanimated, { LinearTransition, FadeOut } from 'react-native-reanimated';
 import type { CommitmentMetadata } from '../../../services/messaging/messagingService';
 import { ff } from '../../../theme/fonts';
+import { friendlyErrorMessage } from '../../../utils/friendlyError';
 import { commitmentItemMeta } from './commitmentOptions';
 
 // "check-verified-02" badge (Figma) — teal scalloped badge with a white check.
@@ -143,7 +144,7 @@ export const CommitmentMessageBubble: React.FC<Props> = ({
       setDecided(null); // revert on failure → buttons come back
       Alert.alert(
         choice === 'approved' ? 'Could not approve' : 'Could not reject',
-        e?.message || 'Please try again.'
+        friendlyErrorMessage(e, 'Please try again.')
       );
     }
   };

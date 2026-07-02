@@ -32,6 +32,7 @@ import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
 import { Images } from '../../assets/images';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 type TripCoreData = import('../../hooks/trips/useTripDetail').TripCoreData;
 
@@ -121,7 +122,7 @@ export default function CommitmentScreen({
     } catch (e: any) {
       rollback();
       setSubmitting(false);
-      Alert.alert('Could not submit', e?.message || 'Please try again.');
+      Alert.alert('Could not submit', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 

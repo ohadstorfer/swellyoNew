@@ -27,6 +27,7 @@ import {
   TripsAnalyticsData,
 } from '../services/analytics/analyticsTripsService';
 import { RetentionCurveCard } from '../components/analytics/RetentionCurveCard';
+import { friendlyErrorMessage } from '../utils/friendlyError';
 import { FeatureAdoptionCard } from '../components/analytics/FeatureAdoptionCard';
 import { BottomSheetShell } from '../components/BottomSheetShell';
 import { TripHealthCard } from '../components/analytics/TripHealthCard';
@@ -240,12 +241,12 @@ export function AnalyticsDashboardScreen({ onBack }: AnalyticsDashboardScreenPro
     // not-yet-deployed analytics-trips function must not blank the whole screen.
     const tripsPromise = fetchTripsAnalytics({ from: r.from, to: r.to })
       .then(setTripsData)
-      .catch((e: any) => setTripsError(e?.message ?? 'Failed to load trips analytics'));
+      .catch((e: any) => setTripsError(friendlyErrorMessage(e, 'Failed to load trips analytics')));
     try {
       const d = await fetchDashboard({ from: r.from ?? undefined, to: r.to ?? undefined });
       setData(d);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load');
+      setError(friendlyErrorMessage(e, 'Failed to load'));
     } finally {
       await tripsPromise;
       setLoading(false);

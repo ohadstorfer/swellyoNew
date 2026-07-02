@@ -544,8 +544,9 @@ export type ExploreFeedRow = GroupTrip & {
 
 /**
  * Explore list via the explore_feed RPC: trips + host name/avatar + count in ONE
- * round-trip, keyset-paginated. `signal` cancels the request when react-query
- * aborts (scroll-past / unmount).
+ * round-trip, keyset-paginated on (participant_count, created_at, id) DESC — busiest
+ * trips first. `signal` cancels the request when react-query aborts (scroll-past /
+ * unmount).
  */
 /** Server-side Explore filters (month/budget). Empty/null fields = filter off.
  *  Mirrors the chip selection in TripsScreen; the RPC applies them across the
@@ -560,6 +561,7 @@ export async function exploreFeed(
   limit = 10,
   cursorCreatedAt: string | null = null,
   cursorId: string | null = null,
+  cursorParticipantCount: number | null = null,
   signal?: AbortSignal,
   filters?: ExploreFeedFilters,
 ): Promise<ExploreFeedRow[]> {
@@ -569,6 +571,7 @@ export async function exploreFeed(
     p_months: months,
     p_budget_min: filters?.budgetMin ?? null,
     p_budget_max: filters?.budgetMax ?? null,
+    p_cursor_participant_count: cursorParticipantCount,
   });
   if (signal) q = q.abortSignal(signal);
   const { data, error } = await q;

@@ -21,6 +21,7 @@ import { TripIcon } from '../tripIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { friendlyErrorMessage } from '../../../utils/friendlyError';
 
 // Name length cap mirrors the Figma "N /21" counter on the Edit Gear sheet.
 const MAX_LEN = 21;
@@ -102,7 +103,7 @@ export const ManageGearSheet: React.FC<Props> = ({
       if (formOnly) onClose();
       else setView({ mode: 'list' });
     } catch (e: any) {
-      Alert.alert('Could not save', e?.message || 'Please try again.');
+      Alert.alert('Could not save', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -123,7 +124,7 @@ export const ManageGearSheet: React.FC<Props> = ({
             if (formOnly) onClose();
             else setView({ mode: 'list' });
           } catch (e: any) {
-            Alert.alert('Could not delete', e?.message || 'Please try again.');
+            Alert.alert('Could not delete', friendlyErrorMessage(e, 'Please try again.'));
           } finally {
             setDeleting(false);
           }

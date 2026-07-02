@@ -27,6 +27,7 @@ import { NotificationCenter } from '../../components/notifications/NotificationC
 import { AdminUpdateRow } from '../../components/trips/AdminUpdateUI';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { ff } from '../../theme/fonts';
+import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 // Tokens mirror the Figma frame (accent #05BCD3, dark #212121, muted greys).
 const T = {
@@ -104,7 +105,7 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
       patchUpdatesCache(prev => prev.map(u => (u.id === updated.id ? updated : u)));
       setEditingUpdateId(null);
     } catch (e: any) {
-      Alert.alert('Could not save update', e?.message || 'Please try again.');
+      Alert.alert('Could not save update', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setSavingUpdate(false);
     }
@@ -124,7 +125,7 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
             patchUpdatesCache(prev => prev.filter(u => u.id !== id));
             setEditingUpdateId(null);
           } catch (e: any) {
-            Alert.alert('Could not delete', e?.message || 'Please try again.');
+            Alert.alert('Could not delete', friendlyErrorMessage(e, 'Please try again.'));
           }
         },
       },
