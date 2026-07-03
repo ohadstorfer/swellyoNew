@@ -44,6 +44,7 @@
     "android": {
       "package": "com.swellyo.app",
       "versionCode": 28,
+      "userInterfaceStyle": "light",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",

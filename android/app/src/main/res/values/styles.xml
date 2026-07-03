@@ -1,8 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
   <!-- Material3 parent required by react-native-bottom-tabs (Android BottomNavigationView).
        Normally applied by the library's Expo config plugin, but this project commits
-       native folders and skips prebuild, so it's set here manually. -->
-  <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+       native folders and skips prebuild, so it's set here manually.
+       Light (not DayNight): the app is light-only (content is #FAFAFA/white and
+       app.json sets userInterfaceStyle=light). DayNight followed the system dark
+       mode and flipped native surfaces (AlertDialog, pickers) to a dark variant
+       whose button text used colorPrimary (#023c69 navy) on a dark-grey surface —
+       nearly invisible. Forcing Light keeps every native popup readable regardless
+       of the phone's system theme. -->
+  <style name="AppTheme" parent="Theme.Material3.Light.NoActionBar">
     <!-- Fully transparent button (3-button) nav bar: drop the semi-opaque grey
          contrast scrim so the light app content blends behind it edge-to-edge.
          windowLightNavigationBar=true → dark nav icons, readable on our light
