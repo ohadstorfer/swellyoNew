@@ -176,6 +176,12 @@ async function sendPushNotification(
       title,
       body: displayBody,
       sound: 'default',
+      // Android: route to the app-created 'default' channel (importance MAX,
+      // exists on every binary since the original push commit — channel setup
+      // runs before the token is fetched). Without an explicit channelId,
+      // FCM v1 routes to its own fallback channel at medium importance and the
+      // notification lands in the tray WITHOUT a heads-up banner.
+      channelId: 'default',
       // High priority so the message arrives promptly and reliably wakes the
       // iOS Notification Service Extension (iMessage-style delivery).
       priority: 'high',

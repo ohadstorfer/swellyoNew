@@ -116,6 +116,7 @@ export type ExpoMessage = {
   title: string;
   body: string;
   sound: 'default';
+  channelId: 'default';
   collapseId: string | undefined;
   data: {
     type: string;
@@ -137,6 +138,11 @@ export function buildExpoMessages(toSend: PreparedRow[]): ExpoMessage[] {
     title: row.text.title,
     body: row.text.body,
     sound: 'default',
+    // Android: route to the app-created 'default' channel (importance MAX,
+    // exists on every binary since the original push commit). Without an
+    // explicit channelId, FCM v1 routes to its own fallback channel at medium
+    // importance — tray only, no heads-up banner (verified on-device 2026-07-03).
+    channelId: 'default',
     collapseId: row.trip_id || undefined,
     data: {
       type: row.type,

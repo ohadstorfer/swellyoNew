@@ -181,6 +181,7 @@ describe('buildExpoMessages', () => {
       title: 'Hi',
       body: 'There',
       sound: 'default',
+      channelId: 'default',
       collapseId: 't9',
       data: {
         type: 'trip_reminder',
