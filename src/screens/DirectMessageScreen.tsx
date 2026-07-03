@@ -67,6 +67,7 @@ import { useDismissKeyboardOnBlur } from '../hooks/useDismissKeyboardOnBlur';
 import { BlockUserOverlay } from '../components/BlockUserOverlay';
 import { ReportUserScreen, ReportedMessageContext } from './ReportUserScreen';
 import { ReportMessageSheet } from '../components/ReportMessageSheet';
+import { ReactionsDetailSheet, ReactorInfo } from '../components/ReactionsDetailSheet';
 import { CommitmentMessageBubble } from '../components/trips/commitment/CommitmentMessageBubble';
 import { BeforeYouApproveModal } from '../components/trips/commitment/BeforeYouApproveModal';
 import {
@@ -388,6 +389,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [reportMessageContext, setReportMessageContext] = useState<ReportedMessageContext | null>(null);
   // Message reports use an in-chat bottom sheet (the whole-user report still uses the full ReportUserScreen).
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  // Tapping a reaction pill opens the WhatsApp-style "who reacted" sheet
+  // (add/remove happens inside it) — identical to group chats.
+  const [reactionsSheet, setReactionsSheet] = useState<{ messageId: string; emoji: string } | null>(null);
   const [showMuteModal, setShowMuteModal] = useState(false);
   // Composer (input bar) height — measured via onLayout. Passed to
   // KeyboardGestureArea's `offset` prop so the interactive-dismiss zone
@@ -480,6 +484,30 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     messages,
     setMessages,
   );
+
+  // user_id -> { name, avatar } resolver for the reactions sheet (same as the
+  // group-chat build: message senders + conversation members, with the 1:1
+  // other participant from props as an authoritative fallback).
+  const reactorInfoById = useMemo(() => {
+    const map = new Map<string, ReactorInfo>();
+    for (const m of messages) {
+      if (m.sender_id && !map.has(m.sender_id)) {
+        map.set(m.sender_id, {
+          name: m.sender_name || m.sender?.name,
+          avatar: m.sender_avatar || m.sender?.avatar || undefined,
+        });
+      }
+    }
+    const conv = providerConversations.find(c => c.id === currentConversationId);
+    for (const mem of conv?.members ?? []) {
+      map.set(mem.user_id, { name: mem.name, avatar: mem.profile_image_url });
+    }
+    if (otherUserId) {
+      map.set(otherUserId, { name: otherUserName, avatar: otherUserAvatar || undefined });
+    }
+    return map;
+  }, [messages, providerConversations, currentConversationId, otherUserId, otherUserName, otherUserAvatar]);
+
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
@@ -4387,14 +4415,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         <MessageReactionsRow
           reactions={message.reactions}
           ownAlignment={isOwnMessage ? 'right' : 'left'}
-          onPress={(emoji) => {
-            const mine = message.reactions?.find(r => r.hasMine);
-            if (mine?.emoji === emoji) {
-              removeReaction(message.id);
-            } else {
-              setReaction(message.id, emoji);
-            }
-          }}
+          // Tapping a reaction pill opens the WhatsApp-style "who reacted" sheet
+          // (add/remove happens inside it), instead of toggling inline.
+          onPress={(emoji) => setReactionsSheet({ messageId: message.id, emoji })}
         />
       )}
       </SwipeToReplyWrapper>
@@ -4779,6 +4802,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         );
       })()}
 
+
+      {/* WhatsApp-style "who reacted" sheet. Reactions are re-derived from the
+          live message so add/remove inside the sheet updates it in place.
+          Identical wiring to group chats. */}
+      <ReactionsDetailSheet
+        visible={!!reactionsSheet}
+        onClose={() => setReactionsSheet(null)}
+        reactions={
+          (reactionsSheet && messages.find(m => m.id === reactionsSheet.messageId)?.reactions) || []
+        }
+        currentUserId={currentUserId}
+        membersById={reactorInfoById}
+        initialEmoji={reactionsSheet?.emoji}
+        onRemoveOwn={() => reactionsSheet && removeReaction(reactionsSheet.messageId)}
+        onAddReaction={(emoji) => reactionsSheet && setReaction(reactionsSheet.messageId, emoji)}
+      />
 
       {/* In-chat "report this message" bottom sheet */}
       <ReportMessageSheet
