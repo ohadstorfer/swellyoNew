@@ -13,6 +13,18 @@ This file is also referenced from `.claude/CLAUDE.md` so any Claude session that
 3. Any new DB migrations have been applied to Supabase **manually** in the SQL editor
 4. `git status` is clean and on the right branch
 5. For OTA: the in-store binary you're targeting was built with `expo-updates` enabled (true for `1.1.0+`, false for anything older)
+6. **Check the "Pending native-only changes" section below** — if any listed change is in what you're shipping, it CANNOT go via OTA
+
+---
+
+## ⚠️ Pending native-only changes — OTA will BREAK or silently miss these
+
+Changes below are sitting in branches/working trees and **require a new `eas build`** (both platforms). Shipping them via `eas update` onto existing binaries either crashes the app at boot or silently does nothing. Delete each entry once it has shipped inside a store build.
+
+| Date | Change | Why native | OTA risk if ignored |
+|---|---|---|---|
+| 2026-07-03 | `react-native-keyboard-controller` **1.18.5 → 1.21.13** (`package.json`, on `ohad`) — fixes Android chat input overlapping keyboard + input vanishing below safe area on swipe-dismiss (upstream bug, fixed in lib 1.21.5) | Native module upgrade; new JS calls `KeyboardControllerNative.getConstants()` which doesn't exist in 1.18.5 binaries | **Hard crash at boot** — red screen `TypeError: getConstants is not a function`. Reproduced 2026-07-03 on a dev client with old native + new JS. An OTA carrying this JS bricks every installed binary until users reinstall. Bump `runtimeVersion` with the build so old binaries never pull the new bundle. |
+| 2026-07-03 | `styles.xml` AppTheme → `Theme.Material3.Light` + `app.json` `android.userInterfaceStyle: "light"` — forces light-only native dialogs (dark mode made AlertDialog buttons unreadable) | Committed native folder edit (`android/`) + app.json config; not part of the JS bundle | Silent no-op via OTA — dark-mode users keep unreadable dialogs until a store build ships |
 
 ---
 
@@ -190,6 +202,7 @@ Steps:
 
 ## 7. OTA-specific gotchas
 
+- **Never OTA a JS bundle whose `package.json` native deps differ from the target binary's.** If any dependency with native code changed version since the binary was built, the OTA can hard-crash at boot (see "Pending native-only changes" at the top — the rnkc 1.21 upgrade is the live example). The guard is the `runtimeVersion` string: bump it together with any native-dep change so old binaries never pull the incompatible bundle.
 - **The 1.0.8 binaries already in the wild will never receive OTAs.** The first OTA-capable build is `1.1.0`. Don't expect anyone on older binaries to get JS updates.
 - **Always pass `--platform ios|android|all` explicitly.** Default for Swellyo is `--platform ios` because iOS is the only 1.1.0 binary live in the stores. Pushing to `all` while Android is still on 1.0.x is technically harmless but obscures intent and breaks the moment Android 1.1.0 ships. See §5A.
 - **Don't `eas update` until the new native binary is approved and live.** Updates accumulate but go nowhere. Harmless but confusing in the dashboard.

@@ -1695,7 +1695,7 @@ PODS:
     - ReactNativeDependencies
     - SwiftUIIntrospect (~> 1.0)
     - Yoga
-  - react-native-keyboard-controller (1.18.5):
+  - react-native-keyboard-controller (1.21.13):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1707,7 +1707,7 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-keyboard-controller/common (= 1.18.5)
+    - react-native-keyboard-controller/common (= 1.21.13)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1718,7 +1718,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-keyboard-controller/common (1.18.5):
+  - react-native-keyboard-controller/common (1.21.13):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -3170,7 +3170,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 603c18db65844bb81dbe62fee8fcc976eaeb7108
   React-microtasksnativemodule: d77e0c426fce34c23227394c96ca1033b30c813c
   react-native-bottom-tabs: 5605290dc59bb17b12e9f037e1f32d596985cab5
-  react-native-keyboard-controller: 5587bad7f102125e2020720c4e37e0b58ff5e52e
+  react-native-keyboard-controller: 1d4a2be0e5ae9d4034621f0818de0ff9e314644e
   react-native-netinfo: f0a9899081c185db1de5bb2fdc1c88c202a059ac
   react-native-safe-area-context: 53f796cb6c814661bbe99fbdfd0585d07b996cdd
   react-native-slider: b76fa3dd989d25e8c2751c2a546674dfc0c2b6f8
