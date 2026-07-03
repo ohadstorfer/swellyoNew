@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
+import { BELL_NOTIFICATION_TYPES } from './notificationsService';
 
 export interface NotificationTapPayload {
   type?: string;
@@ -17,13 +18,16 @@ export interface NotificationTapPayload {
 
 /**
  * Pure decision for whether a received notification should surface a banner /
- * sound / badge.
+ * sound / badge. Runs only while the app is foregrounded (expo-notifications
+ * handler); background pushes are rendered by the OS and never reach this.
  *
- * Rule:
- *  • message notifications  → show UNLESS they belong to the currently-open
- *    conversation (so you get a banner for every other chat, foreground or not).
- *  • all other types        → keep the legacy behavior: suppress while the app
- *    is in the foreground, show when backgrounded.
+ * Rules:
+ *  • message notifications → show (with sound) UNLESS they belong to the
+ *    currently-open conversation.
+ *  • bell notification types (see BELL_NOTIFICATION_TYPES) → show UNLESS the
+ *    user is looking at the notifications screen. SILENT while foregrounded —
+ *    the user is already in the app; sound is for pulling them in from outside.
+ *  • unknown / missing types → legacy rule: suppress while foregrounded.
  *
  * Exported (not on the class) so it can be unit-tested without a real client.
  */
@@ -31,16 +35,24 @@ export function shouldShowForegroundNotification(args: {
   notificationType: string | undefined;
   conversationId: string | null | undefined;
   currentConversationId: string | null;
+  isNotificationsScreenOpen: boolean;
   isForeground: boolean;
-}): boolean {
-  const isMessage = args.notificationType === 'message';
+}): { show: boolean; sound: boolean } {
   const isSameConversation =
     !!args.conversationId && args.conversationId === args.currentConversationId;
 
-  if (isMessage) {
-    return !isSameConversation;
+  if (args.notificationType === 'message') {
+    const show = !isSameConversation;
+    return { show, sound: show };
   }
-  return !args.isForeground && !isSameConversation;
+
+  if (!!args.notificationType && BELL_NOTIFICATION_TYPES.has(args.notificationType)) {
+    const show = !(args.isForeground && args.isNotificationsScreenOpen);
+    return { show, sound: show && !args.isForeground };
+  }
+
+  const show = !args.isForeground && !isSameConversation;
+  return { show, sound: show };
 }
 
 class PushNotificationService {
@@ -52,6 +64,7 @@ class PushNotificationService {
   private responseListener: Notifications.Subscription | null = null;
   private getCurrentConversationId: (() => string | null) | null = null;
   private onNotificationTap: ((payload: NotificationTapPayload) => void) | null = null;
+  private getIsNotificationsScreenOpen: (() => boolean) | null = null;
 
   private constructor() {}
 
@@ -195,12 +208,14 @@ class PushNotificationService {
    */
   setupNotificationHandlers(
     getCurrentConversationId: () => string | null,
-    onNotificationTap: (payload: NotificationTapPayload) => void
+    onNotificationTap: (payload: NotificationTapPayload) => void,
+    getIsNotificationsScreenOpen: () => boolean = () => false
   ): void {
     if (Platform.OS === 'web') return;
 
     this.getCurrentConversationId = getCurrentConversationId;
     this.onNotificationTap = onNotificationTap;
+    this.getIsNotificationsScreenOpen = getIsNotificationsScreenOpen;
 
     // Decide whether a received notification surfaces a banner / sound / badge.
     //
@@ -209,8 +224,10 @@ class PushNotificationService {
     // banners). The currently-open conversation stays suppressed so you don't
     // get a banner for the chat you're already reading.
     //
-    // Non-message notifications (trip reminders, requests, gear) keep the
-    // legacy rule: suppressed while foregrounded, shown when backgrounded.
+    // Bell notification types (requests, commitments, gear, member events,
+    // reminders) also show in the foreground — silently — unless the user is
+    // looking at the notifications screen. Unknown types keep the legacy rule:
+    // suppressed while foregrounded, shown when backgrounded.
     //
     // Note: expo-notifications SDK 54 deprecated `shouldShowAlert` in favor of
     // `shouldShowBanner` + `shouldShowList`. We set all three for safety so
@@ -225,20 +242,21 @@ class PushNotificationService {
         const currentId = this.getCurrentConversationId?.() ?? null;
         const isForeground = AppState.currentState === 'active';
 
-        const shouldShow = shouldShowForegroundNotification({
+        const { show, sound } = shouldShowForegroundNotification({
           notificationType,
           conversationId,
           currentConversationId: currentId,
+          isNotificationsScreenOpen: this.getIsNotificationsScreenOpen?.() ?? false,
           isForeground,
         });
         return {
           // Legacy key (pre-SDK 54) — kept for backwards compat
-          shouldShowAlert: shouldShow,
+          shouldShowAlert: show,
           // SDK 54+ replacement keys
-          shouldShowBanner: shouldShow,
-          shouldShowList: shouldShow,
-          shouldPlaySound: shouldShow,
-          shouldSetBadge: shouldShow,
+          shouldShowBanner: show,
+          shouldShowList: show,
+          shouldPlaySound: sound,
+          shouldSetBadge: show,
         };
       },
     });
@@ -289,6 +307,7 @@ class PushNotificationService {
     }
     this.getCurrentConversationId = null;
     this.onNotificationTap = null;
+    this.getIsNotificationsScreenOpen = null;
 
     console.log('[PushNotificationService] Token cleared');
   }

@@ -63,6 +63,7 @@ import { swellyServiceCopy } from '../services/swelly/swellyServiceCopy';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
 import {
   tripFocusForNotification,
+  isNotificationsScreenOpen,
   type TripDetailFocus,
 } from '../services/notifications/notificationsService';
 import { syncDeviceTimezone } from '../services/notifications/deviceTimezone';
@@ -403,7 +404,8 @@ export const AppContent: React.FC = () => {
         if (payload.conversationId) {
           setPendingNotificationConversationId(payload.conversationId);
         }
-      }
+      },
+      isNotificationsScreenOpen
     );
     // openTripCard intentionally omitted — see TDZ note on the invite resolver.
     // eslint-disable-next-line react-hooks/exhaustive-deps

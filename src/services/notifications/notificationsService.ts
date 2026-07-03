@@ -30,6 +30,48 @@ export type NotificationType =
   | 'trip_reminder'
   | 'trip_ended';
 
+/**
+ * Every bell type, as a runtime set for the foreground push gate.
+ * Record<NotificationType, true> forces exhaustiveness: adding a new
+ * NotificationType without listing it here is a compile error.
+ */
+const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
+  member_joined: true,
+  member_committed: true,
+  gear_claimed: true,
+  admin_update_posted: true,
+  group_gear_updated: true,
+  personal_gear_updated: true,
+  gear_request_decided: true,
+  commitment_decided: true,
+  join_request_decided: true,
+  join_request_received: true,
+  gear_request_received: true,
+  commitment_request_received: true,
+  member_left: true,
+  trip_cancelled: true,
+  member_removed: true,
+  trip_reminder: true,
+  trip_ended: true,
+};
+export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(BELL_TYPE_FLAGS)
+);
+
+/**
+ * "Is the notifications screen (bell panel) currently focused?" — module-level
+ * flag, same manual pattern as MessagingProvider's currentConversationIdRef.
+ * NotificationsPanel sets it on focus/blur; the push foreground gate reads it
+ * to suppress banners for the screen the user is already looking at.
+ */
+let notificationsScreenOpen = false;
+export function setNotificationsScreenOpen(open: boolean): void {
+  notificationsScreenOpen = open;
+}
+export function isNotificationsScreenOpen(): boolean {
+  return notificationsScreenOpen;
+}
+
 export interface NotificationRow {
   id: string;
   recipient_id: string;

@@ -26,6 +26,7 @@ import {
   renderNotification,
   formatNotificationTime,
   tripFocusForNotification,
+  setNotificationsScreenOpen,
   NotificationRow,
   type TripDetailFocus,
 } from '../../services/notifications/notificationsService';
@@ -178,6 +179,16 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   // Rows that were unread the moment the panel opened — kept highlighted for the
   // duration of this viewing even after we mark them read.
   const unreadAtOpen = useRef<Set<string>>(new Set());
+
+  // Tell the push foreground gate the bell screen is visible: banners for bell
+  // notifications are suppressed while the user is already looking at the list
+  // (the focused realtime subscription below inserts the row live instead).
+  useFocusEffect(
+    useCallback(() => {
+      setNotificationsScreenOpen(true);
+      return () => setNotificationsScreenOpen(false);
+    }, [])
+  );
 
   // ── Live inserts/updates while the panel is FOCUSED ──────────────────────
   // The panel is a card that stays mounted in the stack when you open a trip on
