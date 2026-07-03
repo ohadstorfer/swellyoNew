@@ -275,8 +275,8 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   return (
     <View style={styles.contentRoot}>
       <View style={styles.headerCopy}>
-        <Text style={styles.subtitle}>What's your lifestyle?</Text>
-        <Text style={styles.helper}>Pick at least 3!</Text>
+        <Text style={styles.subtitle}>Beyond surfing, what else are you into?</Text>
+        <Text style={styles.helper}>Select 3 or more!</Text>
       </View>
 
       <View style={styles.searchBarWrap}>

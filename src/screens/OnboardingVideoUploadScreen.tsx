@@ -490,9 +490,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.messageText}>
-              {'This helps us match you with the right people, trips, and surf experiences. No pressure,\n\nJust be you!'}
-            </Text>
+            
           </View>
 
         {error && (
