@@ -1,392 +1,178 @@
-import React, { useState } from 'react';
-import {
-  View,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  Platform,
-  Alert,
-  LayoutChangeEvent,
-} from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
-import { Ionicons } from '@expo/vector-icons';
-import { Text } from '../components/Text';
-import { useOnboarding } from '../context/OnboardingContext';
-import { useScreenDimensions } from '../utils/responsive';
-import { colors, borderRadius, spacing } from '../styles/theme';
+import React from 'react';
+import { View, StyleSheet, TouchableOpacity, Image, Platform, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Logo } from '../components/Logo';
+import { ff, fs } from '../theme/fonts';
 
-const STEP_HEADER_HEIGHT = 60;
-const BUTTON_CONTAINER_HEIGHT = 92;
-const MIN_CONTENT_HEIGHT = 400;
+// Pre-composited background (both photos + torn-paper seams flattened into one
+// image by design) — see Figma "Home Screen". Natural size 393×825 (cropped from
+// the original 393×852 export, which had ~27px of transparent padding at the
+// bottom that showed through as a white line above the screen's bottom edge).
+// Width matches the 393pt design frame almost exactly, so this "zoomed out"
+// version renders with little-to-no horizontal crop, unlike the earlier 457-wide
+// asset which overflowed the screen width and cropped both sides more tightly.
+const IMG_BACKGROUND = require('../assets/onboarding/welcome-background.png');
+const BACKGROUND_RATIO = 393 / 825; // width / height
 
-export const CARD_IMAGES = {
-  travel_advice:
-    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/b0d7956780bd01fbfac42c1db76ed27df34c3fcf.jpg',
-  like_minded_travellers:
-    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/63ee08f6a46333084911295e23748727ebc90198.jpg',
-  travel_partners:
-    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/6cbafc07268184703dff606b6cb48836431babec.jpg',
-  guidance:
-    'https://rfdhtvcmagsbxqntnepv.supabase.co/storage/v1/object/public/onboarding-welcome-images/082aedec1b3d12fa462436f56cd5af2e3d6ad236.jpg',
-} as const;
-
-/** All onboarding welcome image URLs — exported for prefetching. */
-export const ONBOARDING_WELCOME_IMAGE_URLS = Object.values(CARD_IMAGES);
-
-const JOURNEY_OPTIONS: Array<{
-  id: string;
-  title: string;
-  imageUri: string;
-}> = [
-  {
-    id: 'travel_advice',
-    title: 'Give & Get Travel Advice',
-    imageUri: CARD_IMAGES.travel_advice,
-  },
-  {
-    id: 'like_minded_travellers',
-    title: 'Connect with Like-Minded Travelers',
-    imageUri: CARD_IMAGES.like_minded_travellers,
-  },
-  {
-    id: 'travel_partners',
-    title: 'Meet Potential Travel Partners',
-    imageUri: CARD_IMAGES.travel_partners,
-  },
-  {
-    id: 'guidance',
-    title: 'General Surf Guidance',
-    imageUri: CARD_IMAGES.guidance,
-  },
-];
+/**
+ * Local asset, so there is nothing to warm over the network. Kept exported
+ * because WelcomeScreen still calls `.forEach(Image.prefetch)` on sign-in; an
+ * empty list is a harmless no-op.
+ */
+export const ONBOARDING_WELCOME_IMAGE_URLS: string[] = [];
 
 interface OnboardingWelcomeScreenProps {
   onNext: () => void;
   onBack?: () => void;
-  updateFormData?: (data: { surfJourney?: string[] }) => void;
+  /** Unused — kept so existing call sites don't break. */
+  updateFormData?: (data: any) => void;
 }
 
 export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = ({
   onNext,
-  onBack,
-  updateFormData,
 }) => {
   const insets = useSafeAreaInsets();
-  const { user, formData } = useOnboarding();
-  const [selectedIds, setSelectedIds] = useState<string[]>(
-    () => formData?.surfJourney ?? []
-  );
-
-  const displayName = user?.nickname || formData?.nickname || '';
-
-  const toggleSelection = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  };
-
-  const handleNext = () => {
-    if (selectedIds.length < 2) {
-      Alert.alert(
-        'Pick at least two',
-        'Please select at least two options for your surf journey.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    updateFormData?.({ surfJourney: selectedIds });
-    onNext();
-  };
-
-  const progressWidth = 237;
-  const progressFilled = 34; // 1/4 step
-
-  // Content height is measured from the host (onLayout) — the scaffold owns the
-  // header + Next button, so we no longer derive it from the screen size.
-  const [contentHeight, setContentHeight] = useState(0);
-
-  const onContentLayout = (e: LayoutChangeEvent) => {
-    const h = e.nativeEvent.layout.height;
-    if (h > 0 && h !== contentHeight) setContentHeight(h);
-  };
-
-  useRegisterOnboardingStep({
-    nextLabel: 'Next',
-    canProceed: selectedIds.length >= 2,
-    onNext: handleNext,
-    onBack: onBack ?? (() => {}),
-  });
 
   return (
-    <View style={styles.contentRoot} onLayout={onContentLayout}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            minHeight: contentHeight > 0 ? contentHeight : MIN_CONTENT_HEIGHT,
-            flexGrow: 1,
-            justifyContent: 'space-evenly',
-          },
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Title block */}
-        <View style={styles.headerTitle}>
-          <Text
-            style={styles.greetingHeader}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-          >
-            {displayName ? `Yo ${displayName}!` : 'Yo!'}
-          </Text>
-          <Text style={styles.title}>What are you here for?</Text>
-          <Text style={styles.subtitle}>Pick at least two!</Text>
-        </View>
+    <View style={styles.root}>
+      {/* Background — full screen height, horizontally centered. The image is
+          wider than the screen at that height, so it overflows evenly on both
+          sides (clipped by the root's overflow: hidden). */}
+      <View style={styles.backgroundWrap} pointerEvents="none">
+        <Image
+          source={IMG_BACKGROUND}
+          style={{ height: '100%', aspectRatio: BACKGROUND_RATIO }}
+          resizeMode="cover"
+        />
+      </View>
 
-        {/* 2x2 cards */}
-        <View style={styles.cardsGrid}>
-          {JOURNEY_OPTIONS.map((option) => {
-            const selected = selectedIds.includes(option.id);
-            return (
-              <TouchableOpacity
-                key={option.id}
-                style={[styles.card, selected && styles.cardSelected]}
-                onPress={() => toggleSelection(option.id)}
-                activeOpacity={0.85}
-              >
-                <View style={styles.cardImageWrap}>
-                  <Image
-                    source={{ uri: option.imageUri }}
-                    style={styles.cardImage}
-                    resizeMode="cover"
-                  />
-                  <View
-                    style={[
-                      styles.checkbox,
-                      selected ? styles.checkboxSelected : styles.checkboxUnselected,
-                    ]}
-                  >
-                    {selected ? (
-                      <Ionicons name="checkmark" size={12} color={colors.white} />
-                    ) : null}
-                  </View>
-                </View>
-                <Text style={styles.cardTitle} numberOfLines={2}>
-                  {option.title}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+      {/* Foggy fade behind the CTA — same treatment as TripDetailScreen's sticky
+          CTA overlay (mirrors the profile "Connect to …" button), so the button
+          reads cleanly over the photo instead of sitting flat on it. */}
+      <View style={styles.ctaOverlay} pointerEvents="none">
+        <LinearGradient
+          colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
+          locations={[0, 0.4, 0.72, 1]}
+          style={styles.ctaOverlayGradient}
+        />
+      </View>
+
+      {/* ---- Foreground content ---- */}
+      <View style={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]}>
+        <View style={styles.topSpacer} />
+        <View style={styles.logoWrap}>
+          <View style={styles.logoOutborder} />
+          <Logo size={98} iconOnly />
         </View>
-      </ScrollView>
+        <Text style={styles.title} allowFontScaling={false}>
+          Yo! Let’s Travel.
+        </Text>
+        <Text style={styles.subtitle} allowFontScaling={false}>
+          Your next surf trip{'\n'}starts here.
+        </Text>
+
+        <View style={styles.spacer} />
+
+        <TouchableOpacity
+          testID="onboarding-welcome-start"
+          style={styles.button}
+          activeOpacity={0.85}
+          onPress={onNext}
+        >
+          <Text style={styles.buttonText} allowFontScaling={false}>
+            Start Your Journey
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  contentRoot: {
+  root: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
   },
-  container: {
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
-  },
-  stepHeader: {
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'web' ? 16 : 8,
-    paddingBottom: 0,
-    gap: 8,
-  },
-  stepHeaderRow: {
-    flexDirection: 'row',
+  backgroundWrap: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 44,
-    position: 'relative',
   },
-  backButton: {
-    width: 60,
-    alignItems: 'flex-start',
-    zIndex: 1,
-  },
-  backPlaceholder: {
-    width: 60,
-    minHeight: 29,
-    zIndex: 1,
-  },
-  greetingHeaderWrap: {
+  ctaOverlay: {
     position: 'absolute',
+    bottom: 0,
     left: 0,
     right: 0,
-    top: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  greetingHeader: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
-    fontWeight: '700',
-    fontSize: 24,
-    lineHeight: 28.8,
-    color: colors.brandTeal,
-    textAlign: 'center',
-  },
-  skipPlaceholder: {
-    width: 60,
-    alignItems: 'flex-end',
-  },
-  stepLabel: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontWeight: '400',
-    fontSize: 14,
-    color: colors.textPrimary,
-    lineHeight: 18,
-  },
-  progressTrack: {
-    height: 4,
-    borderRadius: 8,
-    backgroundColor: colors.progressBackground,
-    width: 237,
-    alignSelf: 'center',
+    height: 215,
     overflow: 'hidden',
+    ...(Platform.OS === 'web' && {
+      backdropFilter: 'blur(6px)',
+      WebkitMaskImage: 'linear-gradient(to bottom, transparent 0%, black 45%)',
+      maskImage: 'linear-gradient(to bottom, transparent 0%, black 45%)',
+    }),
   },
-  progressFill: {
-    height: 4,
-    borderRadius: 8,
-    backgroundColor: colors.progressFill,
+  ctaOverlayGradient: {
+    flex: 1,
   },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 0,
-    paddingBottom: 24,
+  content: {
+    flex: 1,
     alignItems: 'center',
+    paddingHorizontal: 40,
   },
-  headerTitle: {
+  topSpacer: {
+    // Matches the logo's vertical position over the background photo's white gap.
+    height: '25%',
+  },
+  logoWrap: {
+    width: 106,
+    height: 106,
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 24,
+    justifyContent: 'center',
+  },
+  logoOutborder: {
+    position: 'absolute',
+    width: 106,
+    height: 106,
+    borderRadius: 106 / 2,
+    backgroundColor: '#260E0C',
   },
   title: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
-    fontWeight: '700',
-    fontSize: 22,
-    lineHeight: 32,
-    color: '#212121',
+    marginTop: 26,
+    fontFamily:
+      Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat-ExtraBoldItalic',
+    fontSize: fs(28),
+    lineHeight: 34,
+    fontStyle: 'italic',
+    color: '#000000',
     textAlign: 'center',
+    ...(Platform.OS === 'web' ? { fontWeight: '800' as const } : null),
   },
   subtitle: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontWeight: '400',
-    fontSize: 14,
-    lineHeight: 18,
-    color: colors.textSecondary,
+    marginTop: 18,
+    fontFamily: ff('Inter', '600'),
+    fontSize: fs(24),
+    lineHeight: 28,
+    color: '#000000',
     textAlign: 'center',
+    ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),
   },
-  cardsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 16,
-    width: '100%',
-    maxWidth: 345,
-  },
-  card: {
-    width: '47%',
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-    paddingHorizontal: 8,
-    borderWidth: 1.5,
-    borderColor: 'transparent',
-    // Figma Box Shadow 01
-    shadowColor: '#596E7C',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 4,
-  },
-  cardSelected: {
-    borderColor: colors.brandTeal,
-  },
-  cardImageWrap: {
-    height: 104,
-    borderRadius: 8,
-    overflow: 'hidden',
-    marginBottom: 12,
-    position: 'relative',
-  },
-  cardImage: {
-    width: '100%',
-    height: '100%',
-    ...(Platform.OS === 'web' && { objectFit: 'cover' as any }),
-  },
-  checkbox: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxUnselected: {
-    backgroundColor: '#F7F7F7',
-    borderWidth: 1,
-    borderColor: '#CFCFCF',
-  },
-  checkboxSelected: {
-    backgroundColor: '#05bcd3',
-    borderWidth: 1,
-    borderColor: '#05bcd3',
-  },
-  cardTitle: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
-    fontWeight: '700',
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.textPrimary,
-  },
-  affirmation: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
-    fontWeight: '400',
-    fontSize: 14,
-    lineHeight: 18,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  buttonContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    paddingTop: 12,
-    alignItems: 'center',
+  spacer: {
+    flex: 1,
   },
   button: {
-    backgroundColor: '#212121',
-    height: 56,
-    minWidth: 150,
-    maxWidth: 330,
     width: '100%',
-    borderRadius: borderRadius.full,
-    justifyContent: 'center',
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#333333',
     alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  buttonDisabled: {
-    opacity: 0.35,
+    justifyContent: 'center',
   },
   buttonText: {
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
-    fontWeight: '700',
-    fontSize: 18,
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: fs(16),
     lineHeight: 24,
-    color: colors.white,
-    textAlign: 'center',
+    color: '#FFFFFF',
+    ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),
   },
 });
