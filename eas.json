@@ -40,6 +40,9 @@
       "ios": {
         "appleId": "app@swellyo.com",
         "ascAppId": "6762285335"
+      },
+      "android": {
+        "applicationId": "com.swellyo.app"
       }
     }
   }
