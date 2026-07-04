@@ -32,7 +32,7 @@ import { subscribeInAppBanner, InAppBannerPayload } from '../../services/notific
 import { ff, fs } from '../../theme/fonts';
 
 const ENTER_FADE_MS = 200; // opacity resolves early so the spring reads as a slide
-const EXIT_MS = 180; // exits are snappier than enters
+const EXIT_MS = 260; // still shorter than the ~520ms enter spring, but unhurried
 const AUTO_DISMISS_MS = 5000;
 const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 const HIDDEN_Y = -160; // safely above any banner height + inset
