@@ -28,6 +28,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
+import { BlurView } from 'expo-blur';
 import { subscribeInAppBanner, InAppBannerPayload } from '../../services/notifications/inAppBannerBus';
 import { ff, fs } from '../../theme/fonts';
 
@@ -35,7 +36,7 @@ const ENTER_FADE_MS = 200; // opacity resolves early so the spring reads as a sl
 const EXIT_MS = 260; // still shorter than the ~520ms enter spring, but unhurried
 const AUTO_DISMISS_MS = 5000;
 const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
-const HIDDEN_Y = -160; // safely above any banner height + inset
+const HIDDEN_Y = -220; // safely above the (taller, WhatsApp-sized) banner + any notch inset
 // iOS-banner feel: settles ~500ms with a barely-visible overshoot. Springs
 // (unlike timings) keep their velocity when a replacement retargets mid-flight.
 const ENTER_SPRING = { duration: 520, dampingRatio: 0.82 } as const;
@@ -133,6 +134,11 @@ export const InAppBannerHost: React.FC = () => {
     <View pointerEvents="box-none" style={[styles.wrap, { paddingTop: insets.top + 6 }]}>
       <GestureDetector gesture={pan}>
         <Animated.View style={[styles.banner, animatedStyle]}>
+          {/* WhatsApp-style material: real blur on iOS; Android's BlurView is
+              unreliable, so the solid translucent bannerAndroid bg covers it. */}
+          {Platform.OS === 'ios' && (
+            <BlurView intensity={60} tint="systemChromeMaterialDark" style={StyleSheet.absoluteFill} />
+          )}
           <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
             {payload.avatarUrl ? (
               <ExpoImage source={{ uri: payload.avatarUrl }} style={styles.avatar} />
@@ -162,31 +168,34 @@ const styles = StyleSheet.create({
   banner: {
     width: '100%',
     maxWidth: 560,
-    borderRadius: 22,
-    backgroundColor: 'rgba(28,28,30,0.96)',
-    paddingTop: 12,
-    paddingBottom: 8,
+    borderRadius: 26,
+    // iOS: light dark wash OVER the BlurView (real material, like WhatsApp).
+    // Android: BlurView is unreliable, so this is the whole background there.
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(32,32,34,0.52)' : 'rgba(38,38,40,0.97)',
+    overflow: 'hidden', // clips the BlurView to the rounded corners
+    paddingTop: 14,
+    paddingBottom: 9,
     paddingHorizontal: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.3,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 12,
   },
   row: { flexDirection: 'row', alignItems: 'center' },
   pressed: { opacity: 0.85 },
-  avatar: { width: 40, height: 40, borderRadius: 20 },
+  avatar: { width: 52, height: 52, borderRadius: 26 },
   avatarFallback: { backgroundColor: '#05BCD3', alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { color: '#FFFFFF', fontSize: fs(16), fontFamily: ff('Inter', '700'), includeFontPadding: false },
+  avatarInitial: { color: '#FFFFFF', fontSize: fs(20), fontFamily: ff('Inter', '700'), includeFontPadding: false },
   texts: { flex: 1, marginLeft: 12 },
-  title: { color: '#FFFFFF', fontSize: fs(14), fontFamily: ff('Inter', '700'), includeFontPadding: false },
-  body: { color: 'rgba(255,255,255,0.85)', fontSize: fs(13), fontFamily: ff('Inter', '400'), includeFontPadding: false, marginTop: 1 },
+  title: { color: '#FFFFFF', fontSize: fs(16), fontFamily: ff('Inter', '600'), includeFontPadding: false },
+  body: { color: 'rgba(255,255,255,0.8)', fontSize: fs(15), fontFamily: ff('Inter', '400'), includeFontPadding: false, marginTop: 2 },
   grabber: {
     alignSelf: 'center',
-    width: 44,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-    marginTop: 8,
+    width: 56,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    marginTop: 10,
   },
 });
