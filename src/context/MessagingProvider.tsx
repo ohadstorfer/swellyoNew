@@ -764,6 +764,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   // (a broadcast means there IS something new). Bursts are debounced by the caller.
   const handleInboxChange = useCallback(async (conversationIds: string[]) => {
     if (conversationIds.length === 0) return;
+    if (__DEV__) console.log('[MessagingProvider] 📥 inbox change:', conversationIds);
     // Snapshot BEFORE the dispatch below so the banner pass can diff against
     // what was on screen prior to this sync (see try/catch after the dispatch).
     const prevById = new Map(conversationsRef.current.map((c) => [c.id, c]));
@@ -782,16 +783,21 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
       // realtime or network cost. Skips conversations absent from the previous
       // snapshot (initial sync/reconnect) to avoid a banner storm on login.
       try {
+        // Dev-only guard tracer: says exactly why each candidate did/didn't banner.
+        const trace = (convId: string, verdict: string) => {
+          if (__DEV__) console.log(`[MessagingProvider] 🔔 banner ${verdict} conv=${convId}`);
+        };
         for (const conv of updated) {
           const lm = conv.last_message;
-          if (!lm?.id) continue;
+          if (!lm?.id) { trace(conv.id, 'SKIP no-last-message'); continue; }
           const prev = prevById.get(conv.id);
-          if (!prev) continue;
-          if (prev.last_message?.id === lm.id) continue;
+          if (!prev) { trace(conv.id, 'SKIP not-in-prev-snapshot'); continue; }
+          if (prev.last_message?.id === lm.id) { trace(conv.id, 'SKIP same-message-id'); continue; }
           const myId = currentUserIdRef.current;
-          if (!lm.sender_id || lm.sender_id === myId) continue;
-          if (lm.is_system) continue;
-          if (conv.id === currentConversationIdRef.current) continue;
+          if (!lm.sender_id || lm.sender_id === myId) { trace(conv.id, 'SKIP own-or-missing-sender'); continue; }
+          if (lm.is_system) { trace(conv.id, 'SKIP system-message'); continue; }
+          if (conv.id === currentConversationIdRef.current) { trace(conv.id, 'SKIP conversation-open'); continue; }
+          trace(conv.id, 'SHOW');
 
           const isDirect = conv.is_direct;
           const senderMember = isDirect
