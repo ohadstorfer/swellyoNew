@@ -77,8 +77,8 @@ export const AdminUpdateSheet: React.FC<Props> = ({
   const cta = isEdit ? 'Save' : 'Update';
   const TITLE_MAX = 21;
   const MAX = 500;
-  // Title is required; the description is optional (Figma 12933-37482).
-  const disabled = updateTitle.trim().length === 0 || !!saving;
+  // Both title and description are required (DB check: body must be non-empty).
+  const disabled = updateTitle.trim().length === 0 || body.trim().length === 0 || !!saving;
 
   const handleSubmit = () => {
     if (disabled) return;
