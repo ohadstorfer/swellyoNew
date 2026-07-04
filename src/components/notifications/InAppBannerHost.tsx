@@ -3,9 +3,13 @@
  * navigator and activeOverlay. Fed exclusively by inAppBannerBus — the app
  * tree never re-renders for a banner, only this host does.
  *
- * Motion (emil-design-eng): transform/opacity only; enter 280ms strong
- * ease-out; exit 200ms; velocity-based swipe-up dismiss with damped
- * downward drag; reduced-motion → fade only.
+ * Motion (emil-design-eng): transform/opacity only. Enter is an iOS-style
+ * spring (interruptible, retargets on replace, barely-visible settle) with a
+ * faster opacity fade so the motion reads as a slide, not a fade. Exit is
+ * deliberately snappier than the enter (180ms strong ease-out). Swipe-up
+ * dismiss is velocity-based and keeps the drag offset so the exit continues
+ * from the finger's position; a released (non-dismissing) drag springs back
+ * with a soft bounce. Reduced-motion → fade only.
  *
  * Known v1 limitation: RN Modal sheets render in their own window and cover
  * this banner. Accepted (spec).
@@ -20,17 +24,23 @@ import Animated, {
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { Image as ExpoImage } from 'expo-image';
 import { subscribeInAppBanner, InAppBannerPayload } from '../../services/notifications/inAppBannerBus';
 import { ff, fs } from '../../theme/fonts';
 
-const ENTER_MS = 280;
-const EXIT_MS = 200;
+const ENTER_FADE_MS = 200; // opacity resolves early so the spring reads as a slide
+const EXIT_MS = 180; // exits are snappier than enters
 const AUTO_DISMISS_MS = 5000;
 const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 const HIDDEN_Y = -160; // safely above any banner height + inset
+// iOS-banner feel: settles ~500ms with a barely-visible overshoot. Springs
+// (unlike timings) keep their velocity when a replacement retargets mid-flight.
+const ENTER_SPRING = { duration: 520, dampingRatio: 0.82 } as const;
+// Released-but-not-dismissed drag: soft bounce back under the finger's intent.
+const SNAP_BACK_SPRING = { duration: 420, dampingRatio: 0.7 } as const;
 
 export const InAppBannerHost: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -72,15 +82,17 @@ export const InAppBannerHost: React.FC = () => {
   useEffect(() => {
     const unsub = subscribeInAppBanner((p) => {
       setPayload(p);
-      dragY.value = 0;
+      // Replace-mid-drag: ease the drag offset home instead of snapping.
+      dragY.value = dragY.value === 0 ? 0 : withSpring(0, SNAP_BACK_SPRING);
       if (reducedMotion) {
         translateY.value = 0;
         opacity.value = 0;
-        opacity.value = withTiming(1, { duration: ENTER_MS });
+        opacity.value = withTiming(1, { duration: ENTER_FADE_MS });
       } else {
-        // Replace policy: retarget from wherever we are — no restart-from-zero.
-        translateY.value = withTiming(0, { duration: ENTER_MS, easing: EASE_OUT });
-        opacity.value = withTiming(1, { duration: ENTER_MS, easing: EASE_OUT });
+        // Replace policy: the spring retargets from wherever we are, keeping
+        // its velocity — no restart-from-zero, no dead frame.
+        translateY.value = withSpring(0, ENTER_SPRING);
+        opacity.value = withTiming(1, { duration: ENTER_FADE_MS, easing: EASE_OUT });
       }
       armTimer();
     });
@@ -95,9 +107,11 @@ export const InAppBannerHost: React.FC = () => {
     .onEnd((e) => {
       const flungUp = e.velocityY < -500 || e.translationY < -40;
       if (flungUp) {
+        // dragY keeps the finger's offset, so hide()'s translate continues
+        // from where the flick left the banner — momentum, not a restart.
         runOnJS(hide)();
       } else {
-        dragY.value = withTiming(0, { duration: EXIT_MS, easing: EASE_OUT });
+        dragY.value = withSpring(0, SNAP_BACK_SPRING);
         runOnJS(armTimer)();
       }
     });
