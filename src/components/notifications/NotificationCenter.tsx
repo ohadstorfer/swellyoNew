@@ -30,6 +30,7 @@ import {
   NotificationRow,
   type TripDetailFocus,
 } from '../../services/notifications/notificationsService';
+import { onNotification } from '../../services/notifications/notificationsRealtimeHub';
 import {
   approveJoinRequest,
   declineJoinRequest,
@@ -116,12 +117,12 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
   // device during heavy use. A bell's badge needs to stay live regardless of
   // focus, so keep a stable channel for the bell's lifetime. (The panel below
   // IS focus-gated — it's a single screen, so that's correct there.)
+  // The CHANNEL itself now lives in notificationsRealtimeHub (one shared
+  // connection for badge + panel + in-app banner); this is just a cheap
+  // in-memory listener, so attaching/detaching it is free regardless of focus.
   useEffect(() => {
     if (!userId) return;
-    const unsubscribe = notificationsService.subscribe(userId, {
-      onInsert: () => setUnread((u) => u + 1),
-      onUpdate: () => {},
-    });
+    const unsubscribe = onNotification({ onInsert: () => setUnread((u) => u + 1) });
     return unsubscribe;
   }, [userId]);
 
@@ -200,7 +201,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         setItems([]);
         return;
       }
-      const unsubscribe = notificationsService.subscribe(userId, {
+      const unsubscribe = onNotification({
         onInsert: (row) => {
           const thumbs = avatarThumbsFor([row]);
           if (thumbs.length) ExpoImage.prefetch(thumbs).catch(() => {});

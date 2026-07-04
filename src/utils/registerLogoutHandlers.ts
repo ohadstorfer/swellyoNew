@@ -18,6 +18,7 @@ import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { messagingService } from '../services/messaging/messagingService';
 import { blockingService } from '../services/blocking/blockingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
+import { stopNotificationsHub } from '../services/notifications/notificationsRealtimeHub';
 import { queryClient } from '../lib/queryClient';
 
 let registered = false;
@@ -60,6 +61,9 @@ export function registerLogoutHandlers(): void {
 
   // Push notification token
   logoutRegistry.register(() => pushNotificationService.clearToken());
+
+  // Notifications realtime hub (shared channel for badge/panel/banner)
+  logoutRegistry.register(() => stopNotificationsHub());
 
   // react-query cache (trips, etc.) — so User B never sees User A's cached data
   logoutRegistry.register(() => queryClient.clear());

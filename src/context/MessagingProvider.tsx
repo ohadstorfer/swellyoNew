@@ -27,6 +27,10 @@ import { supabase } from '../config/supabase';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { userPresenceService } from '../services/presence/userPresenceService';
 import { resetForLogout as imageUploadResetForLogout } from '../services/messaging/imageUploadService';
+import { showInAppBanner } from '../services/notifications/inAppBannerBus';
+import { messagePreviewText } from '../services/messaging/messagePreviewText';
+import { getStorageThumbUrl } from '../services/media/imageService';
+import { pushRootCard } from '../navigation/navigationRef';
 import { useOnboarding } from './OnboardingContext';
 import {
   conversationReducer,
@@ -760,6 +764,9 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   // (a broadcast means there IS something new). Bursts are debounced by the caller.
   const handleInboxChange = useCallback(async (conversationIds: string[]) => {
     if (conversationIds.length === 0) return;
+    // Snapshot BEFORE the dispatch below so the banner pass can diff against
+    // what was on screen prior to this sync (see try/catch after the dispatch).
+    const prevById = new Map(conversationsRef.current.map((c) => [c.id, c]));
     try {
       // Fetch the EXACT conversations the inbox broadcast named — no updated_at
       // watermark (it races against the locally-tracked lastSync and returns 0).
@@ -768,6 +775,53 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
         // SYNC_FROM_SERVER already carries authoritative unread_count from the
         // batched enrichment, so no separate per-conversation recount is needed.
         dispatch({ type: 'SYNC_FROM_SERVER', payload: { conversations: updated } });
+      }
+
+      // In-app banner for genuinely-new messages in conversations that are not
+      // open. Runs on the enriched result we already fetched — zero extra
+      // realtime or network cost. Skips conversations absent from the previous
+      // snapshot (initial sync/reconnect) to avoid a banner storm on login.
+      try {
+        for (const conv of updated) {
+          const lm = conv.last_message;
+          if (!lm?.id) continue;
+          const prev = prevById.get(conv.id);
+          if (!prev) continue;
+          if (prev.last_message?.id === lm.id) continue;
+          const myId = currentUserIdRef.current;
+          if (!lm.sender_id || lm.sender_id === myId) continue;
+          if (lm.is_system) continue;
+          if (conv.id === currentConversationIdRef.current) continue;
+
+          const isDirect = conv.is_direct;
+          const senderMember = isDirect
+            ? conv.other_user
+            : conv.members?.find((m) => m.user_id === lm.sender_id);
+          const senderName = senderMember?.name;
+          const senderAvatar = senderMember?.profile_image_url;
+          const groupName = !isDirect ? conv.title : undefined;
+          const tripId = !isDirect && typeof conv.metadata?.trip_id === 'string' ? conv.metadata.trip_id : undefined;
+          const surftripId = !isDirect && typeof conv.metadata?.surftrip_id === 'string' ? conv.metadata.surftrip_id : undefined;
+
+          showInAppBanner({
+            id: lm.id,
+            avatarUrl: senderAvatar ? getStorageThumbUrl(senderAvatar, 80) ?? undefined : undefined,
+            title: groupName ? `${senderName ?? 'Someone'} — ${groupName}` : senderName ?? 'New message',
+            body: messagePreviewText(lm, { currentUserId: myId }),
+            onPress: () =>
+              pushRootCard('ChatCard', {
+                conversationId: conv.id,
+                otherUserId: isDirect ? senderMember?.user_id ?? '' : '',
+                otherUserName: isDirect ? senderName ?? 'User' : groupName ?? 'Group Chat',
+                otherUserAvatar: senderAvatar ?? null,
+                isDirect,
+                tripId,
+                surftripId,
+              }),
+          });
+        }
+      } catch (e) {
+        if (__DEV__) console.warn('[MessagingProvider] banner pass failed:', e);
       }
     } catch (error) {
       console.error('[MessagingProvider] Error syncing on inbox change:', error);

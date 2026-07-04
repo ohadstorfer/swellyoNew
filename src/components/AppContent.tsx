@@ -42,6 +42,7 @@ import { userTripsTopic } from '../services/trips/tripsRealtime';
 // opening one of them is instant before the user scrolls. Critical query only.
 const EXPLORE_DETAIL_PREFETCH_COUNT = 3;
 import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
+import { InAppBannerHost } from './notifications/InAppBannerHost';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
 import { messagingService } from '../services/messaging/messagingService';
@@ -67,6 +68,8 @@ import {
   type TripDetailFocus,
 } from '../services/notifications/notificationsService';
 import { syncDeviceTimezone } from '../services/notifications/deviceTimezone';
+import { startNotificationsHub } from '../services/notifications/notificationsRealtimeHub';
+import { startBellBannerSource } from '../services/notifications/bellBannerSource';
 import { useMessaging } from '../context/MessagingProvider';
 
 export const AppContent: React.FC = () => {
@@ -410,6 +413,20 @@ export const AppContent: React.FC = () => {
     // openTripCard intentionally omitted — see TDZ note on the invite resolver.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getCurrentConversationId]);
+
+  // Start the shared notifications realtime hub + the bell→banner bridge so
+  // bell events show an in-app banner within ~1s (instead of waiting on the
+  // push queue cron). Hub stop happens ONLY via the logout registry — do not
+  // stop it here, only the source listener detaches on cleanup/user change.
+  useEffect(() => {
+    if (Platform.OS === 'web' || !user?.id) return;
+    startNotificationsHub(user.id);
+    const stopSource = startBellBannerSource(user.id, openTripCard);
+    return stopSource;
+    // openTripCard is a stable useCallback([]) — safe to omit (matches the
+    // existing TDZ-note pattern of the setupNotificationHandlers effect).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Check if MVP and dev modes are enabled
   const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
@@ -1913,6 +1930,7 @@ export const AppContent: React.FC = () => {
         {/* Swelly chat is the SwellyChat CARD in RootNavigator now (nav
             migration B2) — the display:'none' keep-alive layers are gone. */}
         {activeOverlay && <View style={StyleSheet.absoluteFill}>{activeOverlay}</View>}
+        <InAppBannerHost />
         {/* The floating bottom nav renders INSIDE RootNavigator as the
             custom tabBar (one persistent instance — pill animation plays
             across tab switches). barSuppressed hides it under overlays. */}

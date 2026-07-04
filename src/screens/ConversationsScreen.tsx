@@ -35,6 +35,7 @@ import { getSurftripHeroImagesByConversation } from '../services/surftrips/surft
 import { getGroupTripHeroImagesByConversation } from '../services/trips/groupTripsService';
 import { getStorageThumbUrl } from '../services/media/imageService';
 import { analyticsService } from '../services/analytics/analyticsService';
+import { messagePreviewText } from '../services/messaging/messagePreviewText';
 import { DirectMessageScreen } from './DirectMessageScreen';
 import { DirectGroupChat } from './DirectGroupChat';
 import { SwellyShaperScreen } from './SwellyShaperScreen';
@@ -740,6 +741,7 @@ export default function ConversationsScreen({
     const isLastMessageImage = conv.last_message?.type === 'image' || !!conv.last_message?.image_metadata;
     const isLastMessageVideo = conv.last_message?.type === 'video' || !!(conv.last_message as any)?.video_metadata;
     const isLastMessageAudio = conv.last_message?.type === 'audio' || !!(conv.last_message as any)?.audio_metadata;
+    const previewText = messagePreviewText(conv.last_message as any);
     const lastMessageTime = conv.last_message ? formatTime(conv.last_message.created_at) : '';
     const unreadCount = conv.unread_count || 0;
 
@@ -803,7 +805,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Image
+                  {previewText}
                 </Text>
               </View>
             ) : isLastMessageVideo ? (
@@ -813,7 +815,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Video
+                  {previewText}
                 </Text>
               </View>
             ) : isLastMessageAudio ? (
@@ -823,7 +825,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Voice message
+                  {previewText}
                 </Text>
               </View>
             ) : (
@@ -831,7 +833,7 @@ export default function ConversationsScreen({
                 styles.lastMessage,
                 Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
               ]} numberOfLines={1}>
-                {conv.last_message?.body || 'You got a new match!'}
+                {previewText || 'You got a new match!'}
               </Text>
             )}
           </View>
@@ -880,6 +882,7 @@ export default function ConversationsScreen({
     const isLastMessageAudio = conv.last_message?.type === 'audio' || !!(conv.last_message as any)?.audio_metadata;
     const isLastMessageCommitment = conv.last_message?.type === 'commitment_request';
     const isLastMessageMine = conv.last_message?.sender_id === currentUserId;
+    const previewText = messagePreviewText(conv.last_message as any, { currentUserId });
 
     // WhatsApp-style: in group chats, prefix the last-message preview with who sent it.
     // Skipped for 1:1 DMs and for system messages ("X joined the group").
@@ -974,7 +977,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Image
+                  {previewText}
                 </Text>
               </View>
             ) : isLastMessageVideo ? (
@@ -990,7 +993,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Video
+                  {previewText}
                 </Text>
               </View>
             ) : isLastMessageAudio ? (
@@ -1006,7 +1009,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  Voice message
+                  {previewText}
                 </Text>
               </View>
             ) : isLastMessageCommitment ? (
@@ -1016,7 +1019,7 @@ export default function ConversationsScreen({
                   styles.lastMessage,
                   Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
                 ]} numberOfLines={1}>
-                  {isLastMessageMine ? 'You requested to be Committed' : 'Requested to be Committed'}
+                  {previewText}
                 </Text>
               </View>
             ) : (
@@ -1024,8 +1027,8 @@ export default function ConversationsScreen({
                 styles.lastMessage,
                 Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
               ]} numberOfLines={1}>
-                {conv.last_message?.body
-                  ? `${senderPrefix}${conv.last_message.body}`
+                {previewText
+                  ? `${senderPrefix}${previewText}`
                   : 'You got a new match!'}
               </Text>
             )}

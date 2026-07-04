@@ -3,7 +3,6 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
-import { BELL_NOTIFICATION_TYPES } from './notificationsService';
 
 export interface NotificationTapPayload {
   type?: string;
@@ -17,17 +16,12 @@ export interface NotificationTapPayload {
 }
 
 /**
- * Pure decision for whether a received notification should surface a banner /
- * sound / badge. Runs only while the app is foregrounded (expo-notifications
- * handler); background pushes are rendered by the OS and never reach this.
- *
- * Rules:
- *  • message notifications → show (with sound) UNLESS they belong to the
- *    currently-open conversation.
- *  • bell notification types (see BELL_NOTIFICATION_TYPES) → show UNLESS the
- *    user is looking at the notifications screen. SILENT while foregrounded —
- *    the user is already in the app; sound is for pulling them in from outside.
- *  • unknown / missing types → legacy rule: suppress while foregrounded.
+ * Native-notification gate. Since 2026-07-04 the custom in-app banner
+ * (InAppBannerHost, realtime-driven) owns ALL foreground notifications, so
+ * this is back to the legacy rule: suppress everything while the app is
+ * foregrounded; show (with sound) when backgrounded — except messages for a
+ * conversation still marked open. The unused-looking params are kept so the
+ * handler call site and any future re-split stay stable.
  *
  * Exported (not on the class) so it can be unit-tested without a real client.
  */
@@ -40,17 +34,6 @@ export function shouldShowForegroundNotification(args: {
 }): { show: boolean; sound: boolean } {
   const isSameConversation =
     !!args.conversationId && args.conversationId === args.currentConversationId;
-
-  if (args.notificationType === 'message') {
-    const show = !isSameConversation;
-    return { show, sound: show };
-  }
-
-  if (!!args.notificationType && BELL_NOTIFICATION_TYPES.has(args.notificationType)) {
-    const show = !(args.isForeground && args.isNotificationsScreenOpen);
-    return { show, sound: show && !args.isForeground };
-  }
-
   const show = !args.isForeground && !isSameConversation;
   return { show, sound: show };
 }
@@ -219,15 +202,10 @@ class PushNotificationService {
 
     // Decide whether a received notification surfaces a banner / sound / badge.
     //
-    // Message notifications now show in the FOREGROUND too — a native heads-up
-    // banner for any chat that isn't the one currently open (in-app message
-    // banners). The currently-open conversation stays suppressed so you don't
-    // get a banner for the chat you're already reading.
-    //
-    // Bell notification types (requests, commitments, gear, member events,
-    // reminders) also show in the foreground — silently — unless the user is
-    // looking at the notifications screen. Unknown types keep the legacy rule:
-    // suppressed while foregrounded, shown when backgrounded.
+    // Foreground presentation is now fully suppressed in favor of the custom
+    // in-app banner (InAppBannerHost, realtime-driven). The native gate reverts
+    // to: suppress everything while foregrounded, show (with sound) when
+    // backgrounded — except messages for the currently-open conversation.
     //
     // Note: expo-notifications SDK 54 deprecated `shouldShowAlert` in favor of
     // `shouldShowBanner` + `shouldShowList`. We set all three for safety so
