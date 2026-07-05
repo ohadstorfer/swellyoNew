@@ -171,7 +171,9 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     // iOS: light dark wash OVER the BlurView (real material, like WhatsApp).
     // Android: BlurView is unreliable, so this is the whole background there.
-    backgroundColor: Platform.OS === 'ios' ? 'rgba(32,32,34,0.52)' : 'rgba(38,38,40,0.97)',
+    // Lifted to a lighter slate (was ~rgb(32-38)) so the banner reads as
+    // floating ABOVE the near-black #212121 header instead of camouflaging into it.
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(72,74,82,0.55)' : 'rgba(72,74,82,0.97)',
     overflow: 'hidden', // clips the BlurView to the rounded corners
     paddingTop: 14,
     paddingBottom: 9,

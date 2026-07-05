@@ -54,7 +54,7 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
             <Ionicons
               name={mediaIcon as any}
               size={14}
-              color="rgba(255,255,255,0.7)"
+              color="rgba(0,0,0,0.55)"
               style={styles.previewIcon}
             />
           )}
@@ -66,7 +66,7 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
         style={styles.closeBtn}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
-        <Ionicons name="close" size={22} color="rgba(255,255,255,0.85)" />
+        <Ionicons name="close" size={22} color="rgba(0,0,0,0.55)" />
       </TouchableOpacity>
     </Reanimated.View>
   );
@@ -76,7 +76,10 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: '#2A2A2A',
+    // Light + slightly translucent so it blends with the chat footer (#F5F5F5)
+    // instead of the old dark #2A2A2A box. The purple accent bar + name still
+    // mark it as a reply.
+    backgroundColor: 'rgba(0,0,0,0.10)',
     paddingVertical: 8,
     paddingRight: 8,
     paddingLeft: 0,
@@ -110,7 +113,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   preview: {
-    color: 'rgba(255,255,255,0.85)',
+    color: '#2F2F2F',
     fontSize: 13,
     flexShrink: 1,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',

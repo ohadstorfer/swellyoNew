@@ -411,6 +411,22 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
           merged.updated_at = local.updated_at;
           merged.last_message = local.last_message ?? server.last_message;
         }
+        // READ-STATE GUARD (mirror of the recency guard, for unread_count).
+        // The server computes unread from conversation_members.last_read_at, but
+        // our durable "read" write is debounced + fire-and-forget, so a sync that
+        // lands before it commits reports a STALE unread=1 and would stomp a
+        // conversation the user already opened (e.g. from a notification tap) —
+        // and nothing recounts afterward, so it sticks. If local already says read
+        // (0), keep it UNLESS the server actually has a message NEWER than the one
+        // the user last saw (a genuine new unread). Compare last_message times
+        // directly, not conversationRecency (updated_at can move without a message).
+        if (local.unread_count === 0) {
+          const localMsgMs = local.last_message?.created_at ? new Date(local.last_message.created_at).getTime() : 0;
+          const serverMsgMs = server.last_message?.created_at ? new Date(server.last_message.created_at).getTime() : 0;
+          if (serverMsgMs <= localMsgMs) {
+            merged.unread_count = 0;
+          }
+        }
         return merged;
       }).concat(
         serverConversations.filter(s => !state.some(l => l.id === s.id))

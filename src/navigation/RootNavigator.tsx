@@ -4,6 +4,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
+// Native uses the real @bottom-tabs bar. On web, metro.config.js redirects this
+// exact module specifier to src/navigation/bottomTabsWebShim.tsx (a JS bar),
+// because @bottom-tabs imports RN internals that can't bundle for web.
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
 import ConversationsStack from './ConversationsStack';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';

@@ -695,13 +695,19 @@ export default function ConversationsScreen({
     onConversationPress?.(conv.id);
   };
 
-  // Handle push notification tap — open the target conversation
+  // Handle push notification tap — open the target conversation.
+  // IMPORTANT: only consume (clear) the pending id once we can ACTUALLY open the
+  // chat. On a cold notification-open the conversations list loads in phases
+  // (cache → server), so the target conversation — and, for DMs, its enriched
+  // other_user — may not be present on the first pass. Clearing early left the
+  // notification opening nothing; instead we keep it pending so the next
+  // conversations update re-runs this and opens it.
   useEffect(() => {
     if (!pendingNotificationConversationId || conversations.length === 0) return;
     const conv = conversations.find(c => c.id === pendingNotificationConversationId);
-    if (conv) {
-      handleConversationPress(conv);
-    }
+    if (!conv) return; // not synced yet — wait for the next conversations update
+    if (conv.is_direct && !conv.other_user) return; // DM not enriched yet — wait
+    handleConversationPress(conv);
     onPendingNotificationHandled?.();
   }, [pendingNotificationConversationId, conversations]);
 

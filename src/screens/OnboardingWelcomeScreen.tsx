@@ -2,6 +2,7 @@ import React from 'react';
 import { View, StyleSheet, TouchableOpacity, Image, Platform, Text } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Logo } from '../components/Logo';
 import { ff, fs } from '../theme/fonts';
 
@@ -31,10 +32,24 @@ interface OnboardingWelcomeScreenProps {
 
 export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = ({
   onNext,
+  onBack,
 }) => {
   const insets = useSafeAreaInsets();
 
+  // This full-bleed screen isn't inside a native stack, so it has no built-in
+  // swipe-back. Wire a horizontal right-swipe to onBack (returns to the previous
+  // screen). Vertical drags fail the gesture so they don't trigger a back.
+  const swipeBackGesture = Gesture.Pan()
+    .runOnJS(true)
+    .activeOffsetX(20)
+    .failOffsetY([-25, 25])
+    .onEnd((e) => {
+      const isRightSwipe = e.translationX > 80 || (e.translationX > 40 && e.velocityX > 600);
+      if (isRightSwipe && onBack) onBack();
+    });
+
   return (
+    <GestureDetector gesture={swipeBackGesture}>
     <View style={styles.root}>
       {/* Background — full screen height, horizontally centered. The image is
           wider than the screen at that height, so it overflows evenly on both
@@ -86,6 +101,7 @@ export const OnboardingWelcomeScreen: React.FC<OnboardingWelcomeScreenProps> = (
         </TouchableOpacity>
       </View>
     </View>
+    </GestureDetector>
   );
 };
 

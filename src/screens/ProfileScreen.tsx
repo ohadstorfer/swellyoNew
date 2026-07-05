@@ -840,7 +840,6 @@ const SWIPE_ANIMATION_DURATION = 220;
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, onSettings, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false, reviewRequest }) => {
   const insets = useSafeAreaInsets();
   // Join-request review footer — which action is in flight (disables both).
-  const [reviewBusy, setReviewBusy] = useState<null | 'approve' | 'decline'>(null);
   // Get onboarding context for logout
   const { resetOnboarding, setUser, setCurrentStep, setIsDemoUser } = useOnboarding();
 
@@ -2809,8 +2808,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       </ScrollView>
       </MaybeGestureDetector>
       </ImageBackground>
-      {/* Connect Button with fading overlay - Floating at bottom when viewing other user's profile. Hidden while reviewing a join request (the Approve/Decline footer takes its place). */}
-      {!isViewingOwnProfile && userId && onMessage && !reviewRequest && (
+      {/* Message / Connect button — floats at the bottom of any other user's
+          profile, INCLUDING when reviewing a join request. Approve/Decline lives
+          only in the top bar now, so the bottom is always the "open a chat" action. */}
+      {!isViewingOwnProfile && userId && onMessage && (
         <>
           <View style={styles.connectOverlay} pointerEvents="none">
             <LinearGradient
@@ -2868,51 +2869,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </>
       )}
 
-      {/* Approve / Decline footer — only when this profile was opened to review
-          a pending join request (replaces the Connect button). */}
-      {!isViewingOwnProfile && userId && reviewRequest && (
-        <>
-          <View style={styles.connectOverlay} pointerEvents="none">
-            <LinearGradient
-              colors={['rgba(250, 250, 250, 0)', 'rgba(250, 250, 250, 0.4)', 'rgba(250, 250, 250, 0.75)', '#FAFAFA']}
-              locations={[0, 0.35, 0.6, 0.87]}
-              style={styles.connectOverlayGradient}
-            />
-          </View>
-          <View style={[styles.reviewFooter, { bottom: Math.max(insets.bottom, 16) + 24 }]}>
-            <TouchableOpacity
-              style={[styles.reviewBtn, styles.reviewDeclineBtn]}
-              activeOpacity={0.8}
-              disabled={!!reviewBusy}
-              onPress={async () => {
-                setReviewBusy('decline');
-                try { await reviewRequest.onDecline(); } finally { setReviewBusy(null); }
-              }}
-            >
-              {reviewBusy === 'decline' ? (
-                <ActivityIndicator color="#7B7B7B" />
-              ) : (
-                <Text style={styles.reviewDeclineText}>Decline</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.reviewBtn, styles.reviewApproveBtn]}
-              activeOpacity={0.8}
-              disabled={!!reviewBusy}
-              onPress={async () => {
-                setReviewBusy('approve');
-                try { await reviewRequest.onApprove(); } finally { setReviewBusy(null); }
-              }}
-            >
-              {reviewBusy === 'approve' ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.reviewApproveText}>Approve</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </>
-      )}
+      {/* (Removed) The old bottom Approve/Decline footer — it duplicated the top
+          JoinRequestActionBar. Approve/Decline now lives only in the top bar; the
+          bottom shows the Message/Connect button (above). */}
 
       {/* "Got it!" floating button — shown only on the post-onboarding
           profile (own profile). Mirrors the Connect button styling,

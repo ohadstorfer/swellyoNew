@@ -812,7 +812,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           showInAppBanner({
             id: lm.id,
             avatarUrl: senderAvatar ? getStorageThumbUrl(senderAvatar, 80) ?? undefined : undefined,
-            title: groupName ? `${senderName ?? 'Someone'} — ${groupName}` : senderName ?? 'New message',
+            title: groupName ? `${senderName ?? 'Someone'} - ${groupName}` : senderName ?? 'New message',
             body: messagePreviewText(lm, { currentUserId: myId }),
             onPress: () =>
               pushRootCard('ChatCard', {

@@ -414,6 +414,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Whether the user is near the visual bottom (inverted list → small contentOffset.y).
   // Used to decide whether to cap-on-append (trim oldest) vs leave history alone.
   const isNearBottomRef = useRef(true);
+  // True once the user has actually dragged the list. Until then we keep
+  // isNearBottomRef pinned true, so a stray onScroll during initial layout can't
+  // flip it false — otherwise a message that lands via realtime right after a
+  // notification-open (index 0, below the fold with maintainVisibleContentPosition)
+  // wouldn't auto-scroll and the user would have to scroll down to see it.
+  const hasUserScrolledRef = useRef(false);
   // True once we've trimmed the NEWEST messages off the in-memory window (because
   // the user scrolled far up). "Scroll to bottom" must reload the latest window.
   const hasNewerTrimmedRef = useRef(false);
@@ -1590,6 +1596,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
                 return merged;
               });
+              // These newest messages came from a fetch, not a live realtime INSERT,
+              // so the INSERT handler's auto-scroll never fires and
+              // maintainVisibleContentPosition keeps them below the fold. On a fresh
+              // open (e.g. tapping an in-app banner) the user is still pinned to the
+              // bottom — land them on the newest message instead of above it.
+              if (isNearBottomRef.current) {
+                requestAnimationFrame(() => scrollToBottom(false));
+              }
             }
           })
           .catch((err) => console.error('[DirectMessageScreen] Catch-up sync error:', err));
@@ -1669,6 +1683,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   chatHistoryCache.saveMessages(currentConversationId, merged).catch(() => {});
                   return merged;
                 });
+                // Fresh open (e.g. in-app banner tap): pin to the newest fetched
+                // message — the realtime INSERT auto-scroll won't fire for it.
+                if (isNearBottomRef.current) {
+                  requestAnimationFrame(() => scrollToBottom(false));
+                }
               }
             })
             .catch((err) => console.error('[DirectMessageScreen] Catch-up sync error:', err));
@@ -4645,13 +4664,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             showsVerticalScrollIndicator={false}
             automaticallyAdjustContentInsets={false}
             contentInsetAdjustmentBehavior="never"
+            onScrollBeginDrag={() => {
+              // The user physically grabbed the list — from now on onScroll may
+              // mark them "away from bottom". (Before this, a layout-driven
+              // onScroll must not un-pin a fresh mount; see hasUserScrolledRef.)
+              hasUserScrolledRef.current = true;
+            }}
             onScroll={(event) => {
               handleKeyboardScroll(event);
               const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
               const maxOffset = contentSize.height - layoutMeasurement.height;
               const distanceFromTop = maxOffset - contentOffset.y;
               // Inverted list → small contentOffset.y means at the visual bottom.
-              isNearBottomRef.current = contentOffset.y < 200;
+              const nearBottom = contentOffset.y < 200;
+              // Always allow re-pinning when we're actually at the bottom, but only
+              // allow UN-pinning once the user has really scrolled — so a stray
+              // onScroll during initial layout can't leave a fresh mount un-pinned.
+              if (nearBottom) {
+                isNearBottomRef.current = true;
+              } else if (hasUserScrolledRef.current) {
+                isNearBottomRef.current = false;
+              }
               if (distanceFromTop < 200 && hasMoreMessagesRef.current && !isLoadingOlderRef.current) {
                 loadOlderMessages();
               }
