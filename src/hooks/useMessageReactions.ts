@@ -187,7 +187,7 @@ export function useMessageReactions(
         await messagingService.setReaction(messageId, emoji);
       } catch (err) {
         console.error('[useMessageReactions] setReaction failed', err);
-        refreshOne(messageId);
+        refreshOne(messageId).catch(() => {});
       }
     },
     [currentUserId, optimisticApply, refreshOne],
@@ -201,7 +201,7 @@ export function useMessageReactions(
         await messagingService.removeReaction(messageId);
       } catch (err) {
         console.error('[useMessageReactions] removeReaction failed', err);
-        refreshOne(messageId);
+        refreshOne(messageId).catch(() => {});
       }
     },
     [currentUserId, optimisticApply, refreshOne],

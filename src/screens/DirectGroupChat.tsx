@@ -994,7 +994,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 previousDeleted: messageExists.deleted,
               });
               
-              const deletedMessage = { ...messageExists, deleted: true, body: undefined };
+              const deletedMessage = { ...messageExists, deleted: true, body: undefined, reactions: [] };
               const updated = prev.map(msg =>
                 msg.id === messageId ? deletedMessage : msg
               );
@@ -2125,7 +2125,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           return prev;
         }
         
-        const deletedMessage = { ...messageToDelete, deleted: true, body: undefined };
+        const deletedMessage = { ...messageToDelete, deleted: true, body: undefined, reactions: [] };
         const updated = prev.map(msg => {
           if (msg.id === messageId) {
             console.log('[DirectMessageScreen] Marking message as deleted in UI', { messageId });
@@ -4287,7 +4287,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           )}
         </MessageBubbleHighlight>
       </TouchableOpacity>
-      {message.reactions && message.reactions.length > 0 && (
+      {!message.deleted && message.reactions && message.reactions.length > 0 && (
         <MessageReactionsRow
           reactions={message.reactions}
           ownAlignment={isOwnMessage ? 'right' : 'left'}

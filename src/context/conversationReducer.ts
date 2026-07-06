@@ -244,7 +244,7 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
       const { conversation } = action.payload;
       const index = state.findIndex(c => c.id === conversation.id);
 
-      console.log('[MessagingProvider] 🔄 UPDATE_CONVERSATION reducer:', {
+      if (__DEV__) console.log('[MessagingProvider] 🔄 UPDATE_CONVERSATION reducer:', {
         conversationId: conversation.id,
         isNew: index === -1,
         hasOtherUser: !!conversation.other_user,
@@ -290,7 +290,7 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
         updated_at: latestUpdatedAt,
       };
 
-      console.log('[MessagingProvider] 🔄 UPDATE_CONVERSATION merge result:', {
+      if (__DEV__) console.log('[MessagingProvider] 🔄 UPDATE_CONVERSATION merge result:', {
         conversationId: conversation.id,
         hasOtherUser: !!merged.other_user,
         otherUserName: merged.other_user?.name,

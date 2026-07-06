@@ -48,6 +48,8 @@ class PushNotificationService {
   private getCurrentConversationId: (() => string | null) | null = null;
   private onNotificationTap: ((payload: NotificationTapPayload) => void) | null = null;
   private getIsNotificationsScreenOpen: (() => boolean) | null = null;
+  private launchResponseChecked: boolean = false;
+  private lastRoutedResponseId: string | null = null;
 
   private constructor() {}
 
@@ -244,18 +246,46 @@ class PushNotificationService {
       this.responseListener.remove();
     }
     this.responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
-      if (this.onNotificationTap) {
-        this.onNotificationTap({
-          type: typeof data.type === 'string' ? (data.type as string) : undefined,
-          conversationId: typeof data.conversationId === 'string' ? (data.conversationId as string) : undefined,
-          tripId: typeof data.tripId === 'string' ? (data.tripId as string) : undefined,
-          requestId: typeof data.requestId === 'string' ? (data.requestId as string) : undefined,
-          stage: typeof data.stage === 'string' ? (data.stage as string) : undefined,
-          decision: typeof data.decision === 'string' ? (data.decision as string) : undefined,
-        });
-      }
+      this.routeTapResponse(response);
     });
+
+    // Cold start: a tap that LAUNCHED the app fires before this listener exists,
+    // so it never reaches it (reliably lost on iOS, flaky on Android) — the user
+    // lands on the default tab instead of the chat. The OS keeps that launching
+    // response in memory for this process; read it once here. Purely local,
+    // one-shot — no network, no subscriptions. The identifier dedupe in
+    // routeTapResponse covers Android delivering the same response to both paths.
+    if (!this.launchResponseChecked) {
+      this.launchResponseChecked = true;
+      Notifications.getLastNotificationResponseAsync()
+        .then((response) => {
+          if (response) this.routeTapResponse(response);
+        })
+        .catch((e) => {
+          console.warn('[PushNotificationService] Launch notification check failed:', e);
+        });
+    }
+  }
+
+  // Shared tap router for both the live listener and the cold-start launch
+  // response. Dedupes by notification identifier so the same tap can't route
+  // twice (would double-push cards).
+  private routeTapResponse(response: Notifications.NotificationResponse): void {
+    const responseId = response.notification.request.identifier;
+    if (responseId && responseId === this.lastRoutedResponseId) return;
+    this.lastRoutedResponseId = responseId ?? null;
+
+    const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
+    if (this.onNotificationTap) {
+      this.onNotificationTap({
+        type: typeof data.type === 'string' ? (data.type as string) : undefined,
+        conversationId: typeof data.conversationId === 'string' ? (data.conversationId as string) : undefined,
+        tripId: typeof data.tripId === 'string' ? (data.tripId as string) : undefined,
+        requestId: typeof data.requestId === 'string' ? (data.requestId as string) : undefined,
+        stage: typeof data.stage === 'string' ? (data.stage as string) : undefined,
+        decision: typeof data.decision === 'string' ? (data.decision as string) : undefined,
+      });
+    }
   }
 
   async clearToken(): Promise<void> {

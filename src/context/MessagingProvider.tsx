@@ -797,12 +797,16 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           if (!lm.sender_id || lm.sender_id === myId) { trace(conv.id, 'SKIP own-or-missing-sender'); continue; }
           if (lm.is_system) { trace(conv.id, 'SKIP system-message'); continue; }
           if (conv.id === currentConversationIdRef.current) { trace(conv.id, 'SKIP conversation-open'); continue; }
-          trace(conv.id, 'SHOW');
 
           const isDirect = conv.is_direct;
           const senderMember = isDirect
             ? conv.other_user
             : conv.members?.find((m) => m.user_id === lm.sender_id);
+          // DM not enriched yet — tapping the banner would open the chat with an
+          // empty otherUserId (breaks presence/report). Same wait-for-enrichment
+          // rule as the notification-tap handler in ConversationsScreen.
+          if (isDirect && !senderMember?.user_id) { trace(conv.id, 'SKIP dm-not-enriched'); continue; }
+          trace(conv.id, 'SHOW');
           const senderName = senderMember?.name;
           const senderAvatar = senderMember?.profile_image_url;
           const groupName = !isDirect ? conv.title : undefined;
