@@ -17,7 +17,8 @@ import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScr
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 // TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
-import { pushRootCard, navigationRef } from '../navigation/navigationRef';
+import { pushRootCard } from '../navigation/navigationRef';
+import type { RootStackParamList } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
 import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -100,9 +101,12 @@ export const AppContent: React.FC = () => {
   // Push notification: pending conversation to open from notification tap
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
   // Chat-notification tap → open the chat as a ROOT card (covers any tab).
-  // Held here until the conversation is loaded/enriched, then consumed by the
-  // effect below — mirrors the requestedTripCard queue pattern.
+  // Held here until the conversation is loaded/enriched, then resolved into
+  // requestedChatCard — mirrors the requestedTripCard queue pattern.
   const [pendingChatNotification, setPendingChatNotification] = useState<string | null>(null);
+  // Fully-resolved ChatCard params, consumed mount-safely inside the
+  // navigator (HomeTabsExtras) exactly like requestedTripCard.
+  const [requestedChatCard, setRequestedChatCard] = useState<RootStackParamList['ChatCard'] | null>(null);
   // Programmatic trip-card open (push taps, invites, join decisions, chat
   // headers) — consumed mount-safely inside the navigator, which pushes a
   // TripDetail card. Replaces the old pendingTripDetailId state machine.
@@ -422,18 +426,20 @@ export const AppContent: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getCurrentConversationId]);
 
-  // Consume a chat-notification tap once everything it needs is actually
-  // ready. Each guard returns WITHOUT consuming, so the effect simply retries
-  // on the next conversations update — nothing is silently dropped (the
-  // cold-start failure mode of the old requestTab/nested-stack path).
+  // Resolve a chat-notification tap into full ChatCard params once the
+  // conversation is loaded (and, for DMs, enriched). Each guard returns
+  // WITHOUT consuming, so the effect retries on the next conversations
+  // update — nothing is silently dropped. The actual pushRootCard happens
+  // inside the navigator (HomeTabsExtras consumes requestedChatCard, like
+  // requestedTripCard) — pushing from here raced the cold-start mount of
+  // the root stack and the card was dropped.
   useEffect(() => {
     if (!pendingChatNotification) return;
     const conv = messagingConversations.find(c => c.id === pendingChatNotification);
     if (!conv) return; // conversations still loading
     if (conv.is_direct && !conv.other_user) return; // DM not enriched yet
-    if (!navigationRef.isReady()) return; // navigator not mounted yet
     setPendingChatNotification(null);
-    pushRootCard('ChatCard', {
+    setRequestedChatCard({
       conversationId: conv.id,
       otherUserId: conv.is_direct ? conv.other_user?.user_id ?? '' : '',
       otherUserName: conv.is_direct ? conv.other_user?.name ?? 'User' : conv.title ?? 'Group Chat',
@@ -1003,6 +1009,7 @@ export const AppContent: React.FC = () => {
     setRequestedTripCard({ tripId, focus: focus ?? null });
   }, []);
   const handleRequestedTripCardConsumed = useCallback(() => setRequestedTripCard(null), []);
+  const handleRequestedChatCardConsumed = useCallback(() => setRequestedChatCard(null), []);
   const handleTabChange = useCallback((tab: NavKey) => {
     // Ref-only: update bookkeeping without re-rendering AppContent.
     if (activeTabRef.current !== tab) {
@@ -1835,6 +1842,8 @@ export const AppContent: React.FC = () => {
       pendingNotificationConversationId,
       onPendingNotificationHandled: () => setPendingNotificationConversationId(null),
     },
+    requestedChatCard,
+    onRequestedChatCardConsumed: handleRequestedChatCardConsumed,
     tripsProps: {
       onBack: () => requestTab('lineup'),
     },
@@ -1856,6 +1865,8 @@ export const AppContent: React.FC = () => {
     handleRequestedTabConsumed,
     requestedTripCard,
     handleRequestedTripCardConsumed,
+    requestedChatCard,
+    handleRequestedChatCardConsumed,
     handleOpenGroupChat,
     handleOpenTripDetailFromChat,
     handleOpenSurftripDetail,

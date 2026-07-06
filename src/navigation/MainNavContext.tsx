@@ -2,6 +2,7 @@ import React, { createContext, useContext } from 'react';
 import type { ComponentProps } from 'react';
 import type { TripsBottomNavControl, NavKey } from '../components/trips/TripsBottomNav';
 import type { TripDetailFocus } from '../services/notifications/notificationsService';
+import type { RootStackParamList } from './navigationRef';
 import type ConversationsStack from './ConversationsStack';
 import type TripsScreen from '../screens/trips/TripsScreen';
 import type { ProfileScreen } from '../screens/ProfileScreen';
@@ -36,6 +37,15 @@ export interface MainNavContextValue {
    */
   requestedTripCard: { tripId: string; focus?: TripDetailFocus | null } | null;
   onRequestedTripCardConsumed: () => void;
+  /**
+   * Chat-card open from a push notification tap (DM or group chat).
+   * AppContent resolves the tap into full ChatCard params (waits for the
+   * conversation to load + enrich); consumed here, inside the mounted
+   * navigator, so a cold-start push can never fire before the root stack
+   * exists. Same mount-safe pattern as requestedTripCard.
+   */
+  requestedChatCard: RootStackParamList['ChatCard'] | null;
+  onRequestedChatCardConsumed: () => void;
   /** Swelly chat card: persisted conversation state + callbacks (AppContent
    *  owns the state so a re-opened card is warm). */
   swellyChat: {

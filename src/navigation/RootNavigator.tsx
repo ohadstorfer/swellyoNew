@@ -418,6 +418,7 @@ function HomeTabsExtras() {
     barSuppressed, onTabChange,
     requestedTab, onRequestedTabConsumed,
     requestedTripCard, onRequestedTripCardConsumed,
+    requestedChatCard, onRequestedChatCardConsumed,
     lineupProps,
   } = useMainNav();
   // Android draws the system nav bar inside the layout, so the floating Swelly
@@ -463,6 +464,15 @@ function HomeTabsExtras() {
     });
     onRequestedTripCardConsumed();
   }, [requestedTripCard, onRequestedTripCardConsumed]);
+
+  // Chat-card opens from push notification taps — same mount-safe pattern as
+  // trip cards above: this effect can only run once the navigator tree is
+  // mounted, so a cold-start request waits in AppContent state until then.
+  useEffect(() => {
+    if (!requestedChatCard) return;
+    pushRootCard('ChatCard', requestedChatCard);
+    onRequestedChatCardConsumed();
+  }, [requestedChatCard, onRequestedChatCardConsumed]);
 
   // Swelly floating avatar — Lineup tab only, hidden while an overlay is up.
   if (active !== 'lineup' || barSuppressed || !lineupProps.onSwellyPress) return null;
