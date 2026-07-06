@@ -403,9 +403,14 @@ export const AppContent: React.FC = () => {
           );
           return;
         }
-        // Chat-message pushes carry conversationId instead.
+        // Chat-message pushes carry conversationId instead. The chat opens
+        // inside the Lineup tab's stack (ConversationsScreen consumes the
+        // pending id), so also switch to that tab — otherwise on cold start
+        // the user stays parked on the initial tab (Trips) with the chat
+        // sitting unseen in the unfocused Lineup stack.
         if (payload.conversationId) {
           setPendingNotificationConversationId(payload.conversationId);
+          requestTab('lineup');
         }
       },
       isNotificationsScreenOpen
