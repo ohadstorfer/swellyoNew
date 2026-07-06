@@ -17,7 +17,7 @@ import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScr
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 // TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
-import { pushRootCard } from '../navigation/navigationRef';
+import { pushRootCard, navigationRef } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
 import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -99,6 +99,10 @@ export const AppContent: React.FC = () => {
 
   // Push notification: pending conversation to open from notification tap
   const [pendingNotificationConversationId, setPendingNotificationConversationId] = useState<string | null>(null);
+  // Chat-notification tap → open the chat as a ROOT card (covers any tab).
+  // Held here until the conversation is loaded/enriched, then consumed by the
+  // effect below — mirrors the requestedTripCard queue pattern.
+  const [pendingChatNotification, setPendingChatNotification] = useState<string | null>(null);
   // Programmatic trip-card open (push taps, invites, join decisions, chat
   // headers) — consumed mount-safely inside the navigator, which pushes a
   // TripDetail card. Replaces the old pendingTripDetailId state machine.
@@ -403,14 +407,13 @@ export const AppContent: React.FC = () => {
           );
           return;
         }
-        // Chat-message pushes carry conversationId instead. The chat opens
-        // inside the Lineup tab's stack (ConversationsScreen consumes the
-        // pending id), so also switch to that tab — otherwise on cold start
-        // the user stays parked on the initial tab (Trips) with the chat
-        // sitting unseen in the unfocused Lineup stack.
+        // Chat-message pushes carry conversationId instead. Queue a ROOT
+        // ChatCard (consumed below once the conversation data is loaded) —
+        // same race-proof pattern as trip notifications. The old path pushed
+        // the chat inside the Lineup tab's nested stack, which on cold start
+        // left it hidden behind the initial Trips tab.
         if (payload.conversationId) {
-          setPendingNotificationConversationId(payload.conversationId);
-          requestTab('lineup');
+          setPendingChatNotification(payload.conversationId);
         }
       },
       isNotificationsScreenOpen
@@ -418,6 +421,34 @@ export const AppContent: React.FC = () => {
     // openTripCard intentionally omitted — see TDZ note on the invite resolver.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getCurrentConversationId]);
+
+  // Consume a chat-notification tap once everything it needs is actually
+  // ready. Each guard returns WITHOUT consuming, so the effect simply retries
+  // on the next conversations update — nothing is silently dropped (the
+  // cold-start failure mode of the old requestTab/nested-stack path).
+  useEffect(() => {
+    if (!pendingChatNotification) return;
+    const conv = messagingConversations.find(c => c.id === pendingChatNotification);
+    if (!conv) return; // conversations still loading
+    if (conv.is_direct && !conv.other_user) return; // DM not enriched yet
+    if (!navigationRef.isReady()) return; // navigator not mounted yet
+    setPendingChatNotification(null);
+    pushRootCard('ChatCard', {
+      conversationId: conv.id,
+      otherUserId: conv.is_direct ? conv.other_user?.user_id ?? '' : '',
+      otherUserName: conv.is_direct ? conv.other_user?.name ?? 'User' : conv.title ?? 'Group Chat',
+      otherUserAvatar: conv.is_direct ? conv.other_user?.profile_image_url ?? null : null,
+      isDirect: conv.is_direct,
+      tripId: !conv.is_direct && typeof conv.metadata?.trip_id === 'string' ? conv.metadata.trip_id : undefined,
+      surftripId: !conv.is_direct && typeof conv.metadata?.surftrip_id === 'string' ? conv.metadata.surftrip_id : undefined,
+    });
+    // Land the tab UNDER the card on the chat list, so backing out of the
+    // chat ends up there (mirrors openTripCard's land-on-Trips behavior).
+    requestTab('lineup');
+    // requestTab is a stable useCallback([]) declared later — TDZ-safe at
+    // effect time, same pattern as openTripCard above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingChatNotification, messagingConversations]);
 
   // Start the shared notifications realtime hub + the bell→banner bridge so
   // bell events show an in-app banner within ~1s (instead of waiting on the

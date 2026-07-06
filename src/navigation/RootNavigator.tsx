@@ -444,9 +444,12 @@ function HomeTabsExtras() {
   // exits). Target the nested tab via the container ref — mount-safe.
   useEffect(() => {
     if (!requestedTab) return;
-    if (requestedTab !== active && navigationRef.isReady()) {
-      navigationRef.navigate('HomeTabs', { screen: ROUTE_FOR_KEY[requestedTab] });
-    }
+    if (requestedTab === active) { onRequestedTabConsumed(); return; }
+    // Not ready yet (cold start): leave the request pending — this effect
+    // re-runs when the nav state settles (`active` recomputes). Consuming
+    // here without navigating silently dropped cold-start tab switches.
+    if (!navigationRef.isReady()) return;
+    navigationRef.navigate('HomeTabs', { screen: ROUTE_FOR_KEY[requestedTab] });
     onRequestedTabConsumed();
   }, [requestedTab, active, onRequestedTabConsumed]);
 
