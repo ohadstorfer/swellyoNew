@@ -134,6 +134,7 @@ export interface GroupTrip {
   budget_max: number | null;
   budget_currency: string | null;
   budget_tier: string | null; // 'low' | 'medium' | 'high' — the tier the host picked
+  budget_fx_rate: number | null; // ILS per 1 USD, frozen at price-set time (null = legacy USD-only)
 
   // Multi-select tag columns (text[] with DB CHECK constraints). Replaces the
   // legacy single-value `trip_vibe` column dropped in the May 2026 migration.
@@ -380,7 +381,7 @@ const TRIP_DEST_EMBED =
 export const EXPLORE_TRIP_SELECT = [
   'id', 'host_id', 'status', 'hosting_style', 'title', 'hero_image_url',
   'start_date', 'end_date', 'dates_set_in_stone', 'date_months',
-  'cost_per_person', 'budget_min', 'budget_max',
+  'cost_per_person', 'budget_min', 'budget_max', 'budget_fx_rate',
   'max_participants', 'participant_count', 'created_at',
   TRIP_DEST_EMBED,
 ].join(', ');

@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { FALLBACK_USD_TO_ILS, usdToIls } from '../../utils/currency';
 
 // --------------------------------------------------------------------------
 // BudgetTierCards — 3-card tier picker for the budget step.
@@ -68,8 +69,10 @@ export interface BudgetTierCardsProps {
    * use it to reveal the manual min/max inputs sitting in the parent.
    */
   onManualOverride?: () => void;
-  /** Currency code shown next to ranges. Defaults to USD. */
-  currency?: string;
+  /** Currency shown next to ranges. Israeli operators see ₪ (converted via fxRate); defaults to USD. */
+  currency?: 'ILS' | 'USD';
+  /** USD -> ILS rate, used only when currency === 'ILS'. Defaults to FALLBACK_USD_TO_ILS. */
+  fxRate?: number;
 }
 
 const TIER_ORDER: BudgetTier[] = ['low', 'medium', 'high'];
@@ -77,17 +80,6 @@ const TIER_LABEL: Record<BudgetTier, string> = {
   low: 'Budget',
   medium: 'Mid-range',
   high: 'Premium',
-};
-
-const formatMoney = (n: number): string => {
-  // Compact USD-style formatting. e.g. 1500 -> "$1,500".
-  if (!Number.isFinite(n)) return '$—';
-  return '$' + Math.round(n).toLocaleString('en-US');
-};
-
-const formatRange = (r: BudgetTierRange, currency: string): string => {
-  if (r.min === r.max) return `${formatMoney(r.min)} ${currency}`;
-  return `${formatMoney(r.min)} – ${formatMoney(r.max)}`;
 };
 
 const showAiInfo = (): void => {
@@ -106,12 +98,26 @@ export const BudgetTierCards: React.FC<BudgetTierCardsProps> = ({
   error,
   onManualOverride,
   currency = 'USD',
+  fxRate,
 }) => {
   const { width } = useWindowDimensions();
   // Stack vertically on narrow screens so the USD range stays readable.
   const stacked = width < 380;
 
   const [pressedTier, setPressedTier] = useState<BudgetTier | null>(null);
+
+  const formatMoney = (usd: number): string => {
+    if (!Number.isFinite(usd)) return currency === 'ILS' ? '₪—' : '$—';
+    if (currency === 'ILS') {
+      return '₪' + usdToIls(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
+    }
+    return '$' + Math.round(usd).toLocaleString('en-US');
+  };
+
+  const formatRange = (r: BudgetTierRange): string => {
+    if (r.min === r.max) return `${formatMoney(r.min)} ${currency}`;
+    return `${formatMoney(r.min)} – ${formatMoney(r.max)}`;
+  };
 
   useEffect(() => {
     // Reset transient press state if the ranges object changes.
@@ -153,7 +159,7 @@ export const BudgetTierCards: React.FC<BudgetTierCardsProps> = ({
               onPressOut={() => setPressedTier(prev => (prev === tier ? null : prev))}
               accessibilityRole="button"
               accessibilityState={{ selected: isSelected }}
-              accessibilityLabel={`${TIER_LABEL[tier]}, ${formatRange(range, currency)} per person`}
+              accessibilityLabel={`${TIER_LABEL[tier]}, ${formatRange(range)} per person`}
               style={[
                 styles.card,
                 stacked ? styles.cardStacked : styles.cardRow,
@@ -173,7 +179,7 @@ export const BudgetTierCards: React.FC<BudgetTierCardsProps> = ({
               >
                 {TIER_LABEL[tier]}
               </Text>
-              <Text style={styles.tierRange}>{formatRange(range, currency)}</Text>
+              <Text style={styles.tierRange}>{formatRange(range)}</Text>
               <Text style={styles.tierUnit}>per person</Text>
               {range.label ? (
                 <Text style={styles.tierExtra}>{range.label}</Text>

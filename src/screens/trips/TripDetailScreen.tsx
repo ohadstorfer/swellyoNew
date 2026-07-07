@@ -236,6 +236,7 @@ const buildTripDetailVM = (
   priceInclusions: trip.price_inclusions,
   budgetMin: trip.budget_min,
   budgetMax: trip.budget_max,
+  budgetFxRate: trip.budget_fx_rate,
   budgetTier: (trip.budget_tier as 'low' | 'medium' | 'high' | null) ?? null,
   hostingStyle: trip.hosting_style,
   leader:

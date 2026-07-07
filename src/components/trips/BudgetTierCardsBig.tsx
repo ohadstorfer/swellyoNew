@@ -13,6 +13,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../Text';
+import { FALLBACK_USD_TO_ILS, usdToIls } from '../../utils/currency';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
@@ -49,6 +50,10 @@ export interface BudgetTierCardsBigProps {
   derivation?: string;
   onManualOverride?: () => void;
   error?: string;
+  /** Israeli operators see ₪ (converted via fxRate); everyone else sees $. Defaults to USD. */
+  currency?: 'ILS' | 'USD';
+  /** USD -> ILS rate, used only when currency === 'ILS'. Defaults to FALLBACK_USD_TO_ILS. */
+  fxRate?: number;
 }
 
 const TIER_ORDER: BudgetTier[] = ['low', 'medium', 'high'];
@@ -58,16 +63,6 @@ const TIER_LABEL: Record<BudgetTier, string> = {
   high: 'Premium',
 };
 const CARD_SUBTITLE = 'Accommodation & Meals';
-
-const formatMoney = (n: number): string => {
-  if (!Number.isFinite(n)) return '-';
-  return '$' + Math.round(n).toLocaleString('en-US');
-};
-
-const formatRange = (r: BudgetTierRange): string => {
-  if (r.min === r.max) return formatMoney(r.min);
-  return `${formatMoney(r.min)} - ${formatMoney(r.max)}`;
-};
 
 const showAiInfo = (): void => {
   Alert.alert(
@@ -85,7 +80,22 @@ export const BudgetTierCardsBig: React.FC<BudgetTierCardsBigProps> = ({
   derivation,
   onManualOverride,
   error,
+  currency,
+  fxRate,
 }) => {
+  const formatMoney = (usd: number): string => {
+    if (!Number.isFinite(usd)) return '-';
+    if (currency === 'ILS') {
+      return '₪' + usdToIls(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
+    }
+    return '$' + Math.round(usd).toLocaleString('en-US');
+  };
+
+  const formatRange = (r: BudgetTierRange): string => {
+    if (r.min === r.max) return formatMoney(r.min);
+    return `${formatMoney(r.min)} - ${formatMoney(r.max)}`;
+  };
+
   return (
     <View>
       {/* Estimated by AI pill — pink→purple gradient border */}

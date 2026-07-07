@@ -36,6 +36,8 @@ import {
 import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
 import { BUDGET_THRESHOLD } from '../../services/trips/exploreFilterPredicates';
 import { COUNTRY_NAMES } from '../../data/countryNames';
+import { formatPrice, formatPriceRange, FALLBACK_USD_TO_ILS, isIsraeli, usdToIls } from '../../utils/currency';
+import { useUserProfile } from '../../context/UserProfileContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys, type ExploreFilterKey } from '../../hooks/trips/useTripQueries';
 import { fetchTripCore } from '../../hooks/trips/useTripDetail';
@@ -375,12 +377,11 @@ const TRIP_TYPE: Record<
   C: { label: TRIP_TYPE_PILL.C, icon: 'briefcase-outline' },
 };
 
-const formatTripPrice = (trip: GroupTrip): string | null => {
-  if (trip.cost_per_person != null) return `$${trip.cost_per_person}`;
-  if (trip.budget_min != null && trip.budget_max != null) {
-    return `$${trip.budget_min} - ${trip.budget_max}`;
+const formatTripPrice = (trip: GroupTrip, viewerCountry: string | null): string | null => {
+  if (trip.cost_per_person != null) {
+    return formatPrice(trip.cost_per_person, trip.budget_fx_rate, viewerCountry);
   }
-  return null;
+  return formatPriceRange(trip.budget_min, trip.budget_max, trip.budget_fx_rate, viewerCountry);
 };
 
 const ExploreTripCard: React.FC<{
@@ -389,6 +390,8 @@ const ExploreTripCard: React.FC<{
   onPress?: () => void;
   userId?: string | null;
 }> = ({ trip, meta, onPress, userId }) => {
+  const { profile } = useUserProfile();
+  const viewerCountry = profile?.country_from ?? null;
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
   const typeGradient = TRIP_TYPE_GRADIENT[trip.hosting_style] ?? TRIP_TYPE_GRADIENT.A;
   const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
@@ -396,7 +399,7 @@ const ExploreTripCard: React.FC<{
   const max = trip.max_participants;
   const spotsLeft = max != null ? Math.max(0, max - count) : null;
   const occupancy = max != null ? `${count}/${max}` : `${count}`;
-  const price = formatTripPrice(trip);
+  const price = formatTripPrice(trip, viewerCountry);
 
   // Tiny (~24px) transform thumbnail used as a blur-up placeholder. Supabase
   // image transforms are enabled (already used in NotificationCenter). For
@@ -797,7 +800,7 @@ interface ExploreChip {
 // Three rolling month chips derived from the device clock, so the labels move
 // forward on their own every month. First two read "This/Next Month"; the third
 // shows the literal month name (e.g. "August").
-const buildExploreChips = (now: Date): ExploreChip[] => {
+const buildExploreChips = (now: Date, viewerCountry: string | null): ExploreChip[] => {
   const ymOffset = (offset: number) => {
     const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -807,12 +810,17 @@ const buildExploreChips = (now: Date): ExploreChip[] => {
   const m0 = ymOffset(0);
   const m1 = ymOffset(1);
   const m2 = ymOffset(2);
+  // Label only — the RPC still filters against BUDGET_THRESHOLD in USD.
+  // Approximate conversion via the fallback rate (no single trip rate applies here).
+  const budgetChipUnit = isIsraeli(viewerCountry)
+    ? `₪${Math.round(usdToIls(BUDGET_THRESHOLD, FALLBACK_USD_TO_ILS) / 1000)}k`
+    : `$${BUDGET_THRESHOLD / 1000}k`;
   return [
     { id: `m:${m0.ym}`, label: 'This Month', kind: 'month', value: m0.ym },
     { id: `m:${m1.ym}`, label: 'Next Month', kind: 'month', value: m1.ym },
     { id: `m:${m2.ym}`, label: m2.name, kind: 'month', value: m2.ym },
-    { id: 'b:below', label: `Below $${BUDGET_THRESHOLD / 1000}k`, kind: 'budget', value: 'below' },
-    { id: 'b:above', label: `Above $${BUDGET_THRESHOLD / 1000}k`, kind: 'budget', value: 'above' },
+    { id: 'b:below', label: `Below ${budgetChipUnit}`, kind: 'budget', value: 'below' },
+    { id: 'b:above', label: `Above ${budgetChipUnit}`, kind: 'budget', value: 'above' },
   ];
 };
 
@@ -902,8 +910,14 @@ const ExploreTripsView: React.FC<{
   onDeckScroll?: () => void;
   userId: string | null;
 }> = ({ onOpenTrip, onNavScroll, onDeckScroll, userId }) => {
-  // Month chips roll off the device clock; built once per mount.
-  const chips = useMemo(() => buildExploreChips(new Date()), []);
+  // Viewer's country decides the budget chip label currency (₪ for Israel, $ otherwise);
+  // the RPC filter value itself stays in USD (see deriveExploreFilterKey below).
+  const { profile } = useUserProfile();
+  const viewerCountry = profile?.country_from ?? null;
+
+  // Month chips roll off the device clock; re-derived if the viewer's country changes
+  // (e.g. profile finishes loading after mount) so the budget label currency updates.
+  const chips = useMemo(() => buildExploreChips(new Date(), viewerCountry), [viewerCountry]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggleChip = useCallback((id: string) => {
     setSelected(prev => {

@@ -64,13 +64,14 @@ import {
   STRUCTURE_DISPLAY,
   BUDGET_VIBE,
   formatAge,
-  formatBudgetRange,
   formatDateRange,
   formatSkillLevel,
   formatSkillRange,
   computeCountdownTarget,
 } from './TripDetailView';
 import { TRIP_TYPE_WORD, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
+import { formatPrice, formatPriceRange } from '../../utils/currency';
+import { useUserProfile } from '../../context/UserProfileContext';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
@@ -268,6 +269,8 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onEditDates,
   onEditAccommodation,
 }) => {
+  const { profile } = useUserProfile();
+  const viewerCountry = profile?.country_from ?? null;
   const [showIncludes, setShowIncludes] = useState(false);
   const [showBudgetInfo, setShowBudgetInfo] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
@@ -317,15 +320,14 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   // Tapping the stay card opens the host's booking/listing link, if one was set.
   const stayUrl = vm.accommodationUrl?.trim() || null;
 
-  const priceLabel =
-    vm.costPerPerson != null ? `$${vm.costPerPerson.toLocaleString('en-US')}` : null;
+  const priceLabel = formatPrice(vm.costPerPerson ?? null, vm.budgetFxRate ?? null, viewerCountry);
   const includeSections = priceInclusionSections(vm.priceInclusions);
   const addOns = priceInclusionAddOns(vm.priceInclusions);
   const hasPriceDetail = includeSections.length > 0 || addOns.length > 0;
 
   // Horizontal info chips below the countdown — fixed order, each shown only
   // when it has data.
-  const budgetLabel = formatBudgetRange(vm.budgetMin ?? null, vm.budgetMax ?? null);
+  const budgetLabel = formatPriceRange(vm.budgetMin ?? null, vm.budgetMax ?? null, vm.budgetFxRate ?? null, viewerCountry);
   const budgetVibe = vm.budgetTier ? BUDGET_VIBE[vm.budgetTier] : null;
   // Coloured trip-type tag straddling the top of the countdown card.
   const typeTagWord = vm.hostingStyle ? TRIP_TYPE_WORD[vm.hostingStyle] : null;
@@ -349,7 +351,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     chips.push({
       icon: 'currency-dollar-circle',
       label: 'Price',
-      value: `$${vm.costPerPerson}`,
+      value: formatPrice(vm.costPerPerson ?? null, vm.budgetFxRate ?? null, viewerCountry) ?? '',
       highlight: true,
       footer: hasPriceDetail ? 'What’s included' : undefined,
       onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,

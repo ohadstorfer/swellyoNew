@@ -60,6 +60,9 @@ import { useTripWizardDraft } from '../../hooks/useTripWizardDraft';
 import { useFieldErrors } from '../../hooks/useFieldErrors';
 import { useDiscardConfirm } from '../../hooks/useDiscardConfirm';
 import { showErrorAlert } from '../../utils/friendlyError';
+import { fetchUsdToIls } from '../../utils/exchangeRate';
+import { FALLBACK_USD_TO_ILS, isIsraeli, ilsToUsd, usdToIls } from '../../utils/currency';
+import { useUserProfile } from '../../context/UserProfileContext';
 
 // Stream A — bottom sheet shell + the new wave-shape slider + big budget cards
 import { WizardBottomSheet } from '../../components/trips/WizardBottomSheet';
@@ -523,7 +526,12 @@ const pickImage = async (aspect: [number, number] = [12, 5]): Promise<string | n
 // -----------------------------------------------------------------------------
 // State <-> GroupTrip mapping
 // -----------------------------------------------------------------------------
-const stateFromTrip = (trip: GroupTrip): WizardState => {
+const stateFromTrip = (trip: GroupTrip, operatorCurrency: 'ILS' | 'USD'): WizardState => {
+  // Israeli operators edit in ₪; stored values are USD, so convert up using the
+  // trip's frozen rate (falling back to today's default if the trip predates rate capture).
+  const editRate = trip.budget_fx_rate ?? FALLBACK_USD_TO_ILS;
+  const toEditCurrency = (usd: number | null): number | null =>
+    usd == null ? null : operatorCurrency === 'ILS' ? usdToIls(usd, editRate) : usd;
   const months = trip.date_months ?? [];
   const sorted = [...months].sort();
   const skillLevels = (trip.target_surf_levels ?? []).filter(l =>
@@ -585,9 +593,12 @@ const stateFromTrip = (trip: GroupTrip): WizardState => {
     budgetTier: null,
     // Edit mode skips the estimate; preload manual.
     manualBudget: true,
-    budgetManualMin: trip.budget_min != null ? String(trip.budget_min) : '',
-    budgetManualMax: trip.budget_max != null ? String(trip.budget_max) : '',
-    costPerPerson: trip.cost_per_person != null ? String(trip.cost_per_person) : '',
+    budgetManualMin:
+      trip.budget_min != null ? String(toEditCurrency(trip.budget_min)) : '',
+    budgetManualMax:
+      trip.budget_max != null ? String(toEditCurrency(trip.budget_max)) : '',
+    costPerPerson:
+      trip.cost_per_person != null ? String(toEditCurrency(trip.cost_per_person)) : '',
     priceInclusions: trip.price_inclusions ?? {},
     visibility: (trip.visibility as Visibility) ?? 'public',
   };
@@ -1202,6 +1213,10 @@ export default function CreateTripFlowA({
   resumeDraft = false,
 }: CreateTripFlowAProps): React.ReactElement {
   const editMode = !!initialTrip;
+  const { profile } = useUserProfile();
+  // Israeli operators price in ₪; everyone else prices in $. Non-Israeli
+  // operators still store the frozen rate so Israeli VIEWERS can later see ₪.
+  const operatorCurrency: 'ILS' | 'USD' = isIsraeli(profile?.country_from) ? 'ILS' : 'USD';
   const effectiveStyle: HostingStyle = initialTrip?.hosting_style ?? hostingStyle;
   const ageWindow = AGE_WINDOW_BY_STYLE[effectiveStyle];
   // Flow B is the "leader" flow: it adds the 'aboutYou' step and requires a
@@ -1229,9 +1244,10 @@ export default function CreateTripFlowA({
   const initialState = useMemo<WizardState>(
     () =>
       initialTrip
-        ? stateFromTrip(initialTrip)
+        ? stateFromTrip(initialTrip, operatorCurrency)
         : { ...INITIAL_STATE, hostingStyle: effectiveStyle },
-    // initialTrip is stable for the wizard's lifetime; intentionally empty deps.
+    // initialTrip/operatorCurrency are stable for the wizard's lifetime;
+    // intentionally empty deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -1359,6 +1375,19 @@ export default function CreateTripFlowA({
     }
   }, [isFixedFlow, state.datesMode, setState]);
 
+  // Frozen USD->ILS rate for this session. Used both for in-flow ₪ display and
+  // to convert manual ₪ entries to canonical USD at save time.
+  const [fxRate, setFxRate] = useState<number>(FALLBACK_USD_TO_ILS);
+  useEffect(() => {
+    let cancelled = false;
+    fetchUsdToIls().then(r => {
+      if (!cancelled) setFxRate(r);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Budget estimate (transient — not persisted)
   const [budgetEstimate, setBudgetEstimate] = useState<BudgetEstimate | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
@@ -1474,21 +1503,47 @@ export default function CreateTripFlowA({
   const resolveBudget = useCallback((): {
     min: number | null;
     max: number | null;
-    currency: string | null;
+    currency: 'ILS' | 'USD' | null;
+    fxRate: number;
   } => {
+    // Edit mode must convert/save using the trip's OWN frozen rate (same one the
+    // prefill in stateFromTrip used) — never the live mount-time rate — so an
+    // untouched edit round-trips without silently drifting the canonical USD.
+    // Create mode has no frozen rate yet, so it uses the live mount rate.
+    const saveRate = editMode ? (initialTrip?.budget_fx_rate ?? FALLBACK_USD_TO_ILS) : fxRate;
+    // AI tier ranges are already USD — store as-is regardless of operator currency.
     if (budgetEstimate && state.budgetTier && !state.manualBudget) {
       const r = budgetEstimate.ranges[state.budgetTier];
-      return { min: Math.round(r.min), max: Math.round(r.max), currency: 'USD' };
+      return {
+        min: Math.round(r.min),
+        max: Math.round(r.max),
+        currency: operatorCurrency,
+        fxRate: saveRate,
+      };
     }
-    const min = state.budgetManualMin ? parseInt(state.budgetManualMin, 10) : null;
-    const max = state.budgetManualMax ? parseInt(state.budgetManualMax, 10) : null;
-    return { min, max, currency: min != null || max != null ? 'USD' : null };
+    // Manual entry is in the operator's currency. Convert ₪ -> USD for canonical storage.
+    const rawMin = state.budgetManualMin ? parseInt(state.budgetManualMin, 10) : null;
+    const rawMax = state.budgetManualMax ? parseInt(state.budgetManualMax, 10) : null;
+    const toUsd = (v: number | null): number | null =>
+      v == null ? null : operatorCurrency === 'ILS' ? ilsToUsd(v, saveRate) : v;
+    const min = toUsd(rawMin);
+    const max = toUsd(rawMax);
+    return {
+      min,
+      max,
+      currency: min != null || max != null ? operatorCurrency : null,
+      fxRate: saveRate,
+    };
   }, [
     budgetEstimate,
     state.budgetTier,
     state.manualBudget,
     state.budgetManualMin,
     state.budgetManualMax,
+    operatorCurrency,
+    fxRate,
+    editMode,
+    initialTrip,
   ]);
 
   // -----------------------------------------------------------------------
@@ -1734,12 +1789,23 @@ export default function CreateTripFlowA({
       const skillLevels: SurfLevel[] = state.skillLevels.length
         ? state.skillLevels
         : (['all'] as SurfLevel[]);
+      // Edit mode must save against the trip's OWN frozen rate (matches the
+      // prefill in stateFromTrip) so budget_fx_rate never drifts on an
+      // untouched edit; create mode has no frozen rate yet, so it uses the
+      // live mount-time rate.
+      const saveRate = editMode ? (initialTrip?.budget_fx_rate ?? FALLBACK_USD_TO_ILS) : fxRate;
       // Flow C uses a fixed per-person price + rich inclusions, no budget range.
       const budget = isFixedFlow
-        ? { min: null, max: null, currency: 'USD' }
+        ? { min: null, max: null, currency: operatorCurrency, fxRate: saveRate }
         : resolveBudget();
-      const fixedPrice =
+      const rawFixed =
         isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
+      const fixedPrice =
+        rawFixed == null
+          ? null
+          : operatorCurrency === 'ILS'
+            ? ilsToUsd(rawFixed, saveRate)
+            : rawFixed;
       const priceInclusions = isFixedFlow
         ? normalizePriceInclusions(state.priceInclusions)
         : null;
@@ -1774,9 +1840,14 @@ export default function CreateTripFlowA({
             ? state.accommodationUrl.trim() || null
             : null,
           accommodation_image_url: accommodationCommitted ? accommodationImageUrl : null,
+          // budget_currency/cost_per_person are the operator's INPUT currency only —
+          // budget_min/budget_max/cost_per_person are always canonical USD. Never
+          // multiply an amount column by budget_currency; use budget_fx_rate only
+          // to render back to the operator's currency for display.
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
+          budget_fx_rate: budget.fxRate,
           budget_tier: state.manualBudget ? null : state.budgetTier,
           cost_per_person: fixedPrice,
           price_inclusions: priceInclusions,
@@ -1830,6 +1901,7 @@ export default function CreateTripFlowA({
           budget_min: budget.min,
           budget_max: budget.max,
           budget_currency: budget.currency,
+          budget_fx_rate: budget.fxRate,
           budget_tier: state.manualBudget ? null : state.budgetTier,
 
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
@@ -1902,6 +1974,8 @@ export default function CreateTripFlowA({
     startDateObj,
     endDateObj,
     resolveBudget,
+    operatorCurrency,
+    fxRate,
     clearDraft,
     onCreated,
   ]);
@@ -1939,10 +2013,14 @@ export default function CreateTripFlowA({
   const subtitle =
     step === 'budget'
       ? isFixedFlow
-        ? 'A fixed price per person, in USD.'
+        ? operatorCurrency === 'ILS'
+          ? 'A fixed price per person, in ₪.'
+          : 'A fixed price per person, in USD.'
         : editMode
           ? 'Confirm the range for your trip.'
-          : meta.subtitle
+          : operatorCurrency === 'ILS'
+            ? 'Per person, in ₪.'
+            : meta.subtitle
       : step === 'aboutYou' && isFixedFlow
         ? 'Why surfers can trust your operation.'
         : meta.subtitle;
@@ -2564,7 +2642,9 @@ export default function CreateTripFlowA({
 
     return (
       <View>
-        <Text style={localStyles.fieldLabel}>Price per person · USD</Text>
+        <Text style={localStyles.fieldLabel}>
+          Price per person · {operatorCurrency === 'ILS' ? '₪' : 'USD'}
+        </Text>
         <View style={localStyles.priceRow}>
           <View style={localStyles.priceIconBubble}>
             <TripIcon name="currency-dollar-circle" size={22} color={COLORS.inkBody} />
@@ -2684,7 +2764,7 @@ export default function CreateTripFlowA({
           ) : null}
 
           <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>
-            Budget per person · USD
+            Budget per person · {operatorCurrency === 'ILS' ? '₪' : 'USD'}
           </Text>
           <View style={localStyles.row}>
             <TextInput
@@ -2793,6 +2873,8 @@ export default function CreateTripFlowA({
           }}
           basedOnTags={basedOnTags}
           error={errors.budget ?? undefined}
+          currency={operatorCurrency}
+          fxRate={fxRate}
         />
       </FadeInView>
     );
