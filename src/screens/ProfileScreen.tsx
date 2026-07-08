@@ -22,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Rect, Defs, Filter, FeFlood, FeColorMatrix, FeOffset, FeGaussianBlur, FeComposite, FeBlend, Path } from 'react-native-svg';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { Image as ExpoImage } from 'expo-image';
 import { useIsFocused } from '@react-navigation/native';
 import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -34,6 +35,8 @@ import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCo
 import { Images } from '../assets/images';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
+import { getCachedVideoUri } from '../services/media/videoCacheService';
+import { toWidthThumbUrl } from '../services/media/thumbnails';
 import { getCountryFlag } from '../utils/countryFlags';
 import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
 import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/storageService';
@@ -60,6 +63,8 @@ import { LIFESTYLE_ICON_MAP } from '../utils/lifestyleIconMap';
 import { friendlyErrorMessage } from '../utils/friendlyError';
 import { JoinRequestActionBar, JoinRequestActionState } from '../components/trips/JoinRequestActionBar';
 import { getIncomingJoinRequest, approveJoinRequest, declineJoinRequest, IncomingJoinRequest } from '../services/trips/groupTripsService';
+import { queryClient } from '../lib/queryClient';
+import { tripsKeys } from '../hooks/trips/useTripQueries';
 
 // Android: RNGH's ScrollView + GestureDetector composition completely blocks
 // vertical scroll (the inner native scroll never wins). Fall back to RN's
@@ -209,6 +214,76 @@ const getSurfLevelVideoUrl = (boardType: string, surfLevel: number): string | nu
   return getSurfLevelVideoFromStorage(storagePath);
 };
 
+// Bundled poster frame for the DEFAULT surf-level videos (~91% of profiles use a
+// default). Shown instantly (no network — it's in the app binary) while the video
+// downloads to disk on first view, then the playing video covers it. Keyed by clip
+// NAME because the Images.surfLevel key order differs from BOARD_VIDEO_DEFINITIONS
+// order. Softtop (1 clip, no dedicated asset) reuses the shortboard "Dipping" frame.
+const SURF_LEVEL_POSTERS: Record<string, Record<string, any>> = {
+  shortboard: {
+    'Dipping My Toes': Images.surfLevel.shortboard.dippingMyToes,
+    'Cruising Around': Images.surfLevel.shortboard.cruisingAround,
+    Snapping: Images.surfLevel.shortboard.snapping,
+    Charging: Images.surfLevel.shortboard.charging,
+  },
+  midlength: {
+    'Dipping My Toes': Images.surfLevel.midlength.dippingMyToes,
+    'Cruising Around': Images.surfLevel.midlength.cruisingAround,
+    'Carving Turns': Images.surfLevel.midlength.carvingTurns,
+    Charging: Images.surfLevel.midlength.chargingOrCarving,
+  },
+  longboard: {
+    'Dipping My Toes': Images.surfLevel.longboard.dippingMyToes,
+    'Cruising Around': Images.surfLevel.longboard.cruisingAround,
+    'Cross Stepping': Images.surfLevel.longboard.crossStepping,
+    'Hanging Toes': Images.surfLevel.longboard.hangingToes,
+  },
+  softtop: {
+    'Dipping My Toes': Images.surfLevel.shortboard.dippingMyToes,
+  },
+};
+
+// Local bundled poster for the default video at a given board+level, or null.
+const getDefaultSurfVideoPoster = (boardType: string, surfLevel: number): any | null => {
+  const boardTypeNum = mapBoardTypeToNumber(boardType);
+  const boardVideos = BOARD_VIDEO_DEFINITIONS[boardTypeNum];
+  if (!boardVideos || boardVideos.length === 0) return null;
+  const appLevel = surfLevel - 1;
+  const videoIndex = Math.max(0, Math.min(appLevel, boardVideos.length - 1));
+  const video = boardVideos[videoIndex];
+  if (!video) return null;
+  const boardFolder = getBoardFolder(boardTypeNum);
+  return SURF_LEVEL_POSTERS[boardFolder]?.[video.name] ?? null;
+};
+
+// Profile cover banner: renders the wide (`__1280w`) thumbnail of the cover image
+// instead of the full-size original, falling back to the original if the thumbnail
+// isn't generated yet. Keeps ImageBackground so the gradient/overlay children stay.
+const ProfileCoverBackground: React.FC<{
+  uri?: string | null;
+  style?: any;
+  children?: React.ReactNode;
+}> = ({ uri, style, children }) => {
+  const thumb = uri ? (toWidthThumbUrl(uri) ?? uri) : null;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [uri]);
+  const src = uri ? (failed ? uri : thumb) : null;
+  return (
+    <ImageBackground
+      source={src ? { uri: src } : Images.coverImage}
+      style={style}
+      resizeMode="cover"
+      onError={() => {
+        if (!failed && uri && thumb !== uri) setFailed(true);
+      }}
+    >
+      {children}
+    </ImageBackground>
+  );
+};
+
 // Surf Skill Card Component
 interface SurfSkillCardProps {
   boardType: string;
@@ -217,6 +292,7 @@ interface SurfSkillCardProps {
   surfLevelCategory: string;
   surfLevelProgress: number;
   customVideoUrl?: string; // User-uploaded custom video URL
+  posterUrl?: string | null; // Stored poster for a custom video (profile_video_thumbnail_url)
   onUploadVideo?: () => void; // Callback when upload icon is clicked
   isViewingOwnProfile?: boolean; // Whether viewing own profile
 }
@@ -228,12 +304,22 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   surfLevelCategory,
   surfLevelProgress,
   customVideoUrl,
+  posterUrl,
   onUploadVideo,
   isViewingOwnProfile = false,
 }) => {
   // Use custom video if available, otherwise use default surf level video
   const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
   const videoUrl = customVideoUrl || defaultVideoUrl;
+
+  // Poster shown while the video downloads to disk on first view (then the video
+  // covers it). Default videos → bundled local frame (instant). Custom videos →
+  // the stored poster if one exists, else none.
+  const posterSource = customVideoUrl
+    ? (posterUrl && posterUrl.trim() !== ''
+        ? { uri: posterUrl }
+        : getDefaultSurfVideoPoster(boardType, surfLevel)) // custom w/o poster → default frame
+    : getDefaultSurfVideoPoster(boardType, surfLevel);
   
   // Calculate readiness synchronously (not in useEffect) - Safari needs immediate URL
   const isVideoUrlReady = !!(videoUrl && videoUrl.trim() !== '');
@@ -245,6 +331,59 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     return status?.ready === true;
   }, [videoUrl]);
   
+  // Tap-to-play: the video is neither downloaded nor played until the user taps the
+  // play button. Nothing is fetched for a profile that's only glanced at — the
+  // resting state is just the poster frame. `userRequestedPlay` gates both the
+  // one-time download and playback.
+  const [userRequestedPlay, setUserRequestedPlay] = React.useState(false);
+
+  // Play-once intent. `wantsPlay` is true only while the user wants the clip
+  // running: it flips false when the clip reaches its end or the user taps to
+  // pause, which re-reveals the play button. The ref mirror lets the async
+  // player listeners read the current intent without stale closures.
+  const [wantsPlay, setWantsPlay] = React.useState(false);
+  const wantsPlayRef = useRef(false);
+  useEffect(() => {
+    wantsPlayRef.current = wantsPlay;
+  }, [wantsPlay]);
+
+  // `playbackUrl` is what the player actually loads: a locally-cached file:// URI on
+  // native (looping replays from disk, zero network — see videoCacheService), or the
+  // remote URL on web (browser HTTP cache dedupes). Null until the user taps play.
+  const [playbackUrl, setPlaybackUrl] = React.useState<string | null>(null);
+  useEffect(() => {
+    if (!videoUrl || videoUrl.trim() === '' || !userRequestedPlay) {
+      setPlaybackUrl(null);
+      return;
+    }
+    if (Platform.OS === 'web') {
+      setPlaybackUrl(videoUrl);
+      return;
+    }
+    let cancelled = false;
+    setPlaybackUrl(null); // download-then-play: hold playback until the file is cached
+    getCachedVideoUri(videoUrl)
+      .then((local) => {
+        if (!cancelled) setPlaybackUrl(local);
+      })
+      .catch(() => {
+        if (!cancelled) setPlaybackUrl(videoUrl); // fall back to streaming on failure
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [videoUrl, userRequestedPlay]);
+
+  // Hide the poster once the video has actually started rendering frames. Reset
+  // when the video changes so the new clip's poster shows during its download.
+  const [hasStartedPlaying, setHasStartedPlaying] = React.useState(false);
+  useEffect(() => {
+    setHasStartedPlaying(false);
+    setUserRequestedPlay(false);
+    setWantsPlay(false);
+    wantsPlayRef.current = false;
+  }, [videoUrl]);
+
   // Track initial mount to ensure replaceAsync is called on first render
   const isInitialMountRef = useRef(true);
 
@@ -258,13 +397,14 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     shouldPlayRef.current = isFocused;
   }, [isFocused]);
 
-  // Create video player - DO NOT attempt play here, wait for replaceAsync
+  // Create video player - DO NOT attempt play here, wait for replaceAsync.
+  // Source is the resolved playbackUrl (local file on native, remote on web).
   const videoPlayer = useVideoPlayer(
-    videoUrl || '',
+    playbackUrl || '',
     (player: any) => {
       if (player) {
         player.staysActiveInBackground = false; // don't decode while app is backgrounded
-        player.loop = true;
+        player.loop = false; // play-once: no auto-repeat
         player.muted = true; // Critical for Safari autoplay
         player.audioMixingMode = 'mixWithOthers'; // Don't interrupt Spotify/other audio
         
@@ -279,16 +419,19 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   // Drive playback from focus: play when the card is visible, pause when it's
   // not (other tab, pushed screen, or app backgrounded). The monitoring effect
   // below enforces the same desired state on its 2s poll.
+  // Play only when the card is on screen AND the user has asked for playback.
+  // This single effect is the authority on play/pause: flipping `wantsPlay`
+  // (tap-to-pause, clip end) pauses here; tapping play resumes here.
   useEffect(() => {
     if (!videoPlayer) return;
     try {
-      if (isFocused) {
+      if (isFocused && wantsPlay) {
         videoPlayer.play?.();
       } else {
         videoPlayer.pause?.();
       }
     } catch {}
-  }, [isFocused, videoPlayer]);
+  }, [isFocused, wantsPlay, videoPlayer]);
 
   // Listen for statusChange to detect when video is ready to play
   useEffect(() => {
@@ -309,13 +452,16 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         if (__DEV__) {
           console.log('[SurfSkillCard] Video readyToPlay, attempting play');
         }
-        
-        // Ensure muted and loop are set for Safari
+
+        // Video has decoded its first frame — safe to drop the poster.
+        setHasStartedPlaying(true);
+
+        // Ensure muted for Safari; loop stays off (play-once).
         videoPlayer.muted = true;
-        videoPlayer.loop = true;
-        
-        // Attempt to play (only if this card is on screen)
-        if (!shouldPlayRef.current) return;
+        videoPlayer.loop = false;
+
+        // Attempt to play only if this card is on screen AND the user asked for it.
+        if (!shouldPlayRef.current || !wantsPlayRef.current) return;
         const playPromise = videoPlayer.play();
         if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
           (playPromise as any).catch((error: any) => {
@@ -363,8 +509,8 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   // Update player source when video changes OR on initial mount
   // This ensures replaceAsync is called on initial mount for the first video
   useEffect(() => {
-    if (videoUrl && videoPlayer) {
-      const videoUrlToPlay = videoUrl;
+    if (playbackUrl && videoPlayer) {
+      const videoUrlToPlay = playbackUrl;
       if (!videoUrlToPlay) {
         console.warn('[SurfSkillCard] No video URL provided for surf skill video');
         isInitialMountRef.current = false;
@@ -397,7 +543,7 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         replacePromise.then(() => {
           if (videoPlayer) {
             // Set properties required for autoplay
-            videoPlayer.loop = true;
+            videoPlayer.loop = false; // play-once
             videoPlayer.muted = true;
             
             // Ensure playsInline is set again after replaceAsync
@@ -471,10 +617,10 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
             // Wait for video to be ready, then play
             waitForVideoReady().then(() => {
               if (!videoPlayer) return;
-              if (!shouldPlayRef.current) return; // skip autoplay when off screen
+              if (!shouldPlayRef.current || !wantsPlayRef.current) return; // skip when off screen or not requested
 
               // Best Practice: Set properties before play
-              videoPlayer.loop = true;
+              videoPlayer.loop = false; // play-once
               videoPlayer.muted = true;
               
               // Now safe to play (Best Practice: Play after canplay)
@@ -534,11 +680,11 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
         // If replaceAsync doesn't return a promise, mark initial mount as complete
         isInitialMountRef.current = false;
       }
-    } else if (!videoUrl || !videoPlayer) {
-      // If no video URL or player, mark initial mount as complete
+    } else if (!playbackUrl || !videoPlayer) {
+      // If no playback URL or player, mark initial mount as complete
       isInitialMountRef.current = false;
     }
-  }, [videoUrl, videoPlayer]);
+  }, [playbackUrl, videoPlayer]);
 
   // WORKAROUND: autoPlay video for web - call play when player/videoUrl changes
   useEffect(() => {
@@ -546,10 +692,10 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
 
     // Small delay to ensure player is initialized
     const timeoutId = setTimeout(() => {
-      if (videoPlayer && shouldPlayRef.current) {
+      if (videoPlayer && shouldPlayRef.current && wantsPlayRef.current) {
         videoPlayer.muted = true;
-        videoPlayer.loop = true;
-        
+        videoPlayer.loop = false;
+
                 const playPromise = videoPlayer.play();
                 if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
           (playPromise as any).catch((error: any) => {
@@ -564,138 +710,83 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     return () => clearTimeout(timeoutId);
   }, [videoPlayer, videoUrl]);
 
-  // Continuous playback monitoring - ensures video never stops
+  // Play-once end detection. When the clip reaches its end, flip back to the
+  // paused state (re-reveals the play button) and rewind to the first frame so
+  // the next Play starts the clip over. No restart/force-play — the video runs
+  // exactly once per user request.
   useEffect(() => {
     if (!videoPlayer || !videoUrl) return;
 
     let isMounted = true;
-    let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
-    let subscriptions: any[] = [];
+    const subscriptions: any[] = [];
 
-    // Function to force play the video
-    const forcePlay = async () => {
+    const handleEnd = () => {
       if (!isMounted || !videoPlayer) return;
-
-      // Respect focus — when the card is off screen, enforce paused instead of
-      // forcing it back to life (this is what stops the 2s poll + status
-      // listeners from resurrecting the video on other tabs).
-      if (!shouldPlayRef.current) {
-        try { if (videoPlayer.playing) videoPlayer.pause?.(); } catch {}
-        return;
+      if (__DEV__) {
+        console.log('[SurfSkillCard] Video reached end — showing play button');
       }
-
-      try {
-        // Ensure properties are set
-        videoPlayer.loop = true;
-        videoPlayer.muted = true;
-        
-        // Check if video is not playing
-        const isPlaying = videoPlayer.playing;
-        
-        if (!isPlaying) {
-          if (__DEV__) {
-            console.log('[SurfSkillCard] Video stopped/paused, restarting playback');
-          }
-            const playPromise = videoPlayer.play();
-            if (playPromise !== undefined && typeof (playPromise as any).catch === 'function') {
-            (playPromise as any).catch((error: any) => {
-              if (__DEV__ && error.name !== 'NotAllowedError') {
-                console.warn('[SurfSkillCard] Force play failed:', error.message);
-                }
-              });
-            }
-          }
-      } catch (error) {
-        if (__DEV__) {
-          console.warn('[SurfSkillCard] Error in forcePlay:', error);
-        }
-      }
+      wantsPlayRef.current = false;
+      setWantsPlay(false);
+      try { videoPlayer.pause?.(); } catch {}
+      try { videoPlayer.currentTime = 0; } catch {} // rewind for a clean replay
     };
 
-    // Set up event listeners for video status changes
     try {
-      // Listen for status changes (paused, ended, etc.)
       if (videoPlayer.addListener) {
-        const statusSubscription = videoPlayer.addListener('statusChange', (status: any) => {
-          if (!isMounted) return;
-          
-          // If video is paused or ended, restart it
-          if (status?.isPaused || status?.didJustFinish) {
-            if (__DEV__) {
-              console.log('[SurfSkillCard] Video status changed - paused or ended, restarting');
-            }
-            setTimeout(() => forcePlay(), 100);
-          }
-        });
-        subscriptions.push(statusSubscription);
-      }
-
-      // Listen for playToEnd event (when video finishes)
-      if (videoPlayer.addListener) {
-        const endSubscription = videoPlayer.addListener('playToEnd', () => {
-          if (!isMounted) return;
-          if (__DEV__) {
-            console.log('[SurfSkillCard] Video ended, restarting');
-          }
-          setTimeout(() => forcePlay(), 100);
-        });
-        subscriptions.push(endSubscription);
+        subscriptions.push(
+          videoPlayer.addListener('statusChange', (status: any) => {
+            if (!isMounted) return;
+            if (status?.didJustFinish) handleEnd();
+          })
+        );
+        subscriptions.push(videoPlayer.addListener('playToEnd', handleEnd));
       }
     } catch (error) {
       if (__DEV__) {
-        console.warn('[SurfSkillCard] Could not set up video listeners:', error);
+        console.warn('[SurfSkillCard] Could not set up end listeners:', error);
       }
-    }
-
-    // Polling mechanism to check video status periodically
-    // This ensures the video restarts even if events don't fire
-    statusCheckInterval = setInterval(() => {
-      if (!isMounted || !videoPlayer) return;
-      forcePlay();
-    }, 2000); // Check every 2 seconds
-
-    // Handle visibility changes (when user navigates away and comes back)
-    if (Platform.OS === 'web' && typeof document !== 'undefined') {
-      const handleVisibilityChange = () => {
-        if (!isMounted || !videoPlayer) return;
-        
-        if (document.visibilityState === 'visible') {
-          // Page became visible - ensure video is playing
-          if (__DEV__) {
-            console.log('[SurfSkillCard] Page became visible, ensuring video plays');
-          }
-          setTimeout(() => forcePlay(), 300);
-        }
-      };
-
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      return () => {
-        isMounted = false;
-        if (statusCheckInterval) {
-          clearInterval(statusCheckInterval);
-        }
-        subscriptions.forEach(sub => {
-          if (sub && typeof sub.remove === 'function') {
-            sub.remove();
-          }
-        });
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-      };
     }
 
     return () => {
       isMounted = false;
-      if (statusCheckInterval) {
-        clearInterval(statusCheckInterval);
-      }
-      subscriptions.forEach(sub => {
-        if (sub && typeof sub.remove === 'function') {
-          sub.remove();
-        }
+      subscriptions.forEach((sub) => {
+        if (sub && typeof sub.remove === 'function') sub.remove();
       });
     };
   }, [videoPlayer, videoUrl]);
+
+  // Start / replay the clip. First tap kicks off the one-time download (which
+  // then autoplays once cached); later taps (after end / pause) rewind and play.
+  const handlePlayPress = React.useCallback(() => {
+    wantsPlayRef.current = true;
+    setWantsPlay(true);
+    if (!userRequestedPlay) {
+      setUserRequestedPlay(true); // download → replaceAsync → autoplay (gated on wantsPlay)
+      return;
+    }
+    // Already loaded — rewind and play. The focus/wantsPlay effect will also
+    // issue play(), so this is just a belt-and-suspenders rewind.
+    try {
+      if (videoPlayer) {
+        videoPlayer.currentTime = 0;
+        const p = videoPlayer.play?.() as any;
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
+    } catch {}
+  }, [userRequestedPlay, videoPlayer]);
+
+  // Tap anywhere on the card to toggle playback: pause a playing clip (and
+  // re-reveal the play button), or start/replay a stopped one — so the whole
+  // card is a play target, not just the button.
+  const handleVideoPress = React.useCallback(() => {
+    if (wantsPlayRef.current) {
+      wantsPlayRef.current = false;
+      setWantsPlay(false);
+      try { videoPlayer?.pause?.(); } catch {}
+    } else {
+      handlePlayPress();
+    }
+  }, [videoPlayer, handlePlayPress]);
 
   // Get category subtitle
   const getCategorySubtitle = (category: string): string => {
@@ -739,9 +830,42 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
                 playsInline: true,
               } as any)}
             />
-            {/* Transparent overlay to prevent interactions */}
-            <View style={styles.surfSkillVideoOverlay} />
-            
+            {/* Poster frame shown until the video renders its first frame. Bundled
+                (instant) for default videos; stored poster for custom ones. Covers
+                the black download gap; the playing video then draws over it. */}
+            {posterSource && !hasStartedPlaying && (
+              <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+                <ExpoImage
+                  source={posterSource}
+                  style={StyleSheet.absoluteFillObject}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
+              </View>
+            )}
+
+            {/* Full-bleed tap target: tapping the video while it plays pauses it
+                (and re-reveals the play button). Sits below the play/upload
+                buttons (zIndex 20) so those still receive their own taps. */}
+            <Pressable style={styles.surfSkillVideoOverlay} onPress={handleVideoPress} />
+
+            {/* Tap-to-play button (bottom-right). Shown whenever the clip isn't
+                playing — the initial poster state, after it ends, or after a
+                tap-to-pause. The video only downloads + plays after a press. */}
+            {!wantsPlay && (
+              <View style={[styles.surfSkillPlayButton, { pointerEvents: 'auto' }]}>
+                <TouchableOpacity
+                  style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
+                  onPress={handlePlayPress}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Play surf video"
+                >
+                  <Ionicons name="play" size={22} color="#FFFFFF" style={{ marginLeft: 3 }} />
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Title - Overlaid on video, top left */}
             <View style={styles.surfSkillTitleOverlay}>
               <Text style={styles.surfSkillTitleOverlayText}>Surf Skill</Text>
@@ -1134,6 +1258,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     setRequestActionState('approving');
     try {
       await approveJoinRequest(incomingRequest.requestId);
+      // Refresh the trip caches so the Plan / Members view drops the pending
+      // request row when the host navigates back. This header approve path is
+      // self-contained (no joinRequest route param), so unlike the footer path
+      // in RootNavigator it must invalidate here itself.
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(incomingRequest.tripId) });
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(incomingRequest.tripId) });
+      queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
       // Morph to the "Approved" pill; the bar then collapses itself and calls
       // onDismissed. The profile stays open.
       setRequestActionState('approved');
@@ -1149,6 +1280,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     setRequestActionState('declining');
     try {
       await declineJoinRequest(incomingRequest.requestId);
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(incomingRequest.tripId) });
       setRequestActionState('declined');
     } catch (e) {
       console.error('[ProfileScreen] declineJoinRequest failed:', e);
@@ -2377,10 +2509,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         >
         {/* Cover Image */}
         <View style={styles.coverContainer}>
-          <ImageBackground
-            source={profileData.cover_image_url ? { uri: profileData.cover_image_url } : Images.coverImage}
+          <ProfileCoverBackground
+            uri={profileData.cover_image_url}
             style={styles.coverImage}
-            resizeMode="cover"
           >
             <LinearGradient
               colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.4)']}
@@ -2388,7 +2519,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               style={styles.coverGradient}
             />
             <View style={styles.coverOverlay} />
-          </ImageBackground>
+          </ProfileCoverBackground>
         </View>
 
         {/* Header Buttons */}
@@ -2541,6 +2672,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             surfLevelCategory={profileData.surf_level_category || 'beginner'}
             surfLevelProgress={surfLevelInfo.progress}
             customVideoUrl={profileData.profile_video_url}
+            posterUrl={profileData.profile_video_thumbnail_url}
             // Video upload moved to the Edit Profile screen — omit the
             // onUploadVideo prop so the inline upload button is hidden.
             isViewingOwnProfile={isViewingOwnProfile}
@@ -4069,6 +4201,23 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: Platform.OS === 'android' ? 0 : 4,
   },
+  surfSkillPlayButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    zIndex: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: Platform.OS === 'android' ? 0 : 4,
+  },
   surfSkillContentOverlay: {
     position: 'absolute',
     bottom: 16,
@@ -4077,6 +4226,7 @@ const styles = StyleSheet.create({
     pointerEvents: 'none',
     gap: 4,
   },
+
   surfSkillNameContainer: {
     marginBottom: 4,
   },

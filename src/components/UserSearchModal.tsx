@@ -14,6 +14,7 @@ import { Text } from './Text';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { supabase } from '../config/supabase';
 import { ProfileImage } from './ProfileImage';
+import { getStorageThumbUrl } from '../services/media/imageService';
 import { BottomSheetShell } from './BottomSheetShell';
 
 const SCREEN_H = Dimensions.get('window').height;
@@ -204,7 +205,8 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
                   onPress={() => handleUserPress(item.user_id)}
                 >
                   <ProfileImage
-                    imageUrl={item.profile_image_url}
+                    imageUrl={getStorageThumbUrl(item.profile_image_url, 96)}
+                    fallbackImageUrl={item.profile_image_url}
                     name={item.name}
                     style={styles.avatar}
                     showLoadingIndicator={false}

@@ -36,11 +36,11 @@ function escAttr(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-// Downscale heavy hero photos via Supabase's image-transform (render) endpoint.
-// Originals run ~800KB+; some WhatsApp versions silently drop thumbnails over
-// ~600KB. width=1200 keeps OG-quality while landing well under that (a real
-// 864KB hero comes back ~370KB). Only rewrites Supabase public-object URLs;
-// anything else is passed through untouched.
+// Serve a lighter hero for social/OG previews. Originals run ~800KB+; some
+// WhatsApp versions silently drop thumbnails over ~600KB. The pre-generated
+// 1280px-wide static thumbnail keeps OG-quality while landing well under that
+// (a real 864KB hero comes back ~370KB). Only rewrites Supabase public-object
+// URLs; anything else is passed through untouched.
 function toPreviewImage(url: string): string {
   // Point at the pre-generated 1280px-wide static thumbnail (aspect preserved)
   // in the image-thumbnails bucket instead of the metered /render/image/

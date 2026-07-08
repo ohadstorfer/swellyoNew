@@ -30,7 +30,7 @@ import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember } from '../services/messaging/messagingService';
 import { capMessages, MAX_IN_MEMORY_MESSAGES } from '../services/messaging/messageWindow';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
-import { getImageUrl } from '../services/media/imageService';
+import { getImageUrl, getStorageThumbUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
 import { supabase } from '../config/supabase';
 import { ProfileImage } from '../components/ProfileImage';
@@ -3683,10 +3683,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             activeOpacity={0.7}
           >
             {senderAvatar ? (
-              <Image
-                source={{ uri: senderAvatar }}
+              // Render the 32px thumbnail (memory-disk cached via expo-image),
+              // not the full profile image. ProfileImage falls back to the
+              // original when the best-effort thumb is missing.
+              <ProfileImage
+                imageUrl={getStorageThumbUrl(senderAvatar, 32)}
+                fallbackImageUrl={senderAvatar}
+                name={senderName}
                 style={styles.messageAvatar}
-                resizeMode="cover"
+                showLoadingIndicator={false}
               />
             ) : (
               <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
@@ -3958,7 +3963,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     style={styles.imageTouchable}
                   >
                     <ExpoImage
-                      source={{ uri: fullImageUri }}
+                      // Inline bubble renders the 600px thumbnail (~40-80KB), not
+                      // the full 2560px original — the original is only fetched on
+                      // tap (fullscreen). Legacy messages with no thumbnail_url fall
+                      // back to the original so they still render.
+                      source={{ uri: thumbnailUri || fullImageUri }}
                       placeholder={thumbnailUri ? { uri: thumbnailUri } : undefined}
                       style={[
                         styles.messageImage,

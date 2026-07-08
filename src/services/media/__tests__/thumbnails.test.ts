@@ -56,3 +56,26 @@ describe('toWidthThumbUrl', () => {
     );
   });
 });
+
+describe('S3 source URLs (images-to-s3 migration)', () => {
+  const S3 = 'https://swellyo-images.s3.us-east-1.amazonaws.com';
+  const src = `${S3}/profile-images/u1/avatar-9.jpg`;
+
+  it('toThumbUrl appends the square variant suffix in the same bucket', () => {
+    expect(toThumbUrl(src, 96)).toBe(`${src}__320.jpg?v=${THUMB_CACHE_VERSION}`);
+    expect(toThumbUrl(src, 24)).toBe(`${src}__48.jpg?v=${THUMB_CACHE_VERSION}`);
+  });
+
+  it('toWidthThumbUrl appends the width variant suffix', () => {
+    const hero = `${S3}/surftrip-images/t1/hero-1.jpg`;
+    expect(toWidthThumbUrl(hero, 1280)).toBe(`${hero}__1280w.jpg?v=${THUMB_CACHE_VERSION}`);
+  });
+
+  it('is idempotent — an already-variant S3 URL is returned unchanged', () => {
+    const variant = `${src}__320.jpg?v=${THUMB_CACHE_VERSION}`;
+    expect(toThumbUrl(variant, 96)).toBe(variant);
+    expect(toWidthThumbUrl(`${src}__1280w.jpg?v=${THUMB_CACHE_VERSION}`, 1280)).toBe(
+      `${src}__1280w.jpg?v=${THUMB_CACHE_VERSION}`,
+    );
+  });
+});

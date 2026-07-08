@@ -12,7 +12,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  Image,
   ActivityIndicator,
   Modal,
   Pressable,
@@ -30,6 +29,7 @@ import { SHEET } from '../TripBottomSheet';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import Thumb from '../../Thumb';
 import type { EnrichedGearRequest } from '../../../services/trips/groupTripsService';
 
 const SCREEN_H = Dimensions.get('window').height;
@@ -178,7 +178,13 @@ export const GearRequestsSheet: React.FC<Props> = ({
                         {/* Suggester header */}
                         <View style={s.headerRow}>
                           {r.requester.profile_image_url ? (
-                            <Image source={{ uri: r.requester.profile_image_url }} style={s.avatar} />
+                            <Thumb
+                              uri={r.requester.profile_image_url}
+                              size={144}
+                              style={s.avatar}
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
+                            />
                           ) : (
                             <View style={[s.avatar, s.avatarPlaceholder]}>
                               <Ionicons name="person" size={18} color="#FFFFFF" />

@@ -42,6 +42,8 @@ import {
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { TripIcon, type TripIconName } from './tripIcons';
+import { getStorageThumbUrl } from '../../services/media/imageService';
+import { Thumb } from '../Thumb';
 
 // Trip Overview icon color (Figma "Untitled UI" ink).
 const ICON_INK = '#222B30';
@@ -471,8 +473,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
       {/* ---- Hero + overlapping card with countdown ---- */}
       <View style={styles.heroWrap}>
         {vm.heroImageUri ? (
-          <CachedImage
-            source={{ uri: vm.heroImageUri }}
+          <Thumb
+            uri={vm.heroImageUri}
+            widthPx={1280}
             style={styles.hero}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -604,8 +607,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   accessibilityLabel={aboutHost.name ? `Open ${aboutHost.name}'s profile` : undefined}
                 >
                   {aboutHost.avatarUrl ? (
-                    <CachedImage
-                      source={{ uri: aboutHost.avatarUrl }}
+                    <Thumb
+                      uri={aboutHost.avatarUrl}
+                      size={144}
                       style={styles.aboutHostAvatar}
                       contentFit="cover"
                       cachePolicy="memory-disk"
@@ -819,7 +823,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   >
                     {p.avatarUrl ? (
                       <CachedImage
-                        source={{ uri: p.avatarUrl }}
+                        source={{ uri: getStorageThumbUrl(p.avatarUrl, 144) ?? p.avatarUrl }}
                         style={styles.avatar}
                         contentFit="cover"
                         cachePolicy="memory-disk"

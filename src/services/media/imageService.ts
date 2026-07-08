@@ -15,6 +15,10 @@ import { toThumbUrl } from './thumbnails';
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
 const COUNTRIES_BUCKET = 'Countries';
 const LIFESTYLE_IMAGES_BUCKET = 'lifestyle-thumbnails';
+// swellyo-images S3 base (images-to-s3 migration). Country images now live in
+// swellyo-images/Countries/ (backfilled from Supabase); both the read below and
+// the cache-warm upload go through S3.
+const S3_IMAGES_BASE = 'https://swellyo-images.s3.us-east-1.amazonaws.com';
 
 /** Known lifestyle image filenames in the lifestyle-thumbnails bucket. Must match server LIFESTYLE_IMAGE_FILENAMES. */
 export const LIFESTYLE_BUCKET_IMAGE_FILENAMES = new Set([
@@ -125,8 +129,9 @@ export const getCountryImageFromStorage = (countryName: string): string | null =
   
   // Encode the filename to handle spaces and special characters
   const encodedFileName = encodeURIComponent(fileName);
-  const url = `${SUPABASE_URL}/storage/v1/object/public/${COUNTRIES_BUCKET}/${encodedFileName}`;
-  
+  // S3 (images-to-s3): country images backfilled to swellyo-images/Countries/.
+  const url = `${S3_IMAGES_BASE}/${COUNTRIES_BUCKET}/${encodedFileName}`;
+
   if (__DEV__) {
     console.log('[getCountryImageFromStorage] Country:', countryName, '-> File:', fileName, '-> URL:', url);
   }
@@ -232,91 +237,75 @@ export const uploadCountryImageToStorage = async (
   imageUrl: string
 ): Promise<string | null> => {
   if (!SUPABASE_URL || !countryName || !imageUrl) {
-    if (__DEV__) {
-      console.warn('[uploadCountryImageToStorage] Missing required parameters');
-    }
+    if (__DEV__) console.warn('[uploadCountryImageToStorage] Missing required parameters');
     return null;
   }
 
   try {
-    // Check authentication status FIRST
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (__DEV__) {
-      console.log('[uploadCountryImageToStorage] Auth check:', {
-        isAuthenticated: !!user,
-        userId: user?.id,
-        authError: authError?.message,
-      });
-    }
-    
-    if (!user) {
-      console.warn('[uploadCountryImageToStorage] User not authenticated - skipping upload');
+    // Must be authenticated (matches the old Countries-bucket RLS). The session
+    // token authorizes the image-upload-s3 call for a presigned PUT.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      if (__DEV__) console.warn('[uploadCountryImageToStorage] Not authenticated - skipping upload');
       return null;
     }
 
-    // Get the filename for this country
     const fileName = getCountryImageFileName(countryName);
     if (!fileName) {
-      if (__DEV__) {
-        console.warn('[uploadCountryImageToStorage] Could not generate filename for:', countryName);
-      }
+      if (__DEV__) console.warn('[uploadCountryImageToStorage] Could not generate filename for:', countryName);
       return null;
     }
 
-    if (__DEV__) {
-      console.log('[uploadCountryImageToStorage] Attempting upload:', {
-        countryName,
-        fileName,
-        bucket: COUNTRIES_BUCKET,
-      });
-    }
-
-    // Fetch the image from Pexels URL
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      if (__DEV__) {
-        console.warn('[uploadCountryImageToStorage] Failed to fetch image from Pexels:', response.status);
-      }
+    // Get a presigned PUT for swellyo-images/Countries/<fileName>.
+    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+    const fnUrl = `${SUPABASE_URL}/functions/v1/image-upload-s3`;
+    const signRes = await fetch(fnUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({ action: 'get-country-upload-url', filename: fileName }),
+    });
+    if (!signRes.ok) {
+      if (__DEV__) console.warn('[uploadCountryImageToStorage] presign failed:', signRes.status);
       return null;
     }
+    const { uploadUrl, publicUrl } = await signRes.json();
 
-    // Convert to blob
-    const blob = await response.blob();
-
-    // Upload to Supabase storage
-    const { data, error } = await supabase.storage
-      .from(COUNTRIES_BUCKET)
-      .upload(fileName, blob, {
-        contentType: 'image/jpeg',
-        upsert: true, // Overwrite if exists
+    if (Platform.OS !== 'web') {
+      // Native: download the Pexels image to a temp file, then stream it to S3
+      // via expo-file-system — the RN Blob shim can PUT 0-byte bodies, and a
+      // 0-byte object would poison the shared country cache.
+      const LegacyFS = require('expo-file-system/legacy');
+      const tmp = `${LegacyFS.cacheDirectory}country-${Date.now()}.jpg`;
+      const dl = await LegacyFS.downloadAsync(imageUrl, tmp);
+      if (dl.status < 200 || dl.status >= 300) return null;
+      const put = await LegacyFS.uploadAsync(uploadUrl, tmp, {
+        httpMethod: 'PUT',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': 'image/jpeg' },
       });
-
-    if (error) {
-      console.error('[uploadCountryImageToStorage] Upload error details:', {
-        message: error.message,
-        name: error.name,
-        bucket: COUNTRIES_BUCKET,
-        fileName,
-        userId: user?.id,
-        fullError: error,
+      try { await LegacyFS.deleteAsync(tmp, { idempotent: true }); } catch {}
+      if (put.status < 200 || put.status >= 300) return null;
+    } else {
+      const response = await fetch(imageUrl);
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      if (!blob.size) return null; // never PUT an empty body into the shared cache
+      const put = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: blob,
       });
-      return null;
+      if (!put.ok) return null;
     }
 
-    // Get the public URL
-    const { data: urlData } = supabase.storage
-      .from(COUNTRIES_BUCKET)
-      .getPublicUrl(data.path);
-
-    if (__DEV__) {
-      console.log('[uploadCountryImageToStorage] Successfully uploaded:', countryName, '->', urlData.publicUrl);
-    }
-
-    return urlData.publicUrl;
+    if (__DEV__) console.log('[uploadCountryImageToStorage] Uploaded to S3:', countryName, '->', publicUrl);
+    return publicUrl;
   } catch (error) {
-    if (__DEV__) {
-      console.error('[uploadCountryImageToStorage] Exception:', error);
-    }
+    if (__DEV__) console.error('[uploadCountryImageToStorage] Exception:', error);
     return null;
   }
 };

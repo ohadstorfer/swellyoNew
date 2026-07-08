@@ -924,7 +924,12 @@ export default function ConversationsScreen({
           <View style={styles.avatarContainer}>
             {conv.is_direct ? (
               <ProfileImage
-                imageUrl={avatarUrl}
+                // 1:1 avatar served from the pre-generated static thumbnail
+                // (image-thumbnails bucket) for parity with the group branch.
+                imageUrl={getStorageThumbUrl(avatarUrl, 144)}
+                // Thumbnails are best-effort — fall back to the full original
+                // so a missing thumb shows the photo, not the silhouette.
+                fallbackImageUrl={avatarUrl}
                 name={displayName}
                 style={styles.avatar}
                 showLoadingIndicator={false}

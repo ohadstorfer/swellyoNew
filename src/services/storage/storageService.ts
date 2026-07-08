@@ -106,133 +106,101 @@ const nativeFileFormData = (uri: string, contentType: string): FormData => {
   return formData;
 };
 
+const getImageUploadFunctionUrl = (): string =>
+  `${process.env.EXPO_PUBLIC_SUPABASE_URL || ''}/functions/v1/image-upload-s3`;
+
 /**
- * Upload a profile image to Supabase Storage
- * @param imageUri - The local file URI or base64 data URL
- * @param userId - The authenticated user's ID
- * @returns UploadResult with the public URL on success
+ * Upload an image to swellyo-images S3 via presigned PUT, then fire-and-forget
+ * server-side thumbnail generation. Returns the permanent public S3 URL.
+ * bucket/kind are validated server-side against the caller's JWT (image-upload-s3
+ * derives the key as `<bucket>/<userId>/<kind>-<ts>.jpg`, so a client can't write
+ * outside its own folder). The client never holds THUMBNAIL_SECRET.
  */
-export const uploadProfileImage = async (
+export const uploadImageToS3 = async (
   imageUri: string,
-  userId: string
+  userId: string,
+  bucket: 'profile-images' | 'trip-images' | 'surftrip-images',
+  kind: string,
+  opts?: { maxDimension?: number; quality?: number },
 ): Promise<UploadResult> => {
   try {
-    if (!imageUri || !userId) {
-      return { success: false, error: 'Missing image or user ID' };
+    if (!imageUri || !userId) return { success: false, error: 'Missing image or user ID' };
+
+    if (opts?.maxDimension) {
+      try {
+        imageUri = await compressImage(imageUri, {
+          maxDimension: opts.maxDimension,
+          quality: opts.quality ?? 0.8,
+        });
+      } catch (e) {
+        console.warn('[StorageService/S3img] compression failed, uploading raw:', e);
+      }
     }
 
-    // Compress + resize before upload. iPhone originals can be 3-4 MB, which
-    // fails mid-download on spotty networks. Avatars display at 40-200px so a
-    // 1024px source at q=0.75 is plenty and lands around 200-400 KB.
-    try {
-      imageUri = await compressImage(imageUri, { maxDimension: 1024, quality: 0.75 });
-      console.log('[StorageService] Compressed image URI:', imageUri.substring(0, 50));
-    } catch (compressError) {
-      console.warn('[StorageService] Compression failed, uploading raw:', compressError);
-    }
+    const fnUrl = getImageUploadFunctionUrl();
+    const headers = await getAuthHeaders();
 
-    // Generate a unique filename
-    const fileExtension = 'jpg';
-    const fileName = `${userId}/profile-${Date.now()}.${fileExtension}`;
-
-    console.log('[StorageService] Received image URI:', imageUri);
-    console.log('[StorageService] URI type check:', {
-      isData: imageUri.startsWith('data:'),
-      isBlob: imageUri.startsWith('blob:'),
-      isFile: imageUri.startsWith('file://'),
-      isContent: imageUri.startsWith('content://'),
-      isPh: imageUri.startsWith('ph://'),
-      isHttp: imageUri.startsWith('http://') || imageUri.startsWith('https://'),
-      firstChars: imageUri.substring(0, 50),
+    const signRes = await fetch(fnUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'get-upload-url', userId, bucket, kind }),
     });
+    if (!signRes.ok) {
+      return { success: false, error: `Failed to get upload URL (${signRes.status})` };
+    }
+    const { uploadUrl, key, publicUrl } = await signRes.json();
 
-    let uploadBody: Blob | FormData;
-    const contentType = 'image/jpeg';
-
-    // On native, use FormData with the file URI directly (avoids Blob issues)
     const isNativeFileUri = Platform.OS !== 'web' &&
       (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
 
     if (isNativeFileUri) {
-      console.log('[StorageService] Native file URI – using FormData upload');
-      uploadBody = nativeFileFormData(imageUri, contentType);
-    } else if (imageUri.startsWith('data:')) {
-      // Base64 data URL (web)
-      console.log('[StorageService] Handling data: URI');
-      uploadBody = dataURLtoBlob(imageUri);
-    } else if (imageUri.startsWith('blob:')) {
-      // Blob URL (web - from expo-image-manipulator)
-      console.log('[StorageService] Handling blob: URI');
-      uploadBody = await uriToBlob(imageUri);
-    } else if (imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-      console.log('[StorageService] Handling http:// URI');
-      uploadBody = await uriToBlob(imageUri);
-    } else {
-      console.log('[StorageService] Unknown format, attempting to fetch as blob...');
-      try {
-        uploadBody = await uriToBlob(imageUri);
-        console.log('[StorageService] Successfully converted unknown format to blob');
-      } catch (fetchError) {
-        console.error('[StorageService] Failed to fetch as blob:', fetchError);
-        console.error('[StorageService] Full URI (first 100 chars):', imageUri.substring(0, 100));
-        return {
-          success: false,
-          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...`
-        };
-      }
-    }
-
-    // Try to upload directly - this is more reliable than checking buckets first
-    // (bucket check might fail due to permissions, but upload might still work)
-    const { data, error } = await supabase.storage
-      .from('profile-images')
-      .upload(fileName, uploadBody, {
-        contentType,
-        upsert: true,
-        // Filenames are timestamped (new URL per upload), so the content at a
-        // URL never changes — cache for a year. Seconds only: supabase-js
-        // prefixes "max-age=" itself. Without this, Supabase serves no-cache
-        // and the web app re-fetches every image on every visit.
-        cacheControl: '31536000',
+      // Stream the file directly via expo-file-system (the RN Blob shim can
+      // produce 0-byte PUT bodies) — mirrors uploadProfileVideoS3.
+      const LegacyFS = require('expo-file-system/legacy');
+      const result = await LegacyFS.uploadAsync(uploadUrl, imageUri, {
+        httpMethod: 'PUT',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': 'image/jpeg' },
       });
-
-    if (error) {
-      console.error('[StorageService] Upload error:', error);
-      
-      // Check if it's a bucket not found error
-      if (error.message?.includes('Bucket not found') || error.message?.includes('does not exist')) {
-        // Try to check if bucket exists (for better error message)
-        const { data: buckets } = await supabase.storage.listBuckets();
-        const bucketExists = buckets?.some(bucket => bucket.name === 'profile-images');
-        
-        if (!bucketExists) {
-          return { 
-            success: false, 
-            error: 'Storage bucket "profile-images" does not exist. Please create it in Supabase Storage.' 
-          };
-        }
+      if (result.status < 200 || result.status >= 300) {
+        return { success: false, error: `S3 upload failed (${result.status})` };
       }
-      
-      // For other errors (permissions, etc.), return the error
-      return { success: false, error: error.message || 'Upload failed' };
+    } else {
+      const uploadBody = imageUri.startsWith('data:') ? dataURLtoBlob(imageUri) : await uriToBlob(imageUri);
+      const s3Res = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: uploadBody,
+      });
+      if (!s3Res.ok) return { success: false, error: 'S3 upload failed' };
     }
 
-    // Get the public URL
-    const { data: urlData } = supabase.storage
-      .from('profile-images')
-      .getPublicUrl(data.path);
+    // Fire-and-forget thumbnail generation — <Thumb> falls back to the original
+    // until the variants exist.
+    fetch(fnUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'generate-thumbnails', userId, key }),
+    }).catch((e) => console.warn('[StorageService/S3img] thumb trigger failed:', e));
 
-    console.log('[StorageService] Image uploaded successfully:', urlData.publicUrl);
-    
-    return { success: true, url: urlData.publicUrl };
+    return { success: true, url: publicUrl };
   } catch (error) {
-    console.error('[StorageService] Upload exception:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
-    };
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 };
+
+/**
+ * Upload a profile image (avatar). Now routes to swellyo-images S3 via
+ * uploadImageToS3. Avatars display at 40-200px so 1024px @ q0.75 is plenty.
+ * @param imageUri - The local file URI or base64 data URL
+ * @param userId - The authenticated user's ID
+ * @returns UploadResult with the public S3 URL on success
+ */
+export const uploadProfileImage = async (
+  imageUri: string,
+  userId: string
+): Promise<UploadResult> =>
+  uploadImageToS3(imageUri, userId, 'profile-images', 'profile', { maxDimension: 1024, quality: 0.75 });
 
 /**
  * Upload a profile cover image to the `profile-images` bucket.
@@ -242,74 +210,8 @@ export const uploadProfileImage = async (
 export const uploadCoverImage = async (
   imageUri: string,
   userId: string
-): Promise<UploadResult> => {
-  try {
-    if (!imageUri || !userId) {
-      return { success: false, error: 'Missing image or user ID' };
-    }
-
-    // Cover photos are wide and prominent — allow more pixels than avatars
-    // (which use 1024px max). 2048 keeps the file small enough for spotty
-    // networks while still looking sharp on tablet-width displays.
-    try {
-      imageUri = await compressImage(imageUri, { maxDimension: 2048, quality: 0.85 });
-    } catch (compressError) {
-      console.warn('[StorageService] Cover compression failed, uploading raw:', compressError);
-    }
-
-    const fileName = `${userId}/cover-${Date.now()}.jpg`;
-    const contentType = 'image/jpeg';
-
-    let uploadBody: Blob | FormData;
-
-    const isNativeFileUri = Platform.OS !== 'web' &&
-      (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
-
-    if (isNativeFileUri) {
-      uploadBody = nativeFileFormData(imageUri, contentType);
-    } else if (imageUri.startsWith('data:')) {
-      uploadBody = dataURLtoBlob(imageUri);
-    } else if (imageUri.startsWith('blob:') || imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-      uploadBody = await uriToBlob(imageUri);
-    } else {
-      try {
-        uploadBody = await uriToBlob(imageUri);
-      } catch (fetchError) {
-        return {
-          success: false,
-          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...`,
-        };
-      }
-    }
-
-    const { data, error } = await supabase.storage
-      .from('profile-images')
-      .upload(fileName, uploadBody, {
-        contentType,
-        upsert: true,
-        // Timestamped filename → immutable URL → safe to cache long (see
-        // uploadProfileImage).
-        cacheControl: '31536000',
-      });
-
-    if (error) {
-      console.error('[StorageService] Cover upload error:', error);
-      return { success: false, error: error.message || 'Upload failed' };
-    }
-
-    const { data: urlData } = supabase.storage
-      .from('profile-images')
-      .getPublicUrl(data.path);
-
-    return { success: true, url: urlData.publicUrl };
-  } catch (error) {
-    console.error('[StorageService] Cover upload exception:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-};
+): Promise<UploadResult> =>
+  uploadImageToS3(imageUri, userId, 'profile-images', 'cover', { maxDimension: 2048, quality: 0.85 });
 
 /**
  * Upload a poster image for the user's surf video to the `profile-images`
@@ -325,146 +227,35 @@ export const uploadProfileVideoThumbnail = async (
   thumbnailUri: string,
   userId: string,
 ): Promise<string | null> => {
-  try {
-    if (!thumbnailUri || !userId) return null;
-
-    const fileName = `${userId}/video-thumbnail-${Date.now()}.jpg`;
-    const contentType = 'image/jpeg';
-
-    let uploadBody: Blob | FormData;
-
-    const isNativeFileUri = Platform.OS !== 'web' &&
-      (thumbnailUri.startsWith('file://') ||
-        thumbnailUri.startsWith('content://') ||
-        thumbnailUri.startsWith('ph://'));
-
-    if (isNativeFileUri) {
-      uploadBody = nativeFileFormData(thumbnailUri, contentType);
-    } else if (thumbnailUri.startsWith('data:')) {
-      uploadBody = dataURLtoBlob(thumbnailUri);
-    } else {
-      uploadBody = await uriToBlob(thumbnailUri);
-    }
-
-    const { data, error } = await supabase.storage
-      .from('profile-images')
-      .upload(fileName, uploadBody, {
-        contentType,
-        upsert: true,
-        // Timestamped filename → immutable URL → safe to cache long (see
-        // uploadProfileImage).
-        cacheControl: '31536000',
-      });
-
-    if (error) {
-      console.warn('[StorageService] Video thumbnail upload error:', error.message);
-      return null;
-    }
-
-    const { data: urlData } = supabase.storage
-      .from('profile-images')
-      .getPublicUrl(data.path);
-
-    return urlData.publicUrl ?? null;
-  } catch (err) {
-    console.warn('[StorageService] Video thumbnail upload exception:', err);
-    return null;
-  }
+  // Input is already a small JPEG (~240px) from captureVideoThumbnail — no
+  // compression needed. Routes to swellyo-images S3 like the other profile images.
+  const r = await uploadImageToS3(thumbnailUri, userId, 'profile-images', 'video-thumbnail');
+  return r.success ? (r.url ?? null) : null;
 };
 
 /**
- * Upload a hero image for a surftrip group to the `surftrip-images` bucket.
- * Same URI handling as uploadTripImage / uploadProfileImage.
+ * Upload a surftrip hero image to swellyo-images S3 (`surftrip-images/` prefix).
+ * Rewired to S3 in images-to-s3 Phase 1 (2048px @ q0.85, matches trip heroes).
  */
 export const uploadSurftripImage = async (
   imageUri: string,
   userId: string
-): Promise<UploadResult> => {
-  return uploadToBucket(imageUri, userId, 'surftrip-images', 'hero');
-};
+): Promise<UploadResult> =>
+  uploadImageToS3(imageUri, userId, 'surftrip-images', 'hero', { maxDimension: 2048, quality: 0.85 });
 
 /**
- * Upload a trip image (hero or accommodation) to the `trip-images` bucket.
- * Mirrors `uploadProfileImage` — same URI handling, different bucket and path.
+ * Upload a group-trip image (hero or accommodation) to swellyo-images S3
+ * (`trip-images/` prefix). Rewired to S3 in images-to-s3 Phase 1. Heroes are
+ * wide/prominent → 2048px @ q0.85 (matches covers; also keeps the source under
+ * the generate-thumbnail-s3 5 MB / 40 MP guard). Surftrip uploads stay on
+ * Supabase for now (see uploadSurftripImage).
  */
 export const uploadTripImage = async (
   imageUri: string,
   userId: string,
   kind: 'hero' | 'accommodation' = 'hero'
-): Promise<UploadResult> => {
-  return uploadToBucket(imageUri, userId, 'trip-images', kind);
-};
-
-const uploadToBucket = async (
-  imageUri: string,
-  userId: string,
-  bucket: 'trip-images' | 'surftrip-images',
-  kind: string
-): Promise<UploadResult> => {
-  try {
-    if (!imageUri || !userId) {
-      return { success: false, error: 'Missing image or user ID' };
-    }
-
-    const fileName = `${userId}/${kind}-${Date.now()}.jpg`;
-    const contentType = 'image/jpeg';
-
-    let uploadBody: Blob | FormData;
-
-    const isNativeFileUri = Platform.OS !== 'web' &&
-      (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
-
-    if (isNativeFileUri) {
-      uploadBody = nativeFileFormData(imageUri, contentType);
-    } else if (imageUri.startsWith('data:')) {
-      uploadBody = dataURLtoBlob(imageUri);
-    } else if (imageUri.startsWith('blob:') || imageUri.startsWith('http://') || imageUri.startsWith('https://')) {
-      uploadBody = await uriToBlob(imageUri);
-    } else {
-      try {
-        uploadBody = await uriToBlob(imageUri);
-      } catch (fetchError) {
-        return {
-          success: false,
-          error: `Unsupported image format. URI starts with: ${imageUri.substring(0, 20)}...`
-        };
-      }
-    }
-
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .upload(fileName, uploadBody, {
-        contentType,
-        upsert: true,
-        // Timestamped filename → immutable URL → safe to cache long (see
-        // uploadProfileImage).
-        cacheControl: '31536000',
-      });
-
-    if (error) {
-      console.error(`[StorageService] ${bucket} upload error:`, error);
-      if (error.message?.includes('Bucket not found') || error.message?.includes('does not exist')) {
-        return {
-          success: false,
-          error: `Storage bucket "${bucket}" does not exist. Please run the corresponding migration.`,
-        };
-      }
-      return { success: false, error: error.message || 'Upload failed' };
-    }
-
-    const { data: urlData } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(data.path);
-
-    return { success: true, url: urlData.publicUrl };
-  } catch (error) {
-    console.error(`[StorageService] ${bucket} upload exception:`, error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
-};
+): Promise<UploadResult> =>
+  uploadImageToS3(imageUri, userId, 'trip-images', kind, { maxDimension: 2048, quality: 0.85 });
 
 /**
  * Upload a profile video to Supabase Storage

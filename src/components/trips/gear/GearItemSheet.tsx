@@ -14,7 +14,6 @@ import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -29,6 +28,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 import { TripIcon } from '../tripIcons';
+import Thumb from '../../Thumb';
 import type { EnrichedGearItem, GearContributor } from '../../../services/trips/groupTripsService';
 
 interface Props {
@@ -69,7 +69,13 @@ const Contributor: React.FC<{ c: GearContributor; me?: boolean }> = ({ c, me }) 
   <View style={styles.contributor}>
     <View style={styles.avatarWrap}>
       {c.profile_image_url ? (
-        <Image source={{ uri: c.profile_image_url }} style={[styles.avatar, me && styles.avatarMe]} />
+        <Thumb
+          uri={c.profile_image_url}
+          size={144}
+          style={[styles.avatar, me && styles.avatarMe]}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
       ) : (
         <View style={[styles.avatar, styles.avatarFallback, me && styles.avatarMe]}>
           <Text style={styles.avatarInitial}>{initialOf(c.name)}</Text>

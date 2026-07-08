@@ -378,7 +378,11 @@ export async function processImage(uri: string): Promise<ImageProcessingResult> 
 }
 
 /**
- * Upload image to Supabase Storage
+ * Upload a chat image to swellyo-images S3 (`message-images/` prefix) via a
+ * membership-checked presigned PUT (image-upload-s3 `get-message-upload-url`).
+ * Public URL (message-images/* is public on S3, matching the legacy Supabase
+ * bucket) — the display path is unchanged. Key scheme is preserved:
+ * `message-images/{conversationId}/{messageId}/{original|thumbnail}.jpg`.
  */
 export async function uploadImageToStorage(
   imageUri: string,
@@ -392,47 +396,49 @@ export async function uploadImageToStorage(
   }
 
   try {
-    const contentType = 'image/jpeg';
+    // Presigned PUT from image-upload-s3 (validates conversation membership).
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+    const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+    const fnUrl = `${process.env.EXPO_PUBLIC_SUPABASE_URL || ''}/functions/v1/image-upload-s3`;
 
-    // On native, use FormData with the file URI directly (avoids Blob issues)
+    const signRes = await fetch(fnUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+        'apikey': anonKey,
+      },
+      body: JSON.stringify({ action: 'get-message-upload-url', conversationId, messageId, isThumbnail }),
+    });
+    if (!signRes.ok) throw new Error(`Failed to get upload URL (${signRes.status})`);
+    const { uploadUrl, publicUrl } = await signRes.json();
+
     const isNativeFileUri = Platform.OS !== 'web' &&
       (imageUri.startsWith('file://') || imageUri.startsWith('content://') || imageUri.startsWith('ph://'));
 
-    let uploadBody: Blob | FormData;
     if (isNativeFileUri) {
-      uploadBody = nativeFileFormData(imageUri, contentType);
-    } else if (imageUri.startsWith('data:')) {
-      uploadBody = dataURLtoBlob(imageUri);
-    } else {
-      uploadBody = await uriToBlob(imageUri);
-    }
-
-    // Construct storage path: {conversation_id}/{message_id}/original.jpg or thumbnail.jpg
-    const fileName = isThumbnail ? 'thumbnail.jpg' : 'original.jpg';
-    const storagePath = `${conversationId}/${messageId}/${fileName}`;
-
-    // Upload to storage
-    const { data, error } = await supabase.storage
-      .from('message-images')
-      .upload(storagePath, uploadBody, {
-        contentType,
-        upsert: false,
-        // Message media is immutable (path is keyed by message id), so it's
-        // safe to cache long. Seconds only — supabase-js prefixes "max-age=".
-        cacheControl: '31536000',
+      // Stream the file directly (RN Blob shim can PUT 0-byte bodies).
+      const LegacyFS = require('expo-file-system/legacy');
+      const result = await LegacyFS.uploadAsync(uploadUrl, imageUri, {
+        httpMethod: 'PUT',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': 'image/jpeg' },
       });
-
-    if (error) {
-      console.error('[imageUploadService] Upload error:', error);
-      throw error;
+      if (result.status < 200 || result.status >= 300) {
+        throw new Error(`S3 upload failed (${result.status})`);
+      }
+    } else {
+      const uploadBody = imageUri.startsWith('data:') ? dataURLtoBlob(imageUri) : await uriToBlob(imageUri);
+      const res = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: uploadBody,
+      });
+      if (!res.ok) throw new Error(`S3 upload failed (${res.status})`);
     }
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('message-images')
-      .getPublicUrl(data.path);
-
-    return urlData.publicUrl;
+    return publicUrl;
   } catch (error) {
     console.error('[imageUploadService] Error uploading image:', error);
     throw error;

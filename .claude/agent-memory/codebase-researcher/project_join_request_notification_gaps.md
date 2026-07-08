@@ -109,3 +109,9 @@ requests to join" → Host, Push, "Approve or decline now") matches the actual
 between spec and DB trigger design.
 
 Related: [[project_notifications_push_queue_phase1]], [[project_explore_prefetching_order_coupling]] (same focus-gated-broadcast-invalidation pattern family).
+
+**UPDATE 2026-07-06:** the "Plan tab / TripDetailScreen gap" section above is now FIXED — as of
+the current code, `useTripRealtime.ts:49-55`'s focus-regain catch-up DOES include
+`tripsKeys.detailRequests(tripId)` (comment there explicitly cites this exact bug as the reason).
+The remaining live gap is different and is in `TripMembersScreen`/`ProfileScreen`'s approve button
+— see [[project_profile_approve_no_invalidation_gap]] for the current root cause.

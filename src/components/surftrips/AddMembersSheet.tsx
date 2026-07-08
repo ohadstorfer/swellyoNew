@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Image,
   Platform,
   TextInput,
   Animated,
@@ -15,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../Text';
+import { Thumb } from '../Thumb';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
 import type { AddableDmPartner } from '../../services/surftrips/surftripsService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
@@ -284,7 +284,13 @@ const PartnerRow: React.FC<PartnerRowProps> = ({
     >
       <View style={styles.avatarWrap}>
         {profile_image_url ? (
-          <Image source={{ uri: profile_image_url }} style={styles.avatar} />
+          <Thumb
+            uri={profile_image_url}
+            size={144}
+            style={styles.avatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
         ) : (
           <View style={[styles.avatar, styles.avatarPlaceholder]}>
             <Text style={styles.avatarInitial}>

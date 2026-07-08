@@ -13,7 +13,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Image as CachedImage } from 'expo-image';
 import { ff } from '../../../theme/fonts';
+import Thumb from '../../Thumb';
+import { getStorageThumbUrl } from '../../../services/media/imageService';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
 import { getGroupTripInviteUrl } from '../../../services/trips/groupTripsService';
 import { YoureInIllustration } from './YoureInIllustration';
@@ -61,7 +64,13 @@ const Avatar: React.FC<{
   const dim = { width: size, height: size, borderRadius: size / 2 };
   if (url) {
     return (
-      <Image source={{ uri: url }} style={[dim, ring && styles.avatarRing]} />
+      <Thumb
+        uri={url}
+        size={size}
+        style={[dim, ring && styles.avatarRing]}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
     );
   }
   return (
@@ -158,7 +167,12 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
           <View style={styles.card}>
             <View style={styles.tripsCard}>
               {trip.hero_image_url ? (
-                <Image source={{ uri: trip.hero_image_url }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <CachedImage
+                  source={{ uri: getStorageThumbUrl(trip.hero_image_url, 320) ?? trip.hero_image_url }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                />
               ) : (
                 <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>
                   <Ionicons name="image-outline" size={30} color="#9AA0A6" />

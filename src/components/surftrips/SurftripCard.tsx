@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
+import { Thumb } from '../Thumb';
 import type { SurftripGroupForUser } from '../../types/surftrips';
 
 interface SurftripCardProps {
@@ -23,7 +24,13 @@ export const SurftripCard: React.FC<SurftripCardProps> = ({ group, onPress, show
     <TouchableOpacity activeOpacity={0.6} onPress={onPress} style={styles.row}>
       <View style={styles.thumbWrap}>
         {group.hero_image_url ? (
-          <Image source={{ uri: group.hero_image_url }} style={styles.thumb} />
+          <Thumb
+            uri={group.hero_image_url}
+            size={144}
+            style={styles.thumb}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
         ) : (
           <View style={[styles.thumb, styles.thumbPlaceholder]}>
             <Ionicons name="people" size={22} color="#FFFFFF" />

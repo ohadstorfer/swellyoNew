@@ -24,6 +24,22 @@ export const THUMB_CACHE_VERSION = 2;
 
 const OBJECT_MARKER = '/storage/v1/object/public/';
 
+// S3 image bucket (images-to-s3 migration). Variants live in the SAME bucket at
+// `<sourceKey>__<size>.jpg`, so — unlike the Supabase path, which swaps into the
+// separate image-thumbnails bucket — there is no bucket swap: we just append the
+// suffix. Detected by host substring (no env var, so this stays OTA-safe).
+const S3_IMAGES_MARKER = 'swellyo-images.s3';
+const VARIANT_RE = /__(?:\d+|\d+w)\.jpg(?:\?|$)/;
+
+/**
+ * Append a variant suffix to an S3 source URL, or return it unchanged if it is
+ * already a variant. `suffix` is e.g. `__320.jpg` or `__1280w.jpg`.
+ */
+const appendS3Variant = (url: string, suffix: string): string => {
+  if (VARIANT_RE.test(url)) return url; // already a variant
+  return `${url}${suffix}?v=${THUMB_CACHE_VERSION}`;
+};
+
 /** Smallest ladder size >= requested px (caps at the largest ladder size). */
 export const snapSquareSize = (px: number): number =>
   SQUARE_LADDER.find((s) => s >= px) ?? SQUARE_LADDER[SQUARE_LADDER.length - 1];
@@ -43,6 +59,7 @@ export const toThumbUrl = (
   baseUrl: string = defaultBase(),
 ): string | null => {
   if (!url) return null;
+  if (url.includes(S3_IMAGES_MARKER)) return appendS3Variant(url, `__${snapSquareSize(px)}.jpg`);
   const i = url.indexOf(OBJECT_MARKER);
   if (i === -1) return url; // not a Supabase public object — leave as-is
   const rest = url.slice(i + OBJECT_MARKER.length); // "<bucket>/<path>"
@@ -62,6 +79,7 @@ export const toWidthThumbUrl = (
   baseUrl: string = defaultBase(),
 ): string | null => {
   if (!url) return null;
+  if (url.includes(S3_IMAGES_MARKER)) return appendS3Variant(url, `__${width}w.jpg`);
   const i = url.indexOf(OBJECT_MARKER);
   if (i === -1) return url;
   const rest = url.slice(i + OBJECT_MARKER.length);

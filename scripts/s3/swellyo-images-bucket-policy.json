@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadSourcePrefixes",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::swellyo-images/profile-images/*",
+        "arn:aws:s3:::swellyo-images/trip-images/*",
+        "arn:aws:s3:::swellyo-images/surftrip-images/*",
+        "arn:aws:s3:::swellyo-images/lifestyle-thumbnails/*",
+        "arn:aws:s3:::swellyo-images/Countries/*",
+        "arn:aws:s3:::swellyo-images/message-images/*"
+      ]
+    }
+  ]
+}

@@ -222,8 +222,9 @@ const TripCard: React.FC<{
     >
       <View style={styles.cardImageWrap}>
         {trip.hero_image_url ? (
-          <CachedImage
-            source={{ uri: trip.hero_image_url }}
+          <Thumb
+            uri={trip.hero_image_url}
+            widthPx={1280}
             style={styles.cardImageBg}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -431,8 +432,9 @@ const ExploreTripCard: React.FC<{
       disabled={!onPress}
     >
       {trip.hero_image_url ? (
-        <CachedImage
-          source={{ uri: trip.hero_image_url }}
+        <Thumb
+          uri={trip.hero_image_url}
+          widthPx={1280}
           placeholder={heroThumb ? { uri: heroThumb } : undefined}
           placeholderContentFit="cover"
           style={styles.cardImageBg}

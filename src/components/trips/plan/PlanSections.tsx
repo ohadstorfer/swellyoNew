@@ -10,7 +10,6 @@ import React, { useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
-  Image,
   ScrollView,
   StyleSheet,
   Pressable,
@@ -92,7 +91,16 @@ const Avatar: React.FC<{ url: string | null; name: string | null; size?: number 
   size = 24,
 }) => {
   const dim = { width: size, height: size, borderRadius: size / 2 };
-  if (url) return <Image source={{ uri: url }} style={[styles.avatarImg, dim]} />;
+  if (url)
+    return (
+      <Thumb
+        uri={url}
+        size={size}
+        style={[styles.avatarImg, dim]}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+    );
   return (
     <View style={[styles.avatarImg, styles.avatarFallback, dim]}>
       <Text style={[styles.avatarInitial, { fontSize: size * 0.42 }]}>{initialsOf(name)}</Text>

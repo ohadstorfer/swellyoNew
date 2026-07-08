@@ -15,6 +15,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Image as CachedImage } from 'expo-image';
 import Svg, { Path } from 'react-native-svg';
 import { ff } from '../../../theme/fonts';
+import Thumb from '../../Thumb';
+import { getStorageThumbUrl } from '../../../services/media/imageService';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
 
 // Full doodle illustration (line + icons) — Figma node 13073:15813, native
@@ -46,7 +48,15 @@ const Avatar: React.FC<{
 }> = ({ url, name, size, ring }) => {
   const dim = { width: size, height: size, borderRadius: size / 2 };
   if (url) {
-    return <Image source={{ uri: url }} style={[dim, ring && styles.avatarRing]} />;
+    return (
+      <Thumb
+        uri={url}
+        size={size}
+        style={[dim, ring && styles.avatarRing]}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+    );
   }
   return (
     <View style={[dim, styles.avatarFallback, ring && styles.avatarRing]}>
@@ -144,9 +154,10 @@ export const JoinDeclinedOverlay: React.FC<Props> = ({
             <View style={styles.tripsCard}>
               {trip.hero_image_url ? (
                 <CachedImage
-                  source={{ uri: trip.hero_image_url }}
+                  source={{ uri: getStorageThumbUrl(trip.hero_image_url, 320) ?? trip.hero_image_url }}
                   style={StyleSheet.absoluteFill}
                   contentFit="cover"
+                  cachePolicy="memory-disk"
                 />
               ) : (
                 <View style={[StyleSheet.absoluteFill, styles.heroFallback]}>

@@ -187,7 +187,10 @@ serve(async (req) => {
     const prefix = `${bucket}/${path}`;
 
     const squareNames = isCover ? [] : SQUARE_LADDER.map((s) => `${prefix}__${s}.jpg`);
-    const widthName = HERO_BUCKETS.has(bucket) ? `${prefix}__${WIDTH_VARIANT}w.jpg` : null;
+    // Wide `__1280w` variant: hero buckets AND cover photos (both wide, rendered
+    // full-width; the client reads them via toWidthThumbUrl). Covers get ONLY this
+    // (no square ladder — squareNames is [] for covers above).
+    const widthName = (HERO_BUCKETS.has(bucket) || isCover) ? `${prefix}__${WIDTH_VARIANT}w.jpg` : null;
     const allNames = [...squareNames, ...(widthName ? [widthName] : [])];
 
     // Idempotency: bail before downloading/decoding if everything already exists.

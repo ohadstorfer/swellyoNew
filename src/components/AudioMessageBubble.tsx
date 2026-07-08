@@ -116,11 +116,12 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
   // while the optimistic message is still uploading so the sender can hear it.
   const playUrl = audio_metadata?.audio_url || _localPreviewUri || '';
 
-  // Warm the cache as soon as the bubble mounts so tapping play is instant.
-  useEffect(() => {
-    if (!playUrl || isUploading) return;
-    audioPlaybackService.preload(id, playUrl);
-  }, [id, playUrl, isUploading]);
+  // NOTE: intentionally NO eager preload on mount. Previously the bubble called
+  // audioPlaybackService.preload(id, playUrl) here, which downloaded the full
+  // audio for every bubble that scrolled into the FlatList window even if never
+  // played — a major egress source. `play()` already loads on demand (cached →
+  // in-flight → load-now) and shows a brief spinner on the first tap, so first
+  // play is still correct and every later play is instant from the LRU cache.
 
   const waveform: number[] = useMemo(() => {
     const samples = audio_metadata?.waveform;
