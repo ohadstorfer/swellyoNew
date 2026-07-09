@@ -116,7 +116,7 @@ async function buildMessageContext(
   } else if (msg.type === 'file') {
     // Mirrors messagePreviewText.ts so the push and the conversation list agree.
     body = msg.body?.trim()
-      ? truncateForPush(msg.body)
+      ? truncateForPush(msg.body.trim())
       : `📎 ${msg.file_metadata?.display_name ?? 'File'}`;
   } else if (msg.type === 'contact') {
     body = `👤 ${msg.contact_metadata?.display_name ?? 'Contact'}`;
