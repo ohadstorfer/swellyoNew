@@ -18,7 +18,7 @@ import {
 } from '../../services/messaging/fileAttachmentPolicy';
 import { PdfRendererView, type PdfRendererProps } from './pdfRenderer';
 import { FileCard } from './FileCard';
-import { ff, fs } from '../../theme/fonts';
+import { fs } from '../../theme/fonts';
 
 interface FilePreviewBodyProps {
   uri: string;
