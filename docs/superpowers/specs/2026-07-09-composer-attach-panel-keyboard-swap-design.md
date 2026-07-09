@@ -54,7 +54,7 @@ Per chat screen:
 
 | State | Source | Purpose |
 |---|---|---|
-| `lastKeyboardHeight` | RN's `keyboardDidShow`, recorded when `height > 0` | The panel's height. Persists across keyboard open/close. |
+| `lastKeyboardHeight` | rnkc's `useGenericKeyboardHandler` `onEnd`, when `height > 0` | The panel's height. Persists across keyboard open/close. |
 | `panelOpen` | `useState` | Whether `AttachPanel` is mounted. |
 
 `lastKeyboardHeight` seeds from a constant (`iOS 291`, `Android 260` — typical
@@ -127,7 +127,7 @@ button has to answer the moment it is pressed. `KEYBOARD_REQUESTED` splits the t
 
 **Tapping the text input with panel open.** The input focuses and the keyboard
 animates up. The panel **stays mounted** and only unmounts once the keyboard has
-fully opened (RN's `keyboardDidShow`). Unmounting it on focus
+fully opened (rnkc's `onEnd`). Unmounting it on focus
 would leave a hole for the duration of the keyboard's open animation and drop the
 composer. Because the heights match, the keyboard simply rises over the panel.
 
@@ -156,11 +156,29 @@ app. **With no `Modal` there is no teardown to wait for**, so `pendingAction` /
 `onDismissed` are deleted and tiles call their handlers directly. This removal is a
 consequence of the redesign, not an unrelated cleanup.
 
-## Expo Go
+## One ruler, not two
 
-Nothing here touches `react-native-keyboard-controller`. Heights, the
-"keyboard-finished-opening" signal and the dismiss all come from RN's `Keyboard` API,
-which is present in Expo Go. The panel behaves identically everywhere.
+The panel is measured with `react-native-keyboard-controller`
+(`useGenericKeyboardHandler`'s `onEnd`), **not** RN's `keyboardDidShow`. It must be
+the same ruler the container's padding uses (`useReanimatedKeyboardAnimation`). Mix
+them and the panel lands a few pixels shy of the keyboard: with the keyboard up,
+`max()` yields `kbHeight`; once it leaves, `panelHeight` — and the composer steps down
+by the difference.
+
+RN's measurement is also the wrong one on **Android**. Under SDK 54's mandatory
+edge-to-edge, `adjustResize` behaves like `adjustNothing`, so RN's keyboard events
+misreport. That is why this project depends on rnkc in the first place.
+
+`useGenericKeyboardHandler`, not `useKeyboardHandler`: the latter claims Android's
+soft-input mode on mount and restores it on unmount, and the screens'
+`useReanimatedKeyboardAnimation` already owns that setting.
+
+**Expo Go.** `App.tsx` skips `KeyboardProvider` there, so rnkc's default context makes
+`setKeyboardHandlers` a no-op — no crash, but no measurement either, and the panel
+falls back to its seed height. The container's padding is equally inert in Expo Go
+(the shared value never leaves 0), so chat keyboard behaviour is already degraded
+there. The panel opens; it just isn't keyboard-matched. Dev and production builds are
+unaffected.
 
 ## Risks
 
