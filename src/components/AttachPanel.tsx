@@ -11,7 +11,12 @@
  * The height is passed in (the last measured keyboard height) and is FIXED: `flex`
  * or measure-on-mount would collapse the panel and re-expand it.
  *
- * No safe-area padding: the panel sits where the keyboard sat, so there is no home
+ * Two views, not one. The outer one is the keyboard's rectangle: invisible, but it
+ * swallows taps so a stray press beside the card doesn't reach a message bubble. The
+ * inner one is the card the user sees — inset from the edges, top corners rounded,
+ * running full-bleed to the bottom of the screen (WhatsApp's shape).
+ *
+ * No safe-area padding: the card sits where the keyboard sat, so there is no home
  * indicator to clear. No grabber either — it isn't draggable.
  */
 import React from 'react';
@@ -20,19 +25,31 @@ import { AttachMenuGrid, type AttachMenuActions } from './AttachMenuGrid';
 
 export function AttachPanel({ height, ...actions }: AttachMenuActions & { height: number }) {
   return (
-    <View testID="attach-panel" style={[styles.panel, { height }]}>
-      <AttachMenuGrid {...actions} />
+    <View testID="attach-panel" style={[styles.rect, { height }]}>
+      <View style={styles.card}>
+        <AttachMenuGrid {...actions} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
+  // The keyboard's rectangle. Transparent — the chat background shows through
+  // around the card, exactly as it does around WhatsApp's.
+  rect: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  card: {
+    flex: 1,
+    // Breathing room under the composer, and in from the screen edges.
+    marginTop: 8,
+    marginHorizontal: 8,
     backgroundColor: '#D9D9D9',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     paddingTop: 22,
     paddingHorizontal: 20,
   },
