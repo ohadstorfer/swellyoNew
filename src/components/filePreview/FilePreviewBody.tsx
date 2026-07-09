@@ -16,7 +16,7 @@ import {
   previewKindForExt,
   MAX_TEXT_PREVIEW_BYTES,
 } from '../../services/messaging/fileAttachmentPolicy';
-import { PdfRendererView } from './pdfRenderer';
+import { PdfRendererView, type PdfRendererProps } from './pdfRenderer';
 import { FileCard } from './FileCard';
 import { ff, fs } from '../../theme/fonts';
 
@@ -42,6 +42,54 @@ class RenderBoundary extends React.Component<
   render() {
     return this.state.failed ? this.props.fallback : this.props.children;
   }
+}
+
+function ImagePreview({ uri }: { uri: string }) {
+  const [failed, setFailed] = useState(false);
+
+  // expo-image does NOT throw on a decode failure — it renders an empty box
+  // and calls onError. RenderBoundary only catches render-phase throws, so a
+  // corrupt image needs its own failure state to reach the card.
+  if (failed) throw new Error('image decode failed'); // caught by RenderBoundary
+
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.image}
+      contentFit="contain"
+      transition={120}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function PdfPreview({
+  uri,
+  Renderer,
+}: {
+  uri: string;
+  /** Non-null here — the caller already branched on PdfRendererView. */
+  Renderer: React.ComponentType<PdfRendererProps>;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  // A mount throw is caught by the parent RenderBoundary. A native-reported
+  // error arrives only via onError, so it needs the same throw-on-state-change
+  // path to reach the same boundary.
+  if (failed) throw new Error('pdf render failed'); // caught by RenderBoundary
+
+  return (
+    // borderRadius on this native view is ignored on Android and CRASHES on
+    // iOS — never round it directly; wrap it if you ever need rounding.
+    <Renderer
+      source={uri}
+      singlePage
+      maxZoom={1}
+      maxPageResolution={2048}
+      style={styles.pdf}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function TextPreview({ uri }: { uri: string }) {
@@ -91,8 +139,8 @@ export function FilePreviewBody({ uri, displayName, ext, sizeBytes }: FilePrevie
 
   if (kind === 'image') {
     return (
-      <RenderBoundary fallback={card}>
-        <Image source={{ uri }} style={styles.image} contentFit="contain" transition={120} />
+      <RenderBoundary key={uri} fallback={card}>
+        <ImagePreview uri={uri} />
       </RenderBoundary>
     );
   }
@@ -101,16 +149,8 @@ export function FilePreviewBody({ uri, displayName, ext, sizeBytes }: FilePrevie
     // Expo Go, or a build without the native view.
     if (!PdfRendererView) return card;
     return (
-      <RenderBoundary fallback={card}>
-        {/* borderRadius on this native view is ignored on Android and CRASHES on
-            iOS — never round it directly; wrap it if you ever need rounding. */}
-        <PdfRendererView
-          source={uri}
-          singlePage
-          maxZoom={1}
-          maxPageResolution={2048}
-          style={styles.pdf}
-        />
+      <RenderBoundary key={uri} fallback={card}>
+        <PdfPreview uri={uri} Renderer={PdfRendererView} />
       </RenderBoundary>
     );
   }
@@ -127,7 +167,7 @@ export function FilePreviewBody({ uri, displayName, ext, sizeBytes }: FilePrevie
       );
     }
     return (
-      <RenderBoundary fallback={card}>
+      <RenderBoundary key={uri} fallback={card}>
         <TextPreview uri={uri} />
       </RenderBoundary>
     );
