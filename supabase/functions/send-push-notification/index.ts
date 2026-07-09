@@ -5,20 +5,31 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const EXPO_ACCESS_TOKEN = Deno.env.get('EXPO_ACCESS_TOKEN')
 
-// Rewrite a Supabase public-object URL to its EXIF-corrected static thumbnail
-// (the `image-thumbnails` bucket). The raw upload keeps its EXIF Orientation
-// tag, which iOS's INImage(imageData:) in the Notification Service Extension
-// ignores — so a portrait phone photo renders rotated 90° in the push. The
-// 320px thumbnail (generate-thumbnail bakes orientation upright) renders
-// correctly. Non-Supabase URLs (e.g. Google avatars) and URLs already pointing
-// at the thumbnails bucket pass through unchanged.
+// Rewrite an image URL to its EXIF-corrected static thumbnail. The raw upload
+// keeps its EXIF Orientation tag, which iOS's INImage(imageData:) in the
+// Notification Service Extension ignores — so a portrait phone photo renders
+// rotated 90° in the push. The 320px thumbnail (generate-thumbnail /
+// generate-thumbnail-s3 bake orientation upright) renders correctly.
+//
+// Two storage backends, two URL shapes:
+//   • Supabase public object → swap into the separate `image-thumbnails` bucket
+//   • S3 (`swellyo-images`)  → variants live in the SAME bucket at
+//     `<sourceKey>__<size>.jpg`, so just append the suffix (no bucket swap)
+// Anything else (e.g. Google avatars) and URLs that are already a variant pass
+// through unchanged.
 // Mirrors src/services/media/thumbnails.ts → toThumbUrl(url, 320).
 const THUMB_OBJECT_MARKER = '/storage/v1/object/public/'
 const THUMBNAILS_BUCKET = 'image-thumbnails'
+const S3_IMAGES_MARKER = 'swellyo-images.s3'
+const VARIANT_RE = /__(?:\d+|\d+w)\.jpg(?:\?|$)/
 const THUMB_CACHE_VERSION = 2
 const AVATAR_THUMB_SIZE = 320
 function toThumbUrl(url: string | null): string | null {
   if (!url) return null
+  if (url.includes(S3_IMAGES_MARKER)) {
+    if (VARIANT_RE.test(url)) return url // already a variant
+    return `${url}__${AVATAR_THUMB_SIZE}.jpg?v=${THUMB_CACHE_VERSION}`
+  }
   const i = url.indexOf(THUMB_OBJECT_MARKER)
   if (i === -1) return url // not a Supabase public object — leave as-is
   const rest = url.slice(i + THUMB_OBJECT_MARKER.length) // "<bucket>/<path>"
