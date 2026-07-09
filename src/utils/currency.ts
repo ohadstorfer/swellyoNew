@@ -25,13 +25,34 @@ export function ilsToUsd(ils: number, rate: number): number {
   return Math.round(ils / rate);
 }
 
+const ILS_ROUND_STEP = 100;
+
+/**
+ * Round a ₪ amount to the nearest ₪100 for display (₪4,220 → ₪4,200).
+ *
+ * Display-only. Never feed the result back into ilsToUsd — the stored USD would
+ * drift a little on every round-trip. Sub-₪50 amounts fall back to the nearest
+ * ₪10 so a real price can never collapse to ₪0.
+ */
+export function roundIlsForDisplay(ils: number): number {
+  if (!Number.isFinite(ils) || ils <= 0) return 0;
+  const rounded = Math.round(ils / ILS_ROUND_STEP) * ILS_ROUND_STEP;
+  if (rounded > 0) return rounded;
+  return Math.max(10, Math.round(ils / 10) * 10);
+}
+
+/** USD → ₪ for display: converts, then rounds to the nearest ₪100. */
+export function usdToIlsDisplay(usd: number, rate: number): number {
+  return roundIlsForDisplay(usd * rate);
+}
+
 function symbolAndAmount(
   usd: number,
   fxRate: number | null | undefined,
   viewerCountry: string | null | undefined,
 ): { symbol: string; amount: number } {
   if (isIsraeli(viewerCountry) && validRate(fxRate)) {
-    return { symbol: '₪', amount: usdToIls(usd, fxRate) };
+    return { symbol: '₪', amount: usdToIlsDisplay(usd, fxRate) };
   }
   return { symbol: '$', amount: Math.round(usd) };
 }

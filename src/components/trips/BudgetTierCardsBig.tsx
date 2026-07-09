@@ -13,7 +13,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../Text';
-import { FALLBACK_USD_TO_ILS, usdToIls } from '../../utils/currency';
+import { FALLBACK_USD_TO_ILS, usdToIlsDisplay } from '../../utils/currency';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
@@ -86,7 +86,7 @@ export const BudgetTierCardsBig: React.FC<BudgetTierCardsBigProps> = ({
   const formatMoney = (usd: number): string => {
     if (!Number.isFinite(usd)) return '-';
     if (currency === 'ILS') {
-      return '₪' + usdToIls(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
+      return '₪' + usdToIlsDisplay(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
     }
     return '$' + Math.round(usd).toLocaleString('en-US');
   };

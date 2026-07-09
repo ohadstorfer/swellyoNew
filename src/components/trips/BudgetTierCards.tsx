@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FALLBACK_USD_TO_ILS, usdToIls } from '../../utils/currency';
+import { FALLBACK_USD_TO_ILS, usdToIlsDisplay } from '../../utils/currency';
 
 // --------------------------------------------------------------------------
 // BudgetTierCards — 3-card tier picker for the budget step.
@@ -109,7 +109,7 @@ export const BudgetTierCards: React.FC<BudgetTierCardsProps> = ({
   const formatMoney = (usd: number): string => {
     if (!Number.isFinite(usd)) return currency === 'ILS' ? '₪—' : '$—';
     if (currency === 'ILS') {
-      return '₪' + usdToIls(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
+      return '₪' + usdToIlsDisplay(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
     }
     return '$' + Math.round(usd).toLocaleString('en-US');
   };
