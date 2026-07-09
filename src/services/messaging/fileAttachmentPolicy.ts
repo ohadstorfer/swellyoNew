@@ -115,6 +115,29 @@ export function formatBytes(n: number): string {
   return `${rounded} ${units[i]}`;
 }
 
+/**
+ * How a picked file should be shown in the pre-send review screen.
+ * 'none' means "show the file card" — it is the fallback AND the error state,
+ * so a preview can never degrade into a blank pane.
+ */
+export type FilePreviewKind = 'image' | 'pdf' | 'text' | 'none';
+
+/** Text previews read the whole file, so cap what we are willing to read. */
+export const MAX_TEXT_PREVIEW_BYTES = 256 * 1024; // 256 KB
+
+const IMAGE_PREVIEW_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic']);
+const TEXT_PREVIEW_EXTS = new Set(['txt', 'csv']);
+
+export function previewKindForExt(ext: string): FilePreviewKind {
+  const e = String(ext ?? '').toLowerCase();
+  // A blocked extension must never be rendered, even if some caller asks.
+  if (!isAllowedExt(e)) return 'none';
+  if (IMAGE_PREVIEW_EXTS.has(e)) return 'image';
+  if (e === 'pdf') return 'pdf';
+  if (TEXT_PREVIEW_EXTS.has(e)) return 'text';
+  return 'none';
+}
+
 export type FileValidationResult =
   | { ok: true; ext: string; displayName: string; contentType: string }
   | { ok: false; reason: string };
