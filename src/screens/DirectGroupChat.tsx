@@ -29,7 +29,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata } from '../services/messaging/messagingService';
-import { AttachSheet } from '../components/AttachSheet';
+import { AttachPanel } from '../components/AttachPanel';
+import { useAttachPanel } from '../hooks/useAttachPanel';
 import { FileBubble } from '../components/messages/FileBubble';
 import { ContactBubble } from '../components/messages/ContactBubble';
 import { capMessages, MAX_IN_MEMORY_MESSAGES } from '../services/messaging/messageWindow';
@@ -492,7 +493,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
-  const [attachSheetVisible, setAttachSheetVisible] = useState(false);
+  const { panelOpen, panelHeight, togglePanel, closePanel } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -521,18 +522,24 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // ContentLayer. height is negative when keyboard is open on iOS → use abs for
   // padding (defensive: ignore brief sign flips during interactive dismiss).
   const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
+  // The panel occupies the keyboard's rectangle. While it's mounted it supplies that
+  // height itself, so the container must not reserve it too — or the composer jumps
+  // by a full keyboard height.
   const animatedKeyboardPadding = useAnimatedStyle(() => ({
-    paddingBottom: Math.round(Math.abs(kbHeight.value)),
-  }));
+    paddingBottom: panelOpen ? 0 : Math.round(Math.abs(kbHeight.value)),
+  }), [panelOpen]);
   // Composer's own bottom padding: insets.bottom at rest (home indicator safe area),
   // shrinks to 0 as keyboard opens (so the input sits flush against keyboard top).
   // Clamp progress to [0,1] — the lib has occasionally reported a hair past either
   // end during fast focus/dismiss, which leaked a stray pixel of paddingBottom.
   const composerRestPadding = Math.max(insets.bottom, 8);
   const animatedComposerPadding = useAnimatedStyle(() => {
-    const p = Math.min(1, Math.max(0, kbProgress.value));
+    // An open panel stands in for a fully-open keyboard: same rectangle, same rule.
+    // Without this, kbProgress falls to 0 as the keyboard leaves and insets.bottom
+    // reappears BETWEEN the composer and the panel.
+    const p = panelOpen ? 1 : Math.min(1, Math.max(0, kbProgress.value));
     return { paddingBottom: Math.round(composerRestPadding * (1 - p)) };
-  });
+  }, [panelOpen]);
   const composerPrimaryColor = '#05BCD3';
   const flatListRef = useRef<FlatList<Message>>(null);
   const { handleScroll: handleKeyboardScroll, handleLayout, scrollToBottom: scrollToBottomBase } = useChatKeyboardScroll(flatListRef, { inverted: true });
@@ -5020,7 +5027,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   ) : (
                     <TouchableOpacity
                       style={styles.attachButton}
-                      onPress={() => setAttachSheetVisible(true)}
+                      onPress={togglePanel}
                       hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
                     >
                       <Ionicons name="add" size={28} color="#222B30" />
@@ -5054,6 +5061,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 />
               )}
               {composer}
+              {panelOpen && (
+                <AttachPanel
+                  height={panelHeight}
+                  onPhotos={() => { closePanel(); handleImagePicker(); }}
+                  onCamera={() => { closePanel(); handleCameraCapture(); }}
+                  onDocument={() => { closePanel(); handlePickDocument(); }}
+                  onContact={() => { closePanel(); handlePickContact(); }}
+                />
+              )}
             </Reanimated.View>
           </View>
         );
@@ -5078,15 +5094,6 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
 
       {/* WhatsApp-style attach menu (Photos / Camera / Document / Contact) */}
-      <AttachSheet
-        visible={attachSheetVisible}
-        onClose={() => setAttachSheetVisible(false)}
-        onPhotos={handleImagePicker}
-        onCamera={handleCameraCapture}
-        onDocument={handlePickDocument}
-        onContact={handlePickContact}
-      />
-
       {/* In-chat "report this message" bottom sheet */}
       <ReportMessageSheet
         visible={reportSheetVisible}
