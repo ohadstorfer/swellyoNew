@@ -81,6 +81,7 @@ export interface MainNavContextValue {
       tripId?: string;
     }) => void;
     onViewUserProfile: (userId: string, fromTripId: string) => void;
+    onStartConversation: (userId: string, otherUserName?: string, otherUserAvatar?: string | null) => void;
   };
 
   lineupProps: ComponentProps<typeof ConversationsStack>;

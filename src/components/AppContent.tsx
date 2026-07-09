@@ -1803,6 +1803,7 @@ export const AppContent: React.FC = () => {
     tripCard: {
       onOpenGroupChat: handleOpenGroupChat,
       onViewUserProfile: stableHandlers.onViewUserProfileFromTrip,
+      onStartConversation: stableHandlers.onStartConversation,
     },
     chatCard: {
       onViewProfile: stableHandlers.onViewUserProfile,

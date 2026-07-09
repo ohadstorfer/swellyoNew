@@ -25,6 +25,7 @@ import {
   listGearRequests,
 } from '../../services/trips/groupTripsService';
 import { tripsKeys, EMPTY_EXPLORE_FILTER_KEY } from './useTripQueries';
+import { isTripHost } from '../../utils/tripRole';
 import type { MyTripsData } from './useTripQueries';
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ export async function fetchTripCore(
     getTripParticipants(tripId, signal),
   ]);
   if (!tripData) return { trip: null, participants: [], myRequest: null };
-  const userIsHost = !!currentUserId && tripData.host_id === currentUserId;
+  const userIsHost = isTripHost(tripData, participantsData, currentUserId);
   const myRequest =
     userIsHost || !currentUserId ? null : await getMyJoinRequest(tripId, currentUserId, signal);
   return { trip: tripData, participants: participantsData, myRequest };

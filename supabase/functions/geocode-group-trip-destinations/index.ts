@@ -175,14 +175,16 @@ serve(async (req) => {
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
-      const { data: trip, error: tripErr } = await supabaseAdmin
-        .from('group_trips')
-        .select('host_id')
-        .eq('id', trip_id)
-        .single()
-      if (tripErr || !trip || trip.host_id !== user.id) {
+      const { data: hostRow, error: hostErr } = await supabaseAdmin
+        .from('group_trip_participants')
+        .select('user_id')
+        .eq('trip_id', trip_id)
+        .eq('user_id', user.id)
+        .eq('role', 'host')
+        .maybeSingle()
+      if (hostErr || !hostRow) {
         return new Response(
-          JSON.stringify({ error: 'Forbidden: only the trip host can enrich this destination' }),
+          JSON.stringify({ error: 'Forbidden: only a trip host can enrich this destination' }),
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }

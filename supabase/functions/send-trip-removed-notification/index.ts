@@ -86,13 +86,15 @@ serve(async (req) => {
     if (authError || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
-    const { data: trip } = await supabase
-      .from('group_trips')
-      .select('host_id')
-      .eq('id', tripId)
+    const { data: hostRow } = await supabase
+      .from('group_trip_participants')
+      .select('user_id')
+      .eq('trip_id', tripId)
+      .eq('user_id', user.id)
+      .eq('role', 'host')
       .maybeSingle();
-    if (!trip || trip.host_id !== user.id) {
-      console.warn(`[Trip Removed Notif] [${reqId}] Forbidden: ${user.id} is not host of ${tripId}`);
+    if (!hostRow) {
+      console.warn(`[Trip Removed Notif] [${reqId}] Forbidden: ${user.id} is not a host of ${tripId}`);
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
 

@@ -28,6 +28,7 @@ import { AdminUpdateRow } from '../../components/trips/AdminUpdateUI';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { ff } from '../../theme/fonts';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { isTripHost } from '../../utils/tripRole';
 
 // Tokens mirror the Figma frame (accent #05BCD3, dark #212121, muted greys).
 const T = {
@@ -75,7 +76,8 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
   // host check are there instantly when arriving via "View all".
   const coreQuery = useTripCore(tripId, currentUserId);
   const trip = coreQuery.data?.trip ?? null;
-  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
+  const participants = coreQuery.data?.participants ?? [];
+  const isHost = isTripHost(trip, participants, currentUserId);
   const updatesQuery = useTripAdminUpdates(tripId);
   const updates = updatesQuery.data ?? [];
 

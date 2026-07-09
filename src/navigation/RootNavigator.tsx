@@ -183,6 +183,7 @@ function TripMembersCardScreen({ route, navigation }: NativeStackScreenProps<Roo
       tripId={tripId}
       onBack={() => navigation.goBack()}
       onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
+      onMessage={tripCard.onStartConversation}
       onReviewRequest={(userId, requestId) =>
         navigation.dispatch(
           StackActions.push('ProfileCard', { userId, joinRequest: { tripId, requestId } })

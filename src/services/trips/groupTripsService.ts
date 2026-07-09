@@ -1479,6 +1479,30 @@ export async function leaveTrip(tripId: string, userId: string): Promise<void> {
  * or by the trip host), but additionally invokes a push notification edge
  * function so the kicked user is notified.
  */
+/** Promote a participant to host. Server verifies the caller is a host (RPC). */
+export async function promoteTripHost(tripId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('promote_trip_host', {
+    p_trip_id: tripId,
+    p_user_id: userId,
+  });
+  if (error) {
+    console.error('[groupTripsService] promoteTripHost error:', error);
+    throw new Error(error.message);
+  }
+}
+
+/** Demote a host back to member. Server rejects removing the last host (trigger). */
+export async function demoteTripHost(tripId: string, userId: string): Promise<void> {
+  const { error } = await supabase.rpc('demote_trip_host', {
+    p_trip_id: tripId,
+    p_user_id: userId,
+  });
+  if (error) {
+    console.error('[groupTripsService] demoteTripHost error:', error);
+    throw new Error(error.message);
+  }
+}
+
 export async function removeParticipant(
   tripId: string,
   userId: string

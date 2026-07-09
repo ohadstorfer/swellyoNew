@@ -24,13 +24,15 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useTripCore, useTripRequests } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
-import { removeParticipant } from '../../services/trips/groupTripsService';
+import { removeParticipant, promoteTripHost, demoteTripHost } from '../../services/trips/groupTripsService';
 import type { EnrichedParticipant } from '../../services/trips/groupTripsService';
 import Thumb from '../../components/Thumb';
 import { CommittedPassportIcon, AdminBadgeIcon } from '../../components/trips/plan/PlanSections';
+import { TripMemberSheet } from '../../components/trips/TripMemberSheet';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { ff } from '../../theme/fonts';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { isTripHost } from '../../utils/tripRole';
 
 // Tokens mirror the sibling "view all" screens (TripUpdates / PackingAndGear).
 const T = {
@@ -38,7 +40,6 @@ const T = {
   ink: '#212121',
   title: '#333333',
   count: '#7B7B7B',
-  remove: '#FF5367', // Colors/accent/100 — destructive "Remove"
   bg: '#FAFAFA',
   surface: '#FFFFFF',
   cardBorder: '#EEEEEE',
@@ -66,14 +67,16 @@ const formatJoined = (iso: string | null): string => (iso ? `Joined ${timeAgo(is
 interface Props {
   tripId: string;
   onBack: () => void;
-  /** Tapping a member row opens their profile (no-op for the current user). */
+  /** Open a member's profile — invoked from the member sheet's "View profile". */
   onViewUserProfile?: (userId: string) => void;
+  /** Start (or open) a DM with a member — from the sheet's "Message". */
+  onMessage?: (userId: string, name?: string, avatar?: string | null) => void;
   /** Host only — open a requester's profile to review (Approve/Decline live
    *  inside the profile). */
   onReviewRequest?: (userId: string, requestId: string) => void;
 }
 
-export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, onReviewRequest }: Props) {
+export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, onMessage, onReviewRequest }: Props) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -86,7 +89,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   const participants = coreQuery.data?.participants ?? [];
 
   // ── Permission layers ─────────────────────────────────────────────────────
-  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
+  const isHost = isTripHost(trip, participants, currentUserId);
   const isMember = useMemo(
     () =>
       !!currentUserId &&
@@ -94,8 +97,6 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
     [participants, currentUserId]
   );
   const isInsider = isHost || isMember;
-  // Only the admin can remove, and never the host themselves.
-  const canRemove = isHost;
   // Insiders see who's committed; outside viewers do not.
   const canSeeCommitted = isInsider;
 
@@ -111,27 +112,69 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   const requestsQuery = useTripRequests(tripId, isHost);
   const pendingRequests = requestsQuery.data?.pending ?? [];
 
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [sheetMember, setSheetMember] = useState<EnrichedParticipant | null>(null);
 
-  const handleRemove = (p: EnrichedParticipant) => {
+  const refetchCore = () =>
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+
+  const confirmSetAdmin = (m: EnrichedParticipant) => {
     Alert.alert(
-      'Remove member',
-      `Remove ${p.name ?? 'this member'} from the trip? They lose access to the plan and group chat.`,
+      `Set ${m.name ?? 'this member'} as admin?`,
+      'Admins can edit this trip, approve requests, remove members, and delete the trip.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Set as admin',
+          onPress: async () => {
+            try {
+              await promoteTripHost(tripId, m.user_id);
+              await refetchCore();
+            } catch (e: any) {
+              Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmRemoveAdmin = (m: EnrichedParticipant) => {
+    Alert.alert(
+      `Remove ${m.name ?? 'this member'} as admin?`,
+      'They stay on the trip as a member and lose admin controls.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove as admin',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await demoteTripHost(tripId, m.user_id);
+              await refetchCore();
+            } catch (e: any) {
+              Alert.alert('Could not update', friendlyErrorMessage(e, 'Please try again.'));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmRemove = (m: EnrichedParticipant) => {
+    Alert.alert(
+      'Remove from trip',
+      `Remove ${m.name ?? 'this member'} from the trip? They lose access to the plan and group chat.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            setRemovingId(p.user_id);
             try {
-              await removeParticipant(tripId, p.user_id);
-              // Refetch trip core (participants + counts) for every surface.
-              await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+              await removeParticipant(tripId, m.user_id);
+              await refetchCore();
             } catch (e: any) {
               Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
-            } finally {
-              setRemovingId(null);
             }
           },
         },
@@ -239,17 +282,15 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
             <View style={styles.card}>
               {participants.map((p, i) => {
                 const thumb = p.profile_image_url;
-                const showRemove =
-                  canRemove && p.role !== 'host' && p.user_id !== currentUserId;
-                const tappable = !!onViewUserProfile && p.user_id !== currentUserId;
+                const isOwnRow = p.user_id === currentUserId;
                 return (
                   <Pressable
                     key={p.user_id}
-                    onPress={tappable ? () => onViewUserProfile!(p.user_id) : undefined}
-                    disabled={!tappable}
+                    onPress={isOwnRow ? undefined : () => setSheetMember(p)}
+                    disabled={isOwnRow}
                     style={[styles.row, i < participants.length - 1 && styles.rowDivider]}
-                    accessibilityRole={tappable ? 'button' : undefined}
-                    accessibilityLabel={p.name ? `Open ${p.name}'s profile` : undefined}
+                    accessibilityRole={isOwnRow ? undefined : 'button'}
+                    accessibilityLabel={p.name ? `Open options for ${p.name}` : undefined}
                   >
                     <View style={styles.avatarWrap}>
                       {thumb ? (
@@ -287,16 +328,8 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
                       </Text>
                     </View>
 
-                    {showRemove ? (
-                      <Pressable
-                        onPress={() => handleRemove(p)}
-                        disabled={removingId === p.user_id}
-                        hitSlop={8}
-                      >
-                        <Text style={styles.remove}>
-                          {removingId === p.user_id ? 'Removing…' : 'Remove'}
-                        </Text>
-                      </Pressable>
+                    {!isOwnRow ? (
+                      <Ionicons name="chevron-forward" size={20} color="#C4C4C4" />
                     ) : null}
                   </Pressable>
                 );
@@ -305,6 +338,19 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           )}
         </ScrollView>
       </View>
+
+      <TripMemberSheet
+        visible={!!sheetMember}
+        member={sheetMember}
+        viewerIsHost={isHost}
+        isSelf={sheetMember?.user_id === currentUserId}
+        onClose={() => setSheetMember(null)}
+        onViewProfile={userId => onViewUserProfile?.(userId)}
+        onMessage={(userId, name, avatar) => onMessage?.(userId, name, avatar)}
+        onSetAdmin={confirmSetAdmin}
+        onRemoveAdmin={confirmRemoveAdmin}
+        onRemove={confirmRemove}
+      />
     </SafeAreaView>
   );
 }
@@ -379,8 +425,6 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0, justifyContent: 'center' },
   name: { fontFamily: ff('Inter', '700'), fontSize: 16, lineHeight: 18, fontWeight: '700', color: T.title },
   joined: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 16, color: T.count, marginTop: 2 },
-
-  remove: { fontFamily: ff('Inter', '400'), fontSize: 12.5, lineHeight: 16, color: T.remove },
 
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.count },
 });

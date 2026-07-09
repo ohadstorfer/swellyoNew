@@ -36,6 +36,7 @@ import { StickyGradientFooter } from '../../components/trips/plan/PlanSections';
 import { TripIcon } from '../../components/trips/tripIcons';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { isTripHost } from '../../utils/tripRole';
 
 const T = {
   accent: '#05BCD3',
@@ -63,7 +64,7 @@ export default function YourGearScreen({ tripId, onBack }: Props) {
   const trip = coreQuery.data?.trip ?? null;
   const participants = coreQuery.data?.participants ?? [];
 
-  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
+  const isHost = isTripHost(trip, participants, currentUserId);
   const me = participants.find(p => p.user_id === currentUserId);
   const myGroupGear: GroupGearItem[] = me?.personal_gear_by_host ?? [];
   const myPersonalGear: PersonalGearItem[] = me?.personal_gear_by_me ?? [];

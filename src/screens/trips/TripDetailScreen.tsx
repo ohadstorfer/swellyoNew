@@ -119,6 +119,7 @@ import {
 import { useTripRealtime } from '../../hooks/trips/useTripRealtime';
 import { TripDetailSkeleton } from '../../components/skeletons';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { isTripHost } from '../../utils/tripRole';
 
 interface TripDetailScreenProps {
   tripId: string;
@@ -350,7 +351,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // isHostDerived must be derived before any hook that depends on it so hook
   // call order stays stable across renders (no conditional hooks).
-  const isHostDerived = !!trip && !!currentUserId && trip.host_id === currentUserId;
+  const isHostDerived = isTripHost(trip, participants, currentUserId);
 
   const updatesQuery = useTripAdminUpdates(tripId);
   const adminUpdates = updatesQuery.data ?? [];

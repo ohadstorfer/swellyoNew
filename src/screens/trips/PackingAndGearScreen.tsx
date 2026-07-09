@@ -30,6 +30,7 @@ import { GearItemSheet } from '../../components/trips/gear/GearItemSheet';
 import { RequestGearSheet } from '../../components/trips/gear/RequestGearSheet';
 import { ManageGearSheet } from '../../components/trips/gear/ManageGearSheet';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { isTripHost } from '../../utils/tripRole';
 
 // Tokens mirror the Figma frame (accent #05BCD3, dark #212121, muted greys).
 const T = {
@@ -61,7 +62,7 @@ export default function PackingAndGearScreen({ tripId, onBack, onEdit }: Props) 
   const gearQuery = useTripGear(tripId, currentUserId);
   const gearItems = gearQuery.data ?? [];
 
-  const isHost = !!trip && !!currentUserId && trip.host_id === currentUserId;
+  const isHost = isTripHost(trip, participants, currentUserId);
   const isApprovedMember = useMemo(
     () =>
       !!currentUserId &&
