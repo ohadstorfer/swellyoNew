@@ -65,7 +65,7 @@ export const MUTE_ALWAYS_UNTIL = new Date('2099-01-01T00:00:00.000Z');
 const SEND_TIMEOUT_MS = 30000; // matches the new-conversation timeout already used in the screens
 
 // Message type
-export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'commitment_request';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'commitment_request' | 'file' | 'contact';
 
 // Message upload state (client-side only, not stored in DB)
 export type MessageUploadState = 
@@ -106,6 +106,25 @@ export interface AudioMetadata {
   waveform: number[];          // Decimated amplitude samples (0..1), ~50 entries
   mime_type: string;           // e.g., 'audio/m4a', 'audio/mp4'
   size_bytes: number;          // File size
+}
+
+// File attachment metadata. Carried on messages of type 'file'. The bytes live
+// in the private S3 prefix message-files/{convId}/{msgId}/file.<ext>; reads go
+// through a short-lived, membership-checked presigned GET (never a public URL).
+export interface FileMetadata {
+  storage_path: string;        // message-files/{convId}/{msgId}/file.<ext>
+  display_name: string;        // sanitized original filename (UI only, never used in the key)
+  mime_type: string;           // e.g. 'application/pdf'
+  ext: string;                 // lowercased extension, no dot
+  size_bytes: number;          // File size in bytes
+}
+
+// Shared-contact metadata. Carried on messages of type 'contact'. Stored inline
+// on the row (no upload). Display-only in v1 — numbers are tap-to-copy.
+export interface ContactMetadata {
+  display_name: string;
+  phone_numbers: { label?: string; number: string }[];
+  emails?: { label?: string; email: string }[];
 }
 
 // Commitment-request metadata. Carried on messages of type 'commitment_request'
@@ -151,6 +170,12 @@ export interface Message {
 
   // Commitment-request fields (only populated for type='commitment_request')
   commitment_metadata?: CommitmentMetadata | null;
+
+  // File-attachment fields (only populated for type='file')
+  file_metadata?: FileMetadata | null;
+
+  // Shared-contact fields (only populated for type='contact')
+  contact_metadata?: ContactMetadata | null;
 
   // Legacy attachments array (keep for backward compatibility)
   attachments: any[];
@@ -1242,6 +1267,93 @@ class MessagingService {
       console.error('Error creating image message with metadata:', error);
       throw error;
     }
+  }
+
+  /**
+   * Shared idempotent insert for upload-first typed messages (file / contact).
+   * Mirrors createImageMessageWithMetadata's auth + ON CONFLICT DO NOTHING on
+   * (sender_id, client_id). The row is only written once the caller has what it
+   * needs (upload done for files; nothing to upload for contacts).
+   */
+  private async createTypedMessageWithMetadata(
+    conversationId: string,
+    type: MessageType,
+    metadataColumn: 'file_metadata' | 'contact_metadata',
+    metadata: unknown,
+    clientId: string,
+  ): Promise<Message> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+
+    let senderId: string | undefined;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) {
+      senderId = session.user.id;
+    } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      senderId = user.id;
+    }
+
+    const payload: Record<string, unknown> = {
+      conversation_id: conversationId,
+      sender_id: senderId,
+      type,
+      body: '',
+      [metadataColumn]: metadata,
+      client_id: clientId,
+    };
+
+    let data: Message | null = null;
+    const { data: upserted, error } = await supabase
+      .from('messages')
+      .upsert(payload, { onConflict: 'sender_id,client_id', ignoreDuplicates: true })
+      .select()
+      .maybeSingle();
+    if (error) throw error;
+
+    if (upserted) {
+      data = upserted as Message;
+    } else {
+      const { data: existing, error: fetchErr } = await supabase
+        .from('messages')
+        .select()
+        .eq('sender_id', senderId)
+        .eq('client_id', clientId)
+        .single();
+      if (fetchErr) throw fetchErr;
+      data = existing as Message;
+    }
+
+    await supabase
+      .from('conversations')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+
+    return data;
+  }
+
+  /** Upload-first file message (bytes already uploaded to storage). */
+  async createFileMessageWithMetadata(
+    conversationId: string,
+    fileMetadata: FileMetadata,
+    clientId: string,
+  ): Promise<Message> {
+    return this.createTypedMessageWithMetadata(
+      conversationId, 'file', 'file_metadata', fileMetadata, clientId,
+    );
+  }
+
+  /** Shared-contact message (inline metadata, no upload). */
+  async createContactMessageWithMetadata(
+    conversationId: string,
+    contactMetadata: ContactMetadata,
+    clientId: string,
+  ): Promise<Message> {
+    return this.createTypedMessageWithMetadata(
+      conversationId, 'contact', 'contact_metadata', contactMetadata, clientId,
+    );
   }
 
   /**

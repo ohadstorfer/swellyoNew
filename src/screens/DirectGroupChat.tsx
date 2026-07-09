@@ -4,6 +4,7 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
+  Pressable,
   Platform,
   Image,
   ActivityIndicator,
@@ -27,7 +28,10 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata } from '../services/messaging/messagingService';
+import { AttachSheet } from '../components/AttachSheet';
+import { FileBubble } from '../components/messages/FileBubble';
+import { ContactBubble } from '../components/messages/ContactBubble';
 import { capMessages, MAX_IN_MEMORY_MESSAGES } from '../services/messaging/messageWindow';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl, getStorageThumbUrl } from '../services/media/imageService';
@@ -42,7 +46,7 @@ import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu, type BubbleRadii } from '../components/MessageActionsMenu';
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
 import { JumboEmojiMessage, jumboBubbleStyle } from '../components/JumboEmojiMessage';
-import { getEmojiOnlyInfo } from '../utils/emoji';
+import { getEmojiOnlyInfo, getEmojiFontSize } from '../utils/emoji';
 import { friendlyErrorMessage } from '../utils/friendlyError';
 import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
@@ -137,6 +141,13 @@ const MEDIA_SEND_DEDUP_MS = 4000;
 const uploadRank = (m: Message): number => {
   if (m.upload_state === 'failed') return 0;
   if (m.upload_state === 'uploading') return 1;
+  // An un-reconciled optimistic row still carries its temporary client id
+  // (id === client_id). It must rank BELOW its confirmed server row (id !==
+  // client_id → rank 2) so a client_id collision in dedupeMessages always
+  // resolves to the real message, never the stale local echo. Text no longer
+  // sets upload_state:'failed', so without this a failed-then-resent text could
+  // tie a server row and mask it permanently.
+  if (!!m.client_id && m.id === m.client_id) return 0;
   return 2; // 'sent' or undefined (a normal server row)
 };
 
@@ -481,6 +492,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
+  const [attachSheetVisible, setAttachSheetVisible] = useState(false);
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -589,6 +601,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const wasDisconnectedRef = useRef(false);
   const lastRealtimeEventAtRef = useRef<number>(Date.now());
   const catchUpInFlightRef = useRef(false);
+  // Timers for the staggered post-reconnect catch-up (see scheduleReconnectCatchUp).
+  const reconnectCatchUpTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Keep refs in sync so subscription callbacks always see latest values
   useEffect(() => {
@@ -757,20 +771,27 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
       // Fetch messages that arrived while the WebSocket was down. Supabase Realtime does not
       // replay missed events on reconnect, so cover the gap with a query against Postgres.
-      const runReconnectCatchUp = async () => {
+      const runReconnectCatchUp = async (force = false) => {
         const convId = currentConversationIdRef.current;
         if (!convId) return;
         if (catchUpInFlightRef.current) return;
-        if (Date.now() - lastRealtimeEventAtRef.current < 10_000) return;
+        // The forced (network-reconnect) path must run even if a Realtime event
+        // arrived recently — its whole purpose is to pull our own just-resent
+        // message whose INSERT echo may have been missed during the reconnect.
+        if (!force && Date.now() - lastRealtimeEventAtRef.current < 10_000) return;
 
         catchUpInFlightRef.current = true;
         try {
-          const since = lastRealtimeEventAtRef.current - 2000;
+          // Widen the lookback on the forced path so a message the outbox
+          // resent a moment ago is reliably inside the window.
+          const since = force
+            ? Date.now() - 60_000
+            : lastRealtimeEventAtRef.current - 2000;
           const missed = await messagingService.getMessagesUpdatedSince(convId, since, 50);
           if (missed.length === 0) return;
-          console.log(`[DirectMessageScreen] catch-up found ${missed.length} missed messages (reconnect path)`);
+          console.log(`[DirectGroupChat] catch-up found ${missed.length} missed messages (reconnect path)`);
           if (missed.length === 50) {
-            console.warn('[DirectMessageScreen] catch-up hit 50-message limit — older gap may require scroll-up pagination');
+            console.warn('[DirectGroupChat] catch-up hit 50-message limit — older gap may require scroll-up pagination');
           }
           setMessages((prev) => {
             const merged = chatHistoryCache.mergeMessages(prev, missed);
@@ -779,10 +800,35 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           });
           lastRealtimeEventAtRef.current = Date.now();
         } catch (err) {
-          console.error('[DirectMessageScreen] reconnect catch-up failed:', err);
+          console.error('[DirectGroupChat] reconnect catch-up failed:', err);
         } finally {
           catchUpInFlightRef.current = false;
         }
+      };
+
+      // Staggered catch-up after a network reconnect. When connectivity returns,
+      // MessagingProvider's NetInfo listener drains the outbox — resending any
+      // text queued while offline — but the resulting Realtime INSERT echo can be
+      // missed while THIS screen's socket is itself resubscribing, leaving our
+      // optimistic row on its temporary client id (no "sent" tick) until the next
+      // screen reload. Pull missed messages directly, staggered because the
+      // resend may only land a second or two after we resubscribe.
+      const scheduleReconnectCatchUp = () => {
+        reconnectCatchUpTimersRef.current.forEach(clearTimeout);
+        reconnectCatchUpTimersRef.current = [];
+        runReconnectCatchUp(true);
+        // Retry a few times because the outbox resend may land a moment after we
+        // resubscribe — but stop as soon as no own optimistic row (id ===
+        // client_id) is left un-reconciled, so a healthy send doesn't keep
+        // re-fetching.
+        const hasUnackedOwn = () => messagesRef.current.some(
+          (m) => m.sender_id === currentUserIdRef.current && !!m.client_id && m.id === m.client_id
+        );
+        [1500, 3500, 6000].forEach((delay) => {
+          reconnectCatchUpTimersRef.current.push(
+            setTimeout(() => { if (hasUnackedOwn()) runReconnectCatchUp(true); }, delay)
+          );
+        });
       };
 
       // Subscribe to messages (callbacks handle currentUserId being null)
@@ -803,7 +849,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               hasTriedReconnectRef.current = false;
               if (wasDisconnectedRef.current) {
                 wasDisconnectedRef.current = false;
-                runReconnectCatchUp();
+                scheduleReconnectCatchUp();
               }
             } else if (status === 'CHANNEL_ERROR') {
               wasDisconnectedRef.current = true;
@@ -1040,6 +1086,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       return () => {
         unsubscribe();
         setIsTyping(false);
+        reconnectCatchUpTimersRef.current.forEach(clearTimeout);
+        reconnectCatchUpTimersRef.current = [];
         setTypingCount(0);
         typingUsersRef.current.forEach(t => clearTimeout(t));
         typingUsersRef.current.clear();
@@ -1173,7 +1221,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           // metadata, upload_state undefined). Never touch received messages,
           // genuinely in-flight uploads, or already-sent rows.
           const mine = m.sender_id === currentUserId;
-          const isMedia = m.type === 'image' || m.type === 'video' || m.type === 'audio';
+          const isMedia = m.type === 'image' || m.type === 'video' || m.type === 'audio' || m.type === 'file';
           // "Has real uploaded media" per type. Video's video_url stays '' until
           // the MediaConvert Lambda finishes, so its success signal is storage_path
           // (set the moment the S3 upload + create succeed), NOT video_url.
@@ -1181,6 +1229,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             m.type === 'image' ? !!m.image_metadata?.image_url :
             m.type === 'video' ? !!m.video_metadata?.storage_path :
             m.type === 'audio' ? !!m.audio_metadata?.audio_url :
+            m.type === 'file' ? !!m.file_metadata?.storage_path :
             true;
           // A dead upload from a previous session (still 'uploading' but not in
           // this session's in-flight set — the local preview may still be cached),
@@ -1395,7 +1444,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         deletedMessages: deletedCount,
         deletedMessageIds: cachedMessages.filter(m => m.deleted).map(m => m.id),
       });
-      setMessages(cachedMessages);
+      // Preserve any local-only (un-acked optimistic) messages for THIS
+      // conversation across a reconnect-triggered reload (CHANNEL_ERROR bumps
+      // reconnectAttempt). Mirrors the server-fetch guard below.
+      setMessages((prev) => {
+        const localForThisConvo = prev.filter(m => m.conversation_id === currentConversationId);
+        if (localForThisConvo.length === 0) return cachedMessages;
+        return chatHistoryCache.mergeMessages(localForThisConvo, cachedMessages);
+      });
       setIsFetchingMessages(false);
 
       setHasMoreMessages(true);
@@ -1484,7 +1540,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           deletedMessages: deletedCount,
           deletedMessageIds: asyncCachedMessages.filter(m => m.deleted).map(m => m.id),
         });
-        setMessages(asyncCachedMessages);
+        // Preserve any local-only (un-acked optimistic) messages for THIS
+        // conversation across a reconnect-triggered reload. Mirrors the
+        // server-fetch guard.
+        setMessages((prev) => {
+          const localForThisConvo = prev.filter(m => m.conversation_id === currentConversationId);
+          if (localForThisConvo.length === 0) return asyncCachedMessages;
+          return chatHistoryCache.mergeMessages(localForThisConvo, asyncCachedMessages);
+        });
         setIsFetchingMessages(false);
 
         setHasMoreMessages(true);
@@ -1924,15 +1987,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       scrollToBottom();
     } catch (error: any) {
       console.error('Error sending message:', error);
-      // Do NOT remove the optimistic row — leave it visible with a failed
-      // indicator so the user knows it's retryable. The outbox entry stays
-      // enqueued and will be retried on the next flush trigger.
+      // Text messages show no failed/retry UI. Leave the optimistic bubble
+      // untouched (Fix #1 keeps it visible) and let the persistent outbox resend
+      // it silently on the next flush trigger. markFailed only bumps attempt
+      // bookkeeping; the entry stays enqueued.
       messageOutbox.markFailed(clientId, error).catch(() => {});
-      setMessages((prev) => prev.map(msg =>
-        msg.id === clientId
-          ? { ...msg, upload_state: 'failed', upload_error: error?.message ?? 'Send failed' }
-          : msg
-      ));
     } finally {
       setIsLoading(false);
     }
@@ -2648,6 +2707,171 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     }
   };
 
+  // ─── File attachments ─────────────────────────────────────────────────────
+  const uploadAndCreateFile = async (
+    convId: string,
+    clientId: string,
+    localUri: string,
+    baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
+  ): Promise<{ created: Message; fileMetadata: FileMetadata }> => {
+    const { uploadFileToStorage } = await import('../services/messaging/fileUploadService');
+    const { storagePath } = await withTimeout(
+      uploadFileToStorage(localUri, convId, clientId, baseMeta.ext),
+      60000,
+      'file-upload',
+    );
+    const fileMetadata: FileMetadata = {
+      storage_path: storagePath,
+      display_name: baseMeta.display_name,
+      mime_type: baseMeta.mime_type,
+      ext: baseMeta.ext,
+      size_bytes: baseMeta.size_bytes,
+    };
+    const created = await messagingService.createFileMessageWithMetadata(convId, fileMetadata, clientId);
+    return { created, fileMetadata };
+  };
+
+  const handleFileSend = async (
+    localUri: string,
+    baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
+  ) => {
+    if (!currentConversationId || !currentUserId) return;
+    const conversationId = currentConversationId;
+    const clientId = Crypto.randomUUID();
+
+    const optimistic: Message = {
+      id: clientId,
+      client_id: clientId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: '',
+      type: 'file',
+      file_metadata: { ...baseMeta, storage_path: '' },
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      upload_state: 'uploading',
+      _localPreviewUri: localUri,
+    } as Message;
+
+    inFlightUploads.add(clientId);
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+      return next;
+    });
+    scrollToBottom();
+
+    try {
+      const { created, fileMetadata } = await uploadAndCreateFile(conversationId, clientId, localUri, baseMeta);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...created, file_metadata: created.file_metadata ?? fileMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined }
+            : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+    } catch (error: any) {
+      console.error('Error sending file:', error);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+      Alert.alert('Could not send file', friendlyErrorMessage(error, 'Failed to send file'));
+    } finally {
+      inFlightUploads.delete(clientId);
+    }
+  };
+
+  const handlePickDocument = async () => {
+    if (!currentConversationId) {
+      Alert.alert('Error', 'Please wait for the conversation to load');
+      return;
+    }
+    const { pickDocument } = await import('../services/messaging/documentPicker');
+    const picked = await pickDocument();
+    if (!picked) return;
+    await handleFileSend(picked.uri, {
+      display_name: picked.display_name,
+      ext: picked.ext,
+      mime_type: picked.mime_type,
+      size_bytes: picked.size_bytes,
+    });
+  };
+
+  // ─── Shared contacts (display-only) ───────────────────────────────────────
+  const handlePickContact = async () => {
+    if (!currentConversationId || !currentUserId) {
+      Alert.alert('Error', 'Please wait for the conversation to load');
+      return;
+    }
+    try {
+      const { pickContact } = await import('../services/messaging/contactPicker');
+      const contact = await pickContact();
+      if (!contact) return;
+      const conversationId = currentConversationId;
+      const clientId = Crypto.randomUUID();
+
+      const optimistic: Message = {
+        id: clientId,
+        client_id: clientId,
+        conversation_id: conversationId,
+        sender_id: currentUserId,
+        body: '',
+        type: 'contact',
+        contact_metadata: contact,
+        attachments: [],
+        is_system: false,
+        edited: false,
+        deleted: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        upload_state: 'sent',
+      } as Message;
+
+      setMessages((prev) => {
+        const next = [...prev, optimistic];
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+      scrollToBottom();
+
+      try {
+        const created = await messagingService.createContactMessageWithMetadata(conversationId, contact, clientId);
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === clientId
+              ? { ...created, contact_metadata: created.contact_metadata ?? contact, upload_state: 'sent' as const }
+              : m
+          );
+          chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+          return next;
+        });
+      } catch (error: any) {
+        console.error('Error sending contact:', error);
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === clientId ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
+          );
+          chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+          return next;
+        });
+        Alert.alert('Could not send contact', friendlyErrorMessage(error, 'Failed to send contact'));
+      }
+    } catch (error: any) {
+      console.error('Error picking contact:', error);
+      Alert.alert('Error', friendlyErrorMessage(error, 'Failed to pick a contact'));
+    }
+  };
+
   // Upload-first video helper (mirrors uploadAndCreateImage). Processes + uploads
   // the video and thumbnail, then creates the message row ONLY on success. Returns
   // the created server row, the built metadata, the local thumbnail poster, and the
@@ -2978,6 +3202,53 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     const convId = currentConversationId;
     if (!convId) return;
     const localUri = message._localPreviewUri;
+
+    // File attachments retry through their own upload-first path.
+    if (message.type === 'file') {
+      if (!localUri || !message.file_metadata) {
+        Alert.alert(
+          'File unavailable',
+          'The original file is no longer available on this device. Remove this message?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Remove', style: 'destructive', onPress: () => handleRemoveFailedMedia(message) },
+          ],
+        );
+        return;
+      }
+      const fm = message.file_metadata;
+      const midF = message.id;
+      const clientIdF = message.client_id ?? midF;
+      inFlightUploads.add(midF);
+      setMessages((prev) => prev.map(m =>
+        m.id === midF ? { ...m, upload_state: 'uploading' as const, upload_error: undefined } : m
+      ));
+      try {
+        const { created, fileMetadata } = await uploadAndCreateFile(convId, clientIdF, localUri, {
+          display_name: fm.display_name, ext: fm.ext, mime_type: fm.mime_type, size_bytes: fm.size_bytes,
+        });
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === midF ? { ...created, file_metadata: created.file_metadata ?? fileMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
+          );
+          chatHistoryCache.saveMessages(convId, next).catch(() => {});
+          return next;
+        });
+      } catch (error: any) {
+        setMessages((prev) => {
+          const next = prev.map(m =>
+            m.id === midF ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
+          );
+          chatHistoryCache.saveMessages(convId, next).catch(() => {});
+          return next;
+        });
+        Alert.alert('Could not send file', friendlyErrorMessage(error, 'Failed to send file'));
+      } finally {
+        inFlightUploads.delete(midF);
+      }
+      return;
+    }
+
     const mediaType = message.type === 'video' || message.video_metadata
       ? 'video'
       : message.type === 'audio'
@@ -3353,7 +3624,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     if (!currentUserId || message.sender_id !== currentUserId) return false;
     if (message.deleted) return false;
     if (message.is_system) return false; // Prevent system message edit
-    
+    // Not yet confirmed by the server (id is still the temporary client id):
+    // an edit would target a non-existent DB row and error out.
+    if (!!message.client_id && message.id === message.client_id) return false;
+
     const messageAge = Date.now() - new Date(message.created_at).getTime();
     const fifteenMinutes = 15 * 60 * 1000;
     return messageAge <= fifteenMinutes;
@@ -3373,6 +3647,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       return false;
     }
     
+    // Not yet confirmed by the server (id is still the temporary client id):
+    // a delete would target a non-existent DB row and error out.
+    if (!!message.client_id && message.id === message.client_id) {
+      return false;
+    }
     console.log('[DirectMessageScreen] canDeleteMessage: true');
     return true; // No time limit on delete
   };
@@ -3612,10 +3891,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
     const isOwnMessage = currentUserId ? message.sender_id === currentUserId : false;
     const isEditing = editingMessageId === message.id;
-    // Jumbo emoji (WhatsApp-style): an emoji-only body (≤3 emoji), with no reply
-    // and not deleted, renders large with no bubble.
+    // Emoji-only bodies (no reply, not deleted) render at an enlarged font that
+    // shrinks as the count grows. A single emoji also drops the bubble (jumbo);
+    // 2-3 emoji keep the bubble and only take the bigger font.
     const jumbo = getEmojiOnlyInfo(message.body);
-    const isJumbo = jumbo.isJumbo && !message.deleted && !message.reply_to_snapshot;
+    const bigEmojiOk = !message.deleted && !message.reply_to_snapshot;
+    const isJumbo = jumbo.isJumbo && bigEmojiOk;
+    const bigEmojiSize = bigEmojiOk && !isJumbo ? getEmojiFontSize(jumbo.count) : null;
+    const bigEmojiTextStyle = bigEmojiSize
+      ? { fontSize: bigEmojiSize, lineHeight: Math.round(bigEmojiSize * 1.2) }
+      : null;
     const canEdit = canEditMessage(message);
     // English/LTR sticks left, Hebrew/Arabic sticks right. Computed once
     // per message and applied to every Text that renders the body content.
@@ -3787,7 +4072,51 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               'image'/'video'/'audio', metadata cleared) must NOT hit the media
               branches and render a blank frame — fall through to the text
               branch which renders the deleted placeholder. */}
-          {!message.deleted && message.type === 'audio' ? (
+          {!message.deleted && message.type === 'file' ? (
+            <View>
+              <FileBubble
+                message={message}
+                isOwn={isOwnMessage}
+                onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
+              />
+              <View style={styles.attachmentFooter}>
+                <Text style={[styles.timestamp, isOwnMessage ? styles.userTimestamp : styles.botTimestamp]}>
+                  {formatTime(message.created_at)}
+                </Text>
+                {isOwnMessage && !message.deleted && (
+                  <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
+                )}
+              </View>
+              {message.upload_state === 'uploading' && (
+                <View style={styles.attachmentStatusRow}>
+                  <ActivityIndicator size="small" color={isOwnMessage ? '#FFFFFF' : '#05BCD3'} />
+                  <Text style={[styles.attachmentStatusText, { color: isOwnMessage ? 'rgba(255,255,255,0.9)' : '#6B7076' }]}>Uploading…</Text>
+                </View>
+              )}
+              {message.upload_state === 'failed' && (
+                <View style={styles.attachmentStatusRow}>
+                  <TouchableOpacity onPress={() => handleRetryUpload(message)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Text style={[styles.attachmentActionText, { color: isOwnMessage ? '#FFFFFF' : '#05BCD3' }]}>Retry</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleRemoveFailedMedia(message)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+                    <Text style={[styles.attachmentActionText, { color: '#E53935' }]}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : !message.deleted && message.type === 'contact' ? (
+            <Pressable onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)} delayLongPress={300}>
+              <ContactBubble message={message} isOwn={isOwnMessage} />
+              <View style={styles.attachmentFooter}>
+                <Text style={[styles.timestamp, isOwnMessage ? styles.userTimestamp : styles.botTimestamp]}>
+                  {formatTime(message.created_at)}
+                </Text>
+                {isOwnMessage && !message.deleted && (
+                  <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
+                )}
+              </View>
+            </Pressable>
+          ) : !message.deleted && message.type === 'audio' ? (
             <View>
               <AudioMessageBubble
                 message={message}
@@ -3830,7 +4159,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
               // Clamp portrait videos at 3:4 so the bubble doesn't dominate the screen.
               // Thumbnail uses resizeMode="cover" so the visible frame just crops cleanly.
-              const aspectRatio = Math.max(rawAspectRatio, 1);
+              // Clamp both extremes (WhatsApp-style): portrait floors at 1:1,
+              // very-wide/panorama caps at 2:1 — beyond that the media center-crops
+              // (cover) instead of rendering as a thin sliver. Tap opens the full image.
+              const aspectRatio = Math.min(Math.max(rawAspectRatio, 1), 2);
               const isUploading = message.upload_state === 'uploading';
               const isFailed = message.upload_state === 'failed';
 
@@ -3936,7 +4268,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               const rawAspectRatio = imageWidth > 0 && imageHeight > 0 ? imageWidth / imageHeight : 1;
               // Clamp portrait images at 1:1 so the bubble doesn't dominate the screen.
               // Matches the video bubble behavior; contentFit="cover" crops cleanly.
-              const aspectRatio = Math.max(rawAspectRatio, 1);
+              // Clamp both extremes (WhatsApp-style): portrait floors at 1:1,
+              // very-wide/panorama caps at 2:1 — beyond that the media center-crops
+              // (cover) instead of rendering as a thin sliver. Tap opens the full image.
+              const aspectRatio = Math.min(Math.max(rawAspectRatio, 1), 2);
 
               if (!fullImageUri) {
                 console.warn('[DirectMessageScreen] ⚠️ Image message has no URL:', {
@@ -4139,6 +4474,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     <Text style={[
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
                       { textAlign: bodyTextAlign },
+                      bigEmojiTextStyle,
                     ]}>
                       {renderMessageBodyWithLinks(message.body || '')}
                     </Text>
@@ -4186,6 +4522,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     <Text style={[
                       isOwnMessage ? styles.userMessageText : styles.botMessageText,
                       { textAlign: bodyTextAlign },
+                      bigEmojiTextStyle,
                     ]}>
                       {renderMessageBodyWithLinks(message.body || '')}
                       {/* Invisible spacer rendered at the timestamp's font
@@ -4662,7 +4999,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   ) : (
                     <TouchableOpacity
                       style={styles.attachButton}
-                      onPress={handleImagePicker}
+                      onPress={() => setAttachSheetVisible(true)}
                       hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
                     >
                       <Ionicons name="add" size={28} color="#222B30" />
@@ -4718,6 +5055,16 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         );
       })()}
 
+
+      {/* WhatsApp-style attach menu (Photos / Camera / Document / Contact) */}
+      <AttachSheet
+        visible={attachSheetVisible}
+        onClose={() => setAttachSheetVisible(false)}
+        onPhotos={handleImagePicker}
+        onCamera={handleCameraCapture}
+        onDocument={handlePickDocument}
+        onContact={handlePickContact}
+      />
 
       {/* In-chat "report this message" bottom sheet */}
       <ReportMessageSheet
@@ -4957,6 +5304,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           if (!selectedMessage) return false;
           if (selectedMessage.deleted || selectedMessage.is_system) return false;
           if (selectedMessage.upload_state === 'failed') return false;
+          // Not yet confirmed by the server (id is still the temporary client
+          // id): it can't anchor a reply reference yet.
+          if (!!selectedMessage.client_id && selectedMessage.id === selectedMessage.client_id) return false;
           return true;
         })()}
         canCopy={!!selectedMessage?.body && selectedMessage.body.trim().length > 0}
@@ -5509,6 +5859,27 @@ const styles = StyleSheet.create({
     // bottom edge — at 20 the line box reserved extra space above/below.
     lineHeight: 15,
   },
+  attachmentFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginTop: 4,
+    gap: 4,
+  },
+  attachmentStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginTop: 4,
+    gap: 12,
+  },
+  attachmentStatusText: {
+    fontSize: 12,
+  },
+  attachmentActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   userTimestamp: {
     color: 'rgba(255, 255, 255, 0.85)', // Light timestamp for contrast on celeste outbound bubbles
   },
@@ -5638,7 +6009,10 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     width: '100%',
     maxWidth: '100%',
-    minHeight: 200,
+    // No minHeight: width:'100%' already fills the bubble width, so a floor would
+    // only override the dynamic aspectRatio and force wide/panorama images into a
+    // too-tall box (then cover-crop zooms them). Let the clamped aspectRatio
+    // govern the height; maxHeight caps tall images.
     maxHeight: 500,
     backgroundColor: colors.backgroundGray,
     // Concentric with the bubble's 16px radius minus the 3px frame inset.

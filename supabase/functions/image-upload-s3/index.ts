@@ -18,6 +18,40 @@ const ALLOWED: Record<string, Set<string>> = {
   "surftrip-images": new Set(["hero"]),
 };
 
+// Chat file attachments — the REAL gate. Keep in sync with the client
+// allowlist in src/services/messaging/fileAttachmentPolicy.ts. Executables and
+// active content are never signed, so bypassing the client yields nothing.
+const FILE_ALLOWED: Set<string> = new Set([
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "csv", "txt", "rtf", "zip",
+  "png", "jpg", "jpeg", "gif", "webp", "heic",
+  "mp3", "m4a", "wav", "mp4", "mov",
+]);
+const FILE_CONTENT_TYPE: Record<string, string> = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/csv",
+  txt: "text/plain",
+  rtf: "application/rtf",
+  zip: "application/zip",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+};
+
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -67,6 +101,50 @@ serve(async (req) => {
         `message-images/${conversationId}/${messageId}/${isThumbnail ? "thumbnail" : "original"}.jpg`;
       const uploadUrl = await generatePresignedUrl("PUT", objectKey, 3600, "image/jpeg");
       return json({ uploadUrl, key: objectKey, publicUrl: `${S3_BASE}/${objectKey}` });
+    }
+
+    // Chat file attachment upload — PRIVATE (message-files/ prefix is not
+    // public). Allowlist-gated + membership-checked. The key is derived from the
+    // message id only; the user's filename never touches the storage path.
+    if (action === "get-message-file-upload-url") {
+      const { conversationId, messageId, ext } = body as {
+        conversationId?: string; messageId?: string; ext?: string;
+      };
+      if (!conversationId || !messageId || !ext) return json({ error: "bad input" }, 400);
+      const e = String(ext).toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (!FILE_ALLOWED.has(e)) return json({ error: "file type not allowed" }, 400);
+      const { data: membership } = await admin
+        .from("conversation_members")
+        .select("user_id")
+        .eq("conversation_id", conversationId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!membership) return json({ error: "not a conversation member" }, 403);
+      const ct = FILE_CONTENT_TYPE[e] ?? "application/octet-stream";
+      const objectKey = `message-files/${conversationId}/${messageId}/file.${e}`;
+      const uploadUrl = await generatePresignedUrl("PUT", objectKey, 3600, ct);
+      return json({ uploadUrl, key: objectKey, contentType: ct });
+    }
+
+    // Chat file attachment download — short-lived presigned GET, membership-
+    // checked. The storagePath must live under this conversation's prefix.
+    if (action === "get-message-file-download-url") {
+      const { conversationId, storagePath } = body as {
+        conversationId?: string; storagePath?: string;
+      };
+      if (!conversationId || !storagePath) return json({ error: "bad input" }, 400);
+      if (!storagePath.startsWith(`message-files/${conversationId}/`)) {
+        return json({ error: "bad path" }, 400);
+      }
+      const { data: membership } = await admin
+        .from("conversation_members")
+        .select("user_id")
+        .eq("conversation_id", conversationId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (!membership) return json({ error: "not a conversation member" }, 403);
+      const downloadUrl = await generatePresignedUrl("GET", storagePath, 900);
+      return json({ downloadUrl });
     }
 
     if (userId !== user.id) return json({ error: "user mismatch" }, 403);

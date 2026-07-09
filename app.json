@@ -35,6 +35,7 @@
         "NSPhotoLibraryUsageDescription": "Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats.",
         "NSCameraUsageDescription": "Swellyo uses your camera so you can take photos and record videos for your profile and to send in chats.",
         "NSMicrophoneUsageDescription": "Swellyo uses your microphone to record voice messages and capture audio for video clips.",
+        "NSContactsUsageDescription": "Swellyo accesses your contacts so you can share a contact card in chats.",
         "NSUserActivityTypes": [
           "INSendMessageIntent"
         ]
@@ -58,7 +59,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
-        "android.permission.POST_NOTIFICATIONS"
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.READ_CONTACTS"
       ],
       "blockedPermissions": [],
       "intentFilters": [

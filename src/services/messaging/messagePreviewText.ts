@@ -9,6 +9,8 @@ type PreviewableMessage = {
   image_metadata?: unknown;
   video_metadata?: unknown;
   audio_metadata?: unknown;
+  file_metadata?: { display_name?: string | null } | null;
+  contact_metadata?: { display_name?: string | null } | null;
   sender_id?: string | null;
 };
 
@@ -20,6 +22,8 @@ export function messagePreviewText(
   if (m.type === 'image' || m.image_metadata) return 'Image';
   if (m.type === 'video' || m.video_metadata) return 'Video';
   if (m.type === 'audio' || m.audio_metadata) return 'Voice message';
+  if (m.type === 'file' || m.file_metadata) return `📎 ${m.file_metadata?.display_name ?? 'File'}`;
+  if (m.type === 'contact' || m.contact_metadata) return `👤 ${m.contact_metadata?.display_name ?? 'Contact'}`;
   if (m.type === 'commitment_request') {
     return m.sender_id && m.sender_id === opts?.currentUserId
       ? 'You requested to be Committed'
