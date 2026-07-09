@@ -121,7 +121,9 @@ and `keyboardDidShow` unmounts the panel behind it. It does **not** merely close
 panel — that would leave neither, which the icon does not promise.
 
 The button always names where it takes you: the attachment menu, or the keyboard it
-replaced.
+replaced. Its glyph is driven by `showKeyboardIcon`, **not** `panelOpen` — the panel
+outlives the tap (it must stay mounted until the keyboard has risen over it), but a
+button has to answer the moment it is pressed. `KEYBOARD_REQUESTED` splits the two.
 
 **Tapping the text input with panel open.** The input focuses and the keyboard
 animates up. The panel **stays mounted** and only unmounts once the keyboard has

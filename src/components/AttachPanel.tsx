@@ -12,9 +12,9 @@
  * or measure-on-mount would collapse the panel and re-expand it.
  *
  * Two views, not one. The outer one is the keyboard's rectangle: invisible, but it
- * swallows taps so a stray press beside the card doesn't reach a message bubble. The
- * inner one is the card the user sees — inset from the edges, top corners rounded,
- * running full-bleed to the bottom of the screen (WhatsApp's shape).
+ * swallows taps so a press in the gap above the card doesn't reach a message bubble.
+ * The inner one is the card the user sees — full width like the keyboard it stands in
+ * for, top corners rounded, running off the bottom of the screen.
  *
  * No safe-area padding: the card sits where the keyboard sat, so there is no home
  * indicator to clear. No grabber either — it isn't draggable.
@@ -44,9 +44,9 @@ const styles = StyleSheet.create({
   },
   card: {
     flex: 1,
-    // Breathing room under the composer, and in from the screen edges.
+    // Full width, like the keyboard it stands in for. Only the top corners are
+    // rounded — the card runs off the bottom of the screen.
     marginTop: 8,
-    marginHorizontal: 8,
     backgroundColor: '#D9D9D9',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,

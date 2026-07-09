@@ -9,10 +9,21 @@ import { BackHandler, Keyboard } from 'react-native';
 import { attachPanelReducer, initialPanelState } from './attachPanelMachine';
 
 export interface AttachPanelApi {
+  /** Whether AttachPanel is mounted. */
   panelOpen: boolean;
   panelHeight: number;
+  /**
+   * Whether the composer button should read "keyboard" rather than "+".
+   *
+   * NOT the same as `panelOpen`. The panel outlives the tap that dismisses it — it
+   * has to stay mounted until the keyboard has finished rising over it — but the
+   * button must answer the moment it is pressed.
+   */
+  showKeyboardIcon: boolean;
   togglePanel: () => void;
   closePanel: () => void;
+  /** The user asked for the keyboard back. Pair with focusing the input. */
+  requestKeyboard: () => void;
 }
 
 export function useAttachPanel(): AttachPanelApi {
@@ -64,10 +75,14 @@ export function useAttachPanel(): AttachPanelApi {
 
   const closePanel = useCallback(() => dispatch({ type: 'CLOSE' }), []);
 
+  const requestKeyboard = useCallback(() => dispatch({ type: 'KEYBOARD_REQUESTED' }), []);
+
   return {
     panelOpen: state.open,
     panelHeight: state.height,
+    showKeyboardIcon: state.open && !state.returningToKeyboard,
     togglePanel,
     closePanel,
+    requestKeyboard,
   };
 }

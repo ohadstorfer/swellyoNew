@@ -9,7 +9,11 @@ const open = (s: PanelState = initialPanelState) => attachPanelReducer(s, { type
 
 describe('attachPanelReducer', () => {
   it('starts closed at the seed height', () => {
-    expect(initialPanelState).toEqual({ open: false, height: SEED_KEYBOARD_HEIGHT });
+    expect(initialPanelState).toEqual({
+      open: false,
+      height: SEED_KEYBOARD_HEIGHT,
+      returningToKeyboard: false,
+    });
   });
 
   it('TOGGLE opens, then closes', () => {
@@ -44,5 +48,36 @@ describe('attachPanelReducer', () => {
   it('TOGGLE preserves the measured height', () => {
     const measured = attachPanelReducer(initialPanelState, { type: 'KEYBOARD_SHOWN', height: 336 });
     expect(open(measured).height).toBe(336);
+  });
+
+  describe('returningToKeyboard — the icon must not wait for the animation', () => {
+    it('starts false', () => {
+      expect(initialPanelState.returningToKeyboard).toBe(false);
+    });
+
+    it('KEYBOARD_REQUESTED sets it while the panel stays mounted', () => {
+      const s = attachPanelReducer(open(), { type: 'KEYBOARD_REQUESTED' });
+      expect(s.returningToKeyboard).toBe(true);
+      expect(s.open).toBe(true); // still mounted — the keyboard has not risen yet
+    });
+
+    it('KEYBOARD_SHOWN clears it along with the panel', () => {
+      const requested = attachPanelReducer(open(), { type: 'KEYBOARD_REQUESTED' });
+      const shown = attachPanelReducer(requested, { type: 'KEYBOARD_SHOWN', height: 336 });
+      expect(shown.open).toBe(false);
+      expect(shown.returningToKeyboard).toBe(false);
+    });
+
+    it('KEYBOARD_REQUESTED is a no-op when the panel is closed', () => {
+      const s = attachPanelReducer(initialPanelState, { type: 'KEYBOARD_REQUESTED' });
+      expect(s).toBe(initialPanelState);
+    });
+
+    it('re-opening the panel clears a stale flag', () => {
+      const requested = attachPanelReducer(open(), { type: 'KEYBOARD_REQUESTED' });
+      const closed = attachPanelReducer(requested, { type: 'CLOSE' });
+      expect(closed.returningToKeyboard).toBe(false);
+      expect(open(closed).returningToKeyboard).toBe(false);
+    });
   });
 });

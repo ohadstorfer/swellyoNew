@@ -545,7 +545,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
-  const { panelOpen, panelHeight, togglePanel, closePanel } = useAttachPanel();
+  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -5183,18 +5183,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                         // so give them the keyboard: focusing raises it over the
                         // panel, and keyboardDidShow unmounts the panel behind it.
                         // Merely toggling shut would leave neither, which the icon
-                        // does not promise.
-                        if (panelOpen) chatInputRef.current?.focus?.();
-                        else togglePanel();
+                        // does not promise. requestKeyboard() flips the glyph back to
+                        // "+" now rather than when the keyboard finishes rising.
+                        if (panelOpen) {
+                          requestKeyboard();
+                          chatInputRef.current?.focus?.();
+                        } else {
+                          togglePanel();
+                        }
                       }}
                       hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
                       accessibilityRole="button"
-                      accessibilityLabel={panelOpen ? 'Show keyboard' : 'Add attachment'}
+                      accessibilityLabel={showKeyboardIcon ? 'Show keyboard' : 'Add attachment'}
                     >
                       {/* The button always names where it takes you: the attachment
                           menu, or back to the keyboard it replaced. Ionicons has no
                           keyboard glyph — only `keypad`, which is a dialpad. */}
-                      {panelOpen ? (
+                      {showKeyboardIcon ? (
                         <MaterialCommunityIcons name="keyboard-outline" size={26} color="#222B30" />
                       ) : (
                         <Ionicons name="add" size={28} color="#222B30" />
