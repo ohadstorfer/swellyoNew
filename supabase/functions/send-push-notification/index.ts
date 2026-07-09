@@ -38,6 +38,31 @@ function toThumbUrl(url: string | null): string | null {
   return `${base}${THUMB_OBJECT_MARKER}${THUMBNAILS_BUCKET}/${rest}__${AVATAR_THUMB_SIZE}.jpg?v=${THUMB_CACHE_VERSION}`
 }
 
+// Both platforms expand a long notification body on demand (iOS: long-press,
+// Android: the chevron), so we send the message near-whole and let the OS decide
+// how much to reveal. The ceiling is the ~4KiB Expo/APNs payload, and the body
+// rides in it TWICE: once as the visible `body`, once as `data.message` (which
+// the iOS extension reads to rebuild the Communication Notification). Hence a
+// byte budget, not just a character count — 500 emoji would be 2000 bytes each
+// time and blow the payload, which Expo rejects outright, losing the push.
+const MAX_BODY_CHARS = 500
+const MAX_BODY_BYTES = 1200
+const BODY_ENCODER = new TextEncoder()
+function truncateForPush(text: string): string {
+  const chars = Array.from(text) // code points — never split a surrogate pair
+  let end = Math.min(chars.length, MAX_BODY_CHARS)
+  let bytes = 0
+  for (let i = 0; i < end; i++) {
+    bytes += BODY_ENCODER.encode(chars[i]).length
+    if (bytes > MAX_BODY_BYTES) {
+      end = i
+      break
+    }
+  }
+  if (end >= chars.length) return text
+  return chars.slice(0, end).join('').trimEnd() + '…'
+}
+
 /**
  * Shared context for one inbound message — resolved once per webhook, not per
  * recipient. Holds everything the notification copy + the iOS rich-avatar
@@ -89,8 +114,7 @@ async function buildMessageContext(
   } else if (msg.type === 'video') {
     body = 'Sent a video';
   } else {
-    body = msg.body || '';
-    if (body.length > 100) body = body.substring(0, 97) + '...';
+    body = truncateForPush(msg.body || '');
   }
 
   // Conversation kind + group image (group chats link to a trip via metadata.trip_id).
