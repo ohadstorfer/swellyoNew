@@ -19,9 +19,11 @@ interface FileBubbleProps {
   message: Message;
   isOwn: boolean;
   onLongPress?: (e: any) => void;
+  /** Computed by the screen (getBodyTextAlign is screen-private). */
+  textAlign?: 'left' | 'right';
 }
 
-export function FileBubble({ message, isOwn, onLongPress }: FileBubbleProps) {
+export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbleProps) {
   const [busy, setBusy] = useState(false);
   const meta = message.file_metadata;
   if (!meta) return null;
@@ -69,23 +71,30 @@ export function FileBubble({ message, isOwn, onLongPress }: FileBubbleProps) {
   };
 
   return (
-    <Pressable onPress={handleOpen} onLongPress={onLongPress} delayLongPress={300} style={styles.row}>
-      <View style={[styles.iconBox, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : '#E9F8FB' }]}>
-        {busy ? (
-          <ActivityIndicator size="small" color={tint} />
-        ) : (
-          <Ionicons name={iconForExt(meta.ext)} size={22} color={tint} />
-        )}
-      </View>
-      <View style={styles.textCol}>
-        <Text numberOfLines={1} style={[styles.name, { color: nameColor }]}>
-          {meta.display_name}
+    <View>
+      <Pressable onPress={handleOpen} onLongPress={onLongPress} delayLongPress={300} style={styles.row}>
+        <View style={[styles.iconBox, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : '#E9F8FB' }]}>
+          {busy ? (
+            <ActivityIndicator size="small" color={tint} />
+          ) : (
+            <Ionicons name={iconForExt(meta.ext)} size={22} color={tint} />
+          )}
+        </View>
+        <View style={styles.textCol}>
+          <Text numberOfLines={1} style={[styles.name, { color: nameColor }]}>
+            {meta.display_name}
+          </Text>
+          <Text style={[styles.sub, { color: subColor }]}>
+            {meta.ext.toUpperCase()} · {formatBytes(meta.size_bytes)}
+          </Text>
+        </View>
+      </Pressable>
+      {!!message.body?.trim() && (
+        <Text style={[styles.caption, { color: nameColor, textAlign: textAlign ?? 'left' }]}>
+          {message.body}
         </Text>
-        <Text style={[styles.sub, { color: subColor }]}>
-          {meta.ext.toUpperCase()} · {formatBytes(meta.size_bytes)}
-        </Text>
-      </View>
-    </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -114,6 +123,15 @@ const styles = StyleSheet.create({
     fontFamily: ff('Inter', '400'),
     fontSize: fs(11),
     marginTop: 2,
+    includeFontPadding: false,
+  },
+  caption: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(15),
+    lineHeight: 20,
+    marginTop: 6,
+    paddingHorizontal: 2,
+    maxWidth: 240,
     includeFontPadding: false,
   },
 });

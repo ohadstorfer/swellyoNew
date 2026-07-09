@@ -4270,6 +4270,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 message={message}
                 isOwn={isOwnMessage}
                 onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
+                textAlign={getBodyTextAlign(message.body)}
               />
               <View style={styles.attachmentFooter}>
                 <Text style={[styles.timestamp, isOwnMessage ? styles.userTimestamp : styles.botTimestamp]}>
