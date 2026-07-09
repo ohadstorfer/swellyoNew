@@ -1,9 +1,11 @@
 /**
  * JumboEmojiMessage — WhatsApp-style "jumbo" rendering for an emoji-only message
- * (1-3 emoji, no other text). Shown with NO bubble background: just the large
+ * (a single emoji, no other text). Shown with NO bubble background: just the large
  * emoji and a small timestamp + read-receipt row below it, aligned to the
  * message side. Used by DirectMessageScreen and DirectGroupChat in place of the
- * normal text bubble when getEmojiOnlyInfo(body).isJumbo is true.
+ * normal text bubble when getEmojiOnlyInfo(body).isJumbo is true. Bodies of 2-3
+ * emoji are NOT routed here — they keep the normal bubble and just enlarge the
+ * body font via getEmojiFontSize().
  *
  * Bubble chrome: spread `jumboBubbleStyle` onto the MessageBubbleHighlight style
  * array so the surrounding bubble goes transparent/padding-free.
@@ -12,6 +14,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from './Text';
+import { getEmojiFontSize } from '../utils/emoji';
 
 /** Drop the bubble background/padding/shadow so only the emoji shows. */
 export const jumboBubbleStyle = {
@@ -25,9 +28,6 @@ export const jumboBubbleStyle = {
   elevation: 0,
   borderWidth: 0,
 };
-
-// Bigger for fewer emoji (WhatsApp shrinks slightly as the count grows).
-const SIZE_BY_COUNT: Record<number, number> = { 1: 52, 2: 42, 3: 34 };
 
 interface Props {
   body: string;
@@ -44,7 +44,7 @@ export const JumboEmojiMessage: React.FC<Props> = ({
   timeText,
   receipt,
 }) => {
-  const fontSize = SIZE_BY_COUNT[count] ?? SIZE_BY_COUNT[3];
+  const fontSize = getEmojiFontSize(count) ?? 52;
   return (
     <View style={isOwn ? styles.alignRight : styles.alignLeft}>
       <Text style={[styles.emoji, { fontSize, lineHeight: Math.round(fontSize * 1.2) }]}>

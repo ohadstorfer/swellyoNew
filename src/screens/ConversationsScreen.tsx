@@ -1805,7 +1805,8 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 13,
     fontWeight: '400',
-    lineHeight: 15,
+    // Emoji glyphs are taller than the latin text box; 15 clipped their tops.
+    lineHeight: 19,
     color: '#A0A0A0',
     textAlign: 'left' ,
   },

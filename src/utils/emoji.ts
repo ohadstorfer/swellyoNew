@@ -1,7 +1,10 @@
 /**
- * Emoji-only detection for WhatsApp-style "jumbo emoji" messages: a text message
- * whose body is ONLY emoji (no letters, digits, or other text) and at most
- * JUMBO_MAX_EMOJI of them renders large with no bubble.
+ * Emoji-only detection for WhatsApp-style large-emoji messages: a text message
+ * whose body is ONLY emoji (no letters, digits, or other text) renders with an
+ * enlarged font — bigger for fewer emoji — for up to BIG_EMOJI_MAX of them.
+ * A SINGLE emoji additionally drops the bubble entirely (`isJumbo`); 2-3 emoji
+ * stay inside a normal bubble at their enlarged size. 4+ emoji render as
+ * ordinary text.
  *
  * Hermes (RN 0.81) has NO `Intl.Segmenter`, and `\p{Emoji}` wrongly matches the
  * digits 0-9, * and #. So we match emoji "clusters" with a regex that relies on
@@ -12,7 +15,22 @@
  * simply never triggers (messages render as normal bubbles) instead of crashing.
  */
 
-export const JUMBO_MAX_EMOJI = 3;
+/** Only a single emoji goes bubble-less; 2+ emoji stay in a normal bubble. */
+export const JUMBO_MAX_EMOJI = 1;
+
+/** Emoji-only bodies up to this many emoji render at an enlarged font size. */
+export const BIG_EMOJI_MAX = 3;
+
+// Bigger for fewer emoji (WhatsApp shrinks slightly as the count grows).
+const FONT_SIZE_BY_COUNT: Record<number, number> = { 1: 52, 2: 42, 3: 34 };
+
+/**
+ * Enlarged font size for an emoji-only body of `count` emoji, or null when the
+ * body isn't emoji-only (count 0) or exceeds BIG_EMOJI_MAX.
+ */
+export function getEmojiFontSize(count: number): number | null {
+  return FONT_SIZE_BY_COUNT[count] ?? null;
+}
 
 // One emoji grapheme cluster:
 //   • a flag = two regional indicators, OR
