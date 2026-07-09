@@ -4,9 +4,15 @@
  * handler (so the sheet is gone before the OS picker / permission dialog opens).
  * Built on BottomSheetShell so it inherits the global fade + slide + swipe and
  * the Android edge-to-edge nav-bar handling.
+ *
+ * The chosen handler runs on the shell's `onDismissed`, i.e. only once the Modal's
+ * UIViewController is fully torn down. A timer raced against the slide-out here and
+ * fired while iOS was still dismissing: the camera and document pickers survived it
+ * (in-process presentations), but the photo library — PHPicker, which lives in
+ * another process — blocked the main thread and the OS killed the app.
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,11 +47,18 @@ export function AttachSheet({
 }: AttachSheetProps) {
   const insets = useSafeAreaInsets();
 
-  // Close first, then run the handler on the next tick so the sheet's dismiss
-  // animation isn't interrupted by the OS picker taking over the screen.
+  // Close first; the handler runs from onDismissed, once the Modal is really gone.
+  const pendingAction = useRef<(() => void) | null>(null);
   const choose = (fn: () => void) => () => {
+    if (pendingAction.current) return; // ignore a second tile tapped mid-dismiss
+    pendingAction.current = fn;
     onClose();
-    setTimeout(fn, 220);
+  };
+
+  const runPendingAction = () => {
+    const fn = pendingAction.current;
+    pendingAction.current = null;
+    fn?.();
   };
 
   // WhatsApp light menu: grey sheet, white circles; only the glyph color changes
@@ -58,7 +71,7 @@ export function AttachSheet({
   ];
 
   return (
-    <BottomSheetShell visible={visible} onClose={onClose}>
+    <BottomSheetShell visible={visible} onClose={onClose} onDismissed={runPendingAction}>
       <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
         <View style={styles.grabber} />
         <View style={styles.grid}>

@@ -50,6 +50,14 @@ interface Props {
   /** Attach the swipe-down-to-dismiss gesture to the whole sheet (default true).
    *  Ignored when `children` is a function — then you place the handlers yourself. */
   swipeToDismiss?: boolean;
+  /**
+   * Fires once the Modal is FULLY gone — after iOS has finished tearing down the
+   * modal's UIViewController, not merely when the slide-out animation ends.
+   * Anything that presents native UI (an OS picker, a permission alert) must wait
+   * for this: UIKit refuses to present while another controller is dismissing, and
+   * PHPicker (the photo library) hangs the main thread instead of failing loudly.
+   */
+  onDismissed?: () => void;
 }
 
 export function BottomSheetShell({
@@ -59,6 +67,7 @@ export function BottomSheetShell({
   backdropColor = 'rgba(0,0,0,0.45)',
   avoidKeyboard = false,
   swipeToDismiss = true,
+  onDismissed,
 }: Props) {
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
@@ -78,6 +87,18 @@ export function BottomSheetShell({
     Platform.OS === 'android' && insets.bottom > 0
       ? { transform: [{ translateY: insets.bottom }] }
       : undefined;
+
+  // `onDismiss` is iOS-only. Everywhere else the Modal has no teardown callback, so
+  // fall back to the unmount of our own `mounted` flag — safe there because those
+  // platforms present their pickers in-process.
+  const onDismissedRef = React.useRef(onDismissed);
+  onDismissedRef.current = onDismissed;
+  const wasMounted = React.useRef(mounted);
+  React.useEffect(() => {
+    if (Platform.OS === 'ios') return;
+    if (wasMounted.current && !mounted) onDismissedRef.current?.();
+    wasMounted.current = mounted;
+  }, [mounted]);
 
   const isRenderProp = typeof children === 'function';
   const content = isRenderProp
@@ -111,6 +132,7 @@ export function BottomSheetShell({
       transparent
       animationType="none"
       onRequestClose={onClose}
+      onDismiss={Platform.OS === 'ios' ? onDismissed : undefined}
       // statusBarTranslucent (Android, no-op on iOS) lets the modal draw behind the
       // status bar — this one DOES work. navigationBarTranslucent is intentionally NOT
       // set: it's broken on SDK 54 (expo/expo#39749), so the bottom is handled by
