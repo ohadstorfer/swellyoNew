@@ -57,14 +57,33 @@ keyboard has appeared once, the measured value is used forever after.
 
 The chat container already carries `paddingBottom = |kbHeight|`
 (`animatedKeyboardPadding`, `DirectMessageScreen.tsx:5188`) — the hole the keyboard
-sits in. The panel occupies **that same hole**, never a new one:
+sits in. The panel occupies **that same hole**, never a new one.
 
-- Panel closed → `paddingBottom = |kbHeight|`, no panel. Unchanged from today.
-- Panel open → `paddingBottom = 0`, panel mounted as a child with
-  `height = lastKeyboardHeight`.
+`paddingBottom = max(|kbHeight|, panelOpen ? panelHeight : 0)`, and the panel is
+**absolutely positioned** (`bottom: 0`, `height: panelHeight`) so it *fills* that
+padding rather than adding to the column.
 
-Both totals are equal, so the composer's Y position never changes. That equality is
-the whole design; every rule below exists to preserve it.
+Both facts exist to kill the same class of bug. A `panelOpen ? 0 : |kbHeight|`
+branch plus a panel in normal flow would be correct only if React's mount and
+Reanimated's UI-thread padding update landed in the same frame; when they don't, the
+panel's height and the keyboard's padding both apply and the composer leaps a
+keyboard's height. With `max()`, the reserved space is `panelHeight` *throughout* the
+swap — while the panel mounts under the still-visible keyboard, and after the
+keyboard goes. **The value never changes, so no frame can catch the two threads
+disagreeing.**
+
+### Order matters: mount, then dismiss
+
+The keyboard lives in a window **above** the app. A panel mounted while the keyboard
+is still up is simply hidden behind it, and the layout is already in its final shape.
+Dismissing afterwards does not open the panel — it uncovers one that was always
+there.
+
+So the dismiss must run **after** React has committed the panel (a `useLayoutEffect`
+keyed on `open`), never inside the `+` handler. `dismissKeyboardNow()` is a
+synchronous native call: from the tap handler it takes the keyboard away a frame
+before the panel paints, and that one empty frame is a visible flick — close, gap,
+open.
 
 ### The composer padding override
 
@@ -74,9 +93,9 @@ composer and the panel. **While `panelOpen`, treat `progress` as 1.**
 
 ## Interactions
 
-**`+` with keyboard open.** In one tick: `setPanelOpen(true)` and
-`KeyboardController.dismiss({ animated: false, keepFocus: false })`. The panel is
-already mounted at the keyboard's height when the keyboard vanishes.
+**`+` with keyboard open.** `setPanelOpen(true)`. React commits the panel behind the
+still-visible keyboard; a `useLayoutEffect` then calls
+`KeyboardController.dismiss({ animated: false, keepFocus: false })`, uncovering it.
 
 **`+` with keyboard closed.** `setPanelOpen(true)`. Composer padding goes to 0, the
 panel takes `lastKeyboardHeight`.

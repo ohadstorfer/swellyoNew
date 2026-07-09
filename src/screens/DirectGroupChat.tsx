@@ -522,12 +522,18 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // ContentLayer. height is negative when keyboard is open on iOS → use abs for
   // padding (defensive: ignore brief sign flips during interactive dismiss).
   const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
-  // The panel occupies the keyboard's rectangle. While it's mounted it supplies that
-  // height itself, so the container must not reserve it too — or the composer jumps
-  // by a full keyboard height.
+  // The panel occupies the keyboard's rectangle, so the reserved space is whichever
+  // of the two is present. Deliberately a max(), not a branch: while the panel mounts
+  // UNDER the still-visible keyboard both are `panelHeight`, and after the keyboard
+  // goes only the panel is. The value never changes across the swap, so no frame can
+  // catch the JS and UI threads disagreeing. (The panel is absolutely positioned and
+  // fills this padding rather than adding to the column — see AttachPanel.)
   const animatedKeyboardPadding = useAnimatedStyle(() => ({
-    paddingBottom: panelOpen ? 0 : Math.round(Math.abs(kbHeight.value)),
-  }), [panelOpen]);
+    paddingBottom: Math.max(
+      Math.round(Math.abs(kbHeight.value)),
+      panelOpen ? panelHeight : 0,
+    ),
+  }), [panelOpen, panelHeight]);
   // Composer's own bottom padding: insets.bottom at rest (home indicator safe area),
   // shrinks to 0 as keyboard opens (so the input sits flush against keyboard top).
   // Clamp progress to [0,1] — the lib has occasionally reported a hair past either
