@@ -60,6 +60,7 @@ import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
+import { FilePreviewModal, type PickedFilePreview } from '../components/FilePreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
@@ -568,6 +569,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const selectedVideoMetadataRef = useRef<{ width?: number; height?: number; duration?: number; fileSize?: number; mimeType?: string } | null>(null);
   const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
+  const [pendingFile, setPendingFile] = useState<PickedFilePreview | null>(null);
+  const [filePreviewVisible, setFilePreviewVisible] = useState(false);
   const insets = useSafeAreaInsets();
   // Keyboard-aware padding for the chat area. Bypasses the measureLayout-based
   // KAV which breaks when nested inside react-native-screen-transitions' transformed
@@ -2933,6 +2936,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     clientId: string,
     localUri: string,
     baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
+    caption?: string,
   ): Promise<{ created: Message; fileMetadata: FileMetadata }> => {
     const { uploadFileToStorage } = await import('../services/messaging/fileUploadService');
     const { storagePath } = await withTimeout(
@@ -2947,13 +2951,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       ext: baseMeta.ext,
       size_bytes: baseMeta.size_bytes,
     };
-    const created = await messagingService.createFileMessageWithMetadata(convId, fileMetadata, clientId);
+    const created = await messagingService.createFileMessageWithMetadata(convId, fileMetadata, clientId, caption ?? '');
     return { created, fileMetadata };
   };
 
   const handleFileSend = async (
     localUri: string,
     baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
+    caption?: string,
   ) => {
     if (!currentConversationId || !currentUserId) return;
     const conversationId = currentConversationId;
@@ -2964,7 +2969,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       client_id: clientId,
       conversation_id: conversationId,
       sender_id: currentUserId,
-      body: '',
+      body: caption ?? '',
       type: 'file',
       file_metadata: { ...baseMeta, storage_path: '' },
       attachments: [],
@@ -2986,7 +2991,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     scrollToBottom();
 
     try {
-      const { created, fileMetadata } = await uploadAndCreateFile(conversationId, clientId, localUri, baseMeta);
+      const { created, fileMetadata } = await uploadAndCreateFile(conversationId, clientId, localUri, baseMeta, caption);
       setMessages((prev) => {
         const next = prev.map(m =>
           m.id === clientId
@@ -3019,12 +3024,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const { pickDocument } = await import('../services/messaging/documentPicker');
     const picked = await pickDocument();
     if (!picked) return;
-    await handleFileSend(picked.uri, {
-      display_name: picked.display_name,
-      ext: picked.ext,
-      mime_type: picked.mime_type,
-      size_bytes: picked.size_bytes,
-    });
+    // Review before sending — nothing is uploaded until the user hits send.
+    setPendingFile(picked);
+    setFilePreviewVisible(true);
   };
 
   // ─── Shared contacts (display-only) ───────────────────────────────────────
@@ -3431,7 +3433,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       try {
         const { created, fileMetadata } = await uploadAndCreateFile(convId, clientIdF, localUri, {
           display_name: fm.display_name, ext: fm.ext, mime_type: fm.mime_type, size_bytes: fm.size_bytes,
-        });
+        }, message.body || undefined);
         setMessages((prev) => {
           const next = prev.map(m =>
             m.id === midF ? { ...created, file_metadata: created.file_metadata ?? fileMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
@@ -5399,6 +5401,32 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           // onEdit undefined so the modal hides the Edit button.
           onEdit={Platform.OS !== 'web' && getImageCropPicker() ? handleEditImage : undefined}
           isProcessing={isProcessingImage}
+          primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* File Preview Modal — review the document, add a comment, then send. */}
+      {pendingFile && (
+        <FilePreviewModal
+          visible={filePreviewVisible}
+          file={pendingFile}
+          onSend={(caption) => {
+            const f = pendingFile;
+            setFilePreviewVisible(false);
+            setPendingFile(null);
+            if (f) {
+              void handleFileSend(f.uri, {
+                display_name: f.display_name,
+                ext: f.ext,
+                mime_type: f.mime_type,
+                size_bytes: f.size_bytes,
+              }, caption);
+            }
+          }}
+          onCancel={() => {
+            setFilePreviewVisible(false);
+            setPendingFile(null);
+          }}
           primaryColor={composerPrimaryColor}
         />
       )}
