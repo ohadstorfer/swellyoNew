@@ -5,7 +5,7 @@
  *
  * No caption here — WhatsApp has none on this screen either.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,10 +53,16 @@ export const ContactPreviewModal: React.FC<ContactPreviewModalProps> = ({
   }, [contact]);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set(allKeys));
+  // onSend's caller unmounts this modal on a later render, so state updates
+  // too slowly to block a same-tick double-tap. A ref blocks it in the same tick.
+  const sendingRef = useRef(false);
 
   // Reopening with a different contact must not inherit the old selection.
   useEffect(() => {
-    if (visible) setSelected(new Set(allKeys));
+    if (visible) {
+      setSelected(new Set(allKeys));
+      sendingRef.current = false;
+    }
   }, [visible, allKeys]);
 
   const toggle = (key: string) => {
@@ -72,6 +78,8 @@ export const ContactPreviewModal: React.FC<ContactPreviewModalProps> = ({
 
   const handleSend = () => {
     if (!canSend) return;
+    if (sendingRef.current) return;
+    sendingRef.current = true;
     const phone_numbers = (contact.phone_numbers ?? []).filter((_, i) => selected.has(phoneKey(i)));
     const emails = (contact.emails ?? []).filter((_, i) => selected.has(emailKey(i)));
     onSend({
