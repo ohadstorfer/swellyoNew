@@ -34,12 +34,19 @@ A true OS-level swap — assigning a custom `inputView` to the first responder �
   (kirillzyusko/react-native-keyboard-controller#1345). Do not reach for it.
 - `gifted-chat#1222` asked for exactly this and was closed **wontfix**.
 
-We use the **persisted-height spacer**, made instant by
-`KeyboardController.dismiss({ animated: false })` (rnkc ≥ 1.19; project is on
-**1.21.13**, verified in `node_modules`). The keyboard is hidden without animation
-while a panel of identical height is already mounted, so the swap is imperceptible.
-This is an illusion, not a real swap — but it is JS-only, needs no rebuild, and
-degrades safely.
+We use the **persisted-height spacer**: a panel of exactly the keyboard's height,
+mounted behind the keyboard, uncovered when the keyboard leaves. Plain
+`Keyboard.dismiss()` — RN's own, animated. No `react-native-keyboard-controller`, so
+no Expo Go caveat and no version floor.
+
+An earlier revision forced `KeyboardController.dismiss({ animated: false })`, reasoning
+that an instant hide would make the swap imperceptible. That was wrong. The panel is
+stationary and the keyboard is an OS window sliding over it; the keyboard's animation
+*is* the transition. Killing it produced a hard cut in one direction against a smooth
+OS slide in the other. See "The motion" below.
+
+This is an illusion, not a real swap — but it is JS-only, needs no rebuild, and runs
+the same everywhere.
 
 ## State model
 
@@ -47,7 +54,7 @@ Per chat screen:
 
 | State | Source | Purpose |
 |---|---|---|
-| `lastKeyboardHeight` | `useKeyboardHandler({ onEnd })`, recorded when `height > 0` | The panel's height. Persists across keyboard open/close. |
+| `lastKeyboardHeight` | RN's `keyboardDidShow`, recorded when `height > 0` | The panel's height. Persists across keyboard open/close. |
 | `panelOpen` | `useState` | Whether `AttachPanel` is mounted. |
 
 `lastKeyboardHeight` seeds from a constant (`iOS 291`, `Android 260` — typical
@@ -72,18 +79,25 @@ swap — while the panel mounts under the still-visible keyboard, and after the
 keyboard goes. **The value never changes, so no frame can catch the two threads
 disagreeing.**
 
-### Order matters: mount, then dismiss
+### The motion
 
 The keyboard lives in a window **above** the app. A panel mounted while the keyboard
-is still up is simply hidden behind it, and the layout is already in its final shape.
-Dismissing afterwards does not open the panel — it uncovers one that was always
-there.
+is still up is hidden behind it, with the layout already in its final shape. Nothing
+on our side of the glass ever moves:
 
-So the dismiss must run **after** React has committed the panel (a `useLayoutEffect`
-keyed on `open`), never inside the `+` handler. `dismissKeyboardNow()` is a
-synchronous native call: from the tap handler it takes the keyboard away a frame
-before the panel paints, and that one empty frame is a visible flick — close, gap,
-open.
+- **Opening the panel** — the keyboard slides *down*, uncovering it.
+- **Leaving the panel** (tapping the input) — the keyboard slides *up*, covering it.
+
+Two halves of one motion, both animated by the OS, panel stationary throughout. The
+dismiss is therefore **animated on purpose**. An instant dismiss cuts the downward
+half and reads as a hard flick against a perfectly smooth return.
+
+### Order matters: mount, then dismiss
+
+The dismiss must run **after** React has committed the panel — a `useLayoutEffect`
+keyed on `open`, never the `+` handler. `Keyboard.dismiss()` is synchronous: from the
+tap handler it starts the keyboard's exit a frame before the panel paints, and that
+empty frame flashes bare chat background.
 
 ### The composer padding override
 
@@ -94,8 +108,8 @@ composer and the panel. **While `panelOpen`, treat `progress` as 1.**
 ## Interactions
 
 **`+` with keyboard open.** `setPanelOpen(true)`. React commits the panel behind the
-still-visible keyboard; a `useLayoutEffect` then calls
-`KeyboardController.dismiss({ animated: false, keepFocus: false })`, uncovering it.
+still-visible keyboard; a `useLayoutEffect` then calls `Keyboard.dismiss()`, and the
+keyboard slides down off it.
 
 **`+` with keyboard closed.** `setPanelOpen(true)`. Composer padding goes to 0, the
 panel takes `lastKeyboardHeight`.
@@ -105,7 +119,7 @@ composer.
 
 **Tapping the text input with panel open.** The input focuses and the keyboard
 animates up. The panel **stays mounted** and only unmounts once the keyboard has
-fully opened (`useKeyboardHandler` `onEnd`, `height > 0`). Unmounting it on focus
+fully opened (RN's `keyboardDidShow`). Unmounting it on focus
 would leave a hole for the duration of the keyboard's open animation and drop the
 composer. Because the heights match, the keyboard simply rises over the panel.
 
@@ -119,8 +133,8 @@ composer. Because the heights match, the keyboard simply rises over the panel.
 Split:
 
 - **`AttachMenuGrid`** — the grid and its tile handlers, lifted verbatim.
-- **`AttachPanel`** — a plain `View` with a fixed `height` hosting the grid. No
-  `Modal`, no `BottomSheetShell`.
+- **`AttachPanel`** — an absolutely-positioned `View` pinned to the container's
+  bottom with a fixed `height`, hosting the grid. No `Modal`, no `BottomSheetShell`.
 
 `AttachSheet` and its `BottomSheetShell` usage are removed from both chat screens.
 
@@ -136,20 +150,19 @@ consequence of the redesign, not an unrelated cleanup.
 
 ## Expo Go
 
-`KeyboardController` comes from `react-native-keyboard-controller`, whose native
-module **is not present in Expo Go** — the reason `src/utils/keyboardAvoidingView.ts`
-already gates rnkc's views behind `isExpoGo`. `AttachPanel` must fall back to RN's
-`Keyboard.dismiss()` behind that same guard. Expo Go then shows the keyboard's slide;
-dev and production builds do not. Without the guard, `+` crashes in Expo Go.
+Nothing here touches `react-native-keyboard-controller`. Heights, the
+"keyboard-finished-opening" signal and the dismiss all come from RN's `Keyboard` API,
+which is present in Expo Go. The panel behaves identically everywhere.
 
 ## Risks
 
-- **`dismiss({ animated: false })` on iOS is documented but unverified** against RN
-  0.81 / Fabric / iOS 18. If iOS animates anyway, the swap degrades to a ~250ms
-  slide revealing the panel — visually acceptable, not a regression. Verify on device
-  first.
 - **The panel's height must be a fixed `height` from `lastKeyboardHeight`**, never
   `flex` and never measured on mount, or the panel collapses and re-expands.
+- **The container's `paddingBottom` must be `max(|kbHeight|, panelHeight)`, not a
+  branch on `panelOpen`.** A branch is correct only if React's mount and Reanimated's
+  UI-thread padding update land in the same frame; when they don't, the panel's height
+  and the keyboard's padding both apply and the composer leaps a keyboard's height.
+  `max()` holds one value across the whole swap.
 - **Split keyboard / floating keyboard on iPad** reports height 0. Out of scope; the
   panel falls back to its seed constant.
 
@@ -162,7 +175,7 @@ dev and production builds do not. Without the guard, `+` crashes in Expo Go.
 3. `+` toggles the panel closed; `insets.bottom` returns.
 4. Android back closes the panel instead of leaving the chat.
 5. Choosing Photos does not crash (the PHPicker regression the `Modal` caused).
-6. `+` works in Expo Go without crashing.
+6. `+` works in Expo Go, identically (no library gate to trip).
 7. Behaviour is identical in `DirectMessageScreen` and `DirectGroupChat`.
 
 ## Note for the implementer
