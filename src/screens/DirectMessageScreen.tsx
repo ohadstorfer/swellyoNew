@@ -22,7 +22,7 @@ import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition, withTi
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
 import { TextInput as PaperTextInput } from 'react-native-paper';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -5178,10 +5178,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   ) : (
                     <TouchableOpacity
                       style={styles.attachButton}
-                      onPress={togglePanel}
+                      onPress={() => {
+                        // Closed → open the panel. Open → the icon says "keyboard",
+                        // so give them the keyboard: focusing raises it over the
+                        // panel, and keyboardDidShow unmounts the panel behind it.
+                        // Merely toggling shut would leave neither, which the icon
+                        // does not promise.
+                        if (panelOpen) chatInputRef.current?.focus?.();
+                        else togglePanel();
+                      }}
                       hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={panelOpen ? 'Show keyboard' : 'Add attachment'}
                     >
-                      <Ionicons name="add" size={28} color="#222B30" />
+                      {/* The button always names where it takes you: the attachment
+                          menu, or back to the keyboard it replaced. Ionicons has no
+                          keyboard glyph — only `keypad`, which is a dialpad. */}
+                      {panelOpen ? (
+                        <MaterialCommunityIcons name="keyboard-outline" size={26} color="#222B30" />
+                      ) : (
+                        <Ionicons name="add" size={28} color="#222B30" />
+                      )}
                     </TouchableOpacity>
                   )
                 }

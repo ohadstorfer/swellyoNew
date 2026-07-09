@@ -114,8 +114,14 @@ keyboard slides down off it.
 **`+` with keyboard closed.** `setPanelOpen(true)`. Composer padding goes to 0, the
 panel takes `lastKeyboardHeight`.
 
-**`+` with panel open.** `setPanelOpen(false)`. `insets.bottom` returns to the
-composer.
+**`+` with panel open.** The button is no longer a `+` — it renders a keyboard glyph
+(`MaterialCommunityIcons` `keyboard-outline`; Ionicons has only `keypad`, a dialpad).
+So it gives you the keyboard: it focuses the input, the keyboard rises over the panel,
+and `keyboardDidShow` unmounts the panel behind it. It does **not** merely close the
+panel — that would leave neither, which the icon does not promise.
+
+The button always names where it takes you: the attachment menu, or the keyboard it
+replaced.
 
 **Tapping the text input with panel open.** The input focuses and the keyboard
 animates up. The panel **stays mounted** and only unmounts once the keyboard has
