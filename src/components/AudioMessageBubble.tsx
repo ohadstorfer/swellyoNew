@@ -194,12 +194,12 @@ export const AudioMessageBubble: React.FC<AudioMessageBubbleProps> = ({
         // Own: inherit the container's center alignment (centered on the whole
         // bubble). Received: pin to the top and nudge up so the avatar centers on
         // the waveform row instead (the play button defines that row's height).
+        // Both sides: inherit the container's center alignment and cancel the
+        // asymmetric padding (8 top / 2 bottom) with marginBottom so the avatar
+        // is centered on the FULL bubble. Received mirrors sent, flipped side.
         isOwn
-          // marginBottom cancels the asymmetric container padding (8 top / 2
-          // bottom = 6) so the avatar stays centered on the FULL bubble, not the
-          // padding-shifted content box.
           ? { marginRight: AVATAR_MARGIN, marginBottom: 6 }
-          : { marginLeft: AVATAR_MARGIN, alignSelf: 'flex-start', marginTop: (PLAY_SIZE - AVATAR_SIZE) / 2 },
+          : { marginLeft: AVATAR_MARGIN, marginBottom: 6 },
       ]}
     >
       <ProfileImage
@@ -286,10 +286,11 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 2,
   },
-  // Received bubbles: tight top padding so the waveform sits close under the
-  // sender name. (Avatar is on the right, so it never collides with the name.)
+  // Received bubbles: mirror the sent bubble's vertical rhythm exactly so the
+  // avatar centers in the full card and its top isn't clipped by overflow:hidden.
   containerReceived: {
-    paddingTop: 0,
+    paddingTop: 8,
+    paddingBottom: 2,
   },
   column: {
     flex: 1,
