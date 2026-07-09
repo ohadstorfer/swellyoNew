@@ -3927,6 +3927,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // State keeps messages chronological (oldest-first) for easy append/merge
   const invertedMessages = useMemo(() => dedupeMessages(messages).reverse(), [messages]);
 
+  // Reacting to the newest message grows its cell — the badge hangs below the
+  // bubble (MessageReactionsRow pulls itself up with a negative marginTop). The
+  // list doesn't re-pin to the bottom, so that overhang lands under the composer
+  // and the user has to scroll to see it. Re-pin whenever the newest message's
+  // reactions change, but only if we were already at the bottom, so someone
+  // reading history never gets yanked.
+  const newestMessage = invertedMessages[0];
+  const newestReactionSignature = newestMessage
+    ? `${newestMessage.id}:${(newestMessage.reactions ?? []).reduce((n, r) => n + r.count, 0)}`
+    : '';
+  useEffect(() => {
+    if (!newestMessage?.reactions?.length) return;
+    if (!isNearBottomRef.current) return;
+    scrollToBottomBase(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newestReactionSignature]);
+
   // Map of sender_id → display name, harvested from any message we have that
   // was already enriched. Lets reply previews resolve the original author's
   // name even when the stored snapshot is missing it (or has the legacy 'You'
@@ -4624,8 +4641,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       }
                     </Text>
                   </View>
-                ) : isRtl ? (
-                  // RTL bodies stack vertically (timestamp below body).
+                ) : isRtl || bigEmojiSize ? (
+                  // Stacked layout (timestamp below the body), used for:
+                  //  - RTL bodies, whose inline spacer trick doesn't hold up.
+                  //  - Emoji-only bodies of 2-3 emoji, which render at 42/34px:
+                  //    an inline timestamp next to a glyph that tall reads as a
+                  //    caption stuck to its side. WhatsApp drops it underneath.
                   <Reanimated.View
                     style={{
                       flexDirection: 'column',
@@ -4654,7 +4675,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       ]}>
                         {formatTime(message.created_at)}
                         {message.edited && !message.deleted && (
-                          <Text style={styles.editedBadge}>  (edited)</Text>
+                          <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                         )}
                       </Text>
                       {isOwnMessage && (
@@ -4729,7 +4750,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                       ]}>
                         {formatTime(message.created_at)}
                         {message.edited && !message.deleted && (
-                          <Text style={styles.editedBadge}>  (edited)</Text>
+                          <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                         )}
                       </Text>
                       {isOwnMessage && (
@@ -4757,7 +4778,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     <Text style={[styles.timestamp, styles.userTimestamp]}>
                       {formatTime(message.created_at)}
                       {message.edited && !message.deleted && (
-                        <Text style={styles.editedBadge}>  (edited)</Text>
+                        <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                       )}
                     </Text>
                     {!message.deleted && !isEditing && (
@@ -4769,7 +4790,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     <Text style={[styles.timestamp, styles.botTimestamp]}>
                       {formatTime(message.created_at)}
                       {message.edited && !message.deleted && (
-                        <Text style={styles.editedBadge}>  (edited)</Text>
+                        <Text style={[styles.editedBadge, isOwnMessage && styles.editedBadgeOwn]}>  (edited)</Text>
                       )}
                     </Text>
                   </View>
@@ -6087,6 +6108,10 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: 4,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+  },
+  // Own (celeste) bubbles: "(edited)" is white like the timestamp.
+  editedBadgeOwn: {
+    color: 'rgba(255, 255, 255, 0.85)', // Same as userTimestamp
   },
   deletedMessageText: {
     fontStyle: 'italic',
