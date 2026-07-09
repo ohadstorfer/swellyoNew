@@ -11,9 +11,19 @@
 alter table public.messages add column if not exists file_metadata    jsonb;
 alter table public.messages add column if not exists contact_metadata  jsonb;
 
--- The check_message_type CHECK enumerates allowed `type` values; extend it to
--- accept 'file' and 'contact' (else inserts fail with 23514). Applied to prod
--- 2026-07-08 via SQL. Preserves the original text/image/video/audio/commitment
+-- public.messages carries TWO type constraints, by design (see
+-- add_audio_messaging_support.sql). BOTH must list a new type or inserts fail
+-- with 23514:
+--
+--   1. messages_type_check  -> plain whitelist of allowed `type` values
+--   2. check_message_type   -> consistency between `type` and its metadata cols
+--
+-- 1) Whitelist — extend with 'file' and 'contact'.
+alter table public.messages drop constraint if exists messages_type_check;
+alter table public.messages add constraint messages_type_check
+  check (type in ('text', 'image', 'video', 'audio', 'commitment_request', 'file', 'contact'));
+
+-- 2) Consistency — preserves the original text/image/video/audio/commitment
 -- branches verbatim and appends the two new ones.
 alter table public.messages drop constraint if exists check_message_type;
 alter table public.messages add constraint check_message_type check (
