@@ -28,7 +28,7 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata, ContactMetadata } from '../services/messaging/messagingService';
 import { AttachPanel } from '../components/AttachPanel';
 import { useAttachPanel } from '../hooks/useAttachPanel';
 import { FileBubble } from '../components/messages/FileBubble';
@@ -61,6 +61,7 @@ import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { FilePreviewModal, type PickedFilePreview } from '../components/FilePreviewModal';
+import { ContactPreviewModal } from '../components/ContactPreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
@@ -519,6 +520,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const [pendingFile, setPendingFile] = useState<PickedFilePreview | null>(null);
   const [filePreviewVisible, setFilePreviewVisible] = useState(false);
+  const [pendingContact, setPendingContact] = useState<ContactMetadata | null>(null);
+  const [contactPreviewVisible, setContactPreviewVisible] = useState(false);
   const insets = useSafeAreaInsets();
   // Keyboard-aware padding for the chat area. Bypasses the measureLayout-based
   // KAV which breaks when nested inside react-native-screen-transitions' transformed
@@ -2832,58 +2835,65 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       const { pickContact } = await import('../services/messaging/contactPicker');
       const contact = await pickContact();
       if (!contact) return;
-      const conversationId = currentConversationId;
-      const clientId = Crypto.randomUUID();
-
-      const optimistic: Message = {
-        id: clientId,
-        client_id: clientId,
-        conversation_id: conversationId,
-        sender_id: currentUserId,
-        body: '',
-        type: 'contact',
-        contact_metadata: contact,
-        attachments: [],
-        is_system: false,
-        edited: false,
-        deleted: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        upload_state: 'sent',
-      } as Message;
-
-      setMessages((prev) => {
-        const next = [...prev, optimistic];
-        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
-        return next;
-      });
-      scrollToBottom();
-
-      try {
-        const created = await messagingService.createContactMessageWithMetadata(conversationId, contact, clientId);
-        setMessages((prev) => {
-          const next = prev.map(m =>
-            m.id === clientId
-              ? { ...created, contact_metadata: created.contact_metadata ?? contact, upload_state: 'sent' as const }
-              : m
-          );
-          chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
-          return next;
-        });
-      } catch (error: any) {
-        console.error('Error sending contact:', error);
-        setMessages((prev) => {
-          const next = prev.map(m =>
-            m.id === clientId ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
-          );
-          chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
-          return next;
-        });
-        Alert.alert('Could not send contact', friendlyErrorMessage(error, 'Failed to send contact'));
-      }
+      // Review before sending — the user chooses which numbers to share.
+      setPendingContact(contact);
+      setContactPreviewVisible(true);
     } catch (error: any) {
       console.error('Error picking contact:', error);
       Alert.alert('Error', friendlyErrorMessage(error, 'Failed to pick a contact'));
+    }
+  };
+
+  const sendContact = async (contact: ContactMetadata) => {
+    if (!currentConversationId || !currentUserId) return;
+    const conversationId = currentConversationId;
+    const clientId = Crypto.randomUUID();
+
+    const optimistic: Message = {
+      id: clientId,
+      client_id: clientId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: '',
+      type: 'contact',
+      contact_metadata: contact,
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      upload_state: 'sent',
+    } as Message;
+
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+      return next;
+    });
+    scrollToBottom();
+
+    try {
+      const created = await messagingService.createContactMessageWithMetadata(conversationId, contact, clientId);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...created, contact_metadata: created.contact_metadata ?? contact, upload_state: 'sent' as const }
+            : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+    } catch (error: any) {
+      console.error('Error sending contact:', error);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+      Alert.alert('Could not send contact', friendlyErrorMessage(error, 'Failed to send contact'));
     }
   };
 
@@ -5282,6 +5292,24 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           onCancel={() => {
             setFilePreviewVisible(false);
             setPendingFile(null);
+          }}
+          primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* Contact Preview Modal — choose which numbers/emails to share. */}
+      {pendingContact && (
+        <ContactPreviewModal
+          visible={contactPreviewVisible}
+          contact={pendingContact}
+          onSend={(filtered) => {
+            setContactPreviewVisible(false);
+            setPendingContact(null);
+            void sendContact(filtered);
+          }}
+          onCancel={() => {
+            setContactPreviewVisible(false);
+            setPendingContact(null);
           }}
           primaryColor={composerPrimaryColor}
         />
