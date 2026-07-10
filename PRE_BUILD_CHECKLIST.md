@@ -25,10 +25,11 @@ Changes below are sitting in branches/working trees and **require a new `eas bui
 |---|---|---|---|
 | 2026-07-03 | `react-native-keyboard-controller` **1.18.5 → 1.21.13** (`package.json`, on `ohad`) — fixes Android chat input overlapping keyboard + input vanishing below safe area on swipe-dismiss (upstream bug, fixed in lib 1.21.5) | Native module upgrade; new JS calls `KeyboardControllerNative.getConstants()` which doesn't exist in 1.18.5 binaries | **Hard crash at boot** — red screen `TypeError: getConstants is not a function`. Reproduced 2026-07-03 on a dev client with old native + new JS. An OTA carrying this JS bricks every installed binary until users reinstall. Bump `runtimeVersion` with the build so old binaries never pull the new bundle. |
 | 2026-07-03 | `styles.xml` AppTheme → `Theme.Material3.Light` + `app.json` `android.userInterfaceStyle: "light"` — forces light-only native dialogs (dark mode made AlertDialog buttons unreadable) | Committed native folder edit (`android/`) + app.json config; not part of the JS bundle | Silent no-op via OTA — dark-mode users keep unreadable dialogs until a store build ships |
+| 2026-07-09 | Chat attachments: `expo-camera`, `expo-media-library`, `expo-file-system`, `react-native-pdf-renderer`, `expo-share-intent`; local Expo module `modules/keyboard-direction`; `SwellyoShare` app-extension target | Five native modules, a local module with Swift + Kotlin, and a new Xcode target | **Hard crash at boot** — `react-native-pdf-renderer` and `modules/keyboard-direction` resolve native views/constants that don't exist in a 1.3.1 binary built before 2026-07-09. Bump `runtimeVersion` with the build. |
 
 ---
 
-## 1. Version sync — five spots that must match
+## 1. Version sync — seven spots that must match
 
 `eas.json` uses `cli.appVersionSource: "local"`, so EAS reads the version from the native files, **not from `app.json`**. Because the project is in **bare workflow** (committed `ios/` and `android/` folders), runtime-version POLICIES (e.g. `{ policy: "appVersion" }`) are **not supported** — EAS will refuse to start with: `"runtime version policies are not supported"`. We use a **literal string** for `runtimeVersion` instead, which means all five values must be kept in lockstep manually.
 
@@ -41,7 +42,9 @@ When bumping the app version (e.g. `1.1.0 → 1.2.0`), update **all** of these:
 | `ios/swellyo/Supporting/Expo.plist` | `EXUpdatesRuntimeVersion` (string) | Native iOS reads this on launch to know which OTA channel runtime applies |
 | `android/app/src/main/AndroidManifest.xml` | `expo.modules.updates.EXPO_RUNTIME_VERSION` | Same for Android |
 | `android/app/build.gradle` | `versionName` | The displayed app version on Android |
-| `ios/swellyo.xcodeproj/project.pbxproj` | `MARKETING_VERSION` (×2 occurrences) | The displayed app version on iOS |
+| `ios/Swellyo.xcodeproj/project.pbxproj` | `MARKETING_VERSION` (×6 — one per config × three targets) | The displayed app version on iOS |
+| `targets/notify-service/Info.plist` | `CFBundleShortVersionString` | An extension whose version drifts from the app is **rejected at submission** |
+| `targets/share-extension/Info.plist` | `CFBundleShortVersionString` | Same. Both extensions must match the app exactly |
 
 ### Verify with one command
 
@@ -140,6 +143,35 @@ Why: the signup path runs as role `supabase_auth_admin`, whose `search_path=auth
   `begin; set local search_path = auth; insert into public.users (id,email,created_at,updated_at) values (gen_random_uuid(),'t@t.co',now(),now()); rollback;` — must succeed.
 
 ---
+
+## 3b. iOS credentials — entitlement changes need an authenticated build
+
+`eas build --non-interactive` reuses the provisioning profile cached on EAS's servers and **never contacts Apple**, so it prints `All credentials are ready to build` and then fails inside Xcode:
+
+```
+Provisioning profile "*[expo] com.swellyo.app AdHoc" doesn't support the
+group.com.swellyo.app App Group.
+```
+
+Capability sync (`eas-cli/build/credentials/ios/appstore/capabilityList.js`) only runs when EAS is authenticated with Apple. So:
+
+- [ ] Added or changed an entitlement in `ios/Swellyo/Swellyo.entitlements` or `app.json` `ios.entitlements`? **Run the build interactively at least once** (`eas build -p ios --profile <p>`, no `--non-interactive`) and let it regenerate the profile. EAS creates the App Group identifier itself — no manual Apple portal work needed.
+- [ ] Added a new app-extension target? It gets its own bundle id (e.g. `com.swellyo.app.share`) and needs its own profile. Non-interactive **cannot** create one: `EAS CLI couldn't find any credentials suitable for internal distribution`.
+- [ ] After the profile exists, `--non-interactive` works again for that entitlement set.
+
+## 3c. Apple targets — `expo prebuild` cannot update an existing target
+
+`@bacons/apple-targets@4` throws when a target it manages is already in the pbxproj:
+
+```
+TypeError: [ios.xcodeProjectBeta2]: Cannot read properties of undefined (reading 'removeFromProject')
+```
+
+It nulls `buildConfigurationList` while removing the old build configs, then dereferences it. Incremental `npx expo prebuild -p ios` is therefore **broken** for this project as long as `targets/` is non-empty.
+
+- [ ] Use `npx expo prebuild -p ios --clean` instead. It regenerates `ios/` wholesale.
+- [ ] This is safe **only** because nothing in `ios/` is hand-written — `AppDelegate.swift` and the bridging header are stock templates, and the Podfile's apple-targets loader block is generated. **Re-verify that before running it.** Commit first; the diff is your safety net.
+- [ ] After `--clean`, diff `ios/Swellyo/Info.plist`. A stale committed project can be missing usage-description keys that plugins add (this is how `NSContactsUsageDescription` went missing until 2026-07-09 — iOS terminates the app on contact access without it).
 
 ## 4. Supabase Edge Functions
 
@@ -254,6 +286,8 @@ When the user says any of: "build", "ship", "release", "OTA", "update", "submit"
 6. **Check `git log origin/main..HEAD`** to confirm what's about to ship
 7. **List recent migrations**: `ls -lt supabase/migrations/ | head -5` and ASK the user if each was applied to Supabase
 8. **Determine native vs JS-only** by checking if recent commits touched `package.json`, `app.json` plugins, `ios/`, `android/` — and tell the user which command path applies (`eas update` vs `eas build`)
+9. **Diff the entitlements** (`git diff <last-build-tag> -- ios/Swellyo/Swellyo.entitlements app.json`). Any change means the iOS build MUST run interactively once — see §3b. `--non-interactive` will lie to you and fail 15 minutes later inside Xcode.
+10. **Check every `targets/*/` dir has a matching target in `ios/Swellyo.xcodeproj/project.pbxproj`** (`grep -c product-type.app-extension`). A directory with no target is authored-but-never-built Swift — it silently ships nothing. See §3c.
 
 ### Always confirm with the user before running
 
