@@ -71,6 +71,7 @@ import { getSenderColor } from '../utils/senderColor';
 import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { MediaAlbumBubble } from '../components/MediaAlbumBubble';
 import { AlbumGridModal } from '../components/AlbumGridModal';
+import { AlbumMediaViewer } from '../components/AlbumMediaViewer';
 import { buildDisplayRows, findRowIndexByMessageId, type ChatDisplayRow, type AlbumRow } from '../utils/mediaAlbums';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { AudioMessageBubble } from '../components/AudioMessageBubble';
@@ -600,6 +601,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [multiReviewItems, setMultiReviewItems] = useState<MediaReviewItem[] | null>(null);
   // Album "+N" expansion — the full grid of one album's items. null = closed.
   const [albumModalItems, setAlbumModalItems] = useState<Message[] | null>(null);
+  // Album fullscreen pager — swipe between the album's items (native only;
+  // web falls back to the single-item viewers). null = closed.
+  const [albumViewer, setAlbumViewer] = useState<{ items: Message[]; index: number } | null>(null);
 
   // OS-share media handoff ("Share to Swellyo" → picked this chat). Enter exactly
   // the preview state the pickers set, so caption + Send flow through the existing
@@ -4026,10 +4030,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     return map;
   }, [messages]);
 
-  // Open one album item fullscreen — the image viewer, or the video
-  // sign-and-play path (a copy of the video bubble's openVideo: viewer opens
-  // instantly on the poster, the signing round trip happens behind it).
-  const openAlbumItem = (m: Message) => {
+  // Open one album item fullscreen. Native: the AlbumMediaViewer pager —
+  // swipe moves between the album's items (WhatsApp). Web: fall back to the
+  // single-item viewers (expo-video playback + RNGH pan are mobile-tuned).
+  const openAlbumItem = (items: Message[], m: Message) => {
+    if (Platform.OS !== 'web') {
+      const index = items.findIndex((it) => (it.client_id || it.id) === (m.client_id || m.id));
+      setAlbumViewer({ items, index: Math.max(index, 0) });
+      return;
+    }
     if (m.type === 'video' || m.video_metadata) {
       const storagePath = m.video_metadata?.storage_path;
       const thumbnailUri = m.video_metadata?.thumbnail_url || m._localPreviewUri || '';
@@ -4082,7 +4091,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         <View>
           <MediaAlbumBubble
             items={album.items}
-            onPressItem={openAlbumItem}
+            onPressItem={(m) => openAlbumItem(album.items, m)}
             onLongPressItem={(m, e) => handleMessageLongPress(m, e, false)}
             onRetryItem={(m) => handleRetryUpload(m)}
             onPressMore={() => setAlbumModalItems(album.items)}
@@ -5680,14 +5689,25 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           items={albumModalItems}
           onClose={() => setAlbumModalItems(null)}
           onPressItem={(m) => {
+            const items = albumModalItems;
             setAlbumModalItems(null);
-            setTimeout(() => openAlbumItem(m), 320);
+            setTimeout(() => openAlbumItem(items, m), 320);
           }}
           onLongPressItem={() => {}}
           onRetryItem={(m) => {
             setAlbumModalItems(null);
             handleRetryUpload(m);
           }}
+        />
+      )}
+
+      {/* Album fullscreen pager — swipe between an album's items. */}
+      {albumViewer && (
+        <AlbumMediaViewer
+          visible
+          items={albumViewer.items}
+          initialIndex={albumViewer.index}
+          onClose={() => setAlbumViewer(null)}
         />
       )}
 

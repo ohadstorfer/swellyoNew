@@ -66,7 +66,10 @@ rendering incl. upload states), top-left X. Tap tile → same open-item callback
 
 ## Out of scope (v1)
 
-- Swipe between album items inside the fullscreen viewer
+- ~~Swipe between album items inside the fullscreen viewer~~ — DONE (follow-up):
+  `AlbumMediaViewer` pager opens on any album-tile tap (native; web keeps the
+  single-item viewers). One live video player at a time, lazy per-video URL
+  signing behind the poster, "x of N" counter, same pan-to-dismiss recipe.
 - Animated tile insertion as new items join an album (the grid re-renders)
 - Swipe-to-reply on the album bubble as a whole (reply per item via long-press)
 
