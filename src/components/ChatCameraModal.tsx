@@ -28,6 +28,7 @@ import {
   AccessibilityInfo,
   Alert,
   Animated,
+  Easing,
   Linking,
   Modal,
   Platform,
@@ -175,6 +176,11 @@ export function ChatCameraModal({
   // and flips on its own schedule while a recording spins up.
   const [captureMode, setCaptureMode] = useState<'photo' | 'video'>('photo');
   const captureModeRef = useRef<'photo' | 'video'>('photo');
+  // Drives the mode-selector slide: 0 = VIDEO centered, 1 = PHOTO centered.
+  // Starts at 1 to match the initial captureMode above.
+  const modeAnim = useRef(new Animated.Value(1)).current;
+  const [videoLabelWidth, setVideoLabelWidth] = useState(0);
+  const [photoLabelWidth, setPhotoLabelWidth] = useState(0);
 
   // Pre-configure the native session for the selected tab: pay the mode-switch
   // reconfiguration once at tab switch, so tap-to-record in the VIDEO tab
@@ -259,9 +265,10 @@ export function ChatCameraModal({
     setPreviewImageUri(null);
     setMode('picture');
     setCaptureMode('photo');
+    modeAnim.setValue(1);
     setIsRecording(false);
     setRecordSeconds(0);
-  }, [visible]);
+  }, [visible, modeAnim]);
 
   // Recording timer readout.
   useEffect(() => {
@@ -279,6 +286,20 @@ export function ChatCameraModal({
       useNativeDriver: true,
     }).start();
   }, [shutterScale]);
+
+  // Switch the WhatsApp-style mode tabs, sliding the selected label to center
+  // and swapping colors. Color can't run on the native driver, so the whole
+  // value stays JS-driven — cheap for a two-label row.
+  const animateCaptureMode = useCallback((next: 'photo' | 'video') => {
+    if (captureModeRef.current === next) return;
+    setCaptureMode(next);
+    Animated.timing(modeAnim, {
+      toValue: next === 'photo' ? 1 : 0,
+      duration: reduceMotionRef.current ? 0 : 220,
+      easing: Easing.bezier(0.77, 0, 0.175, 1),
+      useNativeDriver: false,
+    }).start();
+  }, [modeAnim]);
 
   // Legacy fallback: route an asset to the host's external preview (used only
   // when the inline-preview callbacks weren't wired).
@@ -544,6 +565,27 @@ export function ChatCameraModal({
     [presentPick]
   );
 
+  // Mode-selector geometry: shift the whole VIDEO/PHOTO row so the active
+  // label's own center — not the pair's — lands on the row's center. Falls
+  // back to an equal-width guess until both labels have reported onLayout.
+  const modeLabelGap = styles.modeRowInner.gap as number;
+  const videoW = videoLabelWidth || 58;
+  const photoW = photoLabelWidth || 58;
+  const modeRowTranslateX = modeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: reduceMotionRef.current
+      ? [0, 0]
+      : [(modeLabelGap + photoW) / 2, -(videoW + modeLabelGap) / 2],
+  });
+  const videoLabelColor = modeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['#FFCC00', 'rgba(255,255,255,0.75)'],
+  });
+  const photoLabelColor = modeAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(255,255,255,0.75)', '#FFCC00'],
+  });
+
   return (
     <Modal
       visible={visible}
@@ -682,26 +724,36 @@ export function ChatCameraModal({
             style={[styles.modeRow, isRecording && styles.modeRowHidden]}
             pointerEvents={isRecording ? 'none' : 'auto'}
           >
-            <Pressable
-              onPress={() => setCaptureMode('video')}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityState={{ selected: captureMode === 'video' }}
+            <Animated.View
+              style={[styles.modeRowInner, { transform: [{ translateX: modeRowTranslateX }] }]}
             >
-              <Text style={[styles.modeLabel, captureMode === 'video' && styles.modeLabelActive]}>
-                VIDEO
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setCaptureMode('photo')}
-              hitSlop={10}
-              accessibilityRole="button"
-              accessibilityState={{ selected: captureMode === 'photo' }}
-            >
-              <Text style={[styles.modeLabel, captureMode === 'photo' && styles.modeLabelActive]}>
-                PHOTO
-              </Text>
-            </Pressable>
+              <Pressable
+                onPress={() => animateCaptureMode('video')}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityState={{ selected: captureMode === 'video' }}
+              >
+                <Animated.Text
+                  onLayout={e => setVideoLabelWidth(e.nativeEvent.layout.width)}
+                  style={[styles.modeLabel, { color: videoLabelColor }]}
+                >
+                  VIDEO
+                </Animated.Text>
+              </Pressable>
+              <Pressable
+                onPress={() => animateCaptureMode('photo')}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityState={{ selected: captureMode === 'photo' }}
+              >
+                <Animated.Text
+                  onLayout={e => setPhotoLabelWidth(e.nativeEvent.layout.width)}
+                  style={[styles.modeLabel, { color: photoLabelColor }]}
+                >
+                  PHOTO
+                </Animated.Text>
+              </Pressable>
+            </Animated.View>
           </View>
         </View>
 
@@ -846,10 +898,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF3B30',
   },
   modeRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 36,
+    alignItems: 'center',
     paddingTop: 18,
+  },
+  modeRowInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 36,
   },
   modeRowHidden: {
     opacity: 0,
@@ -863,9 +918,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     fontFamily: ff('Inter', '600'),
     includeFontPadding: false,
-  },
-  modeLabelActive: {
-    color: '#FFCC00',
   },
   previewOverlay: {
     ...StyleSheet.absoluteFillObject,
