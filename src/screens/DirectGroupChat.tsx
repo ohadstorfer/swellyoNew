@@ -64,6 +64,7 @@ import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { FilePreviewModal, type PickedFilePreview } from '../components/FilePreviewModal';
 import { ContactPreviewModal } from '../components/ContactPreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
+import { MediaReviewModal, type MediaReviewItem } from '../components/MediaReviewModal';
 import { ChatCameraModal, type CapturedAsset } from '../components/ChatCameraModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
@@ -531,6 +532,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [filePreviewVisible, setFilePreviewVisible] = useState(false);
   const [pendingContact, setPendingContact] = useState<ContactMetadata | null>(null);
   const [contactPreviewVisible, setContactPreviewVisible] = useState(false);
+  // Multi-select gallery batch (≥2 picked assets) awaiting review. null = closed.
+  const [multiReviewItems, setMultiReviewItems] = useState<MediaReviewItem[] | null>(null);
 
   // OS-share media handoff ("Share to Swellyo" → picked this chat). Enter exactly
   // the preview state the pickers set, so caption + Send flow through the existing
@@ -2409,7 +2412,28 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ['images', 'videos'],
               quality: 1,
+              // WhatsApp-style multi-select. One asset keeps the single-item
+              // flow below; ≥2 route to MediaReviewModal.
+              allowsMultipleSelection: true,
+              selectionLimit: 30,
+              orderedSelection: true,
             });
+
+            if (!result.canceled && (result.assets?.length ?? 0) > 1) {
+              const items: MediaReviewItem[] = result.assets.map((a: any) => ({
+                uri: a.uri,
+                isVideo: a.type === 'video' || a.uri.endsWith('.mp4') || a.uri.endsWith('.mov'),
+                width: a.width > 0 ? a.width : undefined,
+                height: a.height > 0 ? a.height : undefined,
+                // expo-image-picker reports duration in milliseconds
+                duration: typeof a.duration === 'number' ? a.duration / 1000 : undefined,
+                mimeType: a.mimeType ?? undefined,
+                fileSize: a.fileSize ?? undefined,
+              }));
+              if (__DEV__) console.log('[DirectGroupChat] multi-pick →', items.length, 'items');
+              setMultiReviewItems(items);
+              return;
+            }
 
             const asset = result.assets?.[0];
             const uri = asset?.uri ?? (result as { uri?: string }).uri;
@@ -5356,6 +5380,29 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             setContactPreviewVisible(false);
             setPendingContact(null);
           }}
+          primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* Multi-media review (≥2 gallery picks) — WhatsApp-style pager with
+          per-item captions. Send fires each item through the SAME upload-first
+          helpers as single sends, one message per item, in selection order.
+          Known quirk (documented in the spec): videos inject their optimistic
+          bubble only after poster generation, so in a mixed batch a video can
+          land after a later-picked photo. */}
+      {multiReviewItems && (
+        <MediaReviewModal
+          visible
+          items={multiReviewItems}
+          onSend={(reviewed) => {
+            setMultiReviewItems(null);
+            for (const item of reviewed) {
+              if (item.isVideo) void handleVideoSend(item.caption, item.uri);
+              else void handleImageSend(item.caption, item.uri);
+            }
+          }}
+          onCancel={() => setMultiReviewItems(null)}
+          onCropImage={Platform.OS !== 'web' && getImageCropPicker() ? cropImage : undefined}
           primaryColor={composerPrimaryColor}
         />
       )}
