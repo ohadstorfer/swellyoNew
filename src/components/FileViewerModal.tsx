@@ -8,7 +8,7 @@
  * it; it owns no file lifecycle.
  */
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { FilePreviewShell } from './filePreview/FilePreviewShell';
@@ -53,13 +53,18 @@ export const FileViewerModal: React.FC<FileViewerModalProps> = ({
 
   const handleShare = async () => {
     try {
-      const Sharing = require('expo-sharing');
-      if (Sharing && (await Sharing.isAvailableAsync())) {
-        await Sharing.shareAsync(uri, { mimeType });
-        return;
+      let shared = false;
+      try {
+        const Sharing = require('expo-sharing');
+        if (Sharing && (await Sharing.isAvailableAsync())) {
+          await Sharing.shareAsync(uri, { mimeType });
+          shared = true;
+        }
+      } catch { /* expo-sharing missing/unavailable — fall through to Linking */ }
+      if (!shared) {
+        const { Linking } = require('react-native');
+        await Linking.openURL(uri);
       }
-      const { Linking } = require('react-native');
-      await Linking.openURL(uri);
     } catch (e: any) {
       const { Alert } = require('react-native');
       Alert.alert('Could not share', friendlyErrorMessage(e, 'Failed to share the file.'));
