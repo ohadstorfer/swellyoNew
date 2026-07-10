@@ -124,11 +124,25 @@ export function useAttachPanel(): AttachPanelApi {
         // Blank the keyboard in place. It stays open, so there is no slide at all.
         activateKeyboardPassthrough(state.height).then((applied) => {
           passthroughActive.current = applied;
+          if (__DEV__) {
+            // Three failure modes, one line to tell them apart: module absent (never
+            // reaches here), nothing focused (applied=false), or applied and still
+            // grey — which would mean UIKit paints its own backdrop and the whole
+            // prototype is dead.
+            console.log(
+              `[attach-panel] passthrough available=${isKeyboardPassthroughAvailable} applied=${applied} height=${state.height}`,
+            );
+          }
           // `false` means nothing was focused — the keyboard was already gone, and
           // dismissing is the no-op that keeps the two paths identical.
           if (!applied) Keyboard.dismiss();
         });
       } else {
+        if (__DEV__) {
+          console.log(
+            `[attach-panel] passthrough OFF (available=${isKeyboardPassthroughAvailable}, flag=${KEYBOARD_PASSTHROUGH_PROTOTYPE}) — falling back to Keyboard.dismiss()`,
+          );
+        }
         Keyboard.dismiss();
       }
     }
