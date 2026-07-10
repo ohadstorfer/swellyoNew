@@ -7,17 +7,25 @@
  */
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '../../services/messaging/messagingService';
 import { ff, fs } from '../../theme/fonts';
 
+// Match the text bubbles: MESSAGE_BUBBLE_MAX_WIDTH (window.width - 106) in the
+// chat screens, minus the bubble's own 10px horizontal padding on each side.
+const CARD_MAX_WIDTH = Dimensions.get('window').width - 126;
+
 interface ContactBubbleProps {
   message: Message;
   isOwn: boolean;
+  /** Pre-formatted clock time (e.g. "14:22") shown in the header, next to the name. */
+  timeText?: string;
+  /** Read-receipt node (own messages only); rendered next to the clock time. */
+  receipt?: React.ReactNode;
 }
 
-export function ContactBubble({ message, isOwn }: ContactBubbleProps) {
+export function ContactBubble({ message, isOwn, timeText, receipt }: ContactBubbleProps) {
   const [saving, setSaving] = useState(false);
   const meta = message.contact_metadata;
   if (!meta) return null;
@@ -84,6 +92,12 @@ export function ContactBubble({ message, isOwn }: ContactBubbleProps) {
             {subtitle}
           </Text>
         </View>
+        {(!!timeText || !!receipt) && (
+          <View style={styles.metaTopRight}>
+            {!!timeText && <Text style={[styles.time, { color: subColor }]}>{timeText}</Text>}
+            {receipt}
+          </View>
+        )}
       </View>
 
       <Pressable
@@ -104,13 +118,15 @@ export function ContactBubble({ message, isOwn }: ContactBubbleProps) {
 
 const styles = StyleSheet.create({
   card: {
-    minWidth: 200,
-    maxWidth: 250,
+    // Fixed, not just capped: the card always spans a full-width text bubble,
+    // otherwise a short name shrinks it to its content.
+    width: CARD_MAX_WIDTH,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingBottom: 10,
+    paddingBottom: 12,
+    paddingTop: 2,
   },
   avatar: {
     width: 44,
@@ -122,6 +138,19 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+  },
+  metaTopRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    marginLeft: 6,
+    
+    gap: 4,
+  },
+  time: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(11),
+    includeFontPadding: false,
   },
   name: {
     fontFamily: ff('Inter', '600'),
@@ -140,7 +169,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 9,
+    paddingTop: 12,
+    paddingBottom: 9,
   },
   saveText: {
     fontFamily: ff('Inter', '600'),

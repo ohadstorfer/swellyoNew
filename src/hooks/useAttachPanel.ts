@@ -47,6 +47,14 @@ export interface AttachPanelApi {
    * button must answer the moment it is pressed.
    */
   showKeyboardIcon: boolean;
+  /**
+   * The panel is mounted but on its way out: the user asked for the keyboard and it
+   * is rising over the (still-mounted) panel. The panel has to stay in the tree for
+   * that whole animation to hold the layout, but its buttons must stop responding and
+   * fade the instant the intent is registered — otherwise a tap that lands in the gap
+   * before the keyboard covers them fires a stale action or hits the flipped "+" icon.
+   */
+  panelDismissing: boolean;
   togglePanel: () => void;
   /**
    * Dismiss the panel without summoning the keyboard. For taps that land on the
@@ -181,6 +189,7 @@ export function useAttachPanel(): AttachPanelApi {
     panelOpen: state.open,
     panelHeight: state.height,
     showKeyboardIcon: state.open && !state.returningToKeyboard,
+    panelDismissing: state.open && state.returningToKeyboard,
     togglePanel,
     closePanel,
     requestKeyboard,

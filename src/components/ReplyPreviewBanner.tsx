@@ -30,6 +30,10 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
     preview = 'Video';
   } else if (message.type === 'audio') {
     preview = 'Voice message';
+  } else if (message.type === 'file') {
+    preview = message.file_metadata?.display_name || 'File';
+  } else if (message.type === 'contact') {
+    preview = message.contact_metadata?.display_name || 'Contact';
   } else {
     preview = (message.body || '').trim();
   }
@@ -38,6 +42,8 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
     message.type === 'image' ? 'image-outline' :
     message.type === 'video' ? 'videocam-outline' :
     message.type === 'audio' ? 'mic-outline' :
+    message.type === 'file' ? 'document-outline' :
+    message.type === 'contact' ? 'person-outline' :
     null;
 
   return (

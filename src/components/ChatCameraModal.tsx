@@ -25,6 +25,7 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   Alert,
   Animated,
   Linking,
@@ -44,7 +45,9 @@ import {
 } from 'expo-camera';
 import Svg, { Path, Rect, Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { RecentMediaStrip, type GalleryAsset } from './RecentMediaStrip';
+import { RecentMediaStrip, type GalleryAsset, type StripFrame } from './RecentMediaStrip';
+import { ImagePreviewContent } from './ImagePreviewContent';
+import { VideoPreviewContent } from './VideoPreviewContent';
 import { ff, fs } from '../theme/fonts';
 
 export interface CapturedAsset {
@@ -59,13 +62,37 @@ export interface CapturedAsset {
 
 interface ChatCameraModalProps {
   visible: boolean;
+  /**
+   * Legacy fallback: routes an asset to the host's external preview. Only used
+   * when onSendImage/onSendVideo aren't wired — otherwise every asset (shutter
+   * captures and filmstrip picks) previews inline on the camera surface.
+   */
   onCapture: (asset: CapturedAsset) => void;
   onCancel: () => void;
   /** Opens the full OS gallery picker (the caller closes this modal first). */
   onOpenGallery: () => void;
+  /**
+   * When both are provided, every asset — shutter captures and filmstrip picks —
+   * previews inline on this same surface (caption + send over the media), so the
+   * camera never detours through the chat. Send the final image/video uri
+   * straight to the host's upload path.
+   */
+  onSendImage?: (uri: string, caption?: string) => void;
+  onSendVideo?: (uri: string, caption?: string) => void;
+  /**
+   * Opens the native crop editor on an image and resolves the edited file (or
+   * null if cancelled). Absent → the inline preview hides its Edit button.
+   */
+  onCropImage?: (
+    uri: string,
+    width: number,
+    height: number,
+  ) => Promise<{ uri: string; width: number; height: number } | null>;
+  /** Send-button tint for the inline preview, to match the host chat's theme. */
+  primaryColor?: string;
 }
 
-const HOLD_TO_RECORD_MS = 300;
+const HOLD_TO_RECORD_MS = 200;
 const MAX_VIDEO_SECONDS = 60;
 
 const CloseIcon = () => (
@@ -122,7 +149,16 @@ function formatTimer(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }: ChatCameraModalProps) {
+export function ChatCameraModal({
+  visible,
+  onCapture,
+  onCancel,
+  onOpenGallery,
+  onSendImage,
+  onSendVideo,
+  onCropImage,
+  primaryColor = '#B72DF2',
+}: ChatCameraModalProps) {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -133,6 +169,22 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
   const [mode, setMode] = useState<'picture' | 'video'>('picture');
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
+  // WhatsApp-style bottom mode selector. Photo mode keeps tap=photo /
+  // hold=video; Video mode makes the shutter tap-to-start / tap-to-stop.
+  // Distinct from `mode` above, which is the CameraView's native session mode
+  // and flips on its own schedule while a recording spins up.
+  const [captureMode, setCaptureMode] = useState<'photo' | 'video'>('photo');
+  const captureModeRef = useRef<'photo' | 'video'>('photo');
+
+  // Pre-configure the native session for the selected tab: pay the mode-switch
+  // reconfiguration once at tab switch, so tap-to-record in the VIDEO tab
+  // starts (almost) instantly instead of lagging on every take.
+  useEffect(() => {
+    captureModeRef.current = captureMode;
+    if (!recordingRef.current) {
+      setMode(captureMode === 'video' ? 'video' : 'picture');
+    }
+  }, [captureMode]);
 
   // Gesture bookkeeping. Refs, not state: pressIn/pressOut and the retry loop
   // race each other across ticks and must read current values synchronously.
@@ -144,6 +196,34 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
   const deniedAlertShownRef = useRef(false);
 
   const shutterScale = useRef(new Animated.Value(1)).current;
+
+  // ── Inline preview: a tapped thumbnail opens the caption/send UI on this same
+  // surface. The preview grows its own image/video from the thumbnail frame to
+  // its final laid-out position (openFrame), so it lands exactly at the editor
+  // size — no external modal, no fullscreen overshoot, no jump.
+  const growingRef = useRef(false);
+  const reduceMotionRef = useRef(false);
+  const [preview, setPreview] = useState<GalleryAsset | null>(null);
+  const [previewFrame, setPreviewFrame] = useState<StripFrame | undefined>(undefined);
+  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  const previewImageDimsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  // Inline preview is only possible when the host wired the send callbacks;
+  // otherwise fall back to the legacy onCapture → external-preview route.
+  const canInlinePreview = !!(onSendImage && onSendVideo);
+
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then(v => {
+      if (mounted) reduceMotionRef.current = v;
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', v => {
+      reduceMotionRef.current = v;
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
 
   // ── Camera permission: required. Ask once when the modal opens; a hard
   // denial closes the modal after offering Settings.
@@ -173,7 +253,12 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
     busyRef.current = false;
     holdingRef.current = false;
     recordingRef.current = false;
+    growingRef.current = false;
+    setPreview(null);
+    setPreviewFrame(undefined);
+    setPreviewImageUri(null);
     setMode('picture');
+    setCaptureMode('photo');
     setIsRecording(false);
     setRecordSeconds(0);
   }, [visible]);
@@ -195,18 +280,52 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
     }).start();
   }, [shutterScale]);
 
+  // Legacy fallback: route an asset to the host's external preview (used only
+  // when the inline-preview callbacks weren't wired).
+  const routePick = useCallback(
+    (asset: GalleryAsset) => {
+      onCapture({
+        uri: asset.uri,
+        isVideo: asset.isVideo,
+        width: asset.width,
+        height: asset.height,
+        duration: asset.duration,
+      });
+    },
+    [onCapture]
+  );
+
+  // Open the inline preview on this same surface — the camera stays mounted
+  // behind it, so there's no detour through the chat. With `frame` (filmstrip
+  // tap) the media grows from that rect; without it (shutter captures) it
+  // appears in place.
+  const presentPick = useCallback(
+    (asset: GalleryAsset, frame?: StripFrame) => {
+      if (!canInlinePreview) {
+        routePick(asset);
+        return;
+      }
+      if (!asset.isVideo) {
+        setPreviewImageUri(asset.uri);
+        previewImageDimsRef.current = { width: asset.width ?? 0, height: asset.height ?? 0 };
+      }
+      setPreviewFrame(reduceMotionRef.current ? undefined : frame);
+      setPreview(asset);
+    },
+    [canInlinePreview, routePick]
+  );
+
   const takePicture = useCallback(async () => {
     if (busyRef.current || !cameraRef.current) return;
     busyRef.current = true;
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
       if (photo?.uri) {
-        onCapture({
+        presentPick({
           uri: photo.uri,
           isVideo: false,
           width: photo.width,
           height: photo.height,
-          mimeType: 'image/jpeg',
         });
       }
     } catch (error) {
@@ -219,54 +338,63 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
       console.error('[ChatCameraModal] takePictureAsync failed:', error);
       Alert.alert('Error', 'Failed to take photo. Please try again.');
     }
-  }, [onCapture]);
+  }, [presentPick]);
 
-  // Kicks off recordAsync once the video session is live. Mode was just
-  // flipped to "video"; the native session reconfigures on its own schedule,
-  // so retry a few times instead of trusting any single callback to fire.
+  // Kicks off recordAsync once the video session is live. In the VIDEO tab the
+  // session is already configured (mode flips on tab switch), so the first
+  // attempt usually sticks; from a PHOTO-tab hold the mode was just flipped and
+  // the native session reconfigures on its own schedule, so retry a few times
+  // instead of trusting any single callback to fire.
+  //
+  // isRecording flips ON once here and OFF once in the finally — flipping it
+  // per attempt made the timer, red shutter, and filmstrip strobe on every
+  // failed attempt while the session spun up.
   const startRecording = useCallback(async () => {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      if (!holdingRef.current || !cameraRef.current) return; // finger lifted while spinning up
-      try {
-        recordingRef.current = true;
-        recordStartRef.current = Date.now();
-        setIsRecording(true);
-        setRecordSeconds(0);
-        const recordPromise = cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
-        const video = await recordPromise; // resolves on stopRecording() or maxDuration
-        const durationSec = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
-        recordingRef.current = false;
-        setIsRecording(false);
-        setMode('picture');
-        if (video?.uri) {
-          onCapture({
-            uri: video.uri,
-            isVideo: true,
-            duration: durationSec,
-            mimeType: video.uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4',
-          });
-        }
-        return;
-      } catch (error) {
-        recordingRef.current = false;
-        setIsRecording(false);
-        // Session not ready yet — wait a beat and retry while still holding.
-        if (attempt < 5 && holdingRef.current) {
-          await new Promise(resolve => setTimeout(resolve, 250));
-          continue;
-        }
-        setMode('picture');
-        const msg = error instanceof Error ? error.message : String(error);
-        if (/simulator/i.test(msg)) {
-          Alert.alert('Camera unavailable', 'iOS Simulator has no camera. Test on a physical device.');
+    setIsRecording(true);
+    setRecordSeconds(0);
+    recordStartRef.current = Date.now();
+    try {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (!holdingRef.current || !cameraRef.current) return; // finger lifted while spinning up
+        try {
+          recordingRef.current = true;
+          recordStartRef.current = Date.now();
+          const recordPromise = cameraRef.current.recordAsync({ maxDuration: MAX_VIDEO_SECONDS });
+          const video = await recordPromise; // resolves on stopRecording() or maxDuration
+          const durationSec = Math.max(1, Math.round((Date.now() - recordStartRef.current) / 1000));
+          recordingRef.current = false;
+          holdingRef.current = false; // disarm tap-mode intent (maxDuration can end the take)
+          if (video?.uri) {
+            presentPick({
+              uri: video.uri,
+              isVideo: true,
+              duration: durationSec,
+            });
+          }
+          return;
+        } catch (error) {
+          recordingRef.current = false;
+          // Session not ready yet — wait a beat and retry while still armed.
+          if (attempt < 5 && holdingRef.current) {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            continue;
+          }
+          const msg = error instanceof Error ? error.message : String(error);
+          if (/simulator/i.test(msg)) {
+            Alert.alert('Camera unavailable', 'iOS Simulator has no camera. Test on a physical device.');
+            return;
+          }
+          console.error('[ChatCameraModal] recordAsync failed:', error);
+          Alert.alert('Error', 'Failed to record video. Please try again.');
           return;
         }
-        console.error('[ChatCameraModal] recordAsync failed:', error);
-        Alert.alert('Error', 'Failed to record video. Please try again.');
-        return;
       }
+    } finally {
+      setIsRecording(false);
+      // Restore the session for the selected tab (video stays hot in VIDEO).
+      setMode(captureModeRef.current === 'video' ? 'video' : 'picture');
     }
-  }, [onCapture]);
+  }, [presentPick]);
 
   const beginHold = useCallback(async () => {
     if (busyRef.current) return;
@@ -275,6 +403,7 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
     if (!micPermission?.granted) {
       const result = await requestMicPermission();
       if (!result.granted) {
+        holdingRef.current = false;
         if (!result.canAskAgain) {
           Alert.alert(
             'Microphone needed',
@@ -290,6 +419,14 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
         return;
       }
       if (!holdingRef.current) return; // finger lifted during the permission prompt
+      // iOS: the session lives in video mode permanently and the mic input
+      // attaches reactively when `mute` flips false after this grant. Give the
+      // session a beat to wire the audio in, or the first-ever video records
+      // silent. Only paid once, right after the system permission dialog.
+      if (Platform.OS === 'ios') {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!holdingRef.current) return;
+      }
     }
     setMode('video');
     void startRecording();
@@ -297,15 +434,29 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
 
   const handleShutterPressIn = useCallback(() => {
     pressShutter(true);
+    if (captureMode === 'video') {
+      // Video mode is tap-to-toggle: first tap starts, second tap stops.
+      if (recordingRef.current) {
+        holdingRef.current = false;
+        cameraRef.current?.stopRecording();
+        return;
+      }
+      // holdingRef doubles as "recording intent" for the startRecording retry
+      // loop; in tap mode it stays armed until the stop tap.
+      holdingRef.current = true;
+      void beginHold();
+      return;
+    }
     holdingRef.current = true;
     holdTimerRef.current = setTimeout(() => {
       holdTimerRef.current = null;
       if (holdingRef.current) void beginHold();
     }, HOLD_TO_RECORD_MS);
-  }, [beginHold, pressShutter]);
+  }, [beginHold, pressShutter, captureMode]);
 
   const handleShutterPressOut = useCallback(() => {
     pressShutter(false);
+    if (captureMode === 'video') return; // tap-to-toggle: release does nothing
     holdingRef.current = false;
     if (holdTimerRef.current) {
       // Quick tap: hold threshold never fired → photo.
@@ -321,7 +472,7 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
     // Hold started but recording never began (mode still spinning up or the
     // mic prompt was up) — cancel back to picture mode, nothing to send.
     setMode('picture');
-  }, [pressShutter, takePicture]);
+  }, [pressShutter, takePicture, captureMode]);
 
   // Safety: never leave a recording running if the modal is closed mid-hold.
   useEffect(() => {
@@ -339,17 +490,58 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
     setFacing(prev => (prev === 'back' ? 'front' : 'back'));
   }, []);
 
+  // Dismiss the inline preview back to the live camera (swipe-down / close ✕).
+  const handlePreviewCancel = useCallback(() => {
+    setPreview(null);
+    setPreviewFrame(undefined);
+    setPreviewImageUri(null);
+    growingRef.current = false;
+    busyRef.current = false; // re-arm the shutter after a cancelled capture
+  }, []);
+
+  const handlePreviewSendImage = useCallback(
+    (caption?: string) => {
+      if (previewImageUri) onSendImage?.(previewImageUri, caption);
+      onCancel();
+    },
+    [previewImageUri, onSendImage, onCancel]
+  );
+
+  const handlePreviewSendVideo = useCallback(
+    (caption?: string, overrideUri?: string) => {
+      const uri = overrideUri ?? preview?.uri;
+      if (uri) onSendVideo?.(uri, caption);
+      onCancel();
+    },
+    [preview, onSendVideo, onCancel]
+  );
+
+  const handlePreviewEdit = useCallback(async () => {
+    if (!previewImageUri || !onCropImage) return;
+    const { width, height } = previewImageDimsRef.current;
+    try {
+      const result = await onCropImage(previewImageUri, width, height);
+      if (result?.uri) {
+        setPreviewImageUri(result.uri);
+        previewImageDimsRef.current = { width: result.width, height: result.height };
+      }
+    } catch (err) {
+      console.warn('[ChatCameraModal] crop failed:', err);
+    }
+  }, [previewImageUri, onCropImage]);
+
   const handleStripSelect = useCallback(
-    (asset: GalleryAsset) => {
-      onCapture({
-        uri: asset.uri,
-        isVideo: asset.isVideo,
-        width: asset.width,
-        height: asset.height,
-        duration: asset.duration,
+    (_displayUri: string, frame: StripFrame, _isVideo: boolean, asset: Promise<GalleryAsset>) => {
+      if (growingRef.current) return;
+      growingRef.current = true;
+      // Resolve the real file, then open the preview — which grows its own media
+      // from the tapped thumbnail's frame to its final position.
+      asset.then(a => presentPick(a, frame)).catch(err => {
+        console.warn('[ChatCameraModal] filmstrip asset failed to resolve:', err);
+        growingRef.current = false;
       });
     },
-    [onCapture]
+    [presentPick]
   );
 
   return (
@@ -361,6 +553,18 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
       navigationBarTranslucent={Platform.OS === 'android'}
     >
       <View style={styles.container}>
+        {/* iOS runs the native session in video mode PERMANENTLY: flipping mode
+            reconfigures the running AVCaptureSession (preset + movie output +
+            mic attach/detach), and each reconfiguration blanks the preview /
+            resets exposure — the dark flick on every photo↔video switch. So:
+            - mode is pinned to 'video'; takePictureAsync has no mode guard and
+              the photo output is always attached, so photos still work (at the
+              1080p session format — the upload pipeline's ≤2560px makes the
+              12MP→2MP drop irrelevant).
+            - pictureSize matches videoQuality so no preset ever changes.
+            - the mic attaches once via `mute` flipping false when permission
+              lands, not on every mode flip.
+            Android keeps the per-tab mode flips (different native stack). */}
         {cameraPermission?.granted && (
           <CameraView
             ref={cameraRef}
@@ -368,8 +572,10 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
             facing={facing}
             flash={flash}
             enableTorch={isRecording && flash !== 'off'}
-            mode={mode}
+            mode={Platform.OS === 'ios' ? 'video' : mode}
+            mute={Platform.OS === 'ios' ? !micPermission?.granted : false}
             videoQuality="1080p"
+            pictureSize={Platform.OS === 'ios' ? '1920x1080' : undefined}
           />
         )}
 
@@ -409,9 +615,16 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
           )}
         </View>
 
-        {/* Bottom: filmstrip above the controls row */}
+        {/* Bottom: filmstrip above the controls row. The strip hides by opacity
+            while recording — unmounting its FlatList of thumbnails right at
+            record start/stop caused a visible hitch. */}
         <View style={[styles.bottom, { paddingBottom: insets.bottom + 16 }]}>
-          {!isRecording && <RecentMediaStrip onSelect={handleStripSelect} />}
+          <View
+            style={isRecording && styles.stripHidden}
+            pointerEvents={isRecording ? 'none' : 'auto'}
+          >
+            <RecentMediaStrip onSelect={handleStripSelect} />
+          </View>
           <View style={styles.controlsRow}>
             {isRecording ? (
               <View style={styles.sideButton} />
@@ -430,13 +643,19 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
               onPressIn={handleShutterPressIn}
               onPressOut={handleShutterPressOut}
               accessibilityRole="button"
-              accessibilityLabel="Take photo, hold to record video"
+              accessibilityLabel={
+                captureMode === 'video'
+                  ? isRecording
+                    ? 'Stop recording'
+                    : 'Start recording'
+                  : 'Take photo, hold to record video'
+              }
             >
               <View style={[styles.shutterRing, isRecording && styles.shutterRingRecording]}>
                 <Animated.View
                   style={[
                     styles.shutterInner,
-                    isRecording && styles.shutterInnerRecording,
+                    (captureMode === 'video' || isRecording) && styles.shutterInnerRecording,
                     { transform: [{ scale: shutterScale }] },
                   ]}
                 />
@@ -456,7 +675,64 @@ export function ChatCameraModal({ visible, onCapture, onCancel, onOpenGallery }:
               </Pressable>
             )}
           </View>
+
+          {/* WhatsApp-style mode selector. Kept mounted (opacity 0) while
+              recording so the shutter doesn't jump when the row hides. */}
+          <View
+            style={[styles.modeRow, isRecording && styles.modeRowHidden]}
+            pointerEvents={isRecording ? 'none' : 'auto'}
+          >
+            <Pressable
+              onPress={() => setCaptureMode('video')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityState={{ selected: captureMode === 'video' }}
+            >
+              <Text style={[styles.modeLabel, captureMode === 'video' && styles.modeLabelActive]}>
+                VIDEO
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setCaptureMode('photo')}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityState={{ selected: captureMode === 'photo' }}
+            >
+              <Text style={[styles.modeLabel, captureMode === 'photo' && styles.modeLabelActive]}>
+                PHOTO
+              </Text>
+            </Pressable>
+          </View>
         </View>
+
+        {/* Inline preview: caption + send (and edit/trim) on this same surface.
+            The preview grows its own media from the tapped thumbnail's frame
+            (openFrame) straight to its final editor size — no external modal,
+            no fullscreen overshoot, no jump. */}
+        {preview && (
+          <View style={styles.previewOverlay}>
+            {preview.isVideo ? (
+              <VideoPreviewContent
+                visible
+                videoUri={preview.uri}
+                openFrame={previewFrame}
+                onSend={handlePreviewSendVideo}
+                onCancel={handlePreviewCancel}
+                primaryColor={primaryColor}
+              />
+            ) : (
+              <ImagePreviewContent
+                visible
+                imageUri={previewImageUri ?? preview.uri}
+                openFrame={previewFrame}
+                onSend={handlePreviewSendImage}
+                onCancel={handlePreviewCancel}
+                onEdit={onCropImage ? handlePreviewEdit : undefined}
+                primaryColor={primaryColor}
+              />
+            )}
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -568,5 +844,32 @@ const styles = StyleSheet.create({
   },
   shutterInnerRecording: {
     backgroundColor: '#FF3B30',
+  },
+  modeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 36,
+    paddingTop: 18,
+  },
+  modeRowHidden: {
+    opacity: 0,
+  },
+  stripHidden: {
+    opacity: 0,
+  },
+  modeLabel: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: fs(13),
+    letterSpacing: 1.2,
+    fontFamily: ff('Inter', '600'),
+    includeFontPadding: false,
+  },
+  modeLabelActive: {
+    color: '#FFCC00',
+  },
+  previewOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 7,
+    backgroundColor: '#000',
   },
 });

@@ -29,8 +29,6 @@ export type PendingShare =
 const MAX_AGE_MS = 24 * 3600_000;
 const APP_GROUP = 'group.com.swellyo.app';
 const URL_ONLY = /^https?:\/\/\S+$/i;
-/** Guards the staged-id path segment against traversal (`../`) before we touch the FS. */
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 let pending: PendingShare | null = null;
 const listeners = new Set<() => void>();
@@ -103,30 +101,97 @@ export function normalizeStagedPayload(json: unknown, nowMs: number): PendingSha
 }
 
 /**
- * iOS only: read + delete the staged payload the share extension wrote.
- * Deleting before returning makes the read idempotent — a cold start's
- * getInitialURL and a warm 'url' event can both fire for one share.
+ * Pure: from the raw staged JSONs found in the pending dir, return the newest
+ * one that still normalizes (valid, unexpired). The extension stages one
+ * payload per share, so multiples mean earlier shares never got delivered —
+ * the user's intent is the most recent one.
  */
-export async function loadStagedShare(stagedId: string): Promise<PendingShare | null> {
+export function pickNewestStaged(raws: unknown[], nowMs: number): PendingShare | null {
+  const byNewest = [...raws].sort(
+    (a: any, b: any) =>
+      (Date.parse(String(b?.createdAt ?? '')) || 0) - (Date.parse(String(a?.createdAt ?? '')) || 0),
+  );
+  for (const raw of byNewest) {
+    const p = normalizeStagedPayload(raw, nowMs);
+    if (p) return p;
+  }
+  return null;
+}
+
+/**
+ * iOS only: sweep the App Group pending dir for anything the share extension
+ * staged, and clear it.
+ *
+ * This is deliberately id-agnostic. The deep link (swellyo://share) is only a
+ * wake-up signal — delivery must not depend on it, because the extension's way
+ * of opening the app (the responder-chain openURL workaround) is unsanctioned
+ * and allowed to fail. AppContent calls this on every launch too, so a share
+ * whose app-open failed is delivered the next time the user opens Swellyo.
+ *
+ * Media files are copied OUT of the shared container into the app's own cache
+ * before the pending dir is wiped, so a composer holding one can never lose it
+ * to a later sweep, and the shared container never accumulates.
+ */
+export async function sweepStagedShare(): Promise<PendingShare | null> {
   if (Platform.OS !== 'ios') return null;
-  if (!UUID_RE.test(stagedId)) return null;
   try {
-    const { Paths, File } = require('expo-file-system');
+    const { Paths, File, Directory } = require('expo-file-system');
     const container = Paths.appleSharedContainers?.[APP_GROUP];
     if (!container) return null;
 
-    const file = new File(container, 'share', 'pending', `${stagedId}.json`);
-    if (!file.exists) return null;
-    const raw = file.textSync();
-    try {
-      file.delete();
-    } catch {
-      // A payload we can read but not delete would replay on next launch; the
-      // 24h expiry bounds that, and the picker's consume() bounds it per-run.
+    const pendingDir = new Directory(container, 'share', 'pending');
+    if (!pendingDir.exists) return null;
+
+    const entries = pendingDir.list();
+
+    // Read then delete every staged JSON — the read is the handoff.
+    const raws: unknown[] = [];
+    for (const entry of entries) {
+      if (!(entry instanceof File) || !entry.name.endsWith('.json')) continue;
+      try {
+        raws.push(JSON.parse(entry.textSync()));
+      } catch {
+        // unreadable json: discard below with the delete
+      }
+      try {
+        entry.delete();
+      } catch {}
     }
-    return normalizeStagedPayload(JSON.parse(raw), Date.now());
+
+    let share = pickNewestStaged(raws, Date.now());
+
+    // Rescue the winning payload's media into app-private cache.
+    if (share?.kind === 'media') {
+      const cacheDir = new Directory(Paths.cache, 'incoming-share');
+      if (!cacheDir.exists) cacheDir.create({ intermediates: true });
+      const rescued: { uri: string; mimeType: string }[] = [];
+      for (const f of share.files) {
+        try {
+          const src = new File(f.uri);
+          if (!src.exists) continue;
+          const dst = new File(cacheDir, src.name);
+          if (dst.exists) dst.delete();
+          src.copy(dst);
+          rescued.push({ uri: dst.uri, mimeType: f.mimeType });
+        } catch (e) {
+          console.warn('[shareIntake] media rescue failed:', e);
+        }
+      }
+      share = rescued.length ? { kind: 'media', files: rescued } : null;
+    }
+
+    // Everything left in pending/ is consumed or expired — wipe it.
+    for (const entry of entries) {
+      if (entry instanceof Directory) {
+        try {
+          entry.delete();
+        } catch {}
+      }
+    }
+
+    return share;
   } catch (e) {
-    console.warn('[shareIntake] loadStagedShare failed:', e);
+    console.warn('[shareIntake] sweepStagedShare failed:', e);
     return null;
   }
 }

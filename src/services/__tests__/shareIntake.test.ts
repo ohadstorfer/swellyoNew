@@ -1,5 +1,6 @@
 import {
   normalizeStagedPayload,
+  pickNewestStaged,
   setPendingShare,
   consumePendingShare,
   hasPendingShare,
@@ -69,6 +70,50 @@ describe('normalizeStagedPayload', () => {
     expect(
       normalizeStagedPayload({ version: 1, createdAt: 'not-a-date', kind: 'text', text: 'hi' }, NOW),
     ).toBeNull();
+  });
+});
+
+describe('pickNewestStaged', () => {
+  const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+
+  it('returns the newest valid payload when several are staged', () => {
+    const p = pickNewestStaged(
+      [
+        { version: 1, createdAt: at(60_000), kind: 'text', text: 'older' },
+        { version: 1, createdAt: at(1_000), kind: 'text', text: 'newest' },
+        { version: 1, createdAt: at(30_000), kind: 'text', text: 'middle' },
+      ],
+      NOW,
+    );
+    expect(p).toEqual({ kind: 'text', text: 'newest' });
+  });
+
+  it('skips a newer-but-invalid payload and falls back to the next valid one', () => {
+    const p = pickNewestStaged(
+      [
+        { version: 1, createdAt: at(1_000), kind: 'contact', vcardRaw: 'junk' }, // newest, unparseable
+        { version: 1, createdAt: at(30_000), kind: 'url', url: 'https://swellyo.com' },
+      ],
+      NOW,
+    );
+    expect(p).toEqual({ kind: 'url', url: 'https://swellyo.com' });
+  });
+
+  it('returns null when everything staged is expired or garbage', () => {
+    const p = pickNewestStaged(
+      [
+        { version: 1, createdAt: at(25 * 3600_000), kind: 'text', text: 'expired' },
+        null,
+        'not even an object',
+        { version: 1, kind: 'text', text: 'no createdAt' },
+      ],
+      NOW,
+    );
+    expect(p).toBeNull();
+  });
+
+  it('handles an empty directory', () => {
+    expect(pickNewestStaged([], NOW)).toBeNull();
   });
 });
 

@@ -231,6 +231,27 @@ export interface AggregatedReaction {
   hasMine: boolean;
 }
 
+// Shared column list for message fetches. Embeds message_reactions via the
+// message_reactions_message_id_fkey FK so reactions land in the SAME round
+// trip as the messages — no separate hydration fetch, no late pop-in.
+const MESSAGE_COLS_WITH_REACTIONS =
+  'id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot, message_reactions(user_id, reaction, reacted_at)';
+
+/**
+ * Fold the PostgREST-embedded `message_reactions` rows into the UI-facing
+ * `reactions` field. Server fetches are authoritative: no rows → empty array,
+ * distinct from `undefined` which marks sources that don't know about
+ * reactions (realtime payloads, optimistic sends) — mergeMessages preserves
+ * existing reactions for those.
+ */
+function foldEmbeddedReactions(msg: any, currentUserId: string | null): any {
+  const { message_reactions: rows, ...rest } = msg;
+  return {
+    ...rest,
+    reactions: aggregateReactions((rows ?? []) as MessageReaction[], currentUserId),
+  };
+}
+
 // Realtime subscription status (from Supabase channel .subscribe() callback)
 export type RealtimeSubscriptionStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CHANNEL_ERROR' | 'CLOSED';
 
@@ -675,7 +696,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot')
+        .select(MESSAGE_COLS_WITH_REACTIONS)
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -688,12 +709,14 @@ class MessagingService {
         return [];
       }
 
+      const uid = await this.getCachedUserId();
+
       // Fetch sender info separately for each unique sender (already batched)
       const senderIds = [...new Set(messages.map(msg => msg.sender_id))];
-      
+
       if (senderIds.length === 0) {
         return messages.map(msg => ({
-          ...msg,
+          ...foldEmbeddedReactions(msg, uid),
           sender_name: undefined,
           sender_avatar: undefined,
         }));
@@ -712,7 +735,7 @@ class MessagingService {
 
       // Enrich messages with sender info
       return messages.map(msg => ({
-        ...msg,
+        ...foldEmbeddedReactions(msg, uid),
         sender_name: surferMap.get(msg.sender_id)?.name,
         sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,
       }));
@@ -752,7 +775,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot')
+        .select(MESSAGE_COLS_WITH_REACTIONS)
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -819,13 +842,15 @@ class MessagingService {
         paginatedMessages = paginatedMessages.reverse();
       }
 
+      const uid = await this.getCachedUserId();
+
       // Fetch sender info separately for each unique sender (already batched)
       const senderIds = [...new Set(paginatedMessages.map(msg => msg.sender_id))];
-      
+
       if (senderIds.length === 0) {
         return {
           messages: paginatedMessages.map(msg => ({
-            ...msg,
+            ...foldEmbeddedReactions(msg, uid),
             sender_name: undefined,
             sender_avatar: undefined,
           })),
@@ -847,7 +872,7 @@ class MessagingService {
       // Enrich messages with sender info
       return {
         messages: paginatedMessages.map(msg => ({
-          ...msg,
+          ...foldEmbeddedReactions(msg, uid),
           sender_name: surferMap.get(msg.sender_id)?.name,
           sender_avatar: surferMap.get(msg.sender_id)?.profile_image_url,
         })),
@@ -870,7 +895,7 @@ class MessagingService {
     span: number = 20
   ): Promise<{ messages: Message[]; hasMoreOlder: boolean }> {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured');
-    const cols = 'id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot';
+    const cols = MESSAGE_COLS_WITH_REACTIONS;
     try {
       const { data: target } = await supabase
         .from('messages').select('created_at').eq('id', targetMessageId).single();
@@ -894,14 +919,17 @@ class MessagingService {
       const olderTrimmed = (olderDesc ?? []).slice(0, span).reverse(); // chronological, includes target
       const merged = [...olderTrimmed, ...(newerAsc ?? [])];
 
+      const uid = await this.getCachedUserId();
       const senderIds = [...new Set(merged.map((m: any) => m.sender_id))];
-      if (senderIds.length === 0) return { messages: merged as Message[], hasMoreOlder };
+      if (senderIds.length === 0) {
+        return { messages: merged.map((m: any) => foldEmbeddedReactions(m, uid)) as Message[], hasMoreOlder };
+      }
       const { data: surfersData } = await supabase
         .from('surfers').select('user_id, name, profile_image_url').in('user_id', senderIds);
       const surferMap = new Map((surfersData ?? []).map((s: any) => [s.user_id, s]));
       return {
         messages: merged.map((m: any) => ({
-          ...m,
+          ...foldEmbeddedReactions(m, uid),
           sender_name: surferMap.get(m.sender_id)?.name,
           sender_avatar: surferMap.get(m.sender_id)?.profile_image_url,
         })) as Message[],
@@ -3337,6 +3365,20 @@ class MessagingService {
     } catch (error) {
       console.error('Error calculating unread count:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Current user id from the cached session (synchronous storage read, no
+   * network). Only used to mark `hasMine` on aggregated reactions — a null
+   * here just means my own reactions render un-highlighted until refresh.
+   */
+  private async getCachedUserId(): Promise<string | null> {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.user?.id ?? null;
+    } catch {
+      return null;
     }
   }
 

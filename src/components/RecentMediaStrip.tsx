@@ -34,8 +34,28 @@ export interface GalleryAsset {
   duration?: number;
 }
 
+/** Window-space rectangle of a tapped thumbnail, used to grow it to fullscreen. */
+export interface StripFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 interface RecentMediaStripProps {
-  onSelect: (asset: GalleryAsset) => void;
+  /**
+   * Fires the instant a thumbnail is tapped — synchronously, so the caller can
+   * start the grow animation without waiting on the gallery. `displayUri` is the
+   * thumbnail's own uri (safe to render immediately); `asset` resolves the real
+   * uploadable file path in the background. The caller awaits `asset` before it
+   * actually routes the pick downstream.
+   */
+  onSelect: (
+    displayUri: string,
+    frame: StripFrame,
+    isVideo: boolean,
+    asset: Promise<GalleryAsset>
+  ) => void;
 }
 
 const ITEM_SIZE = 76;
@@ -56,7 +76,68 @@ function formatDuration(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function RecentMediaStrip({ onSelect }: RecentMediaStripProps) {
+/**
+ * A single filmstrip tile. Owns its own ref so it can report its exact
+ * window-space frame on tap — the anchor the camera modal grows from. Kept as a
+ * separate component because measuring needs a per-item ref, which a recycled
+ * FlatList renderItem can't hold.
+ */
+const StripThumb = React.memo(function StripThumb({
+  item,
+  onPick,
+}: {
+  item: MediaLibrary.Asset;
+  onPick: (item: MediaLibrary.Asset, frame: StripFrame) => void;
+}) {
+  const ref = useRef<View>(null);
+  const isVideo = item.mediaType === MediaLibrary.MediaType.video;
+
+  const handlePress = useCallback(() => {
+    const node = ref.current;
+    if (!node) {
+      onPick(item, { x: 0, y: 0, width: ITEM_SIZE, height: ITEM_SIZE });
+      return;
+    }
+    // measureInWindow is async; the tile is transform-free (only an opacity
+    // press state) so the origin it reports is trustworthy.
+    node.measureInWindow((x, y, width, height) => {
+      onPick(item, {
+        x,
+        y,
+        width: width || ITEM_SIZE,
+        height: height || ITEM_SIZE,
+      });
+    });
+  }, [item, onPick]);
+
+  return (
+    <Pressable
+      ref={ref}
+      style={({ pressed }) => [styles.thumbWrap, pressed && styles.pressed]}
+      onPress={handlePress}
+      accessibilityRole="imagebutton"
+    >
+      <Image
+        source={{ uri: item.uri }}
+        style={styles.thumb}
+        contentFit="cover"
+        recyclingKey={item.id}
+        transition={80}
+      />
+      {isVideo && (
+        <View style={styles.durationBadge}>
+          <Text style={styles.durationText}>{formatDuration(item.duration)}</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+});
+
+// Memoized: the camera modal re-renders once per second while recording (the
+// timer readout), and this FlatList of thumbnails must not re-render with it.
+export const RecentMediaStrip = React.memo(function RecentMediaStrip({
+  onSelect,
+}: RecentMediaStripProps) {
   const [permission, requestPermission] = MediaLibrary.usePermissions({
     granularPermissions: ['photo', 'video'],
   });
@@ -100,25 +181,29 @@ export function RecentMediaStrip({ onSelect }: RecentMediaStripProps) {
     }
   }, [permission, requestPermission]);
 
-  const handleSelect = useCallback(
-    async (asset: MediaLibrary.Asset) => {
+  const handlePick = useCallback(
+    (asset: MediaLibrary.Asset, frame: StripFrame) => {
       if (selectingRef.current) return;
       selectingRef.current = true;
-      try {
-        const info = await MediaLibrary.getAssetInfoAsync(asset);
-        const uri = info.localUri ?? info.uri;
-        onSelect({
-          uri,
-          isVideo: asset.mediaType === MediaLibrary.MediaType.video,
-          width: asset.width > 0 ? asset.width : undefined,
-          height: asset.height > 0 ? asset.height : undefined,
-          duration: asset.duration > 0 ? asset.duration : undefined,
-        });
-      } catch (error) {
-        console.warn('[RecentMediaStrip] failed to resolve asset:', error);
-      } finally {
-        selectingRef.current = false;
-      }
+      const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
+      // Resolve the real file path in the background — iOS ph:// uris can't be
+      // uploaded, but the display uri can be rendered right away, so the grow
+      // animation starts now and the resolved asset lands when it's ready.
+      const resolved = (async (): Promise<GalleryAsset> => {
+        try {
+          const info = await MediaLibrary.getAssetInfoAsync(asset);
+          return {
+            uri: info.localUri ?? info.uri,
+            isVideo,
+            width: asset.width > 0 ? asset.width : undefined,
+            height: asset.height > 0 ? asset.height : undefined,
+            duration: asset.duration > 0 ? asset.duration : undefined,
+          };
+        } finally {
+          selectingRef.current = false;
+        }
+      })();
+      onSelect(asset.uri, frame, isVideo, resolved);
     },
     [onSelect]
   );
@@ -156,30 +241,11 @@ export function RecentMediaStrip({ onSelect }: RecentMediaStripProps) {
         ListEmptyComponent={
           hasNextRef.current ? <ActivityIndicator color="#fff" style={styles.loader} /> : null
         }
-        renderItem={({ item }) => (
-          <Pressable
-            style={({ pressed }) => [styles.thumbWrap, pressed && styles.pressed]}
-            onPress={() => void handleSelect(item)}
-            accessibilityRole="imagebutton"
-          >
-            <Image
-              source={{ uri: item.uri }}
-              style={styles.thumb}
-              contentFit="cover"
-              recyclingKey={item.id}
-              transition={80}
-            />
-            {item.mediaType === MediaLibrary.MediaType.video && (
-              <View style={styles.durationBadge}>
-                <Text style={styles.durationText}>{formatDuration(item.duration)}</Text>
-              </View>
-            )}
-          </Pressable>
-        )}
+        renderItem={({ item }) => <StripThumb item={item} onPick={handlePick} />}
       />
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {

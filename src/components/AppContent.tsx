@@ -17,7 +17,7 @@ import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScr
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 // TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
-import { pushRootCard } from '../navigation/navigationRef';
+import { pushRootCard, navigationRef } from '../navigation/navigationRef';
 import type { RootStackParamList } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
 import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
@@ -74,7 +74,7 @@ import { startBellBannerSource } from '../services/notifications/bellBannerSourc
 import { useMessaging } from '../context/MessagingProvider';
 import { initSessionBridge } from '../services/sessionBridge';
 import {
-  loadStagedShare,
+  sweepStagedShare,
   setPendingShare,
   hasPendingShare,
   normalizeAndroidShareIntent,
@@ -185,24 +185,29 @@ export const AppContent: React.FC = () => {
   const tripInviteResolverRef = useRef(false);
 
   // ----- "Share to Swellyo" (native only) -----
-  // iOS: the share extension staged a payload in the App Group container and
-  // deep-linked `swellyo://share?staged=<uuid>`. Android: expo-share-intent below.
-  // `shareTick` exists because the payload lives in shareIntake's module store,
-  // not in React state — the tick is what re-runs the gated resolver.
-  const [pendingStagedShareId, setPendingStagedShareId] = useState<string | null>(null);
+  // iOS: the share extension stages a payload in the App Group container and
+  // deep-links `swellyo://share?staged=<uuid>` — but the deep link is ONLY a
+  // wake-up signal. Delivery is a directory sweep (sweepStagedShare) that also
+  // runs on every launch, because the extension's app-open workaround is
+  // unsanctioned and allowed to fail; a share must survive that.
+  // Android: expo-share-intent below. `shareTick` exists because the payload
+  // lives in shareIntake's module store, not in React state — the tick is what
+  // re-runs the gated resolver.
   const [shareTick, setShareTick] = useState(0);
-  const shareResolverBusyRef = useRef(false);
+  const shareResolverQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  // Cold-start nudge: sweep once per launch even with no deep link.
+  useEffect(() => {
+    if (Platform.OS === 'ios') setShareTick(t => t + 1);
+  }, []);
 
   const parseInviteFromUrl = useCallback((url: string | null) => {
     if (!url) return;
     try {
-      // OS-share fallback from the iOS extension. Handled before the invite
+      // OS-share wake-up from the iOS extension. Handled before the invite
       // params below because it uses the `share` host, not a query-only link.
       if (/^swellyo:\/\/share\b/i.test(url)) {
-        const qi = url.indexOf('?');
-        const sp = new URLSearchParams(qi >= 0 ? url.substring(qi + 1) : '');
-        const stagedId = sp.get('staged');
-        if (stagedId) setPendingStagedShareId(stagedId);
+        setShareTick(t => t + 1);
         return;
       }
       const q = url.indexOf('?');
@@ -386,35 +391,34 @@ export const AppContent: React.FC = () => {
 
   // Post-auth resolver: present the picker once signed in + onboarded. Same gate
   // as the invite resolvers above, so a share that arrives on a logged-out or
-  // mid-onboarding app waits (in the module store / App Group) rather than being
-  // dropped. iOS staged payloads are read here, then deleted by loadStagedShare.
+  // mid-onboarding app waits (in the App Group / module store) rather than being
+  // dropped. Runs are SERIALIZED on a promise chain, not skip-guarded — a deep
+  // link landing mid-sweep must queue behind it, not be lost. A sweep that finds
+  // nothing is the normal case on most launches and stays silent.
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    if (shareResolverBusyRef.current) return;
-    if (!pendingStagedShareId && !hasPendingShare()) return;
+    if (shareTick === 0 && !hasPendingShare()) return;
     if (user === null) return;
     if (!isComplete && !isDemoUser) return;
 
-    shareResolverBusyRef.current = true;
-    (async () => {
-      try {
-        if (pendingStagedShareId) {
-          const share = await loadStagedShare(pendingStagedShareId);
-          setPendingStagedShareId(null);
-          if (!share) {
-            Alert.alert('Share expired', 'That share is no longer available — try sharing again.');
-            return;
-          }
-          setPendingShare(share);
+    shareResolverQueueRef.current = shareResolverQueueRef.current
+      .then(async () => {
+        if (Platform.OS === 'ios' && !hasPendingShare()) {
+          const swept = await sweepStagedShare();
+          if (swept) setPendingShare(swept);
+        }
+        if (!hasPendingShare()) return;
+        // Two wake-ups for one payload (cold-start sweep + deep link) must not
+        // stack two pickers.
+        if (navigationRef.isReady() && navigationRef.getCurrentRoute()?.name === 'ShareToChat') {
+          return;
         }
         pushRootCard('ShareToChat', undefined);
-      } catch (e) {
+      })
+      .catch(e => {
         console.warn('[AppContent] share resolver failed:', e);
-      } finally {
-        shareResolverBusyRef.current = false;
-      }
-    })();
-  }, [pendingStagedShareId, shareTick, user, isComplete, isDemoUser]);
+      });
+  }, [shareTick, user, isComplete, isDemoUser]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be

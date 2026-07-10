@@ -22,7 +22,7 @@ import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition, withTi
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
 import { TextInput as PaperTextInput } from 'react-native-paper';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -30,6 +30,7 @@ import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
 import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata, ContactMetadata } from '../services/messaging/messagingService';
 import { AttachPanel } from '../components/AttachPanel';
+import { KeyboardIcon } from '../components/icons/KeyboardIcon';
 import { useAttachPanel } from '../hooks/useAttachPanel';
 import { FileBubble } from '../components/messages/FileBubble';
 import { ContactBubble } from '../components/messages/ContactBubble';
@@ -500,7 +501,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
-  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
+  const { panelOpen, panelHeight, showKeyboardIcon, panelDismissing, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -1024,17 +1025,22 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             setMessages((prev) => {
               const existingIndex = prev.findIndex(msg => msg.id === updatedMessage.id);
               let updated: typeof prev;
+              let toPersist: Message = updatedMessage;
 
               if (existingIndex !== -1) {
                 // Update existing message — preserve client-only upload fields the sender set locally
                 const existing = prev[existingIndex];
                 const merged: Message = {
                   ...updatedMessage,
+                  // Realtime UPDATE payloads never join message_reactions, so a
+                  // read receipt bumping this row must not wipe the badge.
+                  reactions: existing.reactions,
                   upload_state: existing.upload_state,
                   upload_progress: existing.upload_progress,
                   upload_error: existing.upload_error,
                   _localPreviewUri: existing._localPreviewUri,
                 };
+                toPersist = merged;
                 updated = prev.map(msg =>
                   msg.id === updatedMessage.id ? merged : msg
                 );
@@ -1052,7 +1058,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               }
               const convId = currentConversationIdRef.current;
               if (convId) {
-                chatHistoryCache.updateMessage(convId, updatedMessage.id, updatedMessage).catch(err => {
+                chatHistoryCache.updateMessage(convId, updatedMessage.id, toPersist).catch(err => {
                   console.error('Error updating message in cache:', err);
                 });
               }
@@ -2518,22 +2524,23 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // Keeps the modal mounted (visible={true}) while the cropper presents on top
   // — dismissing the RN Modal first triggers the iOS "view not in window
   // hierarchy" race seen in react-native-image-crop-picker issues #264 / #659.
-  const handleEditImage = async () => {
+  // Open the native crop editor on an image and resolve the edited file (or
+  // null on cancel / missing module). Shared by the external ImagePreviewModal
+  // (handleEditImage) and the camera modal's inline preview.
+  const cropImage = async (
+    uri: string,
+    width: number,
+    height: number,
+  ): Promise<{ uri: string; width: number; height: number } | null> => {
     const cropper = getImageCropPicker();
-    if (!cropper) return;
-    const currentUri = selectedImageUriForUploadRef.current ?? selectedImageUri;
-    if (!currentUri) return;
-
+    if (!cropper) return null;
+    // Use captured source dims; fall back to a generous cap. Without explicit
+    // width/height the lib outputs ~200px regardless of the source.
+    const sourceWidth = width > 0 ? width : 4096;
+    const sourceHeight = height > 0 ? height : 4096;
     try {
-      // Use captured source dims; fall back to a generous cap. Without explicit
-      // width/height the lib outputs ~200px regardless of the source.
-      const { width: capturedW, height: capturedH } = selectedImageDimensionsRef.current;
-      const sourceWidth = capturedW > 0 ? capturedW : 4096;
-      const sourceHeight = capturedH > 0 ? capturedH : 4096;
-
-      if (__DEV__) console.log('[DirectMessageScreen] opening cropper from preview, source dims=', sourceWidth, 'x', sourceHeight);
       const edited = await cropper.openCropper({
-        path: currentUri,
+        path: uri,
         mediaType: 'photo',
         width: sourceWidth,
         height: sourceHeight,
@@ -2554,28 +2561,33 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         compressImageMaxHeight: 2560,
         includeExif: false,
       });
-      if (__DEV__) console.log('[DirectMessageScreen] cropper done, dims=', edited.width, 'x', edited.height);
-
       const editedPath = edited.path.startsWith('file://')
         ? edited.path
         : `file://${edited.path}`;
-
-      // Replace the preview's image in-place. The modal stays open so the user
-      // can keep typing the caption and tap Send when ready.
-      selectedImageUriForUploadRef.current = editedPath;
-      selectedImageDimensionsRef.current = {
+      return {
+        uri: editedPath,
         width: edited.width || sourceWidth,
         height: edited.height || sourceHeight,
       };
-      setSelectedImageUri(editedPath);
     } catch (err) {
-      if (isPickerCancelError(err)) {
-        if (__DEV__) console.log('[DirectMessageScreen] cropper canceled');
-        return;
-      }
-      console.warn('[DirectMessageScreen] openCropper failed:', err);
+      if (isPickerCancelError(err)) return null;
+      console.warn('[DirectGroupChat] openCropper failed:', err);
       Alert.alert('Error', 'Could not open the photo editor.');
+      return null;
     }
+  };
+
+  const handleEditImage = async () => {
+    const currentUri = selectedImageUriForUploadRef.current ?? selectedImageUri;
+    if (!currentUri) return;
+    const { width, height } = selectedImageDimensionsRef.current;
+    const result = await cropImage(currentUri, width, height);
+    if (!result) return;
+    // Replace the preview's image in-place. The modal stays open so the user
+    // can keep typing the caption and tap Send when ready.
+    selectedImageUriForUploadRef.current = result.uri;
+    selectedImageDimensionsRef.current = { width: result.width, height: result.height };
+    setSelectedImageUri(result.uri);
   };
 
   // Handle image send. `overrideImageUri` is no longer used by the picker
@@ -4136,15 +4148,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             </View>
           ) : !message.deleted && message.type === 'contact' ? (
             <Pressable onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)} delayLongPress={300}>
-              <ContactBubble message={message} isOwn={isOwnMessage} />
-              <View style={styles.attachmentFooter}>
-                <Text style={[styles.timestamp, isOwnMessage ? styles.userTimestamp : styles.botTimestamp]}>
-                  {formatTime(message.created_at)}
-                </Text>
-                {isOwnMessage && !message.deleted && (
+              <ContactBubble
+                message={message}
+                isOwn={isOwnMessage}
+                timeText={formatTime(message.created_at)}
+                receipt={isOwnMessage && !message.deleted ? (
                   <ReadReceipt state={getReceiptState(message, otherUserLastReadAt)} enabled={isDirect} />
-                )}
-              </View>
+                ) : undefined}
+              />
             </Pressable>
           ) : !message.deleted && message.type === 'audio' ? (
             <View>
@@ -5071,7 +5082,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                           menu, or back to the keyboard it replaced. Ionicons has no
                           keyboard glyph — only `keypad`, which is a dialpad. */}
                       {showKeyboardIcon ? (
-                        <MaterialCommunityIcons name="keyboard-outline" size={26} color="#222B30" />
+                        <KeyboardIcon size={26} color="#222B30" />
                       ) : (
                         <Ionicons name="add" size={28} color="#222B30" />
                       )}
@@ -5121,6 +5132,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               {panelOpen && (
                 <AttachPanel
                   height={panelHeight}
+                  dismissing={panelDismissing}
                   onPhotos={handleImagePicker}
                   onCamera={handleCameraCapture}
                   onDocument={handlePickDocument}
@@ -5349,7 +5361,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         />
       )}
 
-      {/* In-app chat camera: WhatsApp-style shutter + recent-media filmstrip */}
+      {/* In-app chat camera: WhatsApp-style shutter + recent-media filmstrip.
+          Captures and filmstrip picks both preview inline on the camera surface
+          (onSendImage/Video); onCapture is only a fallback route. */}
       {Platform.OS !== 'web' && (
         <ChatCameraModal
           visible={cameraVisible}
@@ -5359,6 +5373,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             setCameraVisible(false);
             setTimeout(() => { void handleImagePicker(); }, Platform.OS === 'ios' ? 400 : 50);
           }}
+          onSendImage={(uri, caption) => { void handleImageSend(caption, uri); }}
+          onSendVideo={(uri, caption) => { void handleVideoSend(caption, uri); }}
+          onCropImage={cropImage}
+          primaryColor={composerPrimaryColor}
         />
       )}
       <BlockUserOverlay

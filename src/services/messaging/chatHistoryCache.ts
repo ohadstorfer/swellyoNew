@@ -514,11 +514,15 @@ class ChatHistoryCache {
     // CRITICAL: Server messages take precedence, but we preserve cached messages that aren't in the server response
     newMessages.forEach(newMsg => {
       const existing = messageMap.get(newMsg.id);
-      if (existing) {
-        // Server message takes precedence (might be edited/deleted)
-        messageMap.set(newMsg.id, newMsg);
+      if (existing && newMsg.reactions === undefined && existing.reactions !== undefined) {
+        // Reactions live in a separate table, so rows from sources that don't
+        // join them (realtime payloads, optimistic sends) arrive with the
+        // field absent — that must not wipe reactions we already have. Server
+        // fetches embed them and always set an array (possibly empty), which
+        // takes precedence normally.
+        messageMap.set(newMsg.id, { ...newMsg, reactions: existing.reactions });
       } else {
-        // New message from server
+        // Server message takes precedence (might be edited/deleted)
         messageMap.set(newMsg.id, newMsg);
       }
     });

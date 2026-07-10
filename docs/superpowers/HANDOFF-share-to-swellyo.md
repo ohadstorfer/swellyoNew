@@ -1,5 +1,47 @@
 # Handoff — Share to Swellyo (Phase 1)
 
+## 2026-07-10 update — after first on-device test (build 41)
+
+Two bugs found by Ohad's device test, both addressed; **needs a rebuild** (no
+prebuild required — the touched files are read directly by the build):
+
+1. **Contacts never offered Swellyo.** Root cause proven, not guessed:
+   `public.vcard` conforms to `public.text` (verified via `UTType.vCard.supertypes`),
+   so the dictionary activation rule's File key never claims it and its Text key
+   (plain text only) doesn't either. Fix: predicate-form activation rule naming
+   `public.vcard` explicitly. The predicate is verified to parse as an
+   `NSPredicate` and was inspected inside the **built** `.appex`.
+2. **Image share: sheet flashed, app never opened.** Narrowed to two candidate
+   causes (staging failed vs. app-open failed) — indistinguishable without device
+   logs. Both are now covered:
+   - `openHostApp` rewritten to match the known-good reference in
+     `node_modules/expo-share-intent`'s own extension: cast the responder to
+     `UIApplication` and call `open(_:options:completionHandler:)`, completing the
+     request only from the completion handler (previously: deprecated
+     single-arg `perform("openURL:")` + synchronous teardown that could cancel
+     the open in flight).
+   - **Launch-sweep added (this makes delivery not depend on the open at all):**
+     `sweepStagedShare()` in `shareIntake.ts` scans the App Group pending dir on
+     every app launch and on every `swellyo://share` wake-up, delivers the newest
+     valid payload, rescues media files into app cache, and wipes the dir. The
+     earlier claim that "the app picks the payload up on next launch" was false
+     when written; it is true now. `loadStagedShare` (id-keyed read) is gone.
+   - The extension is instrumented with `os.Logger` (subsystem
+     `com.swellyo.app.share`) at every decision point. If anything still fails:
+     `sudo log collect --device-udid 00008110-000235062282401E --last 15m
+     --output share.logarchive`, then
+     `log show share.logarchive --predicate 'subsystem == "com.swellyo.app.share"' --info`.
+
+Also: `displayName: 'Swellyo'` added to the target config — build 41 shows
+"SwellyoShare" in the sheet. This one **does** need a prebuild to land in
+`project.pbxproj` (`INFOPLIST_KEY_CFBundleDisplayName`); cosmetic, defer if the
+pbxproj again has parallel work in flight.
+
+Verified this round: extension compiles AND links standalone
+(`xcodebuild -target SwellyoShare` → BUILD SUCCEEDED, no pod deps), built
+`.appex` Info.plist carries the new rule, 19 JS tests pass, tsc clean vs
+baseline.
+
 **Status:** code complete, **uncommitted** on `ohad`. Not built, not device-tested.
 **Spec:** `docs/superpowers/specs/2026-07-09-share-to-swellyo-design.md`
 **Plan:** `docs/superpowers/plans/2026-07-09-share-to-swellyo.md`

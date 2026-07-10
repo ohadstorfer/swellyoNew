@@ -19,16 +19,44 @@
  * No safe-area padding: the card sits where the keyboard sat, so there is no home
  * indicator to clear. No grabber either — it isn't draggable.
  */
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { AttachMenuGrid, type AttachMenuActions } from './AttachMenuGrid';
 
-export function AttachPanel({ height, ...actions }: AttachMenuActions & { height: number }) {
+/**
+ * `dismissing` is set the moment the user asks for the keyboard back, while the panel
+ * is still mounted so the keyboard can rise over it without the composer jumping (see
+ * useAttachPanel). During that window the card must not swallow taps — a press meant
+ * for the keyboard-return would instead fire a stale attachment action, or hit the
+ * "+" icon that has already flipped underneath. So we drop pointer events immediately
+ * and fade the card out quickly, letting the rising keyboard finish covering an inert,
+ * near-invisible surface instead of a live one.
+ */
+export function AttachPanel({
+  height,
+  dismissing = false,
+  ...actions
+}: AttachMenuActions & { height: number; dismissing?: boolean }) {
+  const opacity = useSharedValue(1);
+
+  useEffect(() => {
+    // Only ever fades OUT: the panel unmounts once the keyboard has fully risen, so it
+    // is never reused after a dismiss and never needs to fade back in.
+    if (dismissing) opacity.value = withTiming(0, { duration: 120 });
+  }, [dismissing, opacity]);
+
+  const cardStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
   return (
-    <View testID="attach-panel" style={[styles.rect, { height }]}>
-      <View style={styles.card}>
+    <View
+      testID="attach-panel"
+      style={[styles.rect, { height }]}
+      pointerEvents={dismissing ? 'none' : 'auto'}
+    >
+      <Animated.View style={[styles.card, cardStyle]}>
         <AttachMenuGrid {...actions} />
-      </View>
+      </Animated.View>
     </View>
   );
 }

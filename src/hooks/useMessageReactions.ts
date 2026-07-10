@@ -51,9 +51,13 @@ export function useMessageReactions(
     [currentUserId, setMessages],
   );
 
-  // Initial hydration: runs once per conversation when the message list first
-  // populates. We track per-conversation so switching chats triggers a fresh
-  // hydration without re-running on every message arrival.
+  // Reconciliation pass: runs once per conversation when the message list
+  // first populates. Message fetches embed message_reactions, so reactions
+  // normally arrive WITH the messages (and persist through the chat cache) —
+  // but reaction changes don't bump the message row's updated_at, so a
+  // cache-hit + catch-up load can show stale reactions from a previous
+  // session. This refetch reconciles the loaded window: it both adds
+  // reactions gained while away and clears ones removed while away.
   const hydratedConvRef = useRef<string | null>(null);
   useEffect(() => {
     if (!conversationId || messages.length === 0) return;
@@ -64,7 +68,7 @@ export function useMessageReactions(
     (async () => {
       const ids = messages.map(m => m.id);
       const rows = await messagingService.fetchReactionsForMessages(ids);
-      if (cancelled || rows.length === 0) return;
+      if (cancelled) return;
 
       const byMessage = new Map<string, MessageReaction[]>();
       for (const r of rows) {
@@ -72,10 +76,16 @@ export function useMessageReactions(
         arr.push(r);
         byMessage.set(r.message_id, arr);
       }
+      const fetchedIds = new Set(ids);
       setMessages(prev =>
         prev.map(m => {
+          // Only touch messages covered by this fetch — anything that arrived
+          // since is fresher than this snapshot.
+          if (!fetchedIds.has(m.id)) return m;
           const rs = byMessage.get(m.id);
-          if (!rs) return m;
+          if (!rs) {
+            return m.reactions?.length ? { ...m, reactions: undefined } : m;
+          }
           return {
             ...m,
             reactions: aggregateReactions(rs, currentUserId ?? null),
