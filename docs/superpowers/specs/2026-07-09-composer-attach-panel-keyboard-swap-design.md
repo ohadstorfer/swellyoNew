@@ -131,7 +131,18 @@ fully opened (rnkc's `onEnd`). Unmounting it on focus
 would leave a hole for the duration of the keyboard's open animation and drop the
 composer. Because the heights match, the keyboard simply rises over the panel.
 
-**Tapping a tile.** Close the panel, then run the handler.
+**Tapping a tile.** Run the handler. The panel **stays open** — the OS picker opens
+over it, and the panel is still there when the picker goes away.
+
+The tile answers the press itself: it scales to `0.96` and its circle darkens to
+`#D8DBDF`, in 90ms on the way down and 160ms back up, both on an ease-out curve. Down
+must be fast because the finger is waiting on it; up can take longer because by then
+the user is watching the picker. `prefers-reduced-motion` keeps the colour, which
+carries the meaning, and drops the movement.
+
+Nothing closes the panel to *nothing*. The keyboard button hands back the keyboard,
+Android's back button closes it. That is WhatsApp's behaviour, and it is why the hook
+exposes no `closePanel`.
 
 **Android hardware back with panel open.** Close the panel; do not leave the screen.
 
@@ -143,6 +154,8 @@ Split:
 - **`AttachMenuGrid`** — the grid and its tile handlers, lifted verbatim.
 - **`AttachPanel`** — an absolutely-positioned `View` pinned to the container's
   bottom with a fixed `height`, hosting the grid. No `Modal`, no `BottomSheetShell`.
+  Its surface is `#DFE1E4`, sampled off a light-mode iOS keyboard screenshot
+  (`rgb(223, 225, 228)`), so the card reads as the keyboard's own backdrop.
 
 `AttachSheet` and its `BottomSheetShell` usage are removed from both chat screens.
 

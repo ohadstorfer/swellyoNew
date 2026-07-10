@@ -2,6 +2,9 @@
  * The 4-tile attachment menu. Lifted out of AttachSheet so it can be hosted by
  * AttachPanel (inline, in the keyboard's rectangle) rather than a bottom sheet.
  *
+ * Tapping a tile does NOT close the panel — the picker opens over it, and the panel
+ * is still there when the picker goes away. The tile answers the press itself.
+ *
  * Tiles call their handlers directly. AttachSheet had to defer each handler to the
  * shell's `onDismissed` because one firing while iOS tore down the Modal's
  * UIViewController hung the main thread on PHPicker (out-of-process) and the OS
@@ -10,6 +13,15 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Reanimated, {
+  Easing,
+  interpolate,
+  interpolateColor,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { ff, fs } from '../theme/fonts';
 
 export interface AttachMenuActions {
@@ -28,6 +40,55 @@ type Tile = {
   hidden?: boolean;
 };
 
+const CIRCLE_REST = '#FFFFFF';
+const CIRCLE_PRESSED = '#D8DBDF';
+
+// Press in fast — the tile has to answer the finger. Release a touch slower, because
+// by then the user is watching the picker, not the tile. Both ease-out: the built-in
+// curves are too weak, and ease-in would delay the very frame being watched.
+const PRESS_IN_MS = 90;
+const PRESS_OUT_MS = 160;
+const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+
+function AttachTile({ tile }: { tile: Tile }) {
+  const press = useSharedValue(0);
+  // Motion-sensitive users keep the colour change — it carries the meaning — and
+  // lose only the movement.
+  const reduceMotion = useReducedMotion();
+
+  const tileStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: reduceMotion ? 1 : interpolate(press.value, [0, 1], [1, 0.96]) }],
+  }));
+
+  const circleStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(press.value, [0, 1], [CIRCLE_REST, CIRCLE_PRESSED]),
+  }));
+
+  return (
+    <Pressable
+      style={styles.tile}
+      onPress={tile.onPress}
+      onPressIn={() => {
+        press.value = withTiming(1, { duration: PRESS_IN_MS, easing: EASE_OUT });
+      }}
+      onPressOut={() => {
+        press.value = withTiming(0, { duration: PRESS_OUT_MS, easing: EASE_OUT });
+      }}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={tile.label}
+    >
+      {/* scale() scales children, so the icon and label shrink with the circle. */}
+      <Reanimated.View style={[styles.tileInner, tileStyle]}>
+        <Reanimated.View style={[styles.iconCircle, circleStyle]}>
+          <Ionicons name={tile.icon} size={26} color={tile.color} />
+        </Reanimated.View>
+        <Text style={styles.tileLabel}>{tile.label}</Text>
+      </Reanimated.View>
+    </Pressable>
+  );
+}
+
 export function AttachMenuGrid({ onPhotos, onCamera, onDocument, onContact }: AttachMenuActions) {
   // WhatsApp light menu: grey surface, white circles; only the glyph color changes
   // per action.
@@ -41,18 +102,7 @@ export function AttachMenuGrid({ onPhotos, onCamera, onDocument, onContact }: At
   return (
     <View style={styles.grid}>
       {tiles.filter(t => !t.hidden).map(t => (
-        <Pressable
-          key={t.key}
-          style={styles.tile}
-          onPress={t.onPress}
-          android_ripple={{ color: 'rgba(0,0,0,0.06)', borderless: false }}
-          hitSlop={6}
-        >
-          <View style={styles.iconCircle}>
-            <Ionicons name={t.icon} size={26} color={t.color} />
-          </View>
-          <Text style={styles.tileLabel}>{t.label}</Text>
-        </Pressable>
+        <AttachTile key={t.key} tile={t} />
       ))}
     </View>
   );
@@ -67,13 +117,14 @@ const styles = StyleSheet.create({
   },
   tile: {
     width: '25%',
+  },
+  tileInner: {
     alignItems: 'center',
   },
   iconCircle: {
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,

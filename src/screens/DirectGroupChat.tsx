@@ -500,7 +500,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
-  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
+  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -5092,10 +5092,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               {panelOpen && (
                 <AttachPanel
                   height={panelHeight}
-                  onPhotos={() => { closePanel(); handleImagePicker(); }}
-                  onCamera={() => { closePanel(); handleCameraCapture(); }}
-                  onDocument={() => { closePanel(); handlePickDocument(); }}
-                  onContact={() => { closePanel(); handlePickContact(); }}
+                  onPhotos={handleImagePicker}
+                  onCamera={handleCameraCapture}
+                  onDocument={handlePickDocument}
+                  onContact={handlePickContact}
                 />
               )}
             </Reanimated.View>

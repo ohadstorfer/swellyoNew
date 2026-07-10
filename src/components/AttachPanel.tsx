@@ -47,7 +47,9 @@ const styles = StyleSheet.create({
     // Full width, like the keyboard it stands in for. Only the top corners are
     // rounded — the card runs off the bottom of the screen.
     marginTop: 8,
-    backgroundColor: '#D9D9D9',
+    // Sampled off a light-mode iOS keyboard screenshot: rgb(223, 225, 228), steady
+    // across the gaps between key rows and the strip beside the globe key.
+    backgroundColor: '#DFE1E4',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 22,
