@@ -5587,32 +5587,38 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         />
       )}
 
-      {/* Album "+N" expansion — grid of ALL of one album's items. Opening a
-          tile's viewer must wait for THIS modal to finish dismissing (a second
-          RN Modal presented mid-dismiss is silently dropped on iOS — same trap
-          as the camera → preview handoff). Long-press is disabled here: the
-          message menu is an in-screen overlay and would render BEHIND the
-          modal. */}
+      {/* Album "+N" expansion — grid of ALL of one album's items. Tapping a
+          tile opens the pager viewer NESTED inside this modal, so the grid
+          stays open underneath and closing the viewer lands back on it.
+          Long-press is disabled here: the message menu is an in-screen
+          overlay and would render BEHIND the modal. */}
       {albumModalItems && (
         <AlbumGridModal
           visible
           items={albumModalItems}
           onClose={() => setAlbumModalItems(null)}
-          onPressItem={(m) => {
-            const items = albumModalItems;
-            setAlbumModalItems(null);
-            setTimeout(() => openAlbumItem(items, m), 320);
-          }}
+          onPressItem={(m) => openAlbumItem(albumModalItems, m)}
           onLongPressItem={() => {}}
           onRetryItem={(m) => {
             setAlbumModalItems(null);
             handleRetryUpload(m);
           }}
-        />
+        >
+          {albumViewer && (
+            <AlbumMediaViewer
+              visible
+              items={albumViewer.items}
+              initialIndex={albumViewer.index}
+              onClose={() => setAlbumViewer(null)}
+            />
+          )}
+        </AlbumGridModal>
       )}
 
-      {/* Album fullscreen pager — swipe between an album's items. */}
-      {albumViewer && (
+      {/* Album fullscreen pager opened straight from the bubble (no grid
+          underneath). When the grid modal IS open, the viewer renders nested
+          inside it above instead. */}
+      {!albumModalItems && albumViewer && (
         <AlbumMediaViewer
           visible
           items={albumViewer.items}

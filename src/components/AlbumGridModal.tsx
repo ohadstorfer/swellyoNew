@@ -29,6 +29,13 @@ interface AlbumGridModalProps {
   onPressItem: (message: Message) => void;
   onLongPressItem: (message: Message, event: GestureResponderEvent) => void;
   onRetryItem: (message: Message) => void;
+  /**
+   * Rendered INSIDE this Modal's tree — the host nests the AlbumMediaViewer
+   * here so tapping a tile opens the viewer ON TOP of the grid (which stays
+   * open underneath and is returned to on close). Sibling RN Modals can't do
+   * this reliably on iOS; nested ones can.
+   */
+  children?: React.ReactNode;
 }
 
 const CloseIcon = () => (
@@ -53,6 +60,7 @@ export const AlbumGridModal: React.FC<AlbumGridModalProps> = ({
   onPressItem,
   onLongPressItem,
   onRetryItem,
+  children,
 }) => {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -98,6 +106,8 @@ export const AlbumGridModal: React.FC<AlbumGridModalProps> = ({
             <CloseIcon />
           </Pressable>
         </View>
+        {/* Nested viewer (see prop docs) — presents over the grid. */}
+        {children}
       </View>
     </Modal>
   );
