@@ -4930,6 +4930,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               // mark them "away from bottom". (Before this, a layout-driven
               // onScroll must not un-pin a fresh mount; see hasUserScrolledRef.)
               hasUserScrolledRef.current = true;
+              // Dragging the chat dismisses the keyboard (keyboardDismissMode); the
+              // panel follows the same rule. iOS's 'interactive' mode has no analogue
+              // here — we can't drag the panel down with the finger — so closing at the
+              // start of the drag is as close as it gets. CLOSE is a no-op when the
+              // panel is already shut, so this costs nothing the rest of the time.
+              closePanel();
             }}
             onScroll={(event) => {
               handleKeyboardScroll(event);

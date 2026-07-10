@@ -151,6 +151,14 @@ wanted — precisely what `keyboardShouldPersistTaps="handled"` means for the ke
 The `ScrollView` can still steal the responder when a drag begins, so scrolling is
 unaffected. With the panel closed the wrapper returns `false` and is inert.
 
+**Dragging the chat.** Closes the panel, at the start of the drag. The keyboard is
+dismissed by the list's `keyboardDismissMode`; the panel follows the same rule. iOS's
+`'interactive'` mode has no analogue — the panel cannot be dragged down with the
+finger — so `onScrollBeginDrag` is as close as it gets.
+
+`CLOSE` returns the *same state object* when the panel is already shut, so
+`useReducer` bails out and the chat does not re-render on every scroll.
+
 **Android hardware back with panel open.** Close the panel; do not leave the screen.
 
 ## Components

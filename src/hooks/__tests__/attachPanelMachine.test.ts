@@ -28,6 +28,12 @@ describe('attachPanelReducer', () => {
     expect(attachPanelReducer(closed, { type: 'CLOSE' }).open).toBe(false);
   });
 
+  it('CLOSE on an already-closed panel returns the SAME object', () => {
+    // Every chat scroll dispatches CLOSE. Returning a fresh object would re-render
+    // the whole chat screen on each drag; returning `state` makes useReducer bail.
+    expect(attachPanelReducer(initialPanelState, { type: 'CLOSE' })).toBe(initialPanelState);
+  });
+
   it('KEYBOARD_SHOWN adopts a real height', () => {
     const s = attachPanelReducer(initialPanelState, { type: 'KEYBOARD_SHOWN', height: 336 });
     expect(s.height).toBe(336);
