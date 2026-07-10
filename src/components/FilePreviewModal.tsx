@@ -4,7 +4,7 @@
  * The dark chrome (header, swipe-dismiss, body) lives in FilePreviewShell.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChatTextInput } from './ChatTextInput';
 import { FilePreviewShell } from './filePreview/FilePreviewShell';
