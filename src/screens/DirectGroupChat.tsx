@@ -500,7 +500,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
-  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, requestKeyboard } = useAttachPanel();
+  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -5083,7 +5083,20 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               resizeMode="cover"
             />
             <Reanimated.View style={[{ flex: 1 }, animatedKeyboardPadding]}>
-              {messageList}
+              {/* A tap on the chat's background closes the attach panel, mirroring the
+                  keyboard's own dismiss. Not a full-screen backdrop: that would swallow
+                  bubble taps and block scrolling. RN's responder negotiation runs from
+                  the deepest node up, so a bubble's Touchable claims the touch first and
+                  this only sees what nothing else wanted — exactly what
+                  keyboardShouldPersistTaps="handled" means for the keyboard. The
+                  ScrollView can still steal the responder when a drag begins. */}
+              <View
+                style={{ flex: 1 }}
+                onStartShouldSetResponder={() => panelOpen}
+                onResponderRelease={closePanel}
+              >
+                {messageList}
+              </View>
               {showReturnToLatest && (
                 <TouchableOpacity style={styles.returnToLatestPill} onPress={handleReturnToLatest}>
                   <Text style={styles.returnToLatestText}>Return to latest ↓</Text>

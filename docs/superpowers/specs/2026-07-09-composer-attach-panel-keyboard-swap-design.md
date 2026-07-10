@@ -140,9 +140,16 @@ must be fast because the finger is waiting on it; up can take longer because by 
 the user is watching the picker. `prefers-reduced-motion` keeps the colour, which
 carries the meaning, and drops the movement.
 
-Nothing closes the panel to *nothing*. The keyboard button hands back the keyboard,
-Android's back button closes it. That is WhatsApp's behaviour, and it is why the hook
-exposes no `closePanel`.
+**Tapping the chat's background.** Closes the panel, without summoning the keyboard —
+the same gesture that dismisses the keyboard.
+
+Not a full-screen backdrop: that would swallow bubble taps and block scrolling. The
+message list is wrapped in a `View` whose `onStartShouldSetResponder` returns
+`panelOpen`. RN negotiates the responder from the deepest node upward, so a bubble's
+`Touchable` claims the touch first and the wrapper only ever sees taps nothing else
+wanted — precisely what `keyboardShouldPersistTaps="handled"` means for the keyboard.
+The `ScrollView` can still steal the responder when a drag begins, so scrolling is
+unaffected. With the panel closed the wrapper returns `false` and is inert.
 
 **Android hardware back with panel open.** Close the panel; do not leave the screen.
 

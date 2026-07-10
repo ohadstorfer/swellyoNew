@@ -31,6 +31,12 @@ export interface AttachPanelApi {
    */
   showKeyboardIcon: boolean;
   togglePanel: () => void;
+  /**
+   * Dismiss the panel without summoning the keyboard. For taps that land on the
+   * chat's background — the same gesture that dismisses the keyboard — and for
+   * Android's back button.
+   */
+  closePanel: () => void;
   /** The user asked for the keyboard back. Pair with focusing the input. */
   requestKeyboard: () => void;
 }
@@ -94,6 +100,8 @@ export function useAttachPanel(): AttachPanelApi {
 
   const togglePanel = useCallback(() => dispatch({ type: 'TOGGLE' }), []);
 
+  const closePanel = useCallback(() => dispatch({ type: 'CLOSE' }), []);
+
   const requestKeyboard = useCallback(() => dispatch({ type: 'KEYBOARD_REQUESTED' }), []);
 
   return {
@@ -101,6 +109,7 @@ export function useAttachPanel(): AttachPanelApi {
     panelHeight: state.height,
     showKeyboardIcon: state.open && !state.returningToKeyboard,
     togglePanel,
+    closePanel,
     requestKeyboard,
   };
 }

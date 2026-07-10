@@ -63,6 +63,7 @@ import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { FilePreviewModal, type PickedFilePreview } from '../components/FilePreviewModal';
 import { ContactPreviewModal } from '../components/ContactPreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
+import { ChatCameraModal, type CapturedAsset } from '../components/ChatCameraModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
 import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
@@ -551,7 +552,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
   // Message id whose DM video is currently being signed on-demand (shows a spinner)
   const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
-  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, requestKeyboard } = useAttachPanel();
+  const { panelOpen, panelHeight, showKeyboardIcon, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -573,6 +574,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [selectedVideoUri, setSelectedVideoUri] = useState<string | null>(null);
   const selectedVideoMetadataRef = useRef<{ width?: number; height?: number; duration?: number; fileSize?: number; mimeType?: string } | null>(null);
   const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
+  const [cameraVisible, setCameraVisible] = useState(false);
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const [pendingFile, setPendingFile] = useState<PickedFilePreview | null>(null);
   const [filePreviewVisible, setFilePreviewVisible] = useState(false);
@@ -2666,108 +2668,47 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     }
   };
 
-  // Take a photo or record a video with the native camera and route it into
-  // the same preview modal that gallery picks use (ImagePreviewModal for
-  // photos, VideoPreviewModal for videos). Upload pipelines downstream are
-  // reused unchanged.
-  //
-  // Platform note: iOS's UIImagePickerController natively supports a
-  // Photo/Video toggle when mediaTypes is the mixed list, so we launch it
-  // directly. Android's intent system is single-mode (ACTION_IMAGE_CAPTURE
-  // vs ACTION_VIDEO_CAPTURE) and expo-image-picker silently falls back to
-  // photo-only when given the mixed list — so on Android we show a chooser
-  // dialog first.
-  const handleCameraCapture = async () => {
+  // Open the in-app camera (ChatCameraModal): live preview with a WhatsApp-style
+  // filmstrip of recent gallery media above the shutter. Captures and filmstrip
+  // picks both land in routeCapturedAsset below, which feeds the same preview
+  // modals that gallery picks use (ImagePreviewModal for photos,
+  // VideoPreviewModal for videos). Upload pipelines downstream are unchanged.
+  const handleCameraCapture = () => {
     if (!currentConversationId) {
       Alert.alert('Error', 'Please wait for the conversation to load');
       return;
     }
     if (Platform.OS === 'web') return;
+    setCameraVisible(true);
+  };
 
-    const ImagePicker = require('expo-image-picker');
-
-    // Single-mode launcher used after the user has chosen what to capture
-    // (or directly on iOS via the native toggle).
-    const launchCamera = async (mediaTypes: ('images' | 'videos')[]) => {
-      try {
-        const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          if (!canAskAgain) {
-            Alert.alert(
-              'Permission Required',
-              'Swellyo needs access to your camera. Please enable it in your device settings.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Open Settings', onPress: () => Linking.openSettings() },
-              ]
-            );
-          } else {
-            Alert.alert('Permission Required', 'Sorry, we need camera permissions to take photos!');
-          }
-          return;
-        }
-
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes,
-          allowsEditing: false,
-          quality: 1,
-          // 60s cap — keeps file sizes reasonable for mobile upload (~50-150MB
-          // depending on encoding) and matches WhatsApp behavior. Without this,
-          // a user on 4K HEVC can produce 1-2GB recordings that time out.
-          videoMaxDuration: 60,
-        });
-        if (result.canceled) return;
-        const asset = result.assets?.[0];
-        const uri = asset?.uri;
-        if (!uri) return;
-
-        // Classification mirrors handleImagePicker — asset.type when available,
-        // file extension as fallback. iOS camera returns .mov, Android .mp4.
-        const isVideo = asset?.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
-        if (isVideo) {
-          selectedVideoMetadataRef.current = {
-            width: asset?.width,
-            height: asset?.height,
-            duration: typeof asset?.duration === 'number' ? asset.duration / 1000 : undefined,
-            fileSize: asset?.fileSize,
-            mimeType: asset?.mimeType || (uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4'),
-          };
-          setSelectedVideoUri(uri);
-          setVideoPreviewVisible(true);
-        } else {
-          selectedImageUriForUploadRef.current = uri;
-          selectedImageDimensionsRef.current = {
-            width: asset?.width && asset.width > 0 ? asset.width : 0,
-            height: asset?.height && asset.height > 0 ? asset.height : 0,
-          };
-          setSelectedImageUri(uri);
-          setImagePreviewVisible(true);
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (/not available on simulator/i.test(msg)) {
-          Alert.alert('Camera unavailable', 'iOS Simulator has no camera. Test on a physical device.');
-          return;
-        }
-        console.error('Error capturing photo:', error);
-        Alert.alert('Error', 'Failed to open camera');
+  // Shared landing for camera captures and filmstrip picks — the same block
+  // that used to follow launchCameraAsync. The camera Modal must finish
+  // dismissing before the preview Modal presents: presenting a second RN Modal
+  // while the first is mid-dismiss gets silently dropped on iOS.
+  const routeCapturedAsset = (asset: CapturedAsset) => {
+    setCameraVisible(false);
+    const route = () => {
+      if (asset.isVideo) {
+        selectedVideoMetadataRef.current = {
+          width: asset.width,
+          height: asset.height,
+          duration: asset.duration,
+          mimeType: asset.mimeType || (asset.uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4'),
+        };
+        setSelectedVideoUri(asset.uri);
+        setVideoPreviewVisible(true);
+      } else {
+        selectedImageUriForUploadRef.current = asset.uri;
+        selectedImageDimensionsRef.current = {
+          width: asset.width && asset.width > 0 ? asset.width : 0,
+          height: asset.height && asset.height > 0 ? asset.height : 0,
+        };
+        setSelectedImageUri(asset.uri);
+        setImagePreviewVisible(true);
       }
     };
-
-    if (Platform.OS === 'android') {
-      Alert.alert(
-        'Capture',
-        undefined,
-        [
-          { text: 'Take Photo', onPress: () => { void launchCamera(['images']); } },
-          { text: 'Record Video', onPress: () => { void launchCamera(['videos']); } },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-        { cancelable: true }
-      );
-    } else {
-      await launchCamera(['images', 'videos']);
-    }
+    setTimeout(route, Platform.OS === 'ios' ? 400 : 50);
   };
 
   // Open the native crop/edit editor on-demand from inside ImagePreviewModal.
@@ -5280,7 +5221,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               resizeMode="cover"
             />
             <Reanimated.View style={[{ flex: 1 }, animatedKeyboardPadding]}>
-              {messageList}
+              {/* A tap on the chat's background closes the attach panel, mirroring the
+                  keyboard's own dismiss. Not a full-screen backdrop: that would swallow
+                  bubble taps and block scrolling. RN's responder negotiation runs from
+                  the deepest node up, so a bubble's Touchable claims the touch first and
+                  this only sees what nothing else wanted — exactly what
+                  keyboardShouldPersistTaps="handled" means for the keyboard. The
+                  ScrollView can still steal the responder when a drag begins. */}
+              <View
+                style={{ flex: 1 }}
+                onStartShouldSetResponder={() => panelOpen}
+                onResponderRelease={closePanel}
+              >
+                {messageList}
+              </View>
               {showReturnToLatest && (
                 <TouchableOpacity style={styles.returnToLatestPill} onPress={handleReturnToLatest}>
                   <Text style={styles.returnToLatestText}>Return to latest ↓</Text>
@@ -5520,6 +5474,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           }}
           isProcessing={isProcessingVideo}
           primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* In-app chat camera: WhatsApp-style shutter + recent-media filmstrip */}
+      {Platform.OS !== 'web' && (
+        <ChatCameraModal
+          visible={cameraVisible}
+          onCancel={() => setCameraVisible(false)}
+          onCapture={routeCapturedAsset}
+          onOpenGallery={() => {
+            setCameraVisible(false);
+            setTimeout(() => { void handleImagePicker(); }, Platform.OS === 'ios' ? 400 : 50);
+          }}
         />
       )}
       <BlockUserOverlay
