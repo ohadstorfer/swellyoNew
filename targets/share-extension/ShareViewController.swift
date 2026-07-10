@@ -3,6 +3,12 @@ import Social
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import os
+
+/// Breadcrumbs for on-device debugging. Read with:
+///   sudo log collect --device-udid <udid> --last 15m --output share.logarchive
+///   log show share.logarchive --predicate 'subsystem == "com.swellyo.app.share"' --info
+let shareLog = Logger(subsystem: "com.swellyo.app.share", category: "share")
 
 /// "Share to Swellyo".
 ///
@@ -37,6 +43,15 @@ class ShareViewController: UIViewController {
                 return files.first?.mimeType.hasPrefix("video/") == true ? "Video" : "Photo"
             }
         }
+
+        var debugKind: String {
+            switch self {
+            case .contact(let meta, _): return "contact(metaKeys=\(meta.count))"
+            case .url: return "url"
+            case .text: return "text"
+            case .media(let f): return "media(files=\(f.count))"
+            }
+        }
     }
 
     override func viewDidLoad() {
@@ -54,13 +69,24 @@ class ShareViewController: UIViewController {
     // MARK: - flow
 
     private func start() async {
+        shareLog.info("start: appGroupContainer=\(SharedStore.containerURL?.path ?? "NIL", privacy: .public)")
+
         guard let items = extensionContext?.inputItems as? [NSExtensionItem] else {
+            shareLog.error("start: no inputItems")
             return completeAndDismiss()
         }
         let attachments = items.flatMap { $0.attachments ?? [] }
+        for (i, a) in attachments.enumerated() {
+            shareLog.info(
+                "attachment[\(i)] types=\(a.registeredTypeIdentifiers.joined(separator: ","), privacy: .public)"
+            )
+        }
+
         guard let payload = await resolvePayload(attachments) else {
+            shareLog.error("resolvePayload: nil — nothing matched, dismissing")
             return completeAndDismiss()
         }
+        shareLog.info("resolvePayload: \(payload.debugKind, privacy: .public)")
         await MainActor.run { route(payload) }
     }
 
@@ -183,27 +209,51 @@ class ShareViewController: UIViewController {
             // read; writing the JSON now is the commit point.
             staged = SharedStore.stage(id: stagedId, kind: "media", files: files)
         }
+        shareLog.info("stageAndOpen: staged=\(staged?.uuidString ?? "NIL", privacy: .public)")
         openHostApp(stagedId: staged)
     }
 
     private func openHostApp(stagedId: UUID?) {
-        defer { completeAndDismiss() }
         guard let id = stagedId,
               let url = URL(string: "swellyo://share?staged=\(id.uuidString.lowercased())")
-        else { return }
+        else {
+            shareLog.error("openHostApp: nothing staged — dismissing without opening the app")
+            return completeAndDismiss()
+        }
 
         // Share extensions have no sanctioned openURL. Walking the responder chain
-        // for something that answers `openURL:` is the long-standing workaround.
-        // If a future iOS breaks it the payload is already staged — the app picks
-        // it up on next launch instead of auto-opening.
-        let selector = sel_registerName("openURL:")
+        // to the UIApplication and calling open(_:) is the long-standing workaround,
+        // and is what expo-share-intent's own extension does. `perform("openURL:")`
+        // (the single-arg form, deprecated since iOS 10) is NOT equivalent — the
+        // `respondsToLegacySelector` breadcrumb below records whether it resolves,
+        // so we can tell from a device log which mechanism the OS actually offers.
+        let legacySelector = sel_registerName("openURL:")
+        var opened = false
         var responder: UIResponder? = self
         while let r = responder {
-            if r.responds(to: selector) {
-                _ = r.perform(selector, with: url)
-                return
+            if let application = r as? UIApplication {
+                shareLog.info(
+                    """
+                    openHostApp: found UIApplication in responder chain; \
+                    canOpenURL=\(application.canOpenURL(url), privacy: .public) \
+                    respondsToLegacySelector=\(r.responds(to: legacySelector), privacy: .public)
+                    """
+                )
+                application.open(url, options: [:]) { success in
+                    shareLog.info("openHostApp: open(url) success=\(success, privacy: .public)")
+                    // Complete only after the OS has taken the URL. Tearing the
+                    // extension down synchronously can cancel the open in flight.
+                    self.completeAndDismiss()
+                }
+                opened = true
+                break
             }
             responder = r.next
+        }
+
+        if !opened {
+            shareLog.error("openHostApp: no UIApplication in responder chain; payload stays staged")
+            completeAndDismiss()
         }
     }
 
@@ -240,10 +290,18 @@ class ShareViewController: UIViewController {
         for p in items where p.hasItemConformingToTypeIdentifier(type) {
             let staged = await withCheckedContinuation {
                 (c: CheckedContinuation<SharedStore.StagedFile?, Never>) in
-                p.loadFileRepresentation(forTypeIdentifier: type) { [stagedId] url, _ in
-                    guard let url,
-                          let path = SharedStore.copyIntoContainer(from: url, stagedId: stagedId)
-                    else { return c.resume(returning: nil) }
+                p.loadFileRepresentation(forTypeIdentifier: type) { [stagedId] url, error in
+                    guard let url else {
+                        shareLog.error(
+                            "loadFileRepresentation(\(type, privacy: .public)) failed: \(error?.localizedDescription ?? "nil url", privacy: .public)"
+                        )
+                        return c.resume(returning: nil)
+                    }
+                    guard let path = SharedStore.copyIntoContainer(from: url, stagedId: stagedId)
+                    else {
+                        shareLog.error("copyIntoContainer failed for \(url.lastPathComponent, privacy: .public)")
+                        return c.resume(returning: nil)
+                    }
                     let mime =
                         UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
                         ?? "application/octet-stream"

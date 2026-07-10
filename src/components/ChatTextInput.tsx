@@ -301,10 +301,13 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     useKeyboardDirection();
   // Keyboard direction only breaks ties. Content with a strong directional
   // character keeps RN's own bidi resolution (NO alignment props set — that is
-  // what guarantees nothing else changes). Only neutral content (empty, emoji,
+  // what guarantees nothing else changes). Only TYPED neutral content (emoji,
   // digits) + an RTL keyboard forces right alignment, mirroring WhatsApp.
+  // An empty field never forces: the placeholder must always sit left.
   const forceRtl =
-    getStrongDirection(value) === null && keyboardDirection === 'rtl';
+    value.length > 0 &&
+    getStrongDirection(value) === null &&
+    keyboardDirection === 'rtl';
 
   // Voice message recording — WhatsApp-style push-to-talk with two release
   // axes: slide LEFT to cancel, slide UP to lock. After lock, the composer is

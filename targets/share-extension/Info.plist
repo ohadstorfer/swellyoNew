@@ -11,31 +11,33 @@
       <key>NSExtensionAttributes</key>
       <dict>
         <!--
-          A .vcf shared from Contacts arrives as a file whose UTI (public.vcard)
-          conforms to public.data, so SupportsFileWithMaxCount is what matches it.
-          If Swellyo does not appear in the Contacts share sheet on device,
-          replace this dict with a predicate string that names public.vcard
-          explicitly, e.g.
-            SUBQUERY(extensionItems, $item,
-              SUBQUERY($item.attachments, $att,
-                ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO "public.vcard"
-              ).@count > 0
-            ).@count > 0
-          The dict form is preferred while it works — it is far easier to read.
+          Predicate form, NOT the dictionary form. The dictionary form cannot
+          match a shared contact:
+
+            `public.vcard` conforms to BOTH `public.data` and `public.text`
+            (supertypes: public.contact, public.content, public.data,
+             public.item, public.text — verified with UTType.vCard.supertypes).
+
+          `NSExtensionActivationSupportsFileWithMaxCount` only claims items that
+          are files and NOT text/image/movie/url, and
+          `NSExtensionActivationSupportsText` means *plain* text
+          (public.plain-text). A vCard falls between the two, so Swellyo never
+          appeared in the Contacts share sheet.
+
+          Naming public.vcard explicitly is the only rule that matches it.
         -->
         <key>NSExtensionActivationRule</key>
-        <dict>
-          <key>NSExtensionActivationSupportsText</key>
-          <true/>
-          <key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
-          <integer>1</integer>
-          <key>NSExtensionActivationSupportsImageWithMaxCount</key>
-          <integer>10</integer>
-          <key>NSExtensionActivationSupportsMovieWithMaxCount</key>
-          <integer>1</integer>
-          <key>NSExtensionActivationSupportsFileWithMaxCount</key>
-          <integer>1</integer>
-        </dict>
+        <string>SUBQUERY (
+            extensionItems, $extensionItem,
+            SUBQUERY (
+                $extensionItem.attachments, $attachment,
+                ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.vcard"
+                || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.image"
+                || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.movie"
+                || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url"
+                || ANY $attachment.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text"
+            ).@count &gt; 0
+        ).@count &gt; 0</string>
       </dict>
     </dict>
     <!-- Must track the app target. PRE_BUILD_CHECKLIST tracks 5 version spots;

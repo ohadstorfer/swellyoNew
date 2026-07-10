@@ -42,7 +42,7 @@ guarantees that real text is never rendered against its own direction.
 
 | Content       | Keyboard | Result | Path                    |
 |---------------|----------|--------|-------------------------|
-| `""` (empty)  | Hebrew   | right  | **new**                 |
+| `""` (empty)  | Hebrew   | left   | unchanged — placeholder always sits left (revised 2026-07-10) |
 | `""` (empty)  | English  | left   | unchanged (RN resolves) |
 | `"😋"`        | Hebrew   | right  | **new** — the fix       |
 | `"😋"`        | English  | left   | unchanged (RN resolves) |

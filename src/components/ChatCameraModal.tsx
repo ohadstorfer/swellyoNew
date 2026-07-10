@@ -3,7 +3,7 @@
  * (tap = photo, hold = video), flash/flip, and a filmstrip of recent gallery
  * media above the controls (RecentMediaStrip).
  *
- * Replaces ImagePicker.launchCameraAsync in DirectGroupChat — the OS camera is
+ * Replaces ImagePicker.launchCameraAsync in both chat screens — the OS camera is
  * another process we can't draw the filmstrip over. The contract is the same
  * shape that launchCameraAsync used to produce, so the caller's preview/upload
  * flow (ImagePreviewModal / VideoPreviewModal and everything downstream) is

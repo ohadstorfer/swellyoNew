@@ -18,6 +18,9 @@
 module.exports = {
   type: 'share',
   name: 'SwellyoShare',
+  // What the user reads in the share sheet. Without this the row is labelled
+  // "SwellyoShare" (the target name), which is what shipped in build 41.
+  displayName: 'Swellyo',
   // Match the main app (15.1). Without this the target defaults to iOS 18 and
   // the extension silently won't load on older devices — the same trap
   // notify-service documents.
