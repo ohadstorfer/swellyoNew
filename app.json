@@ -29,7 +29,10 @@
       ],
       "entitlements": {
         "aps-environment": "production",
-        "com.apple.developer.usernotifications.communication": true
+        "com.apple.developer.usernotifications.communication": true,
+        "com.apple.security.application-groups": [
+          "group.com.swellyo.app"
+        ]
       },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats.",
@@ -99,6 +102,20 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Swellyo uses your camera so you can take photos and record videos for your profile and to send in chats.",
+          "microphonePermission": "Swellyo uses your microphone to record voice messages and capture audio for video clips.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats."
+        }
+      ],
+      [
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.731913999896-l8kdj4dfd9841q7ed7kkqoqliq98t2oa"
@@ -122,7 +139,15 @@
         }
       ],
       "@bacons/apple-targets",
-      "react-native-bottom-tabs"
+      "react-native-bottom-tabs",
+      [
+        "expo-share-intent",
+        {
+          "disableIOS": true,
+          "androidIntentFilters": ["text/*", "image/*", "video/*"],
+          "androidMultiIntentFilters": ["image/*", "video/*"]
+        }
+      ]
     ],
     "extra": {
       "eas": {

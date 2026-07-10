@@ -57,7 +57,12 @@ export type RootStackParamList = {
     /** Opened from a "Review request" commitment notification — the chat shows a
      *  one-time "Before you approve" heads-up ~1s after it opens. */
     reviewCommitment?: boolean;
+    /** OS-share media handoff — prefills the composer's media preview on mount. */
+    sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
   };
+  /** OS-share conversation picker ("Share to Swellyo"). The payload itself
+   *  lives in shareIntake's module store, not in nav params. */
+  ShareToChat: undefined;
   /** Swelly AI chat card. service picks the edge-function variant (dev). */
   SwellyChat: { service?: 'copy' | 'copy-copy' };
   /** Surftrip detail card (was dual-rendered: AppContent overlay + inner stack). */

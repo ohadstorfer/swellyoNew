@@ -72,6 +72,35 @@ import { syncDeviceTimezone } from '../services/notifications/deviceTimezone';
 import { startNotificationsHub } from '../services/notifications/notificationsRealtimeHub';
 import { startBellBannerSource } from '../services/notifications/bellBannerSource';
 import { useMessaging } from '../context/MessagingProvider';
+import { initSessionBridge } from '../services/sessionBridge';
+import {
+  loadStagedShare,
+  setPendingShare,
+  hasPendingShare,
+  normalizeAndroidShareIntent,
+} from '../services/shareIntake';
+
+/**
+ * "Share to Swellyo" intake, Android only.
+ *
+ * Android has no share-extension concept: ACTION_SEND launches MainActivity in
+ * our own process, and expo-share-intent surfaces the payload here. On iOS the
+ * extension handles the share itself and only deep-links back (swellyo://share)
+ * when it falls back, so the hook must never run there — its native module is
+ * Android-configured in this app (the plugin runs with disableIOS: true).
+ *
+ * Bound at module scope because Platform.OS is fixed for the process lifetime,
+ * which keeps the hook identity stable and the rules-of-hooks contract intact.
+ */
+type ShareIntentApi = {
+  hasShareIntent: boolean;
+  shareIntent: any;
+  resetShareIntent: (clearNativeModule?: boolean) => void;
+};
+const useShareIntentSafe: () => ShareIntentApi =
+  Platform.OS === 'android'
+    ? require('expo-share-intent').useShareIntent
+    : () => ({ hasShareIntent: false, shareIntent: null, resetShareIntent: () => {} });
 
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession, isLoaded: isOnboardingLoaded, completionCheckedForUserId } = useOnboarding();
@@ -155,9 +184,27 @@ export const AppContent: React.FC = () => {
   const [pendingTripInviteId, setPendingTripInviteId] = useState<string | null>(null);
   const tripInviteResolverRef = useRef(false);
 
+  // ----- "Share to Swellyo" (native only) -----
+  // iOS: the share extension staged a payload in the App Group container and
+  // deep-linked `swellyo://share?staged=<uuid>`. Android: expo-share-intent below.
+  // `shareTick` exists because the payload lives in shareIntake's module store,
+  // not in React state — the tick is what re-runs the gated resolver.
+  const [pendingStagedShareId, setPendingStagedShareId] = useState<string | null>(null);
+  const [shareTick, setShareTick] = useState(0);
+  const shareResolverBusyRef = useRef(false);
+
   const parseInviteFromUrl = useCallback((url: string | null) => {
     if (!url) return;
     try {
+      // OS-share fallback from the iOS extension. Handled before the invite
+      // params below because it uses the `share` host, not a query-only link.
+      if (/^swellyo:\/\/share\b/i.test(url)) {
+        const qi = url.indexOf('?');
+        const sp = new URLSearchParams(qi >= 0 ? url.substring(qi + 1) : '');
+        const stagedId = sp.get('staged');
+        if (stagedId) setPendingStagedShareId(stagedId);
+        return;
+      }
       const q = url.indexOf('?');
       if (q < 0) return;
       const params = new URLSearchParams(url.substring(q + 1));
@@ -170,6 +217,12 @@ export const AppContent: React.FC = () => {
     } catch (e) {
       console.warn('[AppContent] invite URL parse failed:', e);
     }
+  }, []);
+
+  // Publish the Supabase access token into the Keychain group the iOS share
+  // extension reads. iOS-only, idempotent, no-ops in Expo Go.
+  useEffect(() => {
+    initSessionBridge();
   }, []);
 
   // Native: getInitialURL on cold start + 'url' event for warm start.
@@ -306,6 +359,62 @@ export const AppContent: React.FC = () => {
     // render, before initialization (TDZ crash). Safe to omit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingTripInviteId, user, isComplete, isDemoUser]);
+
+  // ----- "Share to Swellyo" intake -----
+  // Android: ACTION_SEND resolved into MainActivity; expo-share-intent hands us
+  // the payload. Files are copied to app-readable paths by the library.
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentSafe();
+  useEffect(() => {
+    if (!hasShareIntent || !shareIntent) return;
+    let cancelled = false;
+    (async () => {
+      const share = await normalizeAndroidShareIntent(shareIntent);
+      resetShareIntent();
+      if (cancelled) return;
+      if (share) {
+        setPendingShare(share);
+        setShareTick(t => t + 1);
+      } else {
+        Alert.alert('Could not share', 'Swellyo couldn’t read what was shared.');
+      }
+    })();
+    return () => { cancelled = true; };
+    // resetShareIntent identity changes per render in the library; depending on
+    // it would re-fire this effect. hasShareIntent is the real edge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasShareIntent]);
+
+  // Post-auth resolver: present the picker once signed in + onboarded. Same gate
+  // as the invite resolvers above, so a share that arrives on a logged-out or
+  // mid-onboarding app waits (in the module store / App Group) rather than being
+  // dropped. iOS staged payloads are read here, then deleted by loadStagedShare.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (shareResolverBusyRef.current) return;
+    if (!pendingStagedShareId && !hasPendingShare()) return;
+    if (user === null) return;
+    if (!isComplete && !isDemoUser) return;
+
+    shareResolverBusyRef.current = true;
+    (async () => {
+      try {
+        if (pendingStagedShareId) {
+          const share = await loadStagedShare(pendingStagedShareId);
+          setPendingStagedShareId(null);
+          if (!share) {
+            Alert.alert('Share expired', 'That share is no longer available — try sharing again.');
+            return;
+          }
+          setPendingShare(share);
+        }
+        pushRootCard('ShareToChat', undefined);
+      } catch (e) {
+        console.warn('[AppContent] share resolver failed:', e);
+      } finally {
+        shareResolverBusyRef.current = false;
+      }
+    })();
+  }, [pendingStagedShareId, shareTick, user, isComplete, isDemoUser]);
 
   // Validate session whenever a user is signed in (regardless of onboarding
   // completion). This unblocks mid-onboarding users who would otherwise be

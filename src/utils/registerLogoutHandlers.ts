@@ -20,6 +20,8 @@ import { blockingService } from '../services/blocking/blockingService';
 import { pushNotificationService } from '../services/notifications/pushNotificationService';
 import { stopNotificationsHub } from '../services/notifications/notificationsRealtimeHub';
 import { queryClient } from '../lib/queryClient';
+import { clearShareRecents } from '../services/shareRecentsCache';
+import { clearSharedSession } from '../services/sessionBridge';
 
 let registered = false;
 
@@ -67,6 +69,18 @@ export function registerLogoutHandlers(): void {
 
   // react-query cache (trips, etc.) — so User B never sees User A's cached data
   logoutRegistry.register(() => queryClient.clear());
+
+  // iOS share extension: drop the cached recents + any staged payload, and the
+  // access token in the shared Keychain group. Otherwise the next user's share
+  // sheet lists the previous user's chats — and could send as them.
+  logoutRegistry.register(() => clearShareRecents());
+  logoutRegistry.register(async () => {
+    try {
+      await clearSharedSession();
+    } catch (e) {
+      console.warn('[Logout] clearSharedSession failed:', e);
+    }
+  });
 
   // Web-only: clear localStorage user data
   if (Platform.OS === 'web') {

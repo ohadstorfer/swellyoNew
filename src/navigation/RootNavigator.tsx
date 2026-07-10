@@ -28,6 +28,7 @@ import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { ShareToChatScreen } from '../screens/ShareToChatScreen';
 import type { NavKey } from '../components/trips/TripsBottomNav';
 import { Images } from '../assets/images';
 import { useMainNav } from './MainNavContext';
@@ -249,6 +250,7 @@ function ChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackP
       tripId={params.tripId}
       surftripId={params.surftripId}
       reviewCommitment={params.reviewCommitment}
+      sharedMedia={params.sharedMedia}
       onBack={() => navigation.goBack()}
       onViewProfile={chatCard.onViewProfile}
       onOpenTripDetail={chatCard.onOpenTripDetail}
@@ -571,6 +573,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="ManageGear" component={ManageGearCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="Commitment" component={CommitmentCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ChatCard" component={ChatCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="ShareToChat" component={ShareToChatScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SwellyChat" component={SwellyChatCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="SurftripCard" component={SurftripCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ProfileCard" component={ProfileCardScreen} options={{ presentation: 'card' }} />

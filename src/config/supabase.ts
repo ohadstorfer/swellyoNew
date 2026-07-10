@@ -4,8 +4,10 @@ import { Platform } from 'react-native';
 
 // Get Supabase credentials from environment variables
 // Trim whitespace to handle any formatting issues
-const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
+// Exported so the iOS share extension's config blob (shareRecentsCache) can carry
+// them into the App Group container — the anon key is public by design.
+export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim();
+export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
 // Validate that credentials are provided and valid
 const validateUrl = (url: string | undefined): boolean => {

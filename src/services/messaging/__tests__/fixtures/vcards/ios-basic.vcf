@@ -1,0 +1,11 @@
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.5//EN
+N:Cohen;Dana;;;
+FN:Dana Cohen
+item1.TEL;type=pref:+972 52-123-4567
+item1.X-ABLabel:Mobile
+TEL;type=HOME;type=VOICE:03-555-1234
+item2.EMAIL;type=INTERNET;type=pref:dana@example.com
+item2.X-ABLabel:Work
+END:VCARD

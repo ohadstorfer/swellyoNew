@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useContext, useReducer, useRef, useEffect, useCallback, useMemo } from 'react';
-import { AppState, AppStateStatus, InteractionManager } from 'react-native';
+import { AppState, AppStateStatus, InteractionManager, Platform } from 'react-native';
 import { 
   messagingService, 
   Conversation, 
@@ -31,6 +31,7 @@ import { showInAppBanner } from '../services/notifications/inAppBannerBus';
 import { messagePreviewText } from '../services/messaging/messagePreviewText';
 import { getStorageThumbUrl } from '../services/media/imageService';
 import { pushRootCard } from '../navigation/navigationRef';
+import { writeShareRecents } from '../services/shareRecentsCache';
 import { useOnboarding } from './OnboardingContext';
 import {
   conversationReducer,
@@ -1006,6 +1007,15 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
 
     listSubsRef.current.set('__batch__', unsub);
   }, [conversations, user, isMessageProcessed, markMessageProcessed]);
+
+  // Mirror the top conversations into the App Group container so the iOS share
+  // extension can render its picker offline. iOS-only; no-ops in Expo Go.
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    const userId = user?.id ? String(user.id) : null;
+    if (!userId || conversations.length === 0) return;
+    writeShareRecents(conversations, userId);
+  }, [conversations, user]);
 
   // 'broadcast' mode only: subscribe to the per-user inbox topic, which the DB
   // trigger fans out to on every message change in any of the user's chats. This

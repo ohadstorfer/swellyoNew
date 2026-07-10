@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>NSExtension</key>
+    <dict>
+      <key>NSExtensionPointIdentifier</key>
+      <string>com.apple.share-services</string>
+      <key>NSExtensionPrincipalClass</key>
+      <string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+      <key>NSExtensionAttributes</key>
+      <dict>
+        <!--
+          A .vcf shared from Contacts arrives as a file whose UTI (public.vcard)
+          conforms to public.data, so SupportsFileWithMaxCount is what matches it.
+          If Swellyo does not appear in the Contacts share sheet on device,
+          replace this dict with a predicate string that names public.vcard
+          explicitly, e.g.
+            SUBQUERY(extensionItems, $item,
+              SUBQUERY($item.attachments, $att,
+                ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO "public.vcard"
+              ).@count > 0
+            ).@count > 0
+          The dict form is preferred while it works — it is far easier to read.
+        -->
+        <key>NSExtensionActivationRule</key>
+        <dict>
+          <key>NSExtensionActivationSupportsText</key>
+          <true/>
+          <key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+          <integer>1</integer>
+          <key>NSExtensionActivationSupportsImageWithMaxCount</key>
+          <integer>10</integer>
+          <key>NSExtensionActivationSupportsMovieWithMaxCount</key>
+          <integer>1</integer>
+          <key>NSExtensionActivationSupportsFileWithMaxCount</key>
+          <integer>1</integer>
+        </dict>
+      </dict>
+    </dict>
+    <!-- Must track the app target. PRE_BUILD_CHECKLIST tracks 5 version spots;
+         this target and notify-service make 6 and 7. -->
+    <key>CFBundleVersion</key>
+    <string>41</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.3.1</string>
+  </dict>
+</plist>

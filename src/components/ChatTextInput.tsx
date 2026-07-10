@@ -24,6 +24,8 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { colors } from '../styles/theme';
+import { getStrongDirection } from '../utils/textDirection';
+import { useKeyboardDirection } from '../hooks/useKeyboardDirection';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { useVoiceRecorder, type VoiceRecording } from '../hooks/useVoiceRecorder';
 import { RecordingOverlay } from './RecordingOverlay';
@@ -280,6 +282,15 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
 
   const isSendDisabled = disabled || (!allowEmpty && !value.trim());
 
+  const { direction: keyboardDirection, refresh: refreshKeyboardDirection } =
+    useKeyboardDirection();
+  // Keyboard direction only breaks ties. Content with a strong directional
+  // character keeps RN's own bidi resolution (NO alignment props set — that is
+  // what guarantees nothing else changes). Only neutral content (empty, emoji,
+  // digits) + an RTL keyboard forces right alignment, mirroring WhatsApp.
+  const forceRtl =
+    getStrongDirection(value) === null && keyboardDirection === 'rtl';
+
   // Voice message recording — WhatsApp-style push-to-talk with two release
   // axes: slide LEFT to cancel, slide UP to lock. After lock, the composer is
   // replaced by a hands-free recording bar (trash + send). Mic shows only on
@@ -508,16 +519,25 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                       paddingBottom: 12,
                     }),
                     ...(textColor ? { color: textColor } : null),
+                    ...(forceRtl
+                      ? { textAlign: 'right' as const, writingDirection: 'rtl' as const }
+                      : null),
                   },
                 ]}
                 placeholder={autoFitPlaceholder ? '' : placeholder}
                 placeholderTextColor={placeholderColor ?? colors.textSecondary}
                 value={value}
-                onChangeText={onChangeText}
+                onChangeText={(text) => {
+                  // Keystrokes are the reliable poll point on Android (no
+                  // native change event there) — see useKeyboardDirection.
+                  refreshKeyboardDirection();
+                  onChangeText(text);
+                }}
                 multiline
                 scrollEnabled={inputHeight >= MAX_INPUT_HEIGHT}
                 maxLength={maxLength}
                 onContentSizeChange={handleContentSizeChange}
+                onFocus={refreshKeyboardDirection}
                 onBlur={() => {
                   // Auto-refocus if blur fired during the send re-render window.
                   // Synchronous to preempt the native dismiss (deferring with rAF

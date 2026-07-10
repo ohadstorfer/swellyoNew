@@ -61,6 +61,7 @@ import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
+import { ChatCameraModal, type CapturedAsset } from '../components/ChatCameraModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
 import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
@@ -358,6 +359,9 @@ interface DirectGroupChatProps {
   // Accepted only so the ChatCard routing union type-checks — group chats never
   // review individual commitments, so this is ignored here.
   reviewCommitment?: boolean;
+  // OS-share handoff ("Share to Swellyo" → picked this chat): prefill the media
+  // preview composer on mount so caption + Send reuse the upload-first pipeline.
+  sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
 }
 
 export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
@@ -374,6 +378,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   onOpenTripDetail,
   surftripId,
   onOpenSurftripDetail,
+  sharedMedia,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
@@ -516,6 +521,39 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const selectedVideoMetadataRef = useRef<{ width?: number; height?: number; duration?: number; fileSize?: number; mimeType?: string } | null>(null);
   const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
+  const [cameraVisible, setCameraVisible] = useState(false);
+
+  // OS-share media handoff ("Share to Swellyo" → picked this chat). Enter exactly
+  // the preview state the pickers set, so caption + Send flow through the existing
+  // upload-first pipeline. Guarded so a re-render can't re-open the preview.
+  const sharedMediaConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!sharedMedia || sharedMediaConsumedRef.current) return;
+    sharedMediaConsumedRef.current = true;
+
+    if (sharedMedia.kind === 'video') {
+      selectedVideoMetadataRef.current = { mimeType: sharedMedia.mimeType };
+      setSelectedVideoUri(sharedMedia.uri);
+      setVideoPreviewVisible(true);
+      return;
+    }
+
+    selectedImageUriForUploadRef.current = sharedMedia.uri;
+    selectedImageDimensionsRef.current = { width: 0, height: 0 };
+    setSelectedImageUri(sharedMedia.uri);
+    setImagePreviewVisible(true);
+    // A shared file carries no dimensions (the pickers read them off the asset),
+    // so resolve them for the bubble's aspect ratio. 0×0 stays as the fallback —
+    // it's what the native picker writes when the asset omits them.
+    Image.getSize(
+      sharedMedia.uri,
+      (width, height) => {
+        selectedImageDimensionsRef.current = { width, height };
+      },
+      () => {},
+    );
+  }, [sharedMedia]);
+
   const insets = useSafeAreaInsets();
   // Keyboard-aware padding for the chat area. Bypasses the measureLayout-based
   // KAV which breaks when nested inside react-native-screen-transitions' transformed
@@ -2089,19 +2127,22 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         return updated;
       });
 
+      // Tear the spotlight down in the same commit as the optimistic body change.
+      // Held open across the await, the dim's cutout still has the pre-edit
+      // bubble's geometry and there's nothing re-measuring it once the menu closed.
+      setEditingMessageId(null);
+      setEditingText('');
+
       const updatedMessage = await messagingService.editMessage(currentConversationId, messageId, newBody);
-      
+
       // Update with server response
       setMessages((prev) => {
-        const updated = prev.map(msg => 
+        const updated = prev.map(msg =>
           msg.id === messageId ? updatedMessage : msg
         );
         chatHistoryCache.updateMessage(currentConversationId, messageId, updatedMessage).catch(() => {});
         return updated;
       });
-
-      setEditingMessageId(null);
-      setEditingText('');
     } catch (error: any) {
       console.error('Error editing message:', error);
       Alert.alert('Could not edit message', friendlyErrorMessage(error, 'Failed to edit message'));
@@ -2424,101 +2465,47 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     }
   };
 
-  // Take a photo or record a video with the native camera and route it into
-  // the same preview modal that gallery picks use (ImagePreviewModal for
-  // photos, VideoPreviewModal for videos). Upload pipelines downstream are
-  // reused unchanged.
-  //
-  // Platform note: iOS's UIImagePickerController natively supports a
-  // Photo/Video toggle when mediaTypes is the mixed list, so we launch it
-  // directly. Android's intent system is single-mode (ACTION_IMAGE_CAPTURE
-  // vs ACTION_VIDEO_CAPTURE) and expo-image-picker silently falls back to
-  // photo-only when given the mixed list — so on Android we show a chooser
-  // dialog first.
-  const handleCameraCapture = async () => {
+  // Open the in-app camera (ChatCameraModal): live preview with a WhatsApp-style
+  // filmstrip of recent gallery media above the shutter. Captures and filmstrip
+  // picks both land in routeCapturedAsset below, which feeds the same preview
+  // modals that gallery picks use (ImagePreviewModal for photos,
+  // VideoPreviewModal for videos). Upload pipelines downstream are unchanged.
+  const handleCameraCapture = () => {
     if (!currentConversationId) {
       Alert.alert('Error', 'Please wait for the conversation to load');
       return;
     }
     if (Platform.OS === 'web') return;
+    setCameraVisible(true);
+  };
 
-    const ImagePicker = require('expo-image-picker');
-
-    const launchCamera = async (mediaTypes: ('images' | 'videos')[]) => {
-      try {
-        const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          if (!canAskAgain) {
-            Alert.alert(
-              'Permission Required',
-              'Swellyo needs access to your camera. Please enable it in your device settings.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Open Settings', onPress: () => Linking.openSettings() },
-              ]
-            );
-          } else {
-            Alert.alert('Permission Required', 'Sorry, we need camera permissions to take photos!');
-          }
-          return;
-        }
-
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes,
-          allowsEditing: false,
-          quality: 1,
-          videoMaxDuration: 60,
-        });
-        if (result.canceled) return;
-        const asset = result.assets?.[0];
-        const uri = asset?.uri;
-        if (!uri) return;
-
-        const isVideo = asset?.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
-        if (isVideo) {
-          selectedVideoMetadataRef.current = {
-            width: asset?.width,
-            height: asset?.height,
-            duration: typeof asset?.duration === 'number' ? asset.duration / 1000 : undefined,
-            fileSize: asset?.fileSize,
-            mimeType: asset?.mimeType || (uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4'),
-          };
-          setSelectedVideoUri(uri);
-          setVideoPreviewVisible(true);
-        } else {
-          selectedImageUriForUploadRef.current = uri;
-          selectedImageDimensionsRef.current = {
-            width: asset?.width && asset.width > 0 ? asset.width : 0,
-            height: asset?.height && asset.height > 0 ? asset.height : 0,
-          };
-          setSelectedImageUri(uri);
-          setImagePreviewVisible(true);
-        }
-      } catch (error) {
-        const msg = error instanceof Error ? error.message : String(error);
-        if (/not available on simulator/i.test(msg)) {
-          Alert.alert('Camera unavailable', 'iOS Simulator has no camera. Test on a physical device.');
-          return;
-        }
-        console.error('Error capturing photo:', error);
-        Alert.alert('Error', 'Failed to open camera');
+  // Shared landing for camera captures and filmstrip picks — the same block
+  // that used to follow launchCameraAsync. The camera Modal must finish
+  // dismissing before the preview Modal presents: presenting a second RN Modal
+  // while the first is mid-dismiss gets silently dropped on iOS.
+  const routeCapturedAsset = (asset: CapturedAsset) => {
+    setCameraVisible(false);
+    const route = () => {
+      if (asset.isVideo) {
+        selectedVideoMetadataRef.current = {
+          width: asset.width,
+          height: asset.height,
+          duration: asset.duration,
+          mimeType: asset.mimeType || (asset.uri.endsWith('.mov') ? 'video/quicktime' : 'video/mp4'),
+        };
+        setSelectedVideoUri(asset.uri);
+        setVideoPreviewVisible(true);
+      } else {
+        selectedImageUriForUploadRef.current = asset.uri;
+        selectedImageDimensionsRef.current = {
+          width: asset.width && asset.width > 0 ? asset.width : 0,
+          height: asset.height && asset.height > 0 ? asset.height : 0,
+        };
+        setSelectedImageUri(asset.uri);
+        setImagePreviewVisible(true);
       }
     };
-
-    if (Platform.OS === 'android') {
-      Alert.alert(
-        'Capture',
-        undefined,
-        [
-          { text: 'Take Photo', onPress: () => { void launchCamera(['images']); } },
-          { text: 'Record Video', onPress: () => { void launchCamera(['videos']); } },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-        { cancelable: true }
-      );
-    } else {
-      await launchCamera(['images', 'videos']);
-    }
+    setTimeout(route, Platform.OS === 'ios' ? 400 : 50);
   };
 
   // Open the native crop/edit editor on-demand from inside ImagePreviewModal.
@@ -5273,6 +5260,19 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           }}
           isProcessing={isProcessingVideo}
           primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* In-app chat camera: WhatsApp-style shutter + recent-media filmstrip */}
+      {Platform.OS !== 'web' && (
+        <ChatCameraModal
+          visible={cameraVisible}
+          onCancel={() => setCameraVisible(false)}
+          onCapture={routeCapturedAsset}
+          onOpenGallery={() => {
+            setCameraVisible(false);
+            setTimeout(() => { void handleImagePicker(); }, Platform.OS === 'ios' ? 400 : 50);
+          }}
         />
       )}
       <BlockUserOverlay

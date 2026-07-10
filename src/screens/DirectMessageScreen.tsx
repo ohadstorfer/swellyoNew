@@ -380,6 +380,9 @@ interface DirectMessageScreenProps {
   // Opened from a "Review request" commitment notification → show a one-time
   // "Before you approve" heads-up ~1s after the chat opens.
   reviewCommitment?: boolean;
+  // OS-share handoff ("Share to Swellyo" → picked this chat): prefill the media
+  // preview composer on mount so caption + Send reuse the upload-first pipeline.
+  sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
 }
 
 export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
@@ -395,6 +398,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   tripId,
   onOpenTripDetail,
   reviewCommitment = false,
+  sharedMedia,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
@@ -568,6 +572,38 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const selectedVideoMetadataRef = useRef<{ width?: number; height?: number; duration?: number; fileSize?: number; mimeType?: string } | null>(null);
   const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
+
+  // OS-share media handoff ("Share to Swellyo" → picked this chat). Enter exactly
+  // the preview state the pickers set, so caption + Send flow through the existing
+  // upload-first pipeline. Guarded so a re-render can't re-open the preview.
+  const sharedMediaConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!sharedMedia || sharedMediaConsumedRef.current) return;
+    sharedMediaConsumedRef.current = true;
+
+    if (sharedMedia.kind === 'video') {
+      selectedVideoMetadataRef.current = { mimeType: sharedMedia.mimeType };
+      setSelectedVideoUri(sharedMedia.uri);
+      setVideoPreviewVisible(true);
+      return;
+    }
+
+    selectedImageUriForUploadRef.current = sharedMedia.uri;
+    selectedImageDimensionsRef.current = { width: 0, height: 0 };
+    setSelectedImageUri(sharedMedia.uri);
+    setImagePreviewVisible(true);
+    // A shared file carries no dimensions (the pickers read them off the asset),
+    // so resolve them for the bubble's aspect ratio. 0×0 stays as the fallback —
+    // it's what the native picker writes when the asset omits them.
+    Image.getSize(
+      sharedMedia.uri,
+      (width, height) => {
+        selectedImageDimensionsRef.current = { width, height };
+      },
+      () => {},
+    );
+  }, [sharedMedia]);
+
   const insets = useSafeAreaInsets();
   // Keyboard-aware padding for the chat area. Bypasses the measureLayout-based
   // KAV which breaks when nested inside react-native-screen-transitions' transformed
@@ -2286,19 +2322,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         return updated;
       });
 
+      // Tear the spotlight down in the same commit as the optimistic body change.
+      // Held open across the await, the dim's cutout still has the pre-edit
+      // bubble's geometry and there's nothing re-measuring it once the menu closed.
+      setEditingMessageId(null);
+      setEditingText('');
+
       const updatedMessage = await messagingService.editMessage(currentConversationId, messageId, newBody);
-      
+
       // Update with server response
       setMessages((prev) => {
-        const updated = prev.map(msg => 
+        const updated = prev.map(msg =>
           msg.id === messageId ? updatedMessage : msg
         );
         chatHistoryCache.updateMessage(currentConversationId, messageId, updatedMessage).catch(() => {});
         return updated;
       });
-
-      setEditingMessageId(null);
-      setEditingText('');
     } catch (error: any) {
       console.error('Error editing message:', error);
       Alert.alert('Could not edit message', friendlyErrorMessage(error, 'Failed to edit message'));
