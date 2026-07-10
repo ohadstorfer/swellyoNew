@@ -1,5 +1,5 @@
-import React from 'react';
-import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './Text';
 import { AggregatedReaction } from '../services/messaging/messagingService';
 
@@ -10,6 +10,14 @@ interface Props {
   // Left offset (px) for left-aligned rows so the badge lines up with the
   // bubble's left edge instead of the avatar lane in group chats.
   leftInset?: number;
+  // True while this message is the one lifted by the spotlight overlay (long-
+  // press menu or edit mode). The pill hangs OUTSIDE the spotlight's cutout, so
+  // leaving it up would strand a blurred, dimmed badge against a perfectly
+  // sharp bubble. It fades instead of unmounting: the row contributes height,
+  // and dropping it would reflow every message below — in an inverted list
+  // that's a visible jump, and it would invalidate the bubbleRect the overlay
+  // is actively drawing its hole from.
+  hidden?: boolean;
 }
 
 /**
@@ -21,7 +29,20 @@ export const MessageReactionsRow: React.FC<Props> = ({
   ownAlignment,
   onPress,
   leftInset,
+  hidden = false,
 }) => {
+  // Exit is quicker than entry: the overlay's own fade-in is 150ms, and the
+  // pill should already be gone by the time the frost settles.
+  const fade = useRef(new Animated.Value(hidden ? 0 : 1)).current;
+  useEffect(() => {
+    Animated.timing(fade, {
+      toValue: hidden ? 0 : 1,
+      duration: hidden ? 110 : 150,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [hidden, fade]);
+
   if (reactions.length === 0) return null;
 
   // Merge every reaction into ONE WhatsApp-style pill: the distinct emojis
@@ -31,11 +52,13 @@ export const MessageReactionsRow: React.FC<Props> = ({
   const Pill = onPress ? TouchableOpacity : View;
 
   return (
-    <View
+    <Animated.View
+      pointerEvents={hidden ? 'none' : 'auto'}
       style={[
         styles.row,
         ownAlignment === 'right' ? styles.alignRight : styles.alignLeft,
         ownAlignment === 'left' && leftInset != null && { marginLeft: leftInset },
+        { opacity: fade },
       ]}
     >
       <Pill
@@ -53,7 +76,7 @@ export const MessageReactionsRow: React.FC<Props> = ({
           <Text style={[styles.count, anyMine && styles.countMine]}>{total}</Text>
         ) : null}
       </Pill>
-    </View>
+    </Animated.View>
   );
 };
 

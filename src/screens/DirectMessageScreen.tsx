@@ -4885,6 +4885,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         <MessageReactionsRow
           reactions={message.reactions}
           ownAlignment={isOwnMessage ? 'right' : 'left'}
+          // Fade the pill out while THIS bubble is the one lifted by the
+          // spotlight — it sits outside the cutout, so it would read as a
+          // blurred smear hanging off a sharp bubble.
+          hidden={
+            (menuVisible && selectedMessage?.id === message.id) ||
+            editingMessageId === message.id
+          }
           // Tapping a reaction pill opens the WhatsApp-style "who reacted" sheet
           // (add/remove happens inside it), instead of toggling inline.
           onPress={(emoji) => setReactionsSheet({ messageId: message.id, emoji })}

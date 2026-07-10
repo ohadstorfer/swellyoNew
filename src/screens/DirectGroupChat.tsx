@@ -4674,6 +4674,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           // Group incoming bubbles are offset by the avatar lane (32 + 8);
           // align the badge to the bubble's left edge, not the avatar.
           leftInset={isDirect ? 2 : 42}
+          // Fade the pill out while THIS bubble is the one lifted by the
+          // spotlight — it sits outside the cutout, so it would read as a
+          // blurred smear hanging off a sharp bubble.
+          hidden={
+            (menuVisible && selectedMessage?.id === message.id) ||
+            editingMessageId === message.id
+          }
           // Tapping a reaction pill opens the WhatsApp-style "who reacted" sheet
           // (add/remove happens inside it), instead of toggling inline.
           onPress={(emoji) => setReactionsSheet({ messageId: message.id, emoji })}
