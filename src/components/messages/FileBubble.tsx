@@ -32,9 +32,11 @@ interface FileBubbleProps {
   onLongPress?: (e: any) => void;
   /** Computed by the screen (getBodyTextAlign is screen-private). */
   textAlign?: 'left' | 'right';
+  /** Content-area max width of a regular text bubble, so file cards line up with it. */
+  maxWidth?: number;
 }
 
-export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbleProps) {
+export function FileBubble({ message, isOwn, onLongPress, textAlign, maxWidth = 240 }: FileBubbleProps) {
   const [busy, setBusy] = useState(false);
   const [viewer, setViewer] = useState<{ uri: string } | null>(null);
   const meta = message.file_metadata;
@@ -107,7 +109,7 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbl
 
   return (
     <View>
-      <Pressable onPress={handleOpen} onLongPress={onLongPress} delayLongPress={300} style={styles.row}>
+      <Pressable onPress={handleOpen} onLongPress={onLongPress} delayLongPress={300} style={[styles.row, { width: maxWidth }]}>
         <View style={[styles.iconBox, { backgroundColor: isOwn ? 'rgba(255,255,255,0.18)' : '#E9F8FB' }]}>
           {busy ? (
             <ActivityIndicator size="small" color={tint} />
@@ -125,7 +127,7 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbl
         </View>
       </Pressable>
       {!!message.body?.trim() && (
-        <Text style={[styles.caption, { color: nameColor, textAlign: textAlign ?? 'left' }]}>
+        <Text style={[styles.caption, { color: nameColor, textAlign: textAlign ?? 'left', width: maxWidth }]}>
           {message.body}
         </Text>
       )}
@@ -149,8 +151,6 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 176,
-    maxWidth: 240,
   },
   iconBox: {
     width: 40,
@@ -178,7 +178,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginTop: 6,
     paddingHorizontal: 2,
-    maxWidth: 240,
     includeFontPadding: false,
   },
 });

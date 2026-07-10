@@ -560,16 +560,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [fullscreenVideo, setFullscreenVideo] = useState<{ url: string | null; posterUrl: string | null } | null>(null);
   // Bumped on every open/close so a stale signing result can't hijack the viewer.
   const videoOpenSeqRef = useRef(0);
-  // Wrappers, not bare refs: the handlers are declared below this call, so we pass
-  // arrows that reach them lazily (a tap can only fire long after everything mounts).
-  // In native-inputView mode these route the opaque menu's tile taps; the same
-  // handlers also feed the RN <AttachPanel> in the fallback path.
-  const { panelOpen, panelHeight, showKeyboardIcon, panelDismissing, usesNativeInputView, togglePanel, closePanel, requestKeyboard } = useAttachPanel({
-    onPhotos: () => handleImagePicker(),
-    onCamera: () => handleCameraCapture(),
-    onDocument: () => handlePickDocument(),
-    onContact: () => handlePickContact(),
-  });
+  const { panelOpen, panelHeight, showKeyboardIcon, panelDismissing, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -4474,6 +4465,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 isOwn={isOwnMessage}
                 onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
                 textAlign={getBodyTextAlign(message.body)}
+                maxWidth={MESSAGE_BUBBLE_MAX_WIDTH - 20}
               />
               <View style={styles.attachmentFooter}>
                 <Text style={[styles.timestamp, isOwnMessage ? styles.userTimestamp : styles.botTimestamp]}>
@@ -5477,10 +5469,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 />
               )}
               {composer}
-              {/* In native-inputView mode the opaque menu IS the surface — don't also
-                  render the RN panel. It still renders in the fallback path (module
-                  absent, or nothing focused so the keyboard was dismissed). */}
-              {panelOpen && !usesNativeInputView && (
+              {panelOpen && (
                 <AttachPanel
                   height={panelHeight}
                   dismissing={panelDismissing}

@@ -21,8 +21,16 @@
  */
 import React, { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { AttachMenuGrid, type AttachMenuActions } from './AttachMenuGrid';
+
+// Strong ease-out — Reanimated's default withTiming easing is ease-in-out, which
+// starts slow and makes the close read sluggish at the exact frame the eye is on it.
+const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+// Exit faster than enter: the close is the system responding to a tap, so it should
+// feel instant; the open can afford to be a touch softer.
+const FADE_IN_MS = 130;
+const FADE_OUT_MS = 90;
 
 /**
  * `dismissing` is set the moment the user asks for the keyboard back, while the panel
@@ -39,12 +47,14 @@ export function AttachPanel({
   ...actions
 }: AttachMenuActions & { height: number; dismissing?: boolean }) {
   // Starts transparent and fades in on mount (the panel is remounted on every open),
-  // then fades back out the instant a keyboard-return is requested. Same 120ms either
-  // way so the swap reads symmetric.
+  // then fades back out — fast, ease-out — the instant a keyboard-return is requested.
   const opacity = useSharedValue(0);
 
   useEffect(() => {
-    opacity.value = withTiming(dismissing ? 0 : 1, { duration: 120 });
+    opacity.value = withTiming(dismissing ? 0 : 1, {
+      duration: dismissing ? FADE_OUT_MS : FADE_IN_MS,
+      easing: EASE_OUT,
+    });
   }, [dismissing, opacity]);
 
   const cardStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));

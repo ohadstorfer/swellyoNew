@@ -137,7 +137,7 @@ export const FilePreviewShell: React.FC<FilePreviewShellProps> = ({
                     {title}
                   </Text>
                   {/* Balances the close button so the title stays centered. */}
-                  <View style={styles.closeButton} />
+                  <View style={styles.closeButtonSpacer} />
                 </View>
 
                 <View style={styles.body}>
@@ -176,6 +176,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  closeButtonSpacer: {
+    width: 36,
+    height: 36,
   },
   title: {
     flex: 1,

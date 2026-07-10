@@ -16,24 +16,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from 'rea
 import { BackHandler, Keyboard } from 'react-native';
 import { useGenericKeyboardHandler } from 'react-native-keyboard-controller';
 import { runOnJS } from 'react-native-reanimated';
-import {
-  activateKeyboardPassthrough,
-  deactivateKeyboardPassthrough,
-  isKeyboardPassthroughAvailable,
-} from '../../modules/keyboard-passthrough';
 import { attachPanelReducer, initialPanelState } from './attachPanelMachine';
-
-/**
- * PROTOTYPE FLAG. When true and the native module is present (iOS dev build), the
- * keyboard is not dismissed to reveal the panel — it is left open with a transparent
- * `inputView`, so it draws nothing and the panel behind it shows through. No slide,
- * nothing to synchronise. Flip to false to fall back to the shipped behaviour.
- *
- * The whole prototype hangs on ONE unverified assumption: that UIKit paints no
- * opaque backdrop behind a custom inputView. If it does, you will see grey and this
- * flag comes back out.
- */
-const KEYBOARD_PASSTHROUGH_PROTOTYPE = true;
 
 export interface AttachPanelApi {
   /** Whether AttachPanel is mounted. */
@@ -48,11 +31,10 @@ export interface AttachPanelApi {
    */
   showKeyboardIcon: boolean;
   /**
-   * The panel is mounted but on its way out: the user asked for the keyboard and it
-   * is rising over the (still-mounted) panel. The panel has to stay in the tree for
-   * that whole animation to hold the layout, but its buttons must stop responding and
-   * fade the instant the intent is registered — otherwise a tap that lands in the gap
-   * before the keyboard covers them fires a stale action or hits the flipped "+" icon.
+   * The user asked for the keyboard back, but it hasn't finished rising yet. The panel
+   * stays mounted through that whole animation (so the composer doesn't jump), but its
+   * card should fade out and stop taking taps immediately — the keyboard rises over an
+   * inert, vanishing surface rather than a live one.
    */
   panelDismissing: boolean;
   togglePanel: () => void;
@@ -73,17 +55,9 @@ export function useAttachPanel(): AttachPanelApi {
   const openRef = useRef(state.open);
   openRef.current = state.open;
 
-  /** True while the keyboard is open but blanked by a transparent inputView. */
-  const passthroughActive = useRef(false);
-  const usePassthrough = KEYBOARD_PASSTHROUGH_PROTOTYPE && isKeyboardPassthroughAvailable;
-
   // Rounded to match the container's `Math.round(Math.abs(kbHeight.value))` exactly.
   // A sub-pixel disagreement between the two is a visible step in the composer.
   const onKeyboardShown = useCallback((height: number) => {
-    // In passthrough the keyboard never left, so an arrival event here would be the
-    // transparent inputView settling — not the user asking for the keyboard back.
-    // Acting on it would tear the panel down while it is still the visible surface.
-    if (passthroughActive.current) return;
     dispatch({ type: 'KEYBOARD_SHOWN', height });
   }, []);
 
@@ -127,63 +101,15 @@ export function useAttachPanel(): AttachPanelApi {
   // and that empty frame is a flash of bare chat background.
   const wasOpen = useRef(false);
   useLayoutEffect(() => {
-    if (state.open && !wasOpen.current) {
-      if (usePassthrough) {
-        // Blank the keyboard in place. It stays open, so there is no slide at all.
-        activateKeyboardPassthrough(state.height).then((applied) => {
-          passthroughActive.current = applied;
-          if (__DEV__) {
-            // Three failure modes, one line to tell them apart: module absent (never
-            // reaches here), nothing focused (applied=false), or applied and still
-            // grey — which would mean UIKit paints its own backdrop and the whole
-            // prototype is dead.
-            console.log(
-              `[attach-panel] passthrough available=${isKeyboardPassthroughAvailable} applied=${applied} height=${state.height}`,
-            );
-          }
-          // `false` means nothing was focused — the keyboard was already gone, and
-          // dismissing is the no-op that keeps the two paths identical.
-          if (!applied) Keyboard.dismiss();
-        });
-      } else {
-        if (__DEV__) {
-          console.log(
-            `[attach-panel] passthrough OFF (available=${isKeyboardPassthroughAvailable}, flag=${KEYBOARD_PASSTHROUGH_PROTOTYPE}) — falling back to Keyboard.dismiss()`,
-          );
-        }
-        Keyboard.dismiss();
-      }
-    }
+    if (state.open && !wasOpen.current) Keyboard.dismiss();
     wasOpen.current = state.open;
-    // `state.height` is read, not tracked: re-running on a height change would
-    // re-activate mid-session.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.open, usePassthrough]);
+  }, [state.open]);
 
   const togglePanel = useCallback(() => dispatch({ type: 'TOGGLE' }), []);
 
-  const closePanel = useCallback(() => {
-    if (passthroughActive.current) {
-      passthroughActive.current = false;
-      // Restore the real keyboard BEFORE dismissing. Once the field resigns first
-      // responder we can no longer find it to clear the transparent inputView, and
-      // the next focus would raise a blank keyboard.
-      deactivateKeyboardPassthrough().then(() => Keyboard.dismiss());
-    }
-    dispatch({ type: 'CLOSE' });
-  }, []);
+  const closePanel = useCallback(() => dispatch({ type: 'CLOSE' }), []);
 
-  const requestKeyboard = useCallback(() => {
-    if (passthroughActive.current) {
-      passthroughActive.current = false;
-      // The keyboard never left; clearing the inputView brings it straight back.
-      // Nothing to defer — there is no open animation to cover, so close now.
-      deactivateKeyboardPassthrough();
-      dispatch({ type: 'CLOSE' });
-      return;
-    }
-    dispatch({ type: 'KEYBOARD_REQUESTED' });
-  }, []);
+  const requestKeyboard = useCallback(() => dispatch({ type: 'KEYBOARD_REQUESTED' }), []);
 
   return {
     panelOpen: state.open,
