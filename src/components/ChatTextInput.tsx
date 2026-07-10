@@ -163,7 +163,25 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
 ) {
   const inputRef = useRef<TextInput>(null);
   const justSentRef = useRef<boolean>(false);
+  const justSentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastLineCountRef = useRef<number>(1);
+
+  // Opens a short window where onBlur auto-refocuses — the re-render from
+  // committing the value can blur the TextInput on iOS. It MUST close itself:
+  // a latched flag makes the keyboard impossible to dismiss for the rest of
+  // the screen's life.
+  const claimFocusWindow = useCallback(() => {
+    justSentRef.current = true;
+    if (justSentTimerRef.current) clearTimeout(justSentTimerRef.current);
+    justSentTimerRef.current = setTimeout(() => {
+      justSentRef.current = false;
+      justSentTimerRef.current = null;
+    }, 400);
+  }, []);
+
+  useEffect(() => () => {
+    if (justSentTimerRef.current) clearTimeout(justSentTimerRef.current);
+  }, []);
   const [inputHeight, setInputHeight] = useState<number>(MIN_INPUT_HEIGHT);
   const [measureWidth, setMeasureWidth] = useState<number>(0);
   const keyboardVisible = useKeyboardVisible();
@@ -247,10 +265,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   const handleSend = () => {
     if (disabled) return;
     if (!allowEmpty && !value.trim()) return;
-    // Mark a short window where onBlur should auto-refocus — the re-render
-    // from clearing value + LayoutAnimation can blur the TextInput on iOS.
-    justSentRef.current = true;
-    setTimeout(() => { justSentRef.current = false; }, 400);
+    claimFocusWindow();
 
     // Slow shrink animation when collapsing the composer back from multi-line
     // to one line. We seed the SV with the CURRENT natural height (so the
@@ -598,7 +613,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
             ]}
             onPressIn={() => {
               if (!value.trim()) return;
-              justSentRef.current = true;
+              claimFocusWindow();
               inputRef.current?.focus();
             }}
             onPress={() => { if (value.trim()) onSaveEdit?.(); }}
@@ -651,7 +666,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
               // the send window and re-assert focus synchronously on the same
               // run loop as the native touch event.
               if (disabled || (!allowEmpty && !value.trim())) return;
-              justSentRef.current = true;
+              claimFocusWindow();
               inputRef.current?.focus();
             }}
             onPress={handleSend}
