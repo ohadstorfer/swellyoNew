@@ -675,7 +675,7 @@ class MessagingService {
       
       const { data: messages, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .gt('updated_at', lastSyncDate)
@@ -752,7 +752,7 @@ class MessagingService {
 
       let query = supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('conversation_id', conversationId)
         // Note: We include deleted messages so they can be displayed with "deleted" placeholder
         .order('created_at', { ascending: useAscending })
@@ -870,7 +870,7 @@ class MessagingService {
     span: number = 20
   ): Promise<{ messages: Message[]; hasMoreOlder: boolean }> {
     if (!isSupabaseConfigured()) throw new Error('Supabase is not configured');
-    const cols = 'id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot';
+    const cols = 'id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot';
     try {
       const { data: target } = await supabase
         .from('messages').select('created_at').eq('id', targetMessageId).single();
@@ -2170,7 +2170,7 @@ class MessagingService {
       try {
         const { data: fullMessage, error } = await supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+          .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot')
           .eq('id', newMessage.id)
           .single();
 
@@ -2227,7 +2227,7 @@ class MessagingService {
     try {
       const { data: fullMessage, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, reply_to_message_id, reply_to_snapshot')
+        .select('id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot')
         .eq('id', updatedMessage.id)
         .single();
 
