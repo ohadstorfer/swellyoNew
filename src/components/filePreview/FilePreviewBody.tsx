@@ -1,9 +1,12 @@
 /**
- * Renders a locally-picked file for the pre-send review screen.
+ * Renders a local file:// for both file preview surfaces: the outgoing
+ * pre-send review (FilePreviewModal) and the incoming viewer (FileViewerModal).
  *
- * Security: this renders only the OUTGOING file the sender just chose in their
- * own picker, before upload. FileBubble's rule — a RECEIVED file is never
- * rendered in-app, it opens through the OS share sheet — is unchanged.
+ * Security: rendering an INCOMING file here is a deliberate reversal of the old
+ * "received files are never rendered in-app" posture — see the note in
+ * FileBubble.tsx. Images already decode in-process via expo-image; text has no
+ * parser; a PDF runs through the system parsers (PDFKit / PDFium), the same ones
+ * the OS share sheet would use.
  *
  * Every branch degrades to FileCard: unrenderable type, text over the cap, a
  * failed read, Expo Go, or a PDF view that throws. There is no path to a blank
