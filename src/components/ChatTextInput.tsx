@@ -94,6 +94,13 @@ export interface ChatTextInputProps {
   value: string;
   onChangeText: (text: string) => void;
   onSend: () => void;
+  /**
+   * Fired when the field is pressed, focused or not. `onFocus` cannot serve here:
+   * a field that never lost focus never regains it. The attach panel needs this —
+   * with the keyboard blanked by a transparent inputView the input keeps focus the
+   * whole time, so a tap on it is the only signal that the user wants the keys back.
+   */
+  onPress?: () => void;
   disabled?: boolean;
   placeholder?: string;
   maxLength?: number;
@@ -142,6 +149,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     value,
     onChangeText,
     onSend,
+    onPress,
     disabled = false,
     placeholder = 'Type your message..',
     maxLength = 500,
@@ -556,6 +564,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
                 maxLength={maxLength}
                 onContentSizeChange={handleContentSizeChange}
                 onFocus={refreshKeyboardDirection}
+                onPressIn={onPress}
                 onBlur={() => {
                   // Auto-refocus if blur fired during the send re-render window.
                   // Synchronous to preempt the native dismiss (deferring with rAF

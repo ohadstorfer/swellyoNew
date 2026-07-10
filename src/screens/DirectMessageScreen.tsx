@@ -5162,6 +5162,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 value={editingMessageId ? editingText : inputText}
                 onChangeText={editingMessageId ? setEditingText : setInputText}
                 onSend={sendMessage}
+                // With the keyboard blanked by a transparent inputView the field never
+                // loses focus, so onFocus never fires again. A press is the only signal.
+                onPress={panelOpen ? requestKeyboard : undefined}
                 onSaveEdit={() => { if (editingMessageId) handleEditMessage(editingMessageId, editingText); }}
                 disabled={isLoading}
                 placeholder={editingMessageId ? 'Edit message' : 'Type your message..'}
