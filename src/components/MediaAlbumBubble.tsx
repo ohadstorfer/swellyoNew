@@ -126,9 +126,13 @@ export const AlbumTile: React.FC<{
   );
 };
 
-// Match the single media bubble's footprint: it fills the message row up to
-// ~72% of the screen. The grid is square (two rows of square tiles).
-const GRID_WIDTH = Math.min(Dimensions.get('window').width * 0.72, 300);
+// Mirrors the host screens' bubble sizing: MESSAGE_BUBBLE_MAX_WIDTH there is
+// `screenWidth - 106`, and the caller wraps this component in the same
+// mediaFrameBubble 3px-per-side inset (imageMessageBubble also sets
+// overflow:hidden on that wrapper). Subtracting both here keeps the grid from
+// ever exceeding the bubble's own max width — which would silently clip the
+// rightmost tile column instead of erroring. Capped at 300 on large phones.
+const GRID_WIDTH = Math.min(Dimensions.get('window').width - 106 - 6, 300);
 const TILE_GAP = 2;
 const TILE_SIZE = (GRID_WIDTH - TILE_GAP) / 2;
 

@@ -3918,6 +3918,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     const showSenderName = isGroupReceived && isFirstInRun && !!senderName;
     const senderNameColor = isGroupReceived ? getSenderColor(album.sender_id) : undefined;
     const mergedReactions = album.items.flatMap(m => (!m.deleted && m.reactions) || []);
+    // Reply-jump highlights the album if its target is any of the album's items.
+    const isHighlighted = album.items.some(m => m.id === highlightedMessageId);
     return (
       <TouchableOpacity
         activeOpacity={0.7}
@@ -3968,19 +3970,37 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               </Text>
             </TouchableOpacity>
           )}
-          <MediaAlbumBubble
-            items={album.items}
-            onPressItem={(m) => openAlbumItem(album.items, m)}
-            onLongPressItem={(m, e) => handleMessageLongPress(m, e, false)}
-            onRetryItem={(m) => handleRetryUpload(m)}
-            onPressMore={() => setAlbumModalItems(album.items)}
-            timeLabel={formatTime(newest.created_at)}
-            receipt={
-              isOwnMessage && !newest.deleted ? (
-                <ReadReceipt state={getReceiptState(newest, otherUserLastReadAt)} onDark enabled={isDirect} />
-              ) : undefined
-            }
-          />
+          {/* Same bubble frame as a single media message: colored background,
+              rounded corners with a tail on the run's last bubble, and the
+              3px WhatsApp-style inset the grid's own 13px radius is concentric
+              with (16 - 3 = 13, see MediaAlbumBubble's `bubble` style). */}
+          <MessageBubbleHighlight
+            isHighlighted={isHighlighted}
+            onAnimationEnd={() => setHighlightedMessageId(null)}
+            style={[
+              styles.messageBubble,
+              isOwnMessage ? styles.userMessageBubble : styles.botMessageBubble,
+              !isLastInRun && (isOwnMessage
+                ? { borderBottomRightRadius: 16 }
+                : { borderBottomLeftRadius: 16 }),
+              styles.imageMessageBubble,
+              styles.mediaFrameBubble,
+            ]}
+          >
+            <MediaAlbumBubble
+              items={album.items}
+              onPressItem={(m) => openAlbumItem(album.items, m)}
+              onLongPressItem={(m, e) => handleMessageLongPress(m, e, false)}
+              onRetryItem={(m) => handleRetryUpload(m)}
+              onPressMore={() => setAlbumModalItems(album.items)}
+              timeLabel={formatTime(newest.created_at)}
+              receipt={
+                isOwnMessage && !newest.deleted ? (
+                  <ReadReceipt state={getReceiptState(newest, otherUserLastReadAt)} onDark enabled={isDirect} />
+                ) : undefined
+              }
+            />
+          </MessageBubbleHighlight>
           {mergedReactions.length > 0 && (
             <MessageReactionsRow
               reactions={mergedReactions}
