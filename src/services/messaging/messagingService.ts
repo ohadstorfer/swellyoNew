@@ -1281,6 +1281,7 @@ class MessagingService {
     metadataColumn: 'file_metadata' | 'contact_metadata',
     metadata: unknown,
     clientId: string,
+    body: string = '',
   ): Promise<Message> {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
@@ -1300,7 +1301,7 @@ class MessagingService {
       conversation_id: conversationId,
       sender_id: senderId,
       type,
-      body: '',
+      body,
       [metadataColumn]: metadata,
       client_id: clientId,
     };
@@ -1339,9 +1340,10 @@ class MessagingService {
     conversationId: string,
     fileMetadata: FileMetadata,
     clientId: string,
+    body: string = '',
   ): Promise<Message> {
     return this.createTypedMessageWithMetadata(
-      conversationId, 'file', 'file_metadata', fileMetadata, clientId,
+      conversationId, 'file', 'file_metadata', fileMetadata, clientId, body,
     );
   }
 
@@ -1350,9 +1352,10 @@ class MessagingService {
     conversationId: string,
     contactMetadata: ContactMetadata,
     clientId: string,
+    body: string = '',
   ): Promise<Message> {
     return this.createTypedMessageWithMetadata(
-      conversationId, 'contact', 'contact_metadata', contactMetadata, clientId,
+      conversationId, 'contact', 'contact_metadata', contactMetadata, clientId, body,
     );
   }
 

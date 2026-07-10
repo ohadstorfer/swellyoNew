@@ -28,7 +28,7 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata, ContactMetadata } from '../services/messaging/messagingService';
 import { AttachPanel } from '../components/AttachPanel';
 import { useAttachPanel } from '../hooks/useAttachPanel';
 import { FileBubble } from '../components/messages/FileBubble';
@@ -60,6 +60,8 @@ import { userPresenceService } from '../services/presence/userPresenceService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
 import { FullscreenImageViewer } from '../components/FullscreenImageViewer';
 import { ImagePreviewModal } from '../components/ImagePreviewModal';
+import { FilePreviewModal, type PickedFilePreview } from '../components/FilePreviewModal';
+import { ContactPreviewModal } from '../components/ContactPreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
 import { ChatCameraModal, type CapturedAsset } from '../components/ChatCameraModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
@@ -522,6 +524,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [videoPreviewVisible, setVideoPreviewVisible] = useState(false);
   const [isProcessingVideo, setIsProcessingVideo] = useState(false);
   const [cameraVisible, setCameraVisible] = useState(false);
+  const [pendingFile, setPendingFile] = useState<PickedFilePreview | null>(null);
+  const [filePreviewVisible, setFilePreviewVisible] = useState(false);
+  const [pendingContact, setPendingContact] = useState<ContactMetadata | null>(null);
+  const [contactPreviewVisible, setContactPreviewVisible] = useState(false);
 
   // OS-share media handoff ("Share to Swellyo" → picked this chat). Enter exactly
   // the preview state the pickers set, so caption + Send flow through the existing
@@ -2713,6 +2719,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     clientId: string,
     localUri: string,
     baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
+    caption?: string,
   ): Promise<{ created: Message; fileMetadata: FileMetadata }> => {
     const { uploadFileToStorage } = await import('../services/messaging/fileUploadService');
     const { storagePath } = await withTimeout(
@@ -2727,13 +2734,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       ext: baseMeta.ext,
       size_bytes: baseMeta.size_bytes,
     };
-    const created = await messagingService.createFileMessageWithMetadata(convId, fileMetadata, clientId);
+    const created = await messagingService.createFileMessageWithMetadata(convId, fileMetadata, clientId, caption ?? '');
     return { created, fileMetadata };
   };
 
   const handleFileSend = async (
     localUri: string,
     baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
+    caption?: string,
   ) => {
     if (!currentConversationId || !currentUserId) return;
     const conversationId = currentConversationId;
@@ -2744,7 +2752,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       client_id: clientId,
       conversation_id: conversationId,
       sender_id: currentUserId,
-      body: '',
+      body: caption ?? '',
       type: 'file',
       file_metadata: { ...baseMeta, storage_path: '' },
       attachments: [],
@@ -2766,7 +2774,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     scrollToBottom();
 
     try {
-      const { created, fileMetadata } = await uploadAndCreateFile(conversationId, clientId, localUri, baseMeta);
+      const { created, fileMetadata } = await uploadAndCreateFile(conversationId, clientId, localUri, baseMeta, caption);
       setMessages((prev) => {
         const next = prev.map(m =>
           m.id === clientId
@@ -2799,12 +2807,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     const { pickDocument } = await import('../services/messaging/documentPicker');
     const picked = await pickDocument();
     if (!picked) return;
-    await handleFileSend(picked.uri, {
-      display_name: picked.display_name,
-      ext: picked.ext,
-      mime_type: picked.mime_type,
-      size_bytes: picked.size_bytes,
-    });
+    // Review before sending — nothing is uploaded until the user hits send.
+    setPendingFile(picked);
+    setFilePreviewVisible(true);
   };
 
   // ─── Shared contacts (display-only) ───────────────────────────────────────
@@ -2817,58 +2822,65 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       const { pickContact } = await import('../services/messaging/contactPicker');
       const contact = await pickContact();
       if (!contact) return;
-      const conversationId = currentConversationId;
-      const clientId = Crypto.randomUUID();
-
-      const optimistic: Message = {
-        id: clientId,
-        client_id: clientId,
-        conversation_id: conversationId,
-        sender_id: currentUserId,
-        body: '',
-        type: 'contact',
-        contact_metadata: contact,
-        attachments: [],
-        is_system: false,
-        edited: false,
-        deleted: false,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        upload_state: 'sent',
-      } as Message;
-
-      setMessages((prev) => {
-        const next = [...prev, optimistic];
-        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
-        return next;
-      });
-      scrollToBottom();
-
-      try {
-        const created = await messagingService.createContactMessageWithMetadata(conversationId, contact, clientId);
-        setMessages((prev) => {
-          const next = prev.map(m =>
-            m.id === clientId
-              ? { ...created, contact_metadata: created.contact_metadata ?? contact, upload_state: 'sent' as const }
-              : m
-          );
-          chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
-          return next;
-        });
-      } catch (error: any) {
-        console.error('Error sending contact:', error);
-        setMessages((prev) => {
-          const next = prev.map(m =>
-            m.id === clientId ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
-          );
-          chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
-          return next;
-        });
-        Alert.alert('Could not send contact', friendlyErrorMessage(error, 'Failed to send contact'));
-      }
+      // Review before sending — the user chooses which numbers to share.
+      setPendingContact(contact);
+      setContactPreviewVisible(true);
     } catch (error: any) {
       console.error('Error picking contact:', error);
       Alert.alert('Error', friendlyErrorMessage(error, 'Failed to pick a contact'));
+    }
+  };
+
+  const sendContact = async (contact: ContactMetadata) => {
+    if (!currentConversationId || !currentUserId) return;
+    const conversationId = currentConversationId;
+    const clientId = Crypto.randomUUID();
+
+    const optimistic: Message = {
+      id: clientId,
+      client_id: clientId,
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: '',
+      type: 'contact',
+      contact_metadata: contact,
+      attachments: [],
+      is_system: false,
+      edited: false,
+      deleted: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      upload_state: 'sent',
+    } as Message;
+
+    setMessages((prev) => {
+      const next = [...prev, optimistic];
+      chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+      return next;
+    });
+    scrollToBottom();
+
+    try {
+      const created = await messagingService.createContactMessageWithMetadata(conversationId, contact, clientId);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId
+            ? { ...created, contact_metadata: created.contact_metadata ?? contact, upload_state: 'sent' as const }
+            : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+    } catch (error: any) {
+      console.error('Error sending contact:', error);
+      setMessages((prev) => {
+        const next = prev.map(m =>
+          m.id === clientId ? { ...m, upload_state: 'failed' as const, upload_error: error?.message } : m
+        );
+        chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
+        return next;
+      });
+      Alert.alert('Could not send contact', friendlyErrorMessage(error, 'Failed to send contact'));
     }
   };
 
@@ -3226,7 +3238,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       try {
         const { created, fileMetadata } = await uploadAndCreateFile(convId, clientIdF, localUri, {
           display_name: fm.display_name, ext: fm.ext, mime_type: fm.mime_type, size_bytes: fm.size_bytes,
-        });
+        }, message.body || undefined);
         setMessages((prev) => {
           const next = prev.map(m =>
             m.id === midF ? { ...created, file_metadata: created.file_metadata ?? fileMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
@@ -4095,6 +4107,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 message={message}
                 isOwn={isOwnMessage}
                 onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
+                textAlign={getBodyTextAlign(message.body)}
               />
               <View style={styles.attachmentFooter}>
                 <Text style={[styles.timestamp, isOwnMessage ? styles.userTimestamp : styles.botTimestamp]}>
@@ -5241,6 +5254,50 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           // onEdit undefined so the modal hides the Edit button.
           onEdit={Platform.OS !== 'web' && getImageCropPicker() ? handleEditImage : undefined}
           isProcessing={isProcessingImage}
+          primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* File Preview Modal — review the document, add a comment, then send. */}
+      {pendingFile && (
+        <FilePreviewModal
+          visible={filePreviewVisible}
+          file={pendingFile}
+          onSend={(caption) => {
+            const f = pendingFile;
+            setFilePreviewVisible(false);
+            setPendingFile(null);
+            if (f) {
+              void handleFileSend(f.uri, {
+                display_name: f.display_name,
+                ext: f.ext,
+                mime_type: f.mime_type,
+                size_bytes: f.size_bytes,
+              }, caption);
+            }
+          }}
+          onCancel={() => {
+            setFilePreviewVisible(false);
+            setPendingFile(null);
+          }}
+          primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* Contact Preview Modal — choose which numbers/emails to share. */}
+      {pendingContact && (
+        <ContactPreviewModal
+          visible={contactPreviewVisible}
+          contact={pendingContact}
+          onSend={(filtered) => {
+            setContactPreviewVisible(false);
+            setPendingContact(null);
+            void sendContact(filtered);
+          }}
+          onCancel={() => {
+            setContactPreviewVisible(false);
+            setPendingContact(null);
+          }}
           primaryColor={composerPrimaryColor}
         />
       )}

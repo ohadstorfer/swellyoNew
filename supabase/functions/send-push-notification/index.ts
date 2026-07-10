@@ -97,7 +97,7 @@ async function buildMessageContext(
 
   const { data: msg, error: msgError } = await supabase
     .from('messages')
-    .select('body, type')
+    .select('body, type, file_metadata, contact_metadata')
     .eq('id', messageId)
     .single();
 
@@ -113,6 +113,13 @@ async function buildMessageContext(
     body = 'Sent a voice message';
   } else if (msg.type === 'video') {
     body = 'Sent a video';
+  } else if (msg.type === 'file') {
+    // Mirrors messagePreviewText.ts so the push and the conversation list agree.
+    body = msg.body?.trim()
+      ? truncateForPush(msg.body.trim())
+      : `📎 ${msg.file_metadata?.display_name ?? 'File'}`;
+  } else if (msg.type === 'contact') {
+    body = `👤 ${msg.contact_metadata?.display_name ?? 'Contact'}`;
   } else {
     body = truncateForPush(msg.body || '');
   }

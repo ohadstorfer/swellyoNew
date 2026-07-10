@@ -22,8 +22,13 @@ export function messagePreviewText(
   if (m.type === 'image' || m.image_metadata) return 'Image';
   if (m.type === 'video' || m.video_metadata) return 'Video';
   if (m.type === 'audio' || m.audio_metadata) return 'Voice message';
-  if (m.type === 'file' || m.file_metadata) return `📎 ${m.file_metadata?.display_name ?? 'File'}`;
-  if (m.type === 'contact' || m.contact_metadata) return `👤 ${m.contact_metadata?.display_name ?? 'Contact'}`;
+  if (m.type === 'file' || m.file_metadata) {
+    // A caption is what the sender chose to say — it beats the filename.
+    return m.body?.trim() || `📎 ${m.file_metadata?.display_name ?? 'File'}`;
+  }
+  if (m.type === 'contact' || m.contact_metadata) {
+    return `👤 ${m.contact_metadata?.display_name ?? 'Contact'}`;
+  }
   if (m.type === 'commitment_request') {
     return m.sender_id && m.sender_id === opts?.currentUserId
       ? 'You requested to be Committed'
