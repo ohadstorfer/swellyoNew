@@ -5241,17 +5241,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               resizeMode="cover"
             />
             <Reanimated.View style={[{ flex: 1 }, animatedKeyboardPadding]}>
-              {/* A tap on the chat's background closes the attach panel, mirroring the
-                  keyboard's own dismiss. Not a full-screen backdrop: that would swallow
-                  bubble taps and block scrolling. RN's responder negotiation runs from
-                  the deepest node up, so a bubble's Touchable claims the touch first and
-                  this only sees what nothing else wanted — exactly what
-                  keyboardShouldPersistTaps="handled" means for the keyboard. The
-                  ScrollView can still steal the responder when a drag begins. */}
+              {/* A tap anywhere in the message area closes the attach panel, mirroring
+                  the keyboard's own dismiss. We watch the CAPTURE phase and return false:
+                  that lets us observe every touch-start over the list WITHOUT claiming the
+                  responder, so message bubbles keep their own taps (open image, long-press
+                  menu) and the ScrollView keeps scrolling. The previous bubble-phase
+                  `onStartShouldSetResponder` never fired for taps that landed on a bubble's
+                  full-width TouchableOpacity — only the empty side gutters closed the panel,
+                  which read as "the tap only works on the sides". */}
               <View
                 style={{ flex: 1 }}
-                onStartShouldSetResponder={() => panelOpen}
-                onResponderRelease={closePanel}
+                onStartShouldSetResponderCapture={() => {
+                  if (panelOpen) closePanel();
+                  return false;
+                }}
               >
                 {messageList}
               </View>
@@ -5506,10 +5509,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           visible={cameraVisible}
           onCancel={() => setCameraVisible(false)}
           onCapture={routeCapturedAsset}
-          onOpenGallery={() => {
-            setCameraVisible(false);
-            setTimeout(() => { void handleImagePicker(); }, Platform.OS === 'ios' ? 400 : 50);
-          }}
+          onOpenGallery={() => { void handleImagePicker(); }}
           onSendImage={(uri, caption) => { void handleImageSend(caption, uri); }}
           onSendVideo={(uri, caption) => { void handleVideoSend(caption, uri); }}
           onCropImage={cropImage}

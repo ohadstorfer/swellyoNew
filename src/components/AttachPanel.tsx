@@ -38,12 +38,13 @@ export function AttachPanel({
   dismissing = false,
   ...actions
 }: AttachMenuActions & { height: number; dismissing?: boolean }) {
-  const opacity = useSharedValue(1);
+  // Starts transparent and fades in on mount (the panel is remounted on every open),
+  // then fades back out the instant a keyboard-return is requested. Same 120ms either
+  // way so the swap reads symmetric.
+  const opacity = useSharedValue(0);
 
   useEffect(() => {
-    // Only ever fades OUT: the panel unmounts once the keyboard has fully risen, so it
-    // is never reused after a dismiss and never needs to fade back in.
-    if (dismissing) opacity.value = withTiming(0, { duration: 120 });
+    opacity.value = withTiming(dismissing ? 0 : 1, { duration: 120 });
   }, [dismissing, opacity]);
 
   const cardStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
