@@ -70,7 +70,12 @@ interface ChatCameraModalProps {
    */
   onCapture: (asset: CapturedAsset) => void;
   onCancel: () => void;
-  /** Opens the full OS gallery picker (the caller closes this modal first). */
+  /**
+   * Legacy fallback for the gallery button: the caller closes this modal and
+   * runs its own picker. Only used when the inline preview isn't available or
+   * the in-modal picker fails — otherwise the camera opens the OS picker
+   * itself and previews the pick inline.
+   */
   onOpenGallery: () => void;
   /**
    * When both are provided, every asset — shutter captures and filmstrip picks —
@@ -254,6 +259,7 @@ export function ChatCameraModal({
   // Reset per-open state (Modal unmounts children while hidden, but refs on
   // this component survive because the component itself stays mounted).
   useEffect(() => {
+    if (__DEV__) console.log('[ChatCameraModal] visible changed →', visible, '(reset runs when true)');
     if (!visible) return;
     deniedAlertShownRef.current = false;
     busyRef.current = false;
@@ -322,6 +328,9 @@ export function ChatCameraModal({
   // appears in place.
   const presentPick = useCallback(
     (asset: GalleryAsset, frame?: StripFrame) => {
+      if (__DEV__) {
+        console.log('[ChatCameraModal] presentPick isVideo=', asset.isVideo, 'inline=', canInlinePreview, 'uri=', asset.uri.slice(0, 60));
+      }
       if (!canInlinePreview) {
         routePick(asset);
         return;
@@ -565,6 +574,74 @@ export function ChatCameraModal({
     [presentPick]
   );
 
+  // Full OS gallery, opened ON TOP of the camera (the native picker presents
+  // over any RN Modal). A pick lands in the same inline preview as everything
+  // else; cancel drops straight back to the live camera. The old route — close
+  // the camera, let the host open the picker — left the external preview stuck
+  // behind this Modal on iOS until the camera was closed by hand.
+  const openingGalleryRef = useRef(false);
+  const handleOpenGallery = useCallback(async () => {
+    if (!canInlinePreview) {
+      onOpenGallery(); // legacy hosts: close the camera and run their own picker
+      return;
+    }
+    if (openingGalleryRef.current) return;
+    openingGalleryRef.current = true;
+    if (__DEV__) console.log('[ChatCameraModal] gallery: opening picker, inline=', canInlinePreview);
+    try {
+      const ImagePicker = require('expo-image-picker');
+      // Android 13+ ships the system photo picker — no permission needed.
+      const usePhotoPicker = Platform.OS === 'android' && Number(Platform.Version) >= 33;
+      if (!usePhotoPicker) {
+        const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          if (!canAskAgain) {
+            Alert.alert(
+              'Permission Required',
+              'Swellyo needs access to your photos. Please enable it in your device settings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openSettings() },
+              ]
+            );
+          } else {
+            Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to send images!');
+          }
+          return;
+        }
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        quality: 1,
+      });
+      const asset = result.assets?.[0];
+      if (__DEV__) {
+        console.log(
+          '[ChatCameraModal] gallery: result canceled=', result.canceled,
+          'type=', asset?.type,
+          'uri=', asset?.uri?.slice(0, 60),
+        );
+      }
+      if (result.canceled || !asset?.uri) return; // cancelled → back to the live camera
+      const isVideo =
+        asset.type === 'video' || asset.uri.endsWith('.mp4') || asset.uri.endsWith('.mov');
+      presentPick({
+        uri: asset.uri,
+        isVideo,
+        width: asset.width > 0 ? asset.width : undefined,
+        height: asset.height > 0 ? asset.height : undefined,
+        // expo-image-picker reports duration in milliseconds
+        duration:
+          isVideo && typeof asset.duration === 'number' ? asset.duration / 1000 : undefined,
+      });
+    } catch (error) {
+      console.warn('[ChatCameraModal] gallery picker failed:', error);
+      onOpenGallery(); // fall back to the host's flow
+    } finally {
+      openingGalleryRef.current = false;
+    }
+  }, [canInlinePreview, onOpenGallery, presentPick]);
+
   // Mode-selector geometry: shift the whole VIDEO/PHOTO row so the active
   // label's own center — not the pair's — lands on the row's center. Falls
   // back to an equal-width guess until both labels have reported onLayout.
@@ -673,7 +750,7 @@ export function ChatCameraModal({
             ) : (
               <Pressable
                 style={({ pressed }) => [styles.sideButton, pressed && styles.buttonPressed]}
-                onPress={onOpenGallery}
+                onPress={() => void handleOpenGallery()}
                 accessibilityRole="button"
                 accessibilityLabel="Open gallery"
                 hitSlop={8}
@@ -761,6 +838,7 @@ export function ChatCameraModal({
             The preview grows its own media from the tapped thumbnail's frame
             (openFrame) straight to its final editor size — no external modal,
             no fullscreen overshoot, no jump. */}
+        {__DEV__ && preview ? (console.log('[ChatCameraModal] rendering preview overlay, uri=', preview.uri.slice(0, 40)), null) : null}
         {preview && (
           <View style={styles.previewOverlay}>
             {preview.isVideo ? (
