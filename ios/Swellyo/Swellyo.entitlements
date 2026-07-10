@@ -14,10 +14,6 @@
     </array>
     <key>com.apple.developer.usernotifications.communication</key>
     <true/>
-    <!-- Shared with the SwellyoShare extension: the App Group container carries
-         the recents cache + staged payloads, and iOS automatically treats app
-         groups as keychain access groups, which is how sessionBridge.ts hands
-         the extension a short-lived Supabase access token. -->
     <key>com.apple.security.application-groups</key>
     <array>
       <string>group.com.swellyo.app</string>

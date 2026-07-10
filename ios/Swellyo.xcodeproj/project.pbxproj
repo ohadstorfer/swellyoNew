@@ -7,22 +7,32 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0D955B7C1D8F87E5B8C52F50 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF79C55CE38298B0AFA6BC65 /* ExpoModulesProvider.swift */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		71C63377CBFB418D9354EB87 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 7FCA44000A72127CCC6A9317 /* PrivacyInfo.xcprivacy */; };
-		807D982DF28EA42FBCBC04A2 /* libPods-Swellyo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A393AF75618A7C59014B4EBB /* libPods-Swellyo.a */; };
+		6EFA9C6D70B8609804545DAA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C6D670C7FBAFB719E130FCB0 /* PrivacyInfo.xcprivacy */; };
+		893E08239F5AB73DF5B25CF9 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845C10C43C682C145659FE73 /* ExpoModulesProvider.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		D43C43C0030705E9BCEDEE0D /* libPods-Swellyo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = C4E84132FE330F2BCC1C7B0C /* libPods-Swellyo.a */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
+		XX23B5FE5DDE1A6F54F1B8XX /* Contacts.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XXDE1E7BAA6635328724AEXX /* Contacts.framework */; };
+		XX41F588429C86D2AEF219XX /* SwellyoShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XX63803E1C9744940ECB14XX /* SwellyoShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */; };
 		XXE00829C48C111D8DF678XX /* SwellyoNotifyService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = XXC73D488D9AB16D7BCFB8XX /* SwellyoNotifyService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		XX48B13D65C2C94674348CXX /* PBXContainerItemProxy */ = {
+		XX82AED4B59A40908B449FXX /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = XX2EAB17A8D09E5D3B4DA0XX;
+			remoteGlobalIDString = XX9DF1C8DE2C3AB35D0C93XX;
+			remoteInfo = SwellyoShare;
+		};
+		XXBFF7FB33278CFE3B0DE8XX /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = XXAEE31948F39BAAB3E972XX;
 			remoteInfo = SwellyoNotifyService;
 		};
 /* End PBXContainerItemProxy section */
@@ -35,6 +45,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				XXE00829C48C111D8DF678XX /* SwellyoNotifyService.appex in Embed Foundation Extensions */,
+				XX41F588429C86D2AEF219XX /* SwellyoShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -45,41 +56,64 @@
 		13B07F961A680F5B00A75B9A /* Swellyo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; fileEncoding = 4; includeInIndex = 0; path = Swellyo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Swellyo/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; name = Info.plist; path = Swellyo/Info.plist; sourceTree = "<group>"; };
-		694749FC03BEA0F0EAF5F9BC /* Pods-Swellyo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Swellyo.debug.xcconfig"; path = "Target Support Files/Pods-Swellyo/Pods-Swellyo.debug.xcconfig"; sourceTree = "<group>"; };
-		7FCA44000A72127CCC6A9317 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Swellyo/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		A393AF75618A7C59014B4EBB /* libPods-Swellyo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Swellyo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		845C10C43C682C145659FE73 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Swellyo/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Swellyo/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		BF79C55CE38298B0AFA6BC65 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-Swellyo/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		E6B8311D53A1FA4380F92100 /* Pods-Swellyo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Swellyo.release.xcconfig"; path = "Target Support Files/Pods-Swellyo/Pods-Swellyo.release.xcconfig"; sourceTree = "<group>"; };
+		C4E84132FE330F2BCC1C7B0C /* libPods-Swellyo.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-Swellyo.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C6D670C7FBAFB719E130FCB0 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Swellyo/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		D1EA0D4A7685F714AD61E037 /* Pods-Swellyo.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Swellyo.debug.xcconfig"; path = "Target Support Files/Pods-Swellyo/Pods-Swellyo.debug.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Swellyo/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* Swellyo-Bridging-Header.h */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "Swellyo-Bridging-Header.h"; path = "Swellyo/Swellyo-Bridging-Header.h"; sourceTree = "<group>"; };
+		F729C7686FBB0B8D908FA2AB /* Pods-Swellyo.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Swellyo.release.xcconfig"; path = "Target Support Files/Pods-Swellyo/Pods-Swellyo.release.xcconfig"; sourceTree = "<group>"; };
+		XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		XX63803E1C9744940ECB14XX /* SwellyoShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = 4; includeInIndex = 0; path = SwellyoShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		XXC73D488D9AB16D7BCFB8XX /* SwellyoNotifyService.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; fileEncoding = 4; includeInIndex = 0; path = SwellyoNotifyService.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		XXDE1E7BAA6635328724AEXX /* Contacts.framework */ = {isa = PBXFileReference; fileEncoding = 4; includeInIndex = undefined; lastKnownFileType = wrapper.framework; name = Contacts.framework; path = System/Library/Frameworks/Contacts.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		XX5B8652C0A42C7DE24B6FXX /* Exceptions for "notify-service" folder in "SwellyoNotifyService" target */ = {
+		XX1C47C0BCFBF2F2DC1466XX /* Exceptions for "share-extension" folder in "SwellyoShare" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 				"expo-target.config.js",
 			);
-			target = XX2EAB17A8D09E5D3B4DA0XX /* SwellyoNotifyService */;
+			target = XX9DF1C8DE2C3AB35D0C93XX /* SwellyoShare */;
+		};
+		XXF076E39215D17FE8A5C8XX /* Exceptions for "notify-service" folder in "SwellyoNotifyService" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				"expo-target.config.js",
+			);
+			target = XXAEE31948F39BAAB3E972XX /* SwellyoNotifyService */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		XX951F6A479E35228028B4XX /* notify-service */ = {
+		XX3D3FD4DD16035DBCD4DCXX /* notify-service */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				XX5B8652C0A42C7DE24B6FXX /* Exceptions for "notify-service" folder in "SwellyoNotifyService" target */,
+				XXF076E39215D17FE8A5C8XX /* Exceptions for "notify-service" folder in "SwellyoNotifyService" target */,
 			);
 			explicitFileTypes = {
 			};
 			explicitFolders = (
 			);
 			path = "notify-service";
+			sourceTree = "<group>";
+		};
+		XXB4267BAA35723784E05BXX /* share-extension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				XX1C47C0BCFBF2F2DC1466XX /* Exceptions for "share-extension" folder in "SwellyoShare" target */,
+			);
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = "share-extension";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -89,7 +123,16 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				807D982DF28EA42FBCBC04A2 /* libPods-Swellyo.a in Frameworks */,
+				D43C43C0030705E9BCEDEE0D /* libPods-Swellyo.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		XX074B8811C1CF8E8A3D74XX /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				XX6A44985675A04437B8C4XX /* SwiftUI.framework in Frameworks */,
+				XX23B5FE5DDE1A6F54F1B8XX /* Contacts.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -105,7 +148,15 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				7FCA44000A72127CCC6A9317 /* PrivacyInfo.xcprivacy */,
+				C6D670C7FBAFB719E130FCB0 /* PrivacyInfo.xcprivacy */,
+			);
+			name = Swellyo;
+			sourceTree = "<group>";
+		};
+		2B41A1A79F5E32F47D474DCA /* Swellyo */ = {
+			isa = PBXGroup;
+			children = (
+				845C10C43C682C145659FE73 /* ExpoModulesProvider.swift */,
 			);
 			name = Swellyo;
 			sourceTree = "<group>";
@@ -114,9 +165,21 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				A393AF75618A7C59014B4EBB /* libPods-Swellyo.a */,
+				XX4DFF38D47332D6BF0183XX /* SwiftUI.framework */,
+				XXDE1E7BAA6635328724AEXX /* Contacts.framework */,
+				C4E84132FE330F2BCC1C7B0C /* libPods-Swellyo.a */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		6BD65488A8F378F47CA43D6E /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				D1EA0D4A7685F714AD61E037 /* Pods-Swellyo.debug.xcconfig */,
+				F729C7686FBB0B8D908FA2AB /* Pods-Swellyo.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -134,8 +197,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				D461D6A475FB85D248E37747 /* Pods */,
-				B2A19FD22811E4F7C1342AEC /* ExpoModulesProviders */,
+				6BD65488A8F378F47CA43D6E /* Pods */,
+				CD3B4A25265368A425B1708C /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -147,16 +210,9 @@
 			children = (
 				13B07F961A680F5B00A75B9A /* Swellyo.app */,
 				XXC73D488D9AB16D7BCFB8XX /* SwellyoNotifyService.appex */,
+				XX63803E1C9744940ECB14XX /* SwellyoShare.appex */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		B2A19FD22811E4F7C1342AEC /* ExpoModulesProviders */ = {
-			isa = PBXGroup;
-			children = (
-				F9DFED1A7A92ACD1B177E462 /* Swellyo */,
-			);
-			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -168,28 +224,19 @@
 			path = Swellyo/Supporting;
 			sourceTree = "<group>";
 		};
-		D461D6A475FB85D248E37747 /* Pods */ = {
+		CD3B4A25265368A425B1708C /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				694749FC03BEA0F0EAF5F9BC /* Pods-Swellyo.debug.xcconfig */,
-				E6B8311D53A1FA4380F92100 /* Pods-Swellyo.release.xcconfig */,
+				2B41A1A79F5E32F47D474DCA /* Swellyo */,
 			);
-			name = Pods;
-			path = Pods;
-			sourceTree = "<group>";
-		};
-		F9DFED1A7A92ACD1B177E462 /* Swellyo */ = {
-			isa = PBXGroup;
-			children = (
-				BF79C55CE38298B0AFA6BC65 /* ExpoModulesProvider.swift */,
-			);
-			name = Swellyo;
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		XX3E41C1850246162C0061XX /* expo:targets */ = {
 			isa = PBXGroup;
 			children = (
-				XX951F6A479E35228028B4XX /* notify-service */,
+				XX3D3FD4DD16035DBCD4DCXX /* notify-service */,
+				XXB4267BAA35723784E05BXX /* share-extension */,
 			);
 			name = "expo:targets";
 			path = ../targets;
@@ -203,29 +250,50 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Swellyo" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				902CC8C7EF87620D7942B0A0 /* [Expo] Configure project */,
+				A8E02F8460777A3512FA63C6 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				37F03B789674427BB92B15E4 /* Upload Debug Symbols to Sentry */,
+				FEEE34C063F54F48A2BC3EC0 /* Upload Debug Symbols to Sentry */,
 				XX72A8CFBF0FBA13A79902XX /* Embed Foundation Extensions */,
-				DD1994CCB405F4F601D25EEF /* [CP] Embed Pods Frameworks */,
+				B24204532590835DC0A52E1D /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				XXEE36CA2EFCE3B4DE2510XX /* PBXTargetDependency */,
+				XX03726514C90C060A918DXX /* PBXTargetDependency */,
+				XX85266673B437C8F82164XX /* PBXTargetDependency */,
 			);
 			name = Swellyo;
 			productName = Swellyo;
 			productReference = 13B07F961A680F5B00A75B9A /* Swellyo.app */;
 			productType = "com.apple.product-type.application";
 		};
-		XX2EAB17A8D09E5D3B4DA0XX /* SwellyoNotifyService */ = {
+		XX9DF1C8DE2C3AB35D0C93XX /* SwellyoShare */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = XXCCBF88F79B4001AA99CFXX /* Build configuration list for PBXNativeTarget "SwellyoNotifyService" */;
+			buildConfigurationList = XXFE902229CA39EB88D107XX /* Build configuration list for PBXNativeTarget "SwellyoShare" */;
+			buildPhases = (
+				XX074B8811C1CF8E8A3D74XX /* Frameworks */,
+				XXDC105B0E28F884B8E02DXX /* Sources */,
+				XXC55EF014B50CBDECCD15XX /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				XXB4267BAA35723784E05BXX /* share-extension */,
+			);
+			name = SwellyoShare;
+			productName = SwellyoShare;
+			productReference = XX63803E1C9744940ECB14XX /* SwellyoShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		XXAEE31948F39BAAB3E972XX /* SwellyoNotifyService */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = XX72C4DFF0D479A766717EXX /* Build configuration list for PBXNativeTarget "SwellyoNotifyService" */;
 			buildPhases = (
 				XXE45443DC38DCFE1DB622XX /* Sources */,
 				XXFA5A8CCDD805DF7AEF9CXX /* Resources */,
@@ -235,7 +303,7 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				XX951F6A479E35228028B4XX /* notify-service */,
+				XX3D3FD4DD16035DBCD4DCXX /* notify-service */,
 			);
 			name = SwellyoNotifyService;
 			productName = SwellyoNotifyService;
@@ -253,7 +321,12 @@
 					13B07F861A680F5B00A75B9A = {
 						LastSwiftMigration = 1250;
 					};
-					XX2EAB17A8D09E5D3B4DA0XX = {
+					XX9DF1C8DE2C3AB35D0C93XX = {
+						CreatedOnToolsVersion = 14.3;
+						DevelopmentTeam = 683UA9HZYT;
+						ProvisioningStyle = Automatic;
+					};
+					XXAEE31948F39BAAB3E972XX = {
 						CreatedOnToolsVersion = 14.3;
 						DevelopmentTeam = 683UA9HZYT;
 						ProvisioningStyle = Automatic;
@@ -274,7 +347,8 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* Swellyo */,
-				XX2EAB17A8D09E5D3B4DA0XX /* SwellyoNotifyService */,
+				XXAEE31948F39BAAB3E972XX /* SwellyoNotifyService */,
+				XX9DF1C8DE2C3AB35D0C93XX /* SwellyoShare */,
 			);
 		};
 /* End PBXProject section */
@@ -287,7 +361,14 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				71C63377CBFB418D9354EB87 /* PrivacyInfo.xcprivacy in Resources */,
+				6EFA9C6D70B8609804545DAA /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		XXC55EF014B50CBDECCD15XX /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -343,24 +424,6 @@
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
-		};
-		37F03B789674427BB92B15E4 /* Upload Debug Symbols to Sentry */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Upload Debug Symbols to Sentry";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -470,7 +533,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Swellyo/Pods-Swellyo-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		902CC8C7EF87620D7942B0A0 /* [Expo] Configure project */ = {
+		A8E02F8460777A3512FA63C6 /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -494,7 +557,7 @@
 			shellPath = /bin/sh;
 			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-Swellyo/expo-configure-project.sh\"\n";
 		};
-		DD1994CCB405F4F601D25EEF /* [CP] Embed Pods Frameworks */ = {
+		B24204532590835DC0A52E1D /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -532,6 +595,24 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Swellyo/Pods-Swellyo-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
+		FEEE34C063F54F48A2BC3EC0 /* Upload Debug Symbols to Sentry */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Upload Debug Symbols to Sentry";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -540,7 +621,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				0D955B7C1D8F87E5B8C52F50 /* ExpoModulesProvider.swift in Sources */,
+				893E08239F5AB73DF5B25CF9 /* ExpoModulesProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		XXDC105B0E28F884B8E02DXX /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -554,22 +642,28 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		XXEE36CA2EFCE3B4DE2510XX /* PBXTargetDependency */ = {
+		XX03726514C90C060A918DXX /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = XX2EAB17A8D09E5D3B4DA0XX /* SwellyoNotifyService */;
-			targetProxy = XX48B13D65C2C94674348CXX /* PBXContainerItemProxy */;
+			target = XXAEE31948F39BAAB3E972XX /* SwellyoNotifyService */;
+			targetProxy = XXBFF7FB33278CFE3B0DE8XX /* PBXContainerItemProxy */;
+		};
+		XX85266673B437C8F82164XX /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = XX9DF1C8DE2C3AB35D0C93XX /* SwellyoShare */;
+			targetProxy = XX82AED4B59A40908B449FXX /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 694749FC03BEA0F0EAF5F9BC /* Pods-Swellyo.debug.xcconfig */;
+			baseConfigurationReference = D1EA0D4A7685F714AD61E037 /* Pods-Swellyo.debug.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Swellyo/Swellyo.entitlements;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 683UA9HZYT;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -601,12 +695,13 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = E6B8311D53A1FA4380F92100 /* Pods-Swellyo.release.xcconfig */;
+			baseConfigurationReference = F729C7686FBB0B8D908FA2AB /* Pods-Swellyo.release.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Swellyo/Swellyo.entitlements;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 683UA9HZYT;
 				INFOPLIST_FILE = Swellyo/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
@@ -748,7 +843,7 @@
 			};
 			name = Release;
 		};
-		XXB5831F16D8AB59E48C76XX /* Debug */ = {
+		XX918259A29EA1F17FEFB6XX /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ANALYZER_NONNULL = YES;
@@ -761,7 +856,7 @@
 				CODE_SIGN_ENTITLEMENTS = "../targets/notify-service/generated.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = 683UA9HZYT;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -791,7 +886,90 @@
 			};
 			name = Debug;
 		};
-		XXDFCA9C881D46BCC15828XX /* Release */ = {
+		XXA4F5A2F5D4F57DDE55F2XX /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = "../targets/share-extension/generated.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 41;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 683UA9HZYT;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "../targets/share-extension/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SwellyoShare;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.3.1;
+				MTL_FAST_MATH = YES;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.swellyo.app.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		XXDC77E241E74A2E5D1A65XX /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = "../targets/share-extension/generated.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 41;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 683UA9HZYT;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "../targets/share-extension/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = SwellyoShare;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.3.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.swellyo.app.share;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		XXEF5841A0DCDE1E45FAF4XX /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_ANALYZER_NONNULL = YES;
@@ -804,7 +982,7 @@
 				CODE_SIGN_ENTITLEMENTS = "../targets/notify-service/generated.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 37;
+				CURRENT_PROJECT_VERSION = 41;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = 683UA9HZYT;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -853,11 +1031,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		XXCCBF88F79B4001AA99CFXX /* Build configuration list for PBXNativeTarget "SwellyoNotifyService" */ = {
+		XX72C4DFF0D479A766717EXX /* Build configuration list for PBXNativeTarget "SwellyoNotifyService" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				XXB5831F16D8AB59E48C76XX /* Debug */,
-				XXDFCA9C881D46BCC15828XX /* Release */,
+				XX918259A29EA1F17FEFB6XX /* Debug */,
+				XXEF5841A0DCDE1E45FAF4XX /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		XXFE902229CA39EB88D107XX /* Build configuration list for PBXNativeTarget "SwellyoShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				XXDC77E241E74A2E5D1A65XX /* Debug */,
+				XXA4F5A2F5D4F57DDE55F2XX /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

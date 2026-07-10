@@ -61,10 +61,14 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>Swellyo uses your camera so you can take photos and record videos for your profile and to send in chats.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>Swellyo accesses your contacts so you can share a contact card in chats.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Swellyo uses your microphone to record voice messages and capture audio for video clips.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to save photos</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Swellyo accesses your photo library so you can select photos and videos for your profile, your surf trips, and to share in chats.</string>
     <key>NSUserActivityTypes</key>
