@@ -69,6 +69,9 @@ import { ChatCameraModal, type CapturedAsset } from '../components/ChatCameraMod
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
 import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
+import { MediaAlbumBubble } from '../components/MediaAlbumBubble';
+import { AlbumGridModal } from '../components/AlbumGridModal';
+import { buildDisplayRows, findRowIndexByMessageId, type ChatDisplayRow, type AlbumRow } from '../utils/mediaAlbums';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { AudioMessageBubble } from '../components/AudioMessageBubble';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
@@ -504,7 +507,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [fullscreenVideo, setFullscreenVideo] = useState<{ url: string | null; posterUrl: string | null } | null>(null);
   // Bumped on every open/close so a stale signing result can't hijack the viewer.
   const videoOpenSeqRef = useRef(0);
-  const { panelOpen, panelHeight, showKeyboardIcon, panelDismissing, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
+  // Wrappers, not bare refs: the handlers are declared below this call, so we pass
+  // arrows that reach them lazily. In native-inputView mode these route the opaque
+  // menu's tile taps; the same handlers also feed the RN <AttachPanel> fallback.
+  const { panelOpen, panelHeight, showKeyboardIcon, panelDismissing, usesNativeInputView, togglePanel, closePanel, requestKeyboard } = useAttachPanel({
+    onPhotos: () => handleImagePicker(),
+    onCamera: () => handleCameraCapture(),
+    onDocument: () => handlePickDocument(),
+    onContact: () => handlePickContact(),
+  });
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const selectedImageUriForUploadRef = useRef<string | null>(null);
@@ -534,6 +545,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [contactPreviewVisible, setContactPreviewVisible] = useState(false);
   // Multi-select gallery batch (≥2 picked assets) awaiting review. null = closed.
   const [multiReviewItems, setMultiReviewItems] = useState<MediaReviewItem[] | null>(null);
+  // Album "+N" expansion — the full grid of one album's items. null = closed.
+  const [albumModalItems, setAlbumModalItems] = useState<Message[] | null>(null);
 
   // OS-share media handoff ("Share to Swellyo" → picked this chat). Enter exactly
   // the preview state the pickers set, so caption + Send flow through the existing
@@ -3511,11 +3524,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const handleReplyPreviewPress = useCallback(async (parentMessageId: string) => {
     if (resolvingReplyJumpId || !currentConversationId) return;
 
-    const findInvertedIndex = (id: string): number => {
-      const arr = messagesRef.current;
-      const chronoIdx = arr.findIndex((m) => m.id === id);
-      return chronoIdx === -1 ? -1 : arr.length - 1 - chronoIdx;
-    };
+    // Display rows, not raw messages: the target may live INSIDE an album row,
+    // in which case we scroll to the album (no per-item highlight there).
+    const findInvertedIndex = (id: string): number =>
+      findRowIndexByMessageId(displayRowsRef.current, id);
 
     let invertedIndex = findInvertedIndex(parentMessageId);
 
@@ -3783,6 +3795,17 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // State keeps messages chronological (oldest-first) for easy append/merge
   const invertedMessages = useMemo(() => dedupeMessages(messages).reverse(), [messages]);
 
+  // WhatsApp-style albums: 4+ consecutive captionless media from one sender
+  // collapse into a single grid row (see utils/mediaAlbums). The FlatList
+  // renders these display rows, NOT raw messages — anything that maps a
+  // message id to a list index (reply-jump) must go through displayRowsRef.
+  const displayRowsRef = useRef<ChatDisplayRow[]>([]);
+  const displayRows = useMemo(() => {
+    const rows = buildDisplayRows(invertedMessages);
+    displayRowsRef.current = rows;
+    return rows;
+  }, [invertedMessages]);
+
   // Reacting to the newest message grows its cell — the badge hangs below the
   // bubble (MessageReactionsRow pulls itself up with a negative marginTop). The
   // list doesn't re-pin to the bottom, so that overhang lands under the composer
@@ -3837,36 +3860,201 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   }, [messages, providerConversations, currentConversationId]);
 
   // FlatList helpers for inverted list
-  const renderItem = useCallback(({ item, index }: { item: Message; index: number }) => {
-    // Track BOTH `id` and `client_id` so the optimistic→server swap (client_id
-    // becomes the row key, server-issued id arrives later) doesn't re-fire the
-    // entering animation mid-flight.
-    const isInitialized = messageAnimationsInitializedRef.current;
-    const idSeen = seenMessageIdsRef.current.has(item.id);
-    const clientIdSeen = item.client_id ? seenMessageIdsRef.current.has(item.client_id) : false;
-    const isNewMessage = isInitialized && !idSeen && !clientIdSeen;
-    if (isInitialized) {
-      seenMessageIdsRef.current.add(item.id);
-      if (item.client_id) seenMessageIdsRef.current.add(item.client_id);
+  // Open one album item fullscreen — the image viewer, or the video
+  // sign-and-play path (a copy of the video bubble's openVideo: viewer opens
+  // instantly on the poster, the signing round trip happens behind it).
+  const openAlbumItem = (m: Message) => {
+    if (m.type === 'video' || m.video_metadata) {
+      const storagePath = m.video_metadata?.storage_path;
+      const thumbnailUri = m.video_metadata?.thumbnail_url || m._localPreviewUri || '';
+      const playableUrl = m.video_metadata?.video_url || m.video_metadata?.original_url || null;
+      const seq = ++videoOpenSeqRef.current;
+      if (storagePath) {
+        setFullscreenVideo({ url: null, posterUrl: thumbnailUri || null });
+        import('../services/messaging/videoUploadService')
+          .then(async ({ signDmVideoUrl }) => {
+            try {
+              const signedUrl = await signDmVideoUrl(storagePath);
+              if (videoOpenSeqRef.current !== seq) return; // viewer closed/reopened since
+              const url = signedUrl || playableUrl || null;
+              if (url) setFullscreenVideo(prev => (prev ? { ...prev, url } : prev));
+              else setFullscreenVideo(null);
+            } catch {
+              if (videoOpenSeqRef.current === seq) setFullscreenVideo(null);
+            }
+          })
+          .catch(() => {
+            if (videoOpenSeqRef.current === seq) setFullscreenVideo(null);
+          });
+      } else if (playableUrl) {
+        setFullscreenVideo({ url: playableUrl, posterUrl: thumbnailUri || null });
+      }
+    } else if (m.image_metadata?.image_url) {
+      setFullscreenImageUrl(m.image_metadata.image_url);
+      setFullscreenThumbnailUrl(m.image_metadata.thumbnail_url || null);
     }
+  };
+
+  // Album row — one grid bubble standing in for 4+ media messages. Mirrors the
+  // message container alignment incl. the group avatar/name treatment;
+  // reactions merge across the album's items.
+  const renderAlbum = (album: AlbumRow, isLastInRun: boolean, isFirstInRun: boolean) => {
+    const newest = album.items[album.items.length - 1];
+    const isOwnMessage = !!currentUserId && album.sender_id === currentUserId;
+    const isGroupReceived = !isOwnMessage && !isDirect;
+    const senderName = newest.sender_name || newest.sender?.name || otherUserName;
+    const senderAvatar = newest.sender_avatar || newest.sender?.avatar || null;
+    const showAvatar = isGroupReceived && isLastInRun && !!(newest.sender_name || newest.sender_avatar);
+    const showAvatarSpacer = isGroupReceived && !isLastInRun;
+    const showSenderName = isGroupReceived && isFirstInRun && !!senderName;
+    const senderNameColor = isGroupReceived ? getSenderColor(album.sender_id) : undefined;
+    const mergedReactions = album.items.flatMap(m => (!m.deleted && m.reactions) || []);
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => Keyboard.dismiss()}
+        style={[
+          styles.messageContainer,
+          isOwnMessage ? styles.userMessageContainer : [
+            styles.botMessageContainer,
+            isDirect && styles.botMessageContainerDirect,
+          ],
+        ]}
+      >
+        {showAvatar && (
+          <TouchableOpacity
+            style={styles.messageAvatarContainer}
+            onPress={() => album.sender_id && onViewProfile?.(album.sender_id)}
+            activeOpacity={0.7}
+          >
+            {senderAvatar ? (
+              <ProfileImage
+                imageUrl={getStorageThumbUrl(senderAvatar, 32)}
+                fallbackImageUrl={senderAvatar}
+                name={senderName}
+                style={styles.messageAvatar}
+                showLoadingIndicator={false}
+              />
+            ) : (
+              <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
+                <Text style={styles.messageAvatarPlaceholderText}>
+                  {senderName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+        {showAvatarSpacer && (
+          <View style={styles.messageAvatarSpacer} />
+        )}
+        <View>
+          {showSenderName && (
+            <TouchableOpacity
+              onPress={() => album.sender_id && onViewProfile?.(album.sender_id)}
+              activeOpacity={0.7}
+              style={{ marginBottom: 3 }}
+            >
+              <Text style={[styles.groupSenderName, { color: senderNameColor }]} numberOfLines={1}>
+                {senderName}
+              </Text>
+            </TouchableOpacity>
+          )}
+          <MediaAlbumBubble
+            items={album.items}
+            onPressItem={openAlbumItem}
+            onLongPressItem={(m, e) => handleMessageLongPress(m, e, false)}
+            onRetryItem={(m) => handleRetryUpload(m)}
+            onPressMore={() => setAlbumModalItems(album.items)}
+            timeLabel={formatTime(newest.created_at)}
+            receipt={
+              isOwnMessage && !newest.deleted ? (
+                <ReadReceipt state={getReceiptState(newest, otherUserLastReadAt)} onDark enabled={isDirect} />
+              ) : undefined
+            }
+          />
+          {mergedReactions.length > 0 && (
+            <MessageReactionsRow
+              reactions={mergedReactions}
+              ownAlignment={isOwnMessage ? 'right' : 'left'}
+              hidden={false}
+              // Open the sheet on the first album item carrying that emoji.
+              onPress={(emoji) => {
+                const owner = album.items.find(m => (m.reactions || []).some(r => r.emoji === emoji));
+                if (owner) setReactionsSheet({ messageId: owner.id, emoji });
+              }}
+            />
+          )}
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  // FlatList helpers for inverted list. Rows are messages OR albums.
+  const renderItem = useCallback(({ item, index }: { item: ChatDisplayRow; index: number }) => {
     // Inverted list: cell[i].marginBottom creates the visible gap between cell[i]
     // (older, above visually) and cell[i-1] (newer, below visually). Compare with
     // the newer neighbor to decide same/different sender. Newest (index 0) sets
     // marginBottom to 0 — the composer's inputWrapper paddingTop owns that gap.
-    const newerMessage = invertedMessages[index - 1];
-    const sameSender = !!newerMessage && newerMessage.sender_id === item.sender_id;
+    const rowSenderId = item.kind === 'album' ? item.sender_id : item.message.sender_id;
+    const newerRow = displayRows[index - 1];
+    const newerSenderId = newerRow
+      ? (newerRow.kind === 'album' ? newerRow.sender_id : newerRow.message.sender_id)
+      : null;
+    const sameSender = !!newerRow && newerSenderId === rowSenderId;
     const messageGap = index === 0 ? 0 : (sameSender ? 3 : 9);
     // "Last/newest of run" (visually bottom): keeps the avatar + the bubble tail.
     // True when the message below has a different sender, or this is the newest.
     const isLastInRun = !sameSender;
     // "First/oldest of run" (visually top): the sender name renders here now
     // (WhatsApp-style), while the avatar stays on the last/newest below.
-    const olderMessage = invertedMessages[index + 1];
-    const isFirstInRun = !olderMessage || olderMessage.sender_id !== item.sender_id;
+    const olderRow = displayRows[index + 1];
+    const olderSenderId = olderRow
+      ? (olderRow.kind === 'album' ? olderRow.sender_id : olderRow.message.sender_id)
+      : null;
+    const isFirstInRun = !olderRow || olderSenderId !== rowSenderId;
+    const isInitialized = messageAnimationsInitializedRef.current;
+    const isOwnSend = !!currentUserId && rowSenderId === currentUserId;
+
+    if (item.kind === 'album') {
+      // The album animates in when its NEWEST item is unseen; all item ids are
+      // marked seen so items joining an existing album never re-fire it.
+      const newest = item.items[item.items.length - 1];
+      const newestSeen =
+        seenMessageIdsRef.current.has(newest.id) ||
+        (newest.client_id ? seenMessageIdsRef.current.has(newest.client_id) : false);
+      const isNewMessage = isInitialized && !newestSeen;
+      if (isInitialized) {
+        for (const m of item.items) {
+          seenMessageIdsRef.current.add(m.id);
+          if (m.client_id) seenMessageIdsRef.current.add(m.client_id);
+        }
+      }
+      const enteringAnim = isNewMessage
+        ? (isOwnSend ? messageSlideUpFromComposer : messageSlideUpFromTypingHeight)
+        : undefined;
+      return (
+        <Reanimated.View entering={enteringAnim} style={{ marginBottom: messageGap }}>
+          <SafeMessageBubble messageId={newest.id}>
+            {renderAlbum(item, isLastInRun, isFirstInRun)}
+          </SafeMessageBubble>
+        </Reanimated.View>
+      );
+    }
+
+    const message = item.message;
+    // Track BOTH `id` and `client_id` so the optimistic→server swap (client_id
+    // becomes the row key, server-issued id arrives later) doesn't re-fire the
+    // entering animation mid-flight.
+    const idSeen = seenMessageIdsRef.current.has(message.id);
+    const clientIdSeen = message.client_id ? seenMessageIdsRef.current.has(message.client_id) : false;
+    const isNewMessage = isInitialized && !idSeen && !clientIdSeen;
+    if (isInitialized) {
+      seenMessageIdsRef.current.add(message.id);
+      if (message.client_id) seenMessageIdsRef.current.add(message.client_id);
+    }
     // Own sends slide up from behind the composer; received messages slide
     // up from the typing indicator's height so the typing → message swap is
     // seamless even when the typing indicator wasn't visible.
-    const isOwnSend = !!currentUserId && item.sender_id === currentUserId;
     const enteringAnim = isNewMessage
       ? (isOwnSend ? messageSlideUpFromComposer : messageSlideUpFromTypingHeight)
       : undefined;
@@ -3875,17 +4063,21 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         entering={enteringAnim}
         style={{ marginBottom: messageGap }}
       >
-        <SafeMessageBubble messageId={item.id}>
-          {renderMessage(item, isLastInRun, isFirstInRun)}
+        <SafeMessageBubble messageId={message.id}>
+          {renderMessage(message, isLastInRun, isFirstInRun)}
         </SafeMessageBubble>
       </Reanimated.View>
     );
-  }, [currentUserId, editingMessageId, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, invertedMessages, highlightedMessageId, resolvingReplyJumpId]);
+  }, [currentUserId, editingMessageId, isDirect, menuVisible, selectedMessage, otherUserLastReadAt, displayRows, highlightedMessageId, resolvingReplyJumpId]);
 
   // Prefer client_id so the React key stays stable across the optimistic →
   // server-confirmed swap. Without this, FlatList unmounts the old wrapper
   // and mounts a new one mid-flight, cutting the entering animation in half.
-  const keyExtractor = useCallback((item: Message) => item.client_id || item.id, []);
+  // Album rows key off their oldest item (see mediaAlbums.ts).
+  const keyExtractor = useCallback(
+    (row: ChatDisplayRow) => (row.kind === 'album' ? row.key : (row.message.client_id || row.message.id)),
+    [],
+  );
 
   // In inverted FlatList: ListHeaderComponent renders at bottom, ListFooterComponent renders at top
   const listHeaderComponent = useMemo(() => <TypingIndicator />, [isTyping, typingCount]);
@@ -4951,7 +5143,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         const messageList = (
           <Reanimated.FlatList
             ref={flatListRef as any}
-            data={invertedMessages}
+            data={displayRows}
             extraData={otherUserLastReadAt}
             renderItem={renderItem}
             keyExtractor={keyExtractor}
@@ -5166,7 +5358,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 />
               )}
               {composer}
-              {panelOpen && (
+              {/* In native-inputView mode the opaque menu IS the surface — don't also
+                  render the RN panel. It still renders in the fallback path. */}
+              {panelOpen && !usesNativeInputView && (
                 <AttachPanel
                   height={panelHeight}
                   dismissing={panelDismissing}
@@ -5381,6 +5575,29 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             setPendingContact(null);
           }}
           primaryColor={composerPrimaryColor}
+        />
+      )}
+
+      {/* Album "+N" expansion — grid of ALL of one album's items. Opening a
+          tile's viewer must wait for THIS modal to finish dismissing (a second
+          RN Modal presented mid-dismiss is silently dropped on iOS — same trap
+          as the camera → preview handoff). Long-press is disabled here: the
+          message menu is an in-screen overlay and would render BEHIND the
+          modal. */}
+      {albumModalItems && (
+        <AlbumGridModal
+          visible
+          items={albumModalItems}
+          onClose={() => setAlbumModalItems(null)}
+          onPressItem={(m) => {
+            setAlbumModalItems(null);
+            setTimeout(() => openAlbumItem(m), 320);
+          }}
+          onLongPressItem={() => {}}
+          onRetryItem={(m) => {
+            setAlbumModalItems(null);
+            handleRetryUpload(m);
+          }}
         />
       )}
 
