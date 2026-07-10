@@ -1,19 +1,30 @@
 /**
  * FileBubble — renders a chat file attachment (type='file'). Shows a file-type
- * icon, the sanitized display name, and a human-readable size. Tapping fetches a
- * short-lived presigned GET and opens the file through the OS share/open sheet —
- * the file is NEVER rendered or executed inside the app.
+ * icon, the sanitized display name, and a human-readable size.
+ *
+ * Tapping downloads the file to the cache (named by message id, never the
+ * sender's display_name — unescaped chars break a file:// uri on Android) and
+ * then, for an image / pdf / text file, opens it in-app via FileViewerModal.
+ * Everything else is handed to the OS share sheet as before.
+ *
+ * Security note: rendering a RECEIVED file in-app is a deliberate reversal of
+ * the old "never render" posture. Images already decode in-process via
+ * expo-image for type='image' messages; text has no parser; a PDF is the only
+ * new attack surface, and it runs through the SYSTEM parsers (PDFKit / PDFium)
+ * — the same ones the OS share sheet would use — which are patched by OS
+ * updates, not ours. A render failure lands on FileCard, never a crash.
  */
 
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '../../services/messaging/messagingService';
-import { formatBytes } from '../../services/messaging/fileAttachmentPolicy';
+import { formatBytes, previewKindForExt } from '../../services/messaging/fileAttachmentPolicy';
 import { getFileDownloadUrl } from '../../services/messaging/fileUploadService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { ff, fs } from '../../theme/fonts';
 import { iconForExt } from './fileIcon';
+import { FileViewerModal } from '../FileViewerModal';
 
 interface FileBubbleProps {
   message: Message;
@@ -25,6 +36,7 @@ interface FileBubbleProps {
 
 export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbleProps) {
   const [busy, setBusy] = useState(false);
+  const [viewer, setViewer] = useState<{ uri: string } | null>(null);
   const meta = message.file_metadata;
   if (!meta) return null;
 
@@ -45,12 +57,20 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbl
         if (typeof window !== 'undefined') window.open(url, '_blank');
         return;
       }
-      // Native: download to cache, then hand to the OS share/open sheet. Fall
-      // back to opening the signed URL directly if expo-sharing's native module
-      // isn't in this build (require returns a lazy proxy that throws on access).
+
+      // Download to a cache path named by message id — NEVER the sender's
+      // display_name, whose spaces/accents/# break a file:// uri silently on
+      // Android (and the native pdf/text readers reject it).
       const LegacyFS = require('expo-file-system/legacy');
-      const target = `${LegacyFS.cacheDirectory}${message.id}-${meta.display_name}`;
+      const target = `${LegacyFS.cacheDirectory}${message.id}.${meta.ext}`;
       const { uri: localUri } = await LegacyFS.downloadAsync(url, target);
+
+      // Renderable in-app? Open the viewer. Otherwise keep today's share-sheet path.
+      if (previewKindForExt(meta.ext) !== 'none') {
+        setViewer({ uri: localUri });
+        return;
+      }
+
       let shared = false;
       try {
         const Sharing = require('expo-sharing');
@@ -67,6 +87,19 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbl
       Alert.alert('Could not open file', friendlyErrorMessage(e, 'Failed to open the file.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const closeViewer = () => {
+    const open = viewer;
+    setViewer(null);
+    // Delete the cached copy of the received file. Best-effort: a failed delete
+    // is not worth surfacing (the OS clears cacheDirectory under pressure anyway).
+    if (open) {
+      try {
+        const { File } = require('expo-file-system');
+        new File(open.uri).delete();
+      } catch { /* already gone, or module unavailable — ignore */ }
     }
   };
 
@@ -93,6 +126,18 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbl
         <Text style={[styles.caption, { color: nameColor, textAlign: textAlign ?? 'left' }]}>
           {message.body}
         </Text>
+      )}
+      {viewer && (
+        <FileViewerModal
+          visible={true}
+          uri={viewer.uri}
+          displayName={meta.display_name}
+          ext={meta.ext}
+          sizeBytes={meta.size_bytes}
+          mimeType={meta.mime_type}
+          caption={message.body ?? undefined}
+          onClose={closeViewer}
+        />
       )}
     </View>
   );
