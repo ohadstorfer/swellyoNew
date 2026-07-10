@@ -23,6 +23,7 @@ import Animated, {
   FadeOut,
 } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
+import { Image as ExpoImage } from 'expo-image';
 
 // expo-video isn't available on web — require lazily so the web bundle skips it.
 let useVideoPlayer: any = null;
@@ -37,7 +38,12 @@ if (Platform.OS !== 'web') {
 
 interface FullscreenVideoPlayerProps {
   visible: boolean;
-  videoUrl: string;
+  /** Playable URL. May be null while it's still being signed — the modal opens
+      immediately on the poster and playback starts when the URL arrives. */
+  videoUrl: string | null;
+  /** The bubble's thumbnail URL — already in expo-image's cache, so it paints
+      instantly and covers the sign + buffer wait (no spinner). */
+  posterUrl?: string | null;
   onClose: () => void;
 }
 
@@ -62,7 +68,11 @@ const PlayIcon = () => (
   </Svg>
 );
 
-const WebVideoPlayer: React.FC<{ videoUrl: string; visible: boolean }> = ({ videoUrl, visible }) => {
+const WebVideoPlayer: React.FC<{ videoUrl: string | null; posterUrl?: string | null; visible: boolean }> = ({
+  videoUrl,
+  posterUrl,
+  visible,
+}) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
@@ -73,14 +83,30 @@ const WebVideoPlayer: React.FC<{ videoUrl: string; visible: boolean }> = ({ vide
       videoRef.current.pause();
       videoRef.current.currentTime = 0;
     }
-  }, [visible]);
+  }, [visible, videoUrl]);
 
-  if (!visible || !videoUrl) return null;
+  if (!visible) return null;
+
+  // URL still signing — show the poster so the modal never opens onto black.
+  if (!videoUrl) {
+    return posterUrl ? (
+      <img
+        src={posterUrl}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          backgroundColor: '#000',
+        }}
+      />
+    ) : null;
+  }
 
   return (
     <video
       ref={videoRef}
       src={videoUrl}
+      poster={posterUrl || undefined}
       controls
       autoPlay
       playsInline
@@ -97,19 +123,24 @@ const WebVideoPlayer: React.FC<{ videoUrl: string; visible: boolean }> = ({ vide
 // Native viewer — mirrors VideoPreviewModal's look: custom play overlay (no
 // native controls), pan-to-dismiss, black background. No caption/trim/send
 // because the video has already been sent.
-const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose: () => void }> = ({
-  videoUrl,
-  visible,
-  onClose,
-}) => {
+const NativeVideoPlayer: React.FC<{
+  videoUrl: string | null;
+  posterUrl?: string | null;
+  visible: boolean;
+  onClose: () => void;
+}> = ({ videoUrl, posterUrl, visible, onClose }) => {
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
   const translateY = useSharedValue(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [firstFrameRendered, setFirstFrameRendered] = useState(false);
 
   if (!useVideoPlayer || !VideoView) return null;
 
-  const player = useVideoPlayer(visible ? videoUrl : null, (p: any) => {
+  // useVideoPlayer recreates the player when the source changes, so passing
+  // null while the URL is still being signed and the real URL afterwards
+  // works: the setup callback re-runs and autoplays once the URL lands.
+  const player = useVideoPlayer(visible && videoUrl ? videoUrl : null, (p: any) => {
     p.loop = true;
     p.muted = false;
     p.play();
@@ -118,6 +149,7 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
   useEffect(() => {
     if (!visible) {
       setIsPlaying(false);
+      setFirstFrameRendered(false);
       translateY.value = 0;
       return;
     }
@@ -129,11 +161,12 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
   }, [visible, player, translateY]);
 
   const togglePlay = useCallback(() => {
+    if (!videoUrl) return;
     try {
       if (player.playing) player.pause();
       else player.play();
     } catch {}
-  }, [player]);
+  }, [player, videoUrl]);
 
   const panGesture = Gesture.Pan()
     .activeOffsetY([-15, 15])
@@ -164,7 +197,7 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
     ),
   }));
 
-  if (!visible || !videoUrl) return null;
+  if (!visible) return null;
 
   return (
     <GestureHandlerRootView style={styles.flex}>
@@ -176,9 +209,31 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
               style={styles.video}
               contentFit="contain"
               nativeControls={false}
+              onFirstFrameRender={() => setFirstFrameRendered(true)}
             />
 
-            {!isPlaying && (
+            {/* Poster: the bubble's thumbnail, instant from expo-image cache.
+                Covers URL signing + buffering, then fades once the video's
+                first frame is on screen — no spinner, no black flash. */}
+            {posterUrl && !firstFrameRendered && (
+              <Animated.View
+                exiting={FadeOut.duration(200)}
+                style={styles.posterOverlay}
+                pointerEvents="none"
+              >
+                <ExpoImage
+                  source={{ uri: posterUrl }}
+                  style={styles.video}
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                  transition={0}
+                />
+              </Animated.View>
+            )}
+
+            {/* Play icon only once playback is actually toggleable — while the
+                poster covers the load, a play icon would invite dead taps. */}
+            {!isPlaying && (firstFrameRendered || !posterUrl) && (
               <Animated.View
                 entering={FadeIn.duration(160)}
                 exiting={FadeOut.duration(120)}
@@ -209,6 +264,7 @@ const NativeVideoPlayer: React.FC<{ videoUrl: string; visible: boolean; onClose:
 export const FullscreenVideoPlayer: React.FC<FullscreenVideoPlayerProps> = ({
   visible,
   videoUrl,
+  posterUrl,
   onClose,
 }) => {
   return (
@@ -231,10 +287,10 @@ export const FullscreenVideoPlayer: React.FC<FullscreenVideoPlayerProps> = ({
             >
               <CloseIcon />
             </TouchableOpacity>
-            <WebVideoPlayer videoUrl={videoUrl} visible={visible} />
+            <WebVideoPlayer videoUrl={videoUrl} posterUrl={posterUrl} visible={visible} />
           </>
         ) : (
-          <NativeVideoPlayer videoUrl={videoUrl} visible={visible} onClose={onClose} />
+          <NativeVideoPlayer videoUrl={videoUrl} posterUrl={posterUrl} visible={visible} onClose={onClose} />
         )}
       </View>
     </Modal>
@@ -255,6 +311,9 @@ const styles = StyleSheet.create({
   video: {
     width: '100%',
     height: '100%',
+  },
+  posterOverlay: {
+    ...StyleSheet.absoluteFillObject,
   },
   playButtonOverlay: {
     ...StyleSheet.absoluteFillObject,

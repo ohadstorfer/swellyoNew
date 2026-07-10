@@ -4,11 +4,10 @@ import {
   StyleSheet,
   Modal,
   TouchableOpacity,
-  Image,
-  ActivityIndicator,
   Platform,
   useWindowDimensions,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { Text } from './Text';
 import { spacing } from '../styles/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,32 +38,16 @@ export const FullscreenImageViewer: React.FC<FullscreenImageViewerProps> = ({
   thumbnailUrl,
   onClose,
 }) => {
-  const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
   const { height: screenHeight } = useWindowDimensions();
   const translateY = useSharedValue(0);
 
   useEffect(() => {
     if (visible) {
-      setIsLoading(true);
       setHasError(false);
-      setImageLoaded(false);
-      translateY.value = 0;
-    } else {
-      translateY.value = 0;
     }
+    translateY.value = 0;
   }, [visible, translateY]);
-
-  const handleImageLoad = () => {
-    setIsLoading(false);
-    setImageLoaded(true);
-  };
-
-  const handleImageError = () => {
-    setIsLoading(false);
-    setHasError(true);
-  };
 
   const panGesture = Gesture.Pan()
     .activeOffsetY([-15, 15])
@@ -113,18 +96,18 @@ export const FullscreenImageViewer: React.FC<FullscreenImageViewerProps> = ({
       <View style={styles.imageContainer}>
         {imageUrl ? (
           <>
-            {!imageLoaded && thumbnailUrl && (
-              <Image
+            {/* The bubble already fetched this exact thumbnail URL through
+                expo-image's memory-disk cache, so it paints instantly here —
+                no spinner. It stays mounted underneath while the full-res
+                fades in on top, so there's never a blank frame. */}
+            {thumbnailUrl && (
+              <ExpoImage
                 source={{ uri: thumbnailUrl }}
                 style={styles.thumbnailImage}
-                resizeMode="contain"
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                transition={0}
               />
-            )}
-
-            {isLoading && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#FFFFFF" />
-              </View>
             )}
 
             {hasError ? (
@@ -133,12 +116,14 @@ export const FullscreenImageViewer: React.FC<FullscreenImageViewerProps> = ({
                 <Text style={styles.errorText}>Failed to load image</Text>
               </View>
             ) : (
-              <Image
+              <ExpoImage
                 source={{ uri: imageUrl }}
                 style={styles.fullImage}
-                resizeMode="contain"
-                onLoad={handleImageLoad}
-                onError={handleImageError}
+                contentFit="contain"
+                cachePolicy="memory-disk"
+                priority="high"
+                transition={200}
+                onError={() => setHasError(true)}
               />
             )}
           </>
@@ -202,11 +187,6 @@ const styles = StyleSheet.create({
   },
   fullImage: {
     ...StyleSheet.absoluteFillObject,
-  },
-  loadingContainer: {
-    position: 'absolute',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   errorContainer: {
     justifyContent: 'center',

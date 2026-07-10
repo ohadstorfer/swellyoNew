@@ -550,9 +550,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [pendingDeleteMessageId, setPendingDeleteMessageId] = useState<string | null>(null);
   const [fullscreenImageUrl, setFullscreenImageUrl] = useState<string | null>(null);
   const [fullscreenThumbnailUrl, setFullscreenThumbnailUrl] = useState<string | null>(null);
-  const [fullscreenVideoUrl, setFullscreenVideoUrl] = useState<string | null>(null);
-  // Message id whose DM video is currently being signed on-demand (shows a spinner)
-  const [signingVideoId, setSigningVideoId] = useState<string | null>(null);
+  // Video viewer opens immediately on the bubble's thumbnail (posterUrl); url
+  // stays null until the on-demand signing resolves behind the poster.
+  const [fullscreenVideo, setFullscreenVideo] = useState<{ url: string | null; posterUrl: string | null } | null>(null);
+  // Bumped on every open/close so a stale signing result can't hijack the viewer.
+  const videoOpenSeqRef = useRef(0);
   const { panelOpen, panelHeight, showKeyboardIcon, panelDismissing, togglePanel, closePanel, requestKeyboard } = useAttachPanel();
   const [imagePreviewVisible, setImagePreviewVisible] = useState(false);
   const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
@@ -4350,7 +4352,6 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               const storagePath = message.video_metadata?.storage_path || '';
               const playableUrl = message.video_metadata?.video_url || message.video_metadata?.original_url || '';
               const videoReady = !!(storagePath || playableUrl);
-              const isSigning = signingVideoId === message.id;
               const rawAspectRatio = message.video_metadata?.width && message.video_metadata?.height
                 ? message.video_metadata.width / message.video_metadata.height : 16 / 9;
               // Clamp portrait videos at 3:4 so the bubble doesn't dominate the screen.
@@ -4363,18 +4364,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               const isFailed = message.upload_state === 'failed';
 
               const openVideo = async () => {
-                if (!videoReady || isUploading || isFailed || isSigning) return;
+                if (!videoReady || isUploading || isFailed) return;
+                const seq = ++videoOpenSeqRef.current;
                 if (storagePath) {
+                  // Open the viewer instantly on the bubble's thumbnail; the
+                  // signing round trip happens behind the poster, not the tap.
+                  setFullscreenVideo({ url: null, posterUrl: thumbnailUri || null });
                   try {
-                    setSigningVideoId(message.id);
                     const { signDmVideoUrl } = await import('../services/messaging/videoUploadService');
                     const signedUrl = await signDmVideoUrl(storagePath);
-                    setFullscreenVideoUrl(signedUrl || playableUrl || null);
-                  } finally {
-                    setSigningVideoId(null);
+                    if (videoOpenSeqRef.current !== seq) return; // viewer closed/reopened since
+                    const url = signedUrl || playableUrl || null;
+                    if (url) {
+                      setFullscreenVideo(prev => (prev ? { ...prev, url } : prev));
+                    } else {
+                      setFullscreenVideo(null);
+                    }
+                  } catch {
+                    if (videoOpenSeqRef.current === seq) setFullscreenVideo(null);
                   }
                 } else if (playableUrl) {
-                  setFullscreenVideoUrl(playableUrl);
+                  setFullscreenVideo({ url: playableUrl, posterUrl: thumbnailUri || null });
                 }
               };
 
@@ -4384,27 +4394,27 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                     activeOpacity={0.9}
                     onPress={openVideo}
                     onLongPress={(e) => handleMessageLongPress(message, e, isLastInRun)}
-                    disabled={!videoReady || isUploading || isFailed || isSigning}
+                    disabled={!videoReady || isUploading || isFailed}
                     style={styles.imageTouchable}
                   >
                     {thumbnailUri ? (
-                      <Image
+                      <ExpoImage
+                        // expo-image (memory-disk) so the fullscreen viewer's
+                        // poster — the same URL — paints instantly from cache.
                         source={{ uri: thumbnailUri }}
                         style={[
                           styles.messageImage,
                           { aspectRatio: aspectRatio && isFinite(aspectRatio) ? aspectRatio : 16 / 9 },
                         ]}
-                        resizeMode="cover"
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        transition={150}
                       />
                     ) : (
                       <View style={[styles.messageImage, { aspectRatio: 16 / 9, backgroundColor: '#1a1a1a' }]} />
                     )}
                     {/* Play button overlay */}
-                    {isSigning ? (
-                      <View style={styles.videoPlayOverlay}>
-                        <ActivityIndicator size="large" color="#FFFFFF" />
-                      </View>
-                    ) : videoReady && !isUploading && !isFailed ? (
+                    {videoReady && !isUploading && !isFailed ? (
                       <View style={styles.videoPlayOverlay}>
                         <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.9)" />
                       </View>
@@ -5413,9 +5423,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       />
 
       <FullscreenVideoPlayer
-        visible={!!fullscreenVideoUrl}
-        videoUrl={fullscreenVideoUrl || ''}
-        onClose={() => setFullscreenVideoUrl(null)}
+        visible={!!fullscreenVideo}
+        videoUrl={fullscreenVideo?.url ?? null}
+        posterUrl={fullscreenVideo?.posterUrl ?? null}
+        onClose={() => {
+          videoOpenSeqRef.current++; // invalidate any in-flight signing
+          setFullscreenVideo(null);
+        }}
       />
 
       {/* Image Preview Modal */}
