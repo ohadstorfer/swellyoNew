@@ -58,15 +58,17 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign }: FileBubbl
         return;
       }
 
-      // Download to a cache path named by message id — NEVER the sender's
-      // display_name, whose spaces/accents/# break a file:// uri silently on
-      // Android (and the native pdf/text readers reject it).
       const LegacyFS = require('expo-file-system/legacy');
-      const target = `${LegacyFS.cacheDirectory}${message.id}.${meta.ext}`;
+      const kind = previewKindForExt(meta.ext);
+      // The in-app readers (pdf/text/image) reject a file:// uri whose name carries
+      // spaces/accents/#, so renderable files get an id-only cache name. The share
+      // sheet has no such limit, so a shared file keeps its human-readable name.
+      const target = kind !== 'none'
+        ? `${LegacyFS.cacheDirectory}${message.id}.${meta.ext}`
+        : `${LegacyFS.cacheDirectory}${message.id}-${meta.display_name}`;
       const { uri: localUri } = await LegacyFS.downloadAsync(url, target);
 
-      // Renderable in-app? Open the viewer. Otherwise keep today's share-sheet path.
-      if (previewKindForExt(meta.ext) !== 'none') {
+      if (kind !== 'none') {
         setViewer({ uri: localUri });
         return;
       }
