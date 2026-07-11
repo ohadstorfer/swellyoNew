@@ -19,7 +19,7 @@
       <string>com.apple.usernotifications.service</string>
     </dict>
     <key>CFBundleVersion</key>
-    <string>42</string>
+    <string>43</string>
     <key>CFBundleShortVersionString</key>
     <string>2.0.2</string>
   </dict>
