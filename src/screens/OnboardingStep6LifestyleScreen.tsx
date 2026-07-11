@@ -45,6 +45,15 @@ const GRID_GAP = 8;
 const SCROLL_HORIZONTAL_PAD = spacing.sm;
 const SEARCH_DEBOUNCE_MS = 150;
 
+// Three bucket filenames are misspelled. The filename is the storage key, so it
+// can't be renamed without breaking every lifestyle_image_urls entry already
+// saved on a profile — override the derived keyword and label instead.
+const MISSPELLED_FILENAMES: Record<string, { keyword: string; label: string }> = {
+  'Wildlifle_Conservation.jpg': { keyword: 'wildlife conservation', label: 'Wildlife Conservation' },
+  'Breathe_Work.jpg': { keyword: 'breath work', label: 'Breath Work' },
+  'Mindfullness_Meditation.jpg': { keyword: 'mindfulness meditation', label: 'Mindfulness / Meditation' },
+};
+
 // Some images cover several distinct activities. The filename can't tell us
 // which underscores separate words ("Rock_Climbing") vs separate titles
 // ("Adventure_Explore"), so the multi-title labels are listed explicitly and
@@ -58,7 +67,6 @@ const MULTI_TITLE_LABELS: Record<string, string> = {
   'Cycling_Triathlon.jpg': 'Cycling / Triathlon',
   'Dirt_Biking_Motocross.jpg': 'Dirt Biking / Motocross',
   'Gym_Fitness_Workout_Crossfit.jpg': 'Gym / Fitness / Workout / Crossfit',
-  'Mindfullness_Meditation.jpg': 'Mindfullness / Meditation',
   'Mobility_Training_Stretching.jpg': 'Mobility Training / Stretching',
   'Overlanding_Van_Life.jpg': 'Overlanding / Van Life',
   'Pool_Billiards_Snooker.jpg': 'Pool / Billiards / Snooker',
@@ -96,9 +104,10 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
         const url = getLifestyleImageBucketUrlForFilename(filename);
         if (!url) return null;
         const stem = filename.replace(/\.jpg$/i, '');
+        const fixed = MISSPELLED_FILENAMES[filename];
         return {
-          keyword: stem.toLowerCase().replace(/_/g, ' '),
-          label: MULTI_TITLE_LABELS[filename] ?? stem.replace(/_/g, ' '),
+          keyword: fixed?.keyword ?? stem.toLowerCase().replace(/_/g, ' '),
+          label: fixed?.label ?? MULTI_TITLE_LABELS[filename] ?? stem.replace(/_/g, ' '),
           imageUrl: url,
         };
       })
