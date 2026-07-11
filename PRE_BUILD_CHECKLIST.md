@@ -14,6 +14,7 @@ This file is also referenced from `.claude/CLAUDE.md` so any Claude session that
 4. `git status` is clean and on the right branch
 5. For OTA: the in-store binary you're targeting was built with `expo-updates` enabled (true for `1.1.0+`, false for anything older)
 6. **Check the "Pending native-only changes" section below** — if any listed change is in what you're shipping, it CANNOT go via OTA
+7. Before bumping the version, check the **highest version already in App Store Connect's Distribution tab** — not just this repo's `app.json` (see §1a; bit us 2026-07-11)
 
 ---
 
@@ -79,6 +80,19 @@ console.log(new Set(all).size === 1 ? '✅ All match' : '❌ DRIFT — values di
 **Why `expo.ios.runtimeVersion` and `expo.android.runtimeVersion` matter**: if either nested override is set, EAS uses the override for that platform's update tag instead of the top-level `expo.runtimeVersion`. A drifted nested value publishes OTAs to a runtime that no installed binary listens for — the update silently goes nowhere. This bit us once when iOS was bumped 1.0.8 → 1.1.0 and `ios.runtimeVersion` stayed at "1.0.0".
 
 `buildNumber` (iOS) and `versionCode` (Android) auto-increment on the EAS build server (per `eas.json` `production.ios.autoIncrement` / `android.autoIncrement`). Don't bump those manually unless you have a reason.
+
+---
+
+## 1a. App Store Connect version — the repo can drift from what's already live
+
+`app.json`'s version is **not** the source of truth for what App Store Connect will accept. Someone can create an App Store version directly in App Store Connect (manual Xcode archive/upload, etc.) without ever touching this repo. Apple then rejects any future App Store submission whose marketing version isn't **strictly higher** than the highest version ever created in that app's Distribution track. TestFlight does **not** enforce this — it only checks that the exact version+build-number pair hasn't been used before — so a build can upload to TestFlight successfully and only fail later, at "Add for Review".
+
+This happened 2026-07-11: repo was at `1.3.1`, bumped to `1.3.2`, built and submitted to TestFlight without any error. But App Store Connect's Distribution tab already showed `2.0.1` (Developer Rejected) and `2.0.0` (Ready for Distribution) — versions that were never tracked in this repo. `1.3.2` uploaded to TestFlight fine but could never actually be used for an App Store submission, since it's lower than `2.0.1`.
+
+**Before bumping the version for any build that might ship to the App Store:**
+- [ ] Open https://appstoreconnect.apple.com/apps/6762285335/distribution/ios and note the highest version listed under "iOS App" in the left rail — **including rejected/in-review entries, not just the live one**
+- [ ] Confirm the new version is strictly greater than that number, not just greater than the repo's last known version
+- [ ] If Claude is doing the bump: **ASK the user** for the current highest App Store Connect version rather than assuming `app.json` reflects reality — there's no CLI/API check for this without extra App Store Connect API wiring, so it can't be automated like the section 1 verify script
 
 ---
 
@@ -288,6 +302,7 @@ When the user says any of: "build", "ship", "release", "OTA", "update", "submit"
 8. **Determine native vs JS-only** by checking if recent commits touched `package.json`, `app.json` plugins, `ios/`, `android/` — and tell the user which command path applies (`eas update` vs `eas build`)
 9. **Diff the entitlements** (`git diff <last-build-tag> -- ios/Swellyo/Swellyo.entitlements app.json`). Any change means the iOS build MUST run interactively once — see §3b. `--non-interactive` will lie to you and fail 15 minutes later inside Xcode.
 10. **Check every `targets/*/` dir has a matching target in `ios/Swellyo.xcodeproj/project.pbxproj`** (`grep -c product-type.app-extension`). A directory with no target is authored-but-never-built Swift — it silently ships nothing. See §3c.
+11. **Before proposing any version bump, ASK the user for the highest version currently shown in App Store Connect's Distribution tab** (https://appstoreconnect.apple.com/apps/6762285335/distribution/ios) — do not assume `app.json`'s current version reflects reality. There is no CLI/API check for this. See §1a — it bit us 2026-07-11 (repo said `1.3.1`, ASC was already at `2.0.1`).
 
 ### Always confirm with the user before running
 
