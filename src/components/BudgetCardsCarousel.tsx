@@ -5,6 +5,7 @@ import {
   FlatList,
   Dimensions,
   Platform,
+  PixelRatio,
   TouchableOpacity,
   Image,
   Animated,
@@ -14,6 +15,13 @@ import { Text } from './Text';
 import { Images } from '../assets/images';
 
 export type BudgetOption = 'budget' | 'mid' | 'high' | 'premium';
+
+// Card text ignores device font scaling beyond this. The card frame is a fixed
+// height, so unbounded accessibility font scaling overflows the frame and clips
+// the Select button — which blocks onboarding. Hosts sizing the carousel area
+// (e.g. OnboardingStep5BudgetScreen) use this to compute the min height the
+// card needs at the worst-case scale.
+export const CARD_MAX_FONT_SCALE = 1.2;
 
 // Figma: outer padding 10.703px, outer radius 21.4px, inner radius 14.27px, shadow 0px 1.784px 14.271px rgba(89,110,124,0.15)
 const FIGMA_OUTER_PADDING = 10.703;
@@ -166,6 +174,51 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
     carouselSize.height > 0
       ? Math.min(carouselSize.height - cardTopPad - CARD_V_BREATHING, MAX_CARD_HEIGHT)
       : FALLBACK_HEIGHT;
+
+  // The card interior (title → Select button) needs a minimum height to show
+  // everything; when the card the screen affords is shorter than that, every
+  // interior size (fonts, coin, margins, button) shrinks by the same factor so
+  // the whole content — critically the Select button — always fits with no
+  // clipping and no scrolling.
+  //
+  // Natural height = fixed chrome (paddings 40 + coin 116 + margins 60 + button 45
+  // = 261) + text lines. Text grows with the device font scale twice over: taller
+  // lines AND extra wrapped lines (tagline/description are width-capped at 228),
+  // hence the (108 + 200·(s−1))·s term: 369 at scale 1, ~439 at the 1.2 cap.
+  const fontScale = Math.min(PixelRatio.getFontScale(), CARD_MAX_FONT_SCALE);
+  const naturalContentHeight = 261 + (108 + 200 * (fontScale - 1)) * fontScale;
+  const availableForContent = cardHeight - FIGMA_OUTER_PADDING * 2;
+  let contentScale = Math.min(1, availableForContent / naturalContentHeight);
+  if (45 * contentScale < 40) {
+    // The Select button stops shrinking at 40pt (it's the one control the user
+    // MUST hit), so once it hits that floor the rest shrinks a bit further to
+    // absorb the difference: needed(k) = (natural − 45)·k + 40.
+    contentScale = (availableForContent - 40) / (naturalContentHeight - 45);
+  }
+  contentScale = Math.max(0.55, Math.min(1, contentScale));
+
+  // Interior style overrides for the shrunken card; null at full size so the
+  // static styles apply untouched. Every value mirrors its StyleSheet twin below.
+  const shrunk = useMemo(() => {
+    if (contentScale >= 1) return null;
+    const k = contentScale;
+    return {
+      content: { paddingTop: 16 * k, paddingBottom: 24 * k },
+      title: { fontSize: 22 * k, lineHeight: 32 * k, marginBottom: 18 * k },
+      coin: { width: 122 * k, height: 116 * k, marginBottom: 18 * k },
+      coinImage: { width: 122 * k, height: 116 * k },
+      tagline: { fontSize: 18 * k, lineHeight: 22 * k, marginBottom: 6 * k },
+      description: {
+        fontSize: 16 * k,
+        lineHeight: (Platform.OS === 'web' ? 15 : 18) * k,
+        marginBottom: 18 * k,
+      },
+      // The button shrinks less than the rest: below ~40pt it stops being a
+      // comfortable touch target, and it's the one control the user MUST hit.
+      button: { height: Math.max(40, 45 * k), paddingVertical: 13 * k },
+      buttonText: { fontSize: 18 * k, lineHeight: 20 * k },
+    };
+  }, [contentScale]);
 
   const initialReal = initialSelection
     ? Math.max(0, BUDGET_ITEMS.findIndex((b) => b.value === initialSelection))
@@ -327,31 +380,49 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
                     >
                       <View style={[styles.cardInner, { borderRadius: FIGMA_INNER_RADIUS }]}>
                         {structuredCard ? (
-                          <View style={styles.structuredCardContent}>
-                            <Text style={styles.structuredCardTitle}>{structuredCard.title}</Text>
-                            <View style={styles.structuredCardCoin}>
+                          <View style={[styles.structuredCardContent, shrunk?.content]}>
+                            <Text
+                              style={[styles.structuredCardTitle, shrunk?.title]}
+                              maxFontSizeMultiplier={CARD_MAX_FONT_SCALE}
+                            >
+                              {structuredCard.title}
+                            </Text>
+                            <View style={[styles.structuredCardCoin, shrunk?.coin]}>
                               <Image
                                 source={structuredCard.coinImageSource}
-                                style={styles.structuredCardCoinImage}
+                                style={[styles.structuredCardCoinImage, shrunk?.coinImage]}
                                 resizeMode="contain"
                               />
                             </View>
-                            <Text style={styles.structuredCardTagline}>{structuredCard.tagline}</Text>
-                            <Text style={styles.structuredCardDescription}>{structuredCard.description}</Text>
+                            <Text
+                              style={[styles.structuredCardTagline, shrunk?.tagline]}
+                              maxFontSizeMultiplier={CARD_MAX_FONT_SCALE}
+                            >
+                              {structuredCard.tagline}
+                            </Text>
+                            <Text
+                              style={[styles.structuredCardDescription, shrunk?.description]}
+                              maxFontSizeMultiplier={CARD_MAX_FONT_SCALE}
+                            >
+                              {structuredCard.description}
+                            </Text>
                             <TouchableOpacity
                               onPress={() => handleCardPress(budgetItem.value)}
                               disabled={isReadOnly}
                               activeOpacity={0.8}
                               style={[
                                 styles.structuredCardSelectButton,
+                                shrunk?.button,
                                 isSelected && styles.structuredCardSelectButtonSelected,
                               ]}
                             >
                               <Text
                                 style={[
                                   styles.structuredCardSelectButtonText,
+                                  shrunk?.buttonText,
                                   isSelected && styles.structuredCardSelectButtonTextSelected,
                                 ]}
+                                maxFontSizeMultiplier={CARD_MAX_FONT_SCALE}
                               >
                                 {isSelected ? 'Selected' : 'Select'}
                               </Text>

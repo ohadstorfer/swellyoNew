@@ -55,8 +55,12 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
   return (
     <View style={styles.contentRoot}>
       <View style={styles.headerCopy}>
-        <Text style={styles.titleAccent}>Budget Mode</Text>
-        <Text style={styles.subtitle}>How do you like to travel?</Text>
+        <Text style={styles.titleAccent} maxFontSizeMultiplier={1.3}>
+          Budget Mode
+        </Text>
+        <Text style={styles.subtitle} maxFontSizeMultiplier={1.3}>
+          How do you like to travel?
+        </Text>
       </View>
 
       <View style={styles.carouselContainer}>
