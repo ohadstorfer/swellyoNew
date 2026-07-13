@@ -44,9 +44,15 @@ create or replace function public.tg_trip_invites_immutable_identity()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if new.trip_id <> old.trip_id
-     or new.invited_by <> old.invited_by
      or new.invited_user_id <> old.invited_user_id then
-    raise exception 'trip_id, invited_by, and invited_user_id cannot be changed after invite creation';
+    raise exception 'trip_id and invited_user_id cannot be changed after invite creation';
+  end if;
+  -- invited_by may only change on a declined/cancelled -> pending re-invite
+  -- (e.g. a different host re-inviting the same user on a multi-host trip);
+  -- any other status transition must keep invited_by immutable.
+  if new.invited_by <> old.invited_by
+     and not (old.status in ('declined', 'cancelled') and new.status = 'pending') then
+    raise exception 'invited_by cannot be changed except on a declined/cancelled -> pending re-invite';
   end if;
   return new;
 end $$;
@@ -88,6 +94,16 @@ begin
     on conflict do nothing;
   elsif old.status = 'pending' and new.status = 'declined' then
     v_type := 'trip_invite_declined';
+  elsif old.status in ('declined', 'cancelled') and new.status = 'pending' then
+    -- re-invite: notify the invitee, same as the insert-time notification,
+    -- since trg_trip_invite_received only fires on INSERT and never sees this
+    -- declined/cancelled -> pending UPDATE.
+    v_name := public.user_display_name(new.invited_by);
+    select title into v_title from public.group_trips where id = new.trip_id;
+    insert into public.notifications (recipient_id, trip_id, type, audience, actor_id, entity_type, entity_id, data)
+    values (new.invited_user_id, new.trip_id, 'trip_invite_received', 'user', new.invited_by, 'trip_invite', new.id,
+            jsonb_build_object('actor_name', v_name, 'trip_title', v_title));
+    return new;
   else
     return new;
   end if;
