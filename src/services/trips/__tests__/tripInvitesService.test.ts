@@ -4,7 +4,7 @@ jest.mock('../../../config/supabase', () => ({
   },
 }));
 import { supabase } from '../../../config/supabase';
-import { inviteUserToTrip, respondToInvite } from '../tripInvitesService';
+import { inviteUserToTrip, respondToInvite, listInviteCandidates } from '../tripInvitesService';
 
 describe('tripInvitesService', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -60,5 +60,81 @@ describe('tripInvitesService', () => {
 
     expect(supabase.from).toHaveBeenCalledWith('group_trip_participants');
     expect(insert).toHaveBeenCalledWith({ trip_id: 't1', user_id: 'u2', role: 'member' });
+  });
+
+  describe('listInviteCandidates', () => {
+    const participantUserId = 'existing-participant';
+    const pendingInvitedUserId = 'pending-invitee';
+    const eligibleGoodMatchId = 'eligible-good-match';
+    const eligiblePoorMatchId = 'eligible-poor-match';
+
+    function mockSupabaseFrom() {
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'group_trip_participants') {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn().mockResolvedValue({
+                data: [{ user_id: participantUserId }],
+                error: null,
+              }),
+            })),
+          };
+        }
+        if (table === 'trip_invites') {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                in: jest.fn().mockResolvedValue({
+                  data: [{ invited_user_id: pendingInvitedUserId }],
+                  error: null,
+                }),
+              })),
+            })),
+          };
+        }
+        if (table === 'surfers') {
+          return {
+            select: jest.fn(() => ({
+              limit: jest.fn().mockResolvedValue({
+                data: [
+                  { user_id: participantUserId, name: 'Participant', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
+                  { user_id: pendingInvitedUserId, name: 'Pending Invitee', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
+                  { user_id: eligibleGoodMatchId, name: 'Good Match', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
+                  { user_id: eligiblePoorMatchId, name: 'Poor Match', profile_image_url: null, country_from: 'Israel', surfboard_type: 'longboard', surf_level_category: 'beginner', age: 50 },
+                ],
+                error: null,
+              }),
+            })),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+    }
+
+    it('excludes existing participants and pending/accepted invitees, keeps eligible candidates, sorted by score desc', async () => {
+      mockSupabaseFrom();
+
+      const criteria = {
+        destination_country: 'France',
+        surfboard_type: 'shortboard',
+        surf_level_category: 'advanced',
+        age_min: 25,
+        age_max: 35,
+      };
+
+      const candidates = await listInviteCandidates('t1', criteria);
+
+      const candidateIds = candidates.map((c) => c.user_id);
+      expect(candidateIds).not.toContain(participantUserId);
+      expect(candidateIds).not.toContain(pendingInvitedUserId);
+      expect(candidateIds).toContain(eligibleGoodMatchId);
+      expect(candidateIds).toContain(eligiblePoorMatchId);
+      expect(candidates).toHaveLength(2);
+
+      // Good match (all criteria aligned) should rank above the poor match.
+      expect(candidates[0].user_id).toBe(eligibleGoodMatchId);
+      expect(candidates[1].user_id).toBe(eligiblePoorMatchId);
+      expect(candidates[0].score).toBeGreaterThan(candidates[1].score);
+    });
   });
 });
