@@ -40,12 +40,21 @@ export async function listPendingInvites(tripId: string): Promise<TripInvite[]> 
 }
 
 export async function respondToInvite(inviteId: string, response: 'accepted' | 'declined', respondingUserId: string): Promise<void> {
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('trip_invites')
     .update({ status: response, responded_at: new Date().toISOString() })
     .eq('id', inviteId)
-    .eq('invited_user_id', respondingUserId);
+    .eq('invited_user_id', respondingUserId)
+    .select('trip_id')
+    .single();
   if (error) throw error;
+
+  if (response === 'accepted' && updated?.trip_id) {
+    const { error: pErr } = await supabase
+      .from('group_trip_participants')
+      .insert({ trip_id: updated.trip_id, user_id: respondingUserId, role: 'member' });
+    if (pErr) throw pErr;
+  }
 }
 
 // Profile fields (name, country_from, surfboard_type, surf_level_category, age,
