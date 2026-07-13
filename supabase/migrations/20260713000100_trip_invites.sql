@@ -37,6 +37,24 @@ drop policy if exists trip_invites_update on public.trip_invites;
 create policy trip_invites_update on public.trip_invites
   for update using (invited_by = auth.uid() or invited_user_id = auth.uid());
 
+-- prevent smuggling in a trip/identity reassignment on update: RLS's implicit
+-- WITH CHECK (reusing USING) only enforces "still touches auth.uid() somewhere",
+-- not that trip_id/invited_by/invited_user_id are unchanged. Pin them immutable.
+create or replace function public.tg_trip_invites_immutable_identity()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.trip_id <> old.trip_id
+     or new.invited_by <> old.invited_by
+     or new.invited_user_id <> old.invited_user_id then
+    raise exception 'trip_id, invited_by, and invited_user_id cannot be changed after invite creation';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_trip_invites_immutable_identity on public.trip_invites;
+create trigger trg_trip_invites_immutable_identity before update on public.trip_invites
+for each row execute function public.tg_trip_invites_immutable_identity();
+
 -- notify the invitee on new invite
 create or replace function public.tg_notify_trip_invite_received()
 returns trigger language plpgsql security definer set search_path = public as $$
