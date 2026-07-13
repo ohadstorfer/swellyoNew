@@ -73,22 +73,29 @@ create trigger trg_trip_invite_received after insert on public.trip_invites
 for each row when (new.status = 'pending')
 execute function public.tg_notify_trip_invite_received();
 
--- notify the host when the invitee responds (accept/decline)
+-- notify the host when the invitee responds (accept/decline); on acceptance,
+-- also add the invitee as a trip participant server-side (SECURITY DEFINER),
+-- since the client cannot satisfy the group_trip_participants INSERT RLS
+-- policy (which requires an approved join_request or being the host).
 create or replace function public.tg_notify_trip_invite_decided()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare v_name text; v_type public.notification_type;
+declare v_name text; v_type public.notification_type; v_title text;
 begin
   if old.status = 'pending' and new.status = 'accepted' then
     v_type := 'trip_invite_accepted';
+    insert into public.group_trip_participants (trip_id, user_id, role)
+    values (new.trip_id, new.invited_user_id, 'member')
+    on conflict do nothing;
   elsif old.status = 'pending' and new.status = 'declined' then
     v_type := 'trip_invite_declined';
   else
     return new;
   end if;
   v_name := public.user_display_name(new.invited_user_id);
+  select title into v_title from public.group_trips where id = new.trip_id;
   insert into public.notifications (recipient_id, trip_id, type, audience, actor_id, entity_type, entity_id, data)
   values (new.invited_by, new.trip_id, v_type, 'admin', new.invited_user_id, 'trip_invite', new.id,
-          jsonb_build_object('actor_name', v_name));
+          jsonb_build_object('actor_name', v_name, 'trip_title', v_title));
   return new;
 end $$;
 

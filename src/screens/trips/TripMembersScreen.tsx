@@ -35,6 +35,19 @@ import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { isTripHost } from '../../utils/tripRole';
 import { InviteMembersSheet } from '../../components/trips/InviteMembersSheet';
 
+// `target_surf_styles` (SurfStyle: 'shortboard'|'midlength'|'longboard'|'softtop'|'all')
+// and `surfers.surfboard_type` (the real profile enum: 'shortboard'|'mid_length'|
+// 'longboard'|'soft_top') diverge for midlength/softtop — mirrors mc_norm_board()
+// in supabase/migrations/20260605120000_match_surfers.sql and normalizeBoardTypeEnum
+// in src/services/matching/matchingService.ts. Translate before using as an invite
+// candidate filter so midlength/softtop trips don't silently match nothing.
+function toSurfboardTypeEnum(style: string | null): string | null {
+  if (!style) return null;
+  if (style === 'midlength') return 'mid_length';
+  if (style === 'softtop') return 'soft_top';
+  return style;
+}
+
 // Tokens mirror the sibling "view all" screens (TripUpdates / PackingAndGear).
 const T = {
   accent: '#05BCD3',
@@ -371,8 +384,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           hostId={currentUserId}
           criteria={{
             destination_country: trip?.destination?.country ?? null,
-            surfboard_type:
-              trip?.target_surf_styles?.find(s => s !== 'all') ?? null,
+            surfboard_type: toSurfboardTypeEnum(trip?.target_surf_styles?.find(s => s !== 'all') ?? null),
             surf_level_category:
               trip?.target_surf_levels?.find(l => l !== 'all') ?? null,
             age_min: trip?.age_min ?? null,

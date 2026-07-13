@@ -8,6 +8,7 @@ import { BottomSheetShell } from '../BottomSheetShell';
 import { listInviteCandidates, inviteUserToTrip, type InviteCandidate } from '../../services/trips/tripInvitesService';
 import type { TripInviteCriteria } from '../../services/trips/tripInviteMatching';
 import { ff } from '../../theme/fonts';
+import { showErrorAlert } from '../../utils/friendlyError';
 
 interface InviteMembersSheetProps {
   visible: boolean;
@@ -43,6 +44,9 @@ export function InviteMembersSheet({
       await inviteUserToTrip(tripId, userId, hostId);
       setCandidates(prev => prev.filter(c => c.user_id !== userId));
       onInvited(userId);
+    } catch (e) {
+      // Leave the candidate in the list so the host can retry.
+      showErrorAlert('Could not send invite', e, 'Could not send invite. Please try again.');
     } finally {
       setInvitingId(null);
     }

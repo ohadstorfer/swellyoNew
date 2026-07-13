@@ -20,9 +20,15 @@ export interface InviteCandidate extends CandidateProfile {
 }
 
 export async function inviteUserToTrip(tripId: string, invitedUserId: string, invitedBy: string): Promise<TripInvite> {
+  // Upsert (not insert): re-inviting a previously declined/cancelled user must
+  // reset the existing row to pending rather than violating the
+  // unique(trip_id, invited_user_id) constraint with a fresh insert.
   const { data, error } = await supabase
     .from('trip_invites')
-    .insert({ trip_id: tripId, invited_user_id: invitedUserId, invited_by: invitedBy, status: 'pending' })
+    .upsert(
+      { trip_id: tripId, invited_user_id: invitedUserId, invited_by: invitedBy, status: 'pending', responded_at: null },
+      { onConflict: 'trip_id,invited_user_id' },
+    )
     .select()
     .single();
   if (error) throw error;
@@ -40,7 +46,12 @@ export async function listPendingInvites(tripId: string): Promise<TripInvite[]> 
 }
 
 export async function respondToInvite(inviteId: string, response: 'accepted' | 'declined', respondingUserId: string): Promise<void> {
-  const { data: updated, error } = await supabase
+  // Note: on acceptance, adding the participant row is done server-side by the
+  // tg_notify_trip_invite_decided SECURITY DEFINER trigger (see
+  // 20260713000100_trip_invites.sql) — a client-side insert into
+  // group_trip_participants would be rejected by RLS, since an invitee has
+  // neither an approved join_request nor host status.
+  const { error } = await supabase
     .from('trip_invites')
     .update({ status: response, responded_at: new Date().toISOString() })
     .eq('id', inviteId)
@@ -48,13 +59,6 @@ export async function respondToInvite(inviteId: string, response: 'accepted' | '
     .select('trip_id')
     .single();
   if (error) throw error;
-
-  if (response === 'accepted' && updated?.trip_id) {
-    const { error: pErr } = await supabase
-      .from('group_trip_participants')
-      .insert({ trip_id: updated.trip_id, user_id: respondingUserId, role: 'member' });
-    if (pErr) throw pErr;
-  }
 }
 
 // Profile fields (name, country_from, surfboard_type, surf_level_category, age,
@@ -112,5 +116,6 @@ export async function listInviteCandidates(
         age: s.age,
       }),
     }))
+    .filter(c => c.score > 0)
     .sort((a, b) => b.score - a.score);
 }
