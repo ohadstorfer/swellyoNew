@@ -43,6 +43,7 @@ import {
 } from '../../services/trips/groupTripsService';
 import { messagingService } from '../../services/messaging/messagingService';
 import { GearRequestsSheet } from '../trips/gear/GearRequestsSheet';
+import { TripInviteResponseSheet } from '../trips/TripInviteResponseSheet';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
@@ -177,6 +178,12 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   // Gear request id whose approve/decline is in flight inside the sheet.
   const [gearProcessing, setGearProcessing] = useState<string | null>(null);
 
+  // Trip invite currently open in the accept/decline sheet (from a
+  // trip_invite_received row).
+  const [activeInvite, setActiveInvite] = useState<
+    { inviteId: string; tripId: string | null; tripName: string } | null
+  >(null);
+
   // Rows that were unread the moment the panel opened — kept highlighted for the
   // duration of this viewing even after we mark them read.
   const unreadAtOpen = useRef<Set<string>>(new Set());
@@ -295,6 +302,16 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
       // its own Approve/Decline action bar at the top.
       if (n.type === 'join_request_received' && n.actor_id) {
         pushRootCard('ProfileCard', { userId: n.actor_id });
+        return;
+      }
+      // Trip invite → open the dedicated accept/decline sheet instead of the
+      // trip itself (the invitee isn't a member yet).
+      if (n.type === 'trip_invite_received' && n.entity_id) {
+        setActiveInvite({
+          inviteId: n.entity_id,
+          tripId: n.trip_id,
+          tripName: n.data?.trip_title ?? 'this trip',
+        });
         return;
       }
       if (!onOpenTrip || !n.trip_id) return;
@@ -551,6 +568,22 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
               onApprove={handleGearApprove}
               onDecline={handleGearDecline}
             />
+
+            {/* Trip invite — accept/decline sheet opened from a
+                trip_invite_received row. */}
+            {activeInvite && userId && (
+              <TripInviteResponseSheet
+                visible
+                inviteId={activeInvite.inviteId}
+                tripName={activeInvite.tripName}
+                respondingUserId={userId}
+                onClose={() => setActiveInvite(null)}
+                onResponded={() => {
+                  invalidateTrip(activeInvite.tripId);
+                  setActiveInvite(null);
+                }}
+              />
+            )}
     </View>
   );
 };

@@ -58,12 +58,13 @@ for each row execute function public.tg_trip_invites_immutable_identity();
 -- notify the invitee on new invite
 create or replace function public.tg_notify_trip_invite_received()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare v_name text;
+declare v_name text; v_title text;
 begin
   v_name := public.user_display_name(new.invited_by);
+  select title into v_title from public.group_trips where id = new.trip_id;
   insert into public.notifications (recipient_id, trip_id, type, audience, actor_id, entity_type, entity_id, data)
   values (new.invited_user_id, new.trip_id, 'trip_invite_received', 'user', new.invited_by, 'trip_invite', new.id,
-          jsonb_build_object('actor_name', v_name));
+          jsonb_build_object('actor_name', v_name, 'trip_title', v_title));
   return new;
 end $$;
 

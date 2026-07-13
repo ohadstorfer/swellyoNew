@@ -28,7 +28,10 @@ export type NotificationType =
   | 'trip_cancelled'
   | 'member_removed'
   | 'trip_reminder'
-  | 'trip_ended';
+  | 'trip_ended'
+  | 'trip_invite_received'
+  | 'trip_invite_accepted'
+  | 'trip_invite_declined';
 
 /**
  * Every bell type, as a runtime set for the foreground push gate.
@@ -53,6 +56,9 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   member_removed: true,
   trip_reminder: true,
   trip_ended: true,
+  trip_invite_received: true,
+  trip_invite_accepted: true,
+  trip_invite_declined: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
   Object.keys(BELL_TYPE_FLAGS)
@@ -135,6 +141,11 @@ export function tripFocusForNotification(
       return 'your-gear';
     case 'admin_update_posted':
       return 'updates';
+    case 'trip_invite_accepted':
+    case 'trip_invite_declined':
+      return 'overview';
+    // trip_invite_received routes to a dedicated response sheet, not this
+    // generic trip-focus path — see NotificationCenter's handleRowPress.
     case 'trip_reminder':
       switch (data?.stage) {
         case 'commit':
@@ -520,6 +531,27 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
     }
     case 'trip_ended':
       return { title: 'Trip ended', body: `Share your photos & memories from ${trip}.`, icon: 'images-outline' };
+    case 'trip_invite_received':
+      return {
+        title: who,
+        body: `invited you to join ${tripName}`,
+        bodyParts: [{ t: 'invited you to join ' }, { t: tripName, b: true }],
+        icon: 'mail-outline',
+      };
+    case 'trip_invite_accepted':
+      return {
+        title: who,
+        body: `accepted your invite to ${tripName}`,
+        bodyParts: [{ t: 'accepted your invite to ' }, { t: tripName, b: true }],
+        icon: 'checkmark-circle-outline',
+      };
+    case 'trip_invite_declined':
+      return {
+        title: who,
+        body: `declined your invite to ${tripName}`,
+        bodyParts: [{ t: 'declined your invite to ' }, { t: tripName, b: true }],
+        icon: 'close-circle-outline',
+      };
     default:
       return { title: 'Notification', body: '', icon: 'notifications-outline' };
   }
