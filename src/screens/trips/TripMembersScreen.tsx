@@ -33,6 +33,7 @@ import { NotificationCenter } from '../../components/notifications/NotificationC
 import { ff } from '../../theme/fonts';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { isTripHost } from '../../utils/tripRole';
+import { InviteMembersSheet } from '../../components/trips/InviteMembersSheet';
 
 // Tokens mirror the sibling "view all" screens (TripUpdates / PackingAndGear).
 const T = {
@@ -113,6 +114,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   const pendingRequests = requestsQuery.data?.pending ?? [];
 
   const [sheetMember, setSheetMember] = useState<EnrichedParticipant | null>(null);
+  const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
 
   const refetchCore = () =>
     queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
@@ -197,6 +199,16 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           Members
         </Text>
         <View style={styles.headerRight}>
+          {isHost ? (
+            <TouchableOpacity
+              onPress={() => setInviteSheetOpen(true)}
+              style={styles.inviteHeaderButton}
+              accessibilityRole="button"
+              accessibilityLabel="Invite surfers"
+            >
+              <Text style={styles.inviteHeaderButtonText}>Invite</Text>
+            </TouchableOpacity>
+          ) : null}
           {currentUserId ? <NotificationCenter userId={currentUserId} bare /> : null}
         </View>
       </View>
@@ -351,6 +363,26 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         onRemoveAdmin={confirmRemoveAdmin}
         onRemove={confirmRemove}
       />
+
+      {currentUserId ? (
+        <InviteMembersSheet
+          visible={inviteSheetOpen}
+          tripId={tripId}
+          hostId={currentUserId}
+          criteria={{
+            destination_country: trip?.destination?.country ?? null,
+            surfboard_type:
+              trip?.target_surf_styles?.find(s => s !== 'all') ?? null,
+            surf_level_category:
+              trip?.target_surf_levels?.find(l => l !== 'all') ?? null,
+            age_min: trip?.age_min ?? null,
+            age_max: trip?.age_max ?? null,
+          }}
+          onClose={() => setInviteSheetOpen(false)}
+          onInvited={() => {}}
+          onViewProfile={userId => onViewUserProfile?.(userId)}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -376,7 +408,15 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontFamily: ff('Montserrat', '700'),
   },
-  headerRight: { minWidth: 28, alignItems: 'flex-end' },
+  headerRight: { flexDirection: 'row', alignItems: 'center', minWidth: 28, justifyContent: 'flex-end' },
+  inviteHeaderButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginRight: 8,
+  },
+  inviteHeaderButtonText: { color: '#fff', fontSize: 13, fontWeight: '600', fontFamily: ff('Inter', '600') },
 
   body: { flex: 1, backgroundColor: T.bg },
   scrollContent: { paddingHorizontal: 16, paddingTop: 24 },
