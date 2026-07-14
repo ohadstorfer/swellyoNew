@@ -26,28 +26,26 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
   initialData = {},
   updateFormData,
 }) => {
-  const [selected, setSelected] = useState<BudgetOption | null>(
-    (initialData.travel_type as BudgetOption | undefined) ?? null,
-  );
+  const initialSelection = (initialData.travel_type as BudgetOption | undefined) ?? undefined;
+  // The bottom "Select" button picks whichever card is currently centred, so the
+  // centred card IS the selection — there is no per-card Select button anymore.
+  const [centered, setCentered] = useState<BudgetOption | null>(initialSelection ?? null);
 
-  const handleSelect = useCallback(
-    (budget: BudgetOption) => {
-      setSelected(budget);
-      updateFormData({ travel_type: budget });
-    },
-    [updateFormData],
-  );
+  const handleCenteredCardChange = useCallback((budget: BudgetOption) => {
+    setCentered(budget);
+  }, []);
 
   const handleNext = useCallback(() => {
-    if (!selected) return;
+    if (!centered) return;
+    updateFormData({ travel_type: centered });
     const data = { ...initialData } as OnboardingData;
-    data.travel_type = selected;
+    data.travel_type = centered;
     onNext(data);
-  }, [selected, initialData, onNext]);
+  }, [centered, initialData, onNext, updateFormData]);
 
   useRegisterOnboardingStep({
-    nextLabel: 'Next',
-    canProceed: !!selected,
+    nextLabel: 'Select',
+    canProceed: !!centered,
     onNext: handleNext,
     onBack,
   });
@@ -64,7 +62,12 @@ export const OnboardingStep5BudgetScreen: React.FC<Props> = ({
       </View>
 
       <View style={styles.carouselContainer}>
-        <BudgetCardsCarousel onSelect={handleSelect} initialSelection={selected ?? undefined} />
+        <BudgetCardsCarousel
+          onSelect={() => {}}
+          hideSelectButton
+          initialSelection={initialSelection}
+          onCenteredCardChange={handleCenteredCardChange}
+        />
       </View>
     </View>
   );

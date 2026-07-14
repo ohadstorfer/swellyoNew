@@ -128,6 +128,8 @@ interface BudgetCardsCarouselProps {
   isReadOnly?: boolean;
   initialSelection?: BudgetOption;
   onCenteredCardChange?: (budget: BudgetOption, index: number) => void;
+  /** Hide the per-card Select button — the host owns selection (e.g. a bottom "Select" button). */
+  hideSelectButton?: boolean;
   /** Ref to parent ScrollView native gesture so vertical scroll can run simultaneously with horizontal pan. */
   parentScrollNativeRef?: React.RefObject<unknown> | null;
 }
@@ -137,6 +139,7 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   isReadOnly = false,
   initialSelection,
   onCenteredCardChange,
+  hideSelectButton = false,
 }) => {
   const [selectedBudget, setSelectedBudget] = useState<BudgetOption | null>(initialSelection ?? null);
   const flatListRef = useRef<FlatList>(null);
@@ -164,32 +167,39 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
   // Top padding above the card inside the carousel area (kept small so the card
   // gets most of the vertical space).
   const cardTopPad = carouselSize.height > 0 ? Math.round(carouselSize.height * 0.02) : 0;
-  // The card FILLS the measured carousel area (minus the top pad and a little
-  // breathing room) instead of a fixed height. A fixed height can't win here: too
-  // small clips the content (title + Select button), too big clips the card FRAME
-  // top/bottom because the horizontal FlatList clips its cards to the container's
-  // vertical bounds — both were seen on Android. Filling the measured space adapts
-  // to any screen; MAX_CARD_HEIGHT just keeps it sensible on very tall screens.
+  // Natural height of the card interior = fixed chrome (paddings 40 + coin 116 +
+  // margins 60 + button 45 = 261; 216 without the button) + text lines. Text grows
+  // with the device font scale twice over: taller lines AND extra wrapped lines
+  // (tagline/description are width-capped at 228), hence the (108 + 200·(s−1))·s
+  // term: 369 at scale 1, ~439 at the 1.2 cap (with the button).
+  const fontScale = Math.min(PixelRatio.getFontScale(), CARD_MAX_FONT_SCALE);
+  const naturalContentHeight =
+    (hideSelectButton ? 216 : 261) + (108 + 200 * (fontScale - 1)) * fontScale;
+
+  // The card fills the measured carousel area (minus the top pad and a little
+  // breathing room) rather than using a fixed height: too small clips the content,
+  // too big clips the card FRAME top/bottom because the horizontal FlatList clips
+  // its cards to the container's vertical bounds — both were seen on Android.
+  // It never grows past what its content actually needs, though, otherwise a tall
+  // screen gives an airy, half-empty card (very visible once the per-card Select
+  // button is hidden). MAX_CARD_HEIGHT keeps it sensible on very tall screens.
+  const naturalCardHeight = naturalContentHeight + FIGMA_OUTER_PADDING * 2;
   const cardHeight =
     carouselSize.height > 0
-      ? Math.min(carouselSize.height - cardTopPad - CARD_V_BREATHING, MAX_CARD_HEIGHT)
-      : FALLBACK_HEIGHT;
+      ? Math.min(
+          carouselSize.height - cardTopPad - CARD_V_BREATHING,
+          naturalCardHeight,
+          MAX_CARD_HEIGHT,
+        )
+      : Math.min(FALLBACK_HEIGHT, naturalCardHeight);
 
-  // The card interior (title → Select button) needs a minimum height to show
-  // everything; when the card the screen affords is shorter than that, every
-  // interior size (fonts, coin, margins, button) shrinks by the same factor so
-  // the whole content — critically the Select button — always fits with no
-  // clipping and no scrolling.
-  //
-  // Natural height = fixed chrome (paddings 40 + coin 116 + margins 60 + button 45
-  // = 261) + text lines. Text grows with the device font scale twice over: taller
-  // lines AND extra wrapped lines (tagline/description are width-capped at 228),
-  // hence the (108 + 200·(s−1))·s term: 369 at scale 1, ~439 at the 1.2 cap.
-  const fontScale = Math.min(PixelRatio.getFontScale(), CARD_MAX_FONT_SCALE);
-  const naturalContentHeight = 261 + (108 + 200 * (fontScale - 1)) * fontScale;
+  // When the card the screen affords is shorter than its natural height, every
+  // interior size (fonts, coin, margins, button) shrinks by the same factor so the
+  // whole content — critically the Select button — always fits with no clipping
+  // and no scrolling.
   const availableForContent = cardHeight - FIGMA_OUTER_PADDING * 2;
   let contentScale = Math.min(1, availableForContent / naturalContentHeight);
-  if (45 * contentScale < 40) {
+  if (!hideSelectButton && 45 * contentScale < 40) {
     // The Select button stops shrinking at 40pt (it's the one control the user
     // MUST hit), so once it hits that floor the rest shrinks a bit further to
     // absorb the difference: needed(k) = (natural − 45)·k + 40.
@@ -406,27 +416,29 @@ export const BudgetCardsCarousel: React.FC<BudgetCardsCarouselProps> = ({
                             >
                               {structuredCard.description}
                             </Text>
-                            <TouchableOpacity
-                              onPress={() => handleCardPress(budgetItem.value)}
-                              disabled={isReadOnly}
-                              activeOpacity={0.8}
-                              style={[
-                                styles.structuredCardSelectButton,
-                                shrunk?.button,
-                                isSelected && styles.structuredCardSelectButtonSelected,
-                              ]}
-                            >
-                              <Text
+                            {!hideSelectButton && (
+                              <TouchableOpacity
+                                onPress={() => handleCardPress(budgetItem.value)}
+                                disabled={isReadOnly}
+                                activeOpacity={0.8}
                                 style={[
-                                  styles.structuredCardSelectButtonText,
-                                  shrunk?.buttonText,
-                                  isSelected && styles.structuredCardSelectButtonTextSelected,
+                                  styles.structuredCardSelectButton,
+                                  shrunk?.button,
+                                  isSelected && styles.structuredCardSelectButtonSelected,
                                 ]}
-                                maxFontSizeMultiplier={CARD_MAX_FONT_SCALE}
                               >
-                                {isSelected ? 'Selected' : 'Select'}
-                              </Text>
-                            </TouchableOpacity>
+                                <Text
+                                  style={[
+                                    styles.structuredCardSelectButtonText,
+                                    shrunk?.buttonText,
+                                    isSelected && styles.structuredCardSelectButtonTextSelected,
+                                  ]}
+                                  maxFontSizeMultiplier={CARD_MAX_FONT_SCALE}
+                                >
+                                  {isSelected ? 'Selected' : 'Select'}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
                         ) : (
                           <Image
@@ -453,7 +465,9 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    // The card no longer fills the area (it's capped at its natural height), so
+    // centre the leftover space instead of dumping it all below the card.
+    justifyContent: 'center',
   },
   carouselContainer: {
     width: '100%',
