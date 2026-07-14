@@ -107,7 +107,7 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact greeting in your FIRST response: "Yo! Let’s get you connected with some other surf travelers!"
+ALWAYS start with this exact question in your FIRST response: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
 
 CRITICAL: If this is the first message in the conversation (new_chat), you MUST ask this question regardless of what the user said in their initial message. Treat their initial message as context/introduction, but still ask STEP 1's question. Only AFTER the user responds to this question should you interpret their response and proceed.
 
@@ -174,6 +174,17 @@ TYPO HANDLING - Be smart and correct automatically:
 - "Siargao, the filipins" → destination_country: "Philippines", area: "Siargao"
 - "Siargao, in the Philippines" → destination_country: "Philippines", area: "Siargao"
 - "in the Philippines" → destination_country: "Philippines", area: null
+
+⚠️ CRITICAL — destination_country MUST BE A COUNTRY NAME ONLY (or "USA"):
+- NEVER put a beach, surf spot, town, city, or region inside destination_country. Those ALWAYS go in "area".
+- If the user names a place that is NOT a country (a beach/spot/town/city), you MUST infer its country and put the place name in "area".
+- NEVER return a comma-joined value like "Israel, Hof Hatzuk" in destination_country — that breaks matching.
+- "Hof Hatzuk" / "hof hatzuk" (beach in Tel Aviv) → destination_country: "Israel", area: "Hof HaTzuk"
+- "Israel, Hof Hatzuk" → destination_country: "Israel", area: "Hof HaTzuk"
+- "Uluwatu" → destination_country: "Indonesia", area: "Uluwatu"
+- "J Bay" / "Jeffreys Bay" → destination_country: "South Africa", area: "Jeffreys Bay"
+- "El Tunco" → destination_country: "El Salvador", area: "El Tunco"
+- If you truly cannot infer the country of an unfamiliar place name, ASK the user which country it is in — do NOT stuff it into destination_country.
 
 CRITICAL RULES FOR DESTINATION EXTRACTION:
 1. ALWAYS extract destination_country when a location is mentioned - NEVER leave it as null!
@@ -400,9 +411,9 @@ IMPORTANT:
 
 DATA STRUCTURE (when is_finished: true):
 {
-  "destination_country": "Country name", // REQUIRED if location mentioned - NEVER null! Correct typos: "filipins" → "Philippines". For USA: always use "USA"
+  "destination_country": "Country name", // REQUIRED if location mentioned - NEVER null! COUNTRY NAME ONLY - never a beach/spot/town/city and NEVER comma-joined (WRONG: "Israel, Hof Hatzuk"; RIGHT: destination_country "Israel" + area "Hof HaTzuk"). Correct typos: "filipins" → "Philippines". For USA: always use "USA"
   "state": "State name for USA destinations only", // REQUIRED for USA destinations (e.g., "California", "Hawaii"). null for non-USA destinations
-  "area": "Area/region name or null if not specified", // Extract if mentioned: "Siargao, filipins" → area: "Siargao"
+  "area": "Area/region name or null if not specified", // Extract if mentioned: "Siargao, filipins" → area: "Siargao". ANY beach/surf spot/town/city goes HERE, never in destination_country: "hof hatzuk" → country "Israel" + area "Hof HaTzuk", "Uluwatu" → country "Indonesia" + area "Uluwatu"
   "budget": 1 | 2 | 3 | null, // null if not specified
   "destination_known": true | false, // whether user knew destination from start
   "purpose": {
@@ -1391,36 +1402,32 @@ serve(async (req: Request) => {
     if (userError || !user) {
       return new Response(
         JSON.stringify({ error: 'Invalid authentication token' }),
-        { 
-          status: 401, 
-          headers: { 
+        {
+          status: 401,
+          headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-          } 
+          }
         }
       )
     }
 
-    // Rate limiting check (distributed; global across isolates)
+    // Distributed rate limiting (per user, global across isolates)
     const rateLimit = await checkRateLimit(supabaseAdmin, user.id, 'swelly-trip-planning')
     if (!rateLimit.allowed) {
       const retryAfter = Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
       return new Response(
-        JSON.stringify({ 
-          error: 'Rate limit exceeded',
-          message: 'Too many requests. Please try again later.',
-          retryAfter 
-        }),
-        { 
-          status: 429, 
-          headers: { 
+        JSON.stringify({ error: 'Rate limit exceeded', message: 'Too many requests. Please try again later.', retryAfter }),
+        {
+          status: 429,
+          headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
             'Retry-After': retryAfter.toString(),
             'X-RateLimit-Limit': RATE_LIMIT_CONFIG.maxRequests.toString(),
             'X-RateLimit-Remaining': '0',
             'X-RateLimit-Reset': rateLimit.resetTime.toString(),
-          } 
+          }
         }
       )
     }

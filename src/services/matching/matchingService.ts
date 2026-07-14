@@ -10,6 +10,7 @@ import { supabaseDatabaseService, SupabaseSurfer } from '../database/supabaseDat
 import { TripPlanningRequest, MatchedUser, BUDGET_MAP, TRAVEL_EXPERIENCE_MAP, GROUP_TYPE_MAP } from '../../types/tripPlanning';
 import { analyzeMatchQuality, calculateDataCompleteness } from './matchQualityAnalyzer';
 import { assignGeoTiers, GeocodedPlace, GeoTier, UserDestinationGeoRow } from './geoTiering';
+import { COUNTRY_NAMES } from '../../data/countryNames';
 
 // Helper function to convert travel_experience (integer or legacy enum string) to comparable numeric level
 // Returns: 1 (new_nomad/0-3), 2 (rising_voyager/4-9), 3 (wave_hunter/10-19), 4 (chicken_joe/20+)
@@ -920,11 +921,27 @@ export async function findMatchingUsers(
 
     // Geo tiering: geocode the requested area in parallel with the surfer query.
     // Any failure resolves to null → everyone stays Tier 3 (today's behavior).
+    // Defensive: extraction sometimes stuffs the spot into destination_country
+    // ("Israel, Hof Hatzuk" with area null) — recover the spot from the tail
+    // and keep the first segment as the country context.
+    let geoPlaceName = request.area || null;
+    let geoCountryContext = request.destination_country || null;
+    if (!geoPlaceName && geoCountryContext && geoCountryContext.includes(',')) {
+      const parts = geoCountryContext.split(',').map(p => p.trim()).filter(Boolean);
+      // Only treat the tail as a spot if it isn't itself a country
+      // ("Costa Rica, Nicaragua" is a legit multi-country destination).
+      const knownCountries = new Set(Object.values(COUNTRY_NAMES).map(n => n.toLowerCase()));
+      const tail = parts.slice(1);
+      if (parts.length > 1 && !tail.some(p => knownCountries.has(p.toLowerCase()) || p.toLowerCase() === 'usa')) {
+        geoCountryContext = parts[0];
+        geoPlaceName = tail.join(', ');
+      }
+    }
     const geocodedPlacePromise: Promise<GeocodedPlace | null> =
-      request.area && request.destination_country
+      geoPlaceName && geoCountryContext
         ? supabase.functions
             .invoke('geocode-place', {
-              body: { place: request.area, country: request.destination_country },
+              body: { place: geoPlaceName, country: geoCountryContext },
             })
             .then(({ data, error }) => (error ? null : (data as GeocodedPlace | null)))
             .catch(() => null)

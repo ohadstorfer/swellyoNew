@@ -1,3 +1,6 @@
 project_id = "rfdhtvcmagsbxqntnepv"
 [functions.geocode-place]
 verify_jwt = true
+
+[functions.swelly-trip-planning]
+verify_jwt = true
