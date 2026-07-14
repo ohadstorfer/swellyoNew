@@ -1,7 +1,8 @@
 /**
  * ContactBubble — WhatsApp-style shared-contact card (type='contact'). Shows an
- * avatar placeholder, the name, and a phone subtitle, with a full-width "Save
- * contact" action that opens the native new-contact form prefilled (via
+ * avatar placeholder, the name, and a phone subtitle, with a full-width action
+ * ("Save contact" for the receiver, "Open" for the sender, who already has it)
+ * that opens the native new-contact form prefilled (via
  * expo-contacts presentFormAsync) so the user saves it to their device — no
  * write permission needed, works on iOS and Android.
  */
@@ -108,9 +109,9 @@ export function ContactBubble({ message, isOwn, timeText, receipt }: ContactBubb
         {saving ? (
           <ActivityIndicator size="small" color={actionTint} />
         ) : (
-          <Ionicons name="person-add-outline" size={16} color={actionTint} />
+          <Ionicons name={isOwn ? 'person-outline' : 'person-add-outline'} size={16} color={actionTint} />
         )}
-        <Text style={[styles.saveText, { color: actionTint }]}>Save contact</Text>
+        <Text style={[styles.saveText, { color: actionTint }]}>{isOwn ? 'Open' : 'Save contact'}</Text>
       </Pressable>
     </View>
   );
