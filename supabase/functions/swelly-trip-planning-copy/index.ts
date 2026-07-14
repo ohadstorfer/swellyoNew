@@ -468,6 +468,99 @@ function buildSearchSpecInline(request: any, queryFilters: any, hasDestination: 
   return parts.length ? parts.join(', ') : '(no filters)'
 }
 
+
+// === Geo tiering helpers (server-side): geocode the requested area, pass geohash
+// buckets (+ 8 neighbors each) and region bounds to match_surfers so it can rank
+// by proximity. Any failure returns null -> RPC gets null params -> today's order.
+const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz'
+function encodeGeohashInline(lat: number, lng: number, precision: number): string {
+  let latitude = Math.max(-90, Math.min(90, lat))
+  let longitude = Math.max(-180, Math.min(180, lng))
+  let latMin = -90, latMax = 90, lngMin = -180, lngMax = 180
+  let hash = '', isEvenBit = true, bit = 0, ch = 0
+  while (hash.length < precision) {
+    if (isEvenBit) {
+      const mid = (lngMin + lngMax) / 2
+      if (longitude >= mid) { ch |= 1 << (4 - bit); lngMin = mid } else { lngMax = mid }
+    } else {
+      const mid = (latMin + latMax) / 2
+      if (latitude >= mid) { ch |= 1 << (4 - bit); latMin = mid } else { latMax = mid }
+    }
+    isEvenBit = !isEvenBit
+    if (bit < 4) { bit++ } else { hash += GEOHASH_BASE32[ch]; bit = 0; ch = 0 }
+  }
+  return hash
+}
+const GEOHASH_NEIGHBOR: Record<string, [string, string]> = {
+  n: ['p0r21436x8zb9dcf5h7kjnmqesgutwvy', 'bc01fg45238967deuvhjyznpkmstqrwx'],
+  s: ['14365h7k9dcfesgujnmqp0r2twvyx8zb', '238967debc01fg45kmstqrwxuvhjyznp'],
+  e: ['bc01fg45238967deuvhjyznpkmstqrwx', 'p0r21436x8zb9dcf5h7kjnmqesgutwvy'],
+  w: ['238967debc01fg45kmstqrwxuvhjyznp', '14365h7k9dcfesgujnmqp0r2twvyx8zb'],
+}
+const GEOHASH_BORDER: Record<string, [string, string]> = {
+  n: ['prxz', 'bcfguvyz'], s: ['028b', '0145hjnp'], e: ['bcfguvyz', 'prxz'], w: ['0145hjnp', '028b'],
+}
+function geohashAdjacentInline(hash: string, dir: 'n' | 's' | 'e' | 'w'): string {
+  const lastCh = hash.slice(-1)
+  let parent = hash.slice(0, -1)
+  const parity = hash.length % 2
+  if (GEOHASH_BORDER[dir][parity].includes(lastCh) && parent !== '') {
+    parent = geohashAdjacentInline(parent, dir)
+  }
+  return parent + GEOHASH_BASE32[GEOHASH_NEIGHBOR[dir][parity].indexOf(lastCh)]
+}
+function geohashCellWithNeighborsInline(hash: string): string[] {
+  const n = geohashAdjacentInline(hash, 'n')
+  const s = geohashAdjacentInline(hash, 's')
+  return [hash, n, s, geohashAdjacentInline(hash, 'e'), geohashAdjacentInline(hash, 'w'),
+    geohashAdjacentInline(n, 'e'), geohashAdjacentInline(n, 'w'),
+    geohashAdjacentInline(s, 'e'), geohashAdjacentInline(s, 'w')]
+}
+const GEO_REGION_TYPES = new Set(['administrative_area_level_1', 'administrative_area_level_2', 'country'])
+interface GeoTierParamsInline {
+  p_geo_bucket5s: string[] | null
+  p_geo_bucket4s: string[] | null
+  p_geo_is_region: boolean
+  p_geo_sw_lat: number | null
+  p_geo_sw_lng: number | null
+  p_geo_ne_lat: number | null
+  p_geo_ne_lng: number | null
+}
+async function geocodeAreaForTiersInline(area: string, country: string): Promise<GeoTierParamsInline | null> {
+  const key = Deno.env.get('GOOGLE_GEOCODING_API_KEY')
+  if (!key || !area || area.trim().length < 2) return null
+  try {
+    const address = encodeURIComponent((area.trim() + ', ' + (country || '')).trim())
+    const res = await fetch('https://maps.googleapis.com/maps/api/geocode/json?address=' + address + '&key=' + key)
+    const data = await res.json()
+    if (data.status !== 'OK' || !data.results?.length) return null
+    const r = data.results[0]
+    const lat = r.geometry?.location?.lat
+    const lng = r.geometry?.location?.lng
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null
+    const types: string[] = Array.isArray(r.types) ? r.types : []
+    const isRegion = types.some((t) => GEO_REGION_TYPES.has(t))
+    const rawBounds = r.geometry?.bounds ?? r.geometry?.viewport ?? null
+    if (isRegion) {
+      if (!rawBounds?.southwest || !rawBounds?.northeast) return null
+      return {
+        p_geo_bucket5s: null, p_geo_bucket4s: null, p_geo_is_region: true,
+        p_geo_sw_lat: rawBounds.southwest.lat, p_geo_sw_lng: rawBounds.southwest.lng,
+        p_geo_ne_lat: rawBounds.northeast.lat, p_geo_ne_lng: rawBounds.northeast.lng,
+      }
+    }
+    return {
+      p_geo_bucket5s: geohashCellWithNeighborsInline(encodeGeohashInline(lat, lng, 5)),
+      p_geo_bucket4s: geohashCellWithNeighborsInline(encodeGeohashInline(lat, lng, 4)),
+      p_geo_is_region: false,
+      p_geo_sw_lat: null, p_geo_sw_lng: null, p_geo_ne_lat: null, p_geo_ne_lng: null,
+    }
+  } catch (e) {
+    console.warn('[find-matches] Geo tiering geocode failed (non-blocking):', e)
+    return null
+  }
+}
+
 /** Max number of matches returned per request; "More" returns the next batch (previously matched are excluded). */
 const MATCHES_PAGE_SIZE = 3
 
@@ -494,6 +587,12 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
   const asArray = (v: any): string[] | null =>
     v == null ? null : (Array.isArray(v) ? (v.length ? v : null) : [v])
 
+  // Geo tiering: geocode the requested area (non-blocking on failure).
+  const geoParams = (hasDestination && request.area)
+    ? await geocodeAreaForTiersInline(String(request.area), String(request.destination_country))
+    : null
+  if (request.area) console.log('[find-matches] Geo tiering params:', geoParams ? (geoParams.p_geo_is_region ? 'region bounds' : 'buckets ' + (geoParams.p_geo_bucket5s?.[0] ?? '?')) : 'none (geocode failed/skipped)')
+
   const rpcParams = {
     p_requesting_user_id: requestingUserId,
     p_excluded_ids: excludedUserIds && excludedUserIds.length ? excludedUserIds : [],
@@ -505,6 +604,13 @@ async function findMatchingUsersV3Server(request: any, requestingUserId: string,
     p_age_min: typeof queryFilters?.age_min === 'number' ? queryFilters.age_min : null,
     p_age_max: typeof queryFilters?.age_max === 'number' ? queryFilters.age_max : null,
     p_limit: MATCHES_PAGE_SIZE,
+    p_geo_bucket5s: geoParams?.p_geo_bucket5s ?? null,
+    p_geo_bucket4s: geoParams?.p_geo_bucket4s ?? null,
+    p_geo_is_region: geoParams?.p_geo_is_region ?? false,
+    p_geo_sw_lat: geoParams?.p_geo_sw_lat ?? null,
+    p_geo_sw_lng: geoParams?.p_geo_sw_lng ?? null,
+    p_geo_ne_lat: geoParams?.p_geo_ne_lat ?? null,
+    p_geo_ne_lng: geoParams?.p_geo_ne_lng ?? null,
   }
 
   const { data: rows, error: rpcErr } = await supabaseAdmin.rpc('match_surfers', rpcParams)
@@ -619,6 +725,15 @@ TYPO HANDLING - Be smart and correct automatically:
 - "Siargao the filipins" → destination_country: "Philippines", area: "Siargao"
 - "Siargao in the Philippines" → destination_country: "Philippines", area: "Siargao"
 - "in the Philippines" → destination_country: "Philippines", area: null
+
+⚠️ CRITICAL — destination_country MUST BE A COUNTRY NAME ONLY (or "USA"):
+- NEVER put a beach, surf spot, town, city, or region inside destination_country. Those ALWAYS go in "area".
+- If the user names a place that is NOT a country (a beach/spot/town/city), you MUST infer its country and put the place name in "area".
+- NEVER return a comma-joined value like "Israel, Hof Hatzuk" in destination_country — that breaks matching.
+- "Hof Hatzuk" / "hof hatzuk" (beach in Tel Aviv) → destination_country: "Israel", area: "Hof HaTzuk"
+- "Uluwatu" → destination_country: "Indonesia", area: "Uluwatu"
+- "J Bay" / "Jeffreys Bay" → destination_country: "South Africa", area: "Jeffreys Bay"
+- If you truly cannot infer the country of an unfamiliar place name, ASK the user which country it is in — do NOT stuff it into destination_country.
 
 CRITICAL RULES FOR DESTINATION EXTRACTION:
 1. ALWAYS extract destination_country when a location is mentioned - NEVER leave it as null!

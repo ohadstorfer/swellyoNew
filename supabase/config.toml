@@ -4,3 +4,6 @@ verify_jwt = true
 
 [functions.swelly-trip-planning]
 verify_jwt = true
+
+[functions.swelly-trip-planning-copy]
+verify_jwt = true
