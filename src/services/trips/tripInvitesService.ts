@@ -68,6 +68,10 @@ export async function respondToInvite(inviteId: string, response: 'accepted' | '
 const CANDIDATE_PROFILE_FIELDS =
   'user_id, name, age, country_from, surfboard_type, surf_level_category, profile_image_url';
 
+// Only surface the strongest matches — a short, curated list invites better than
+// an endless scroll of weak ones.
+const MAX_CANDIDATES = 20;
+
 export async function listInviteCandidates(
   tripId: string,
   criteria: TripInviteCriteria = {},
@@ -117,5 +121,6 @@ export async function listInviteCandidates(
       }),
     }))
     .filter(c => c.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_CANDIDATES);
 }
