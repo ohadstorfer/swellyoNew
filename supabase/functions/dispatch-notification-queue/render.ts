@@ -66,36 +66,42 @@ export function renderPush(
     case 'commitment_decided': // only the approved path reaches push (see mapping)
       return { title: "You're locked in 🤙", body: `Your commitment to ${trip} was approved` };
     case 'member_committed':
-      return { title: `${trip}`, body: `${actor} just committed - the trip is coming up!` };
+      return { title: `${trip}`, body: `${actor} just committed — the trip is coming up!` };
     case 'gear_request_received':
-      return { title: 'Gear suggestion', body: `${actor} suggested to add "${item}" to the group gear` };
+      return { title: 'Gear suggestion', body: `${actor} suggested adding "${item}" to the group gear` };
     case 'gear_request_decided':
       return decision === 'approved'
-        ? { title: 'Gear approved ✅', body: `Your "${item}" suggestion was added to the group gear list - go claim it!` }
+        ? { title: 'Gear approved ✅', body: `Your "${item}" suggestion was added to the group gear list — go claim it!` }
         : { title: 'Gear update', body: `Your "${item}" suggestion wasn't added to ${trip}` };
     case 'admin_update_posted':
       return { title: `New update in ${trip}`, body: data?.preview || 'The host posted an update' };
     case 'group_gear_updated':
-      return { title: 'Group gear update', body: `The group gear list changed in ${trip} - go check it out!` };
+      return { title: 'Group gear update', body: `The group gear list changed in ${trip} — go check it out!` };
     case 'personal_gear_updated':
       return { title: 'Personal packing list', body: `Your packing list for ${trip} was updated` };
     case 'member_left':
       return { title: 'Oh no! Someone left your trip 📉', body: `A member left ${trip}` };
     case 'trip_cancelled':
-      return { title: 'Wow! Your trip was cancelled', body: `${trip} was cancelled by the admin - see why` };
+      return { title: 'Your trip was cancelled', body: `${trip} was cancelled by the admin — see why` };
     case 'member_removed':
       return { title: 'Trip update', body: `The admin decided to remove you from ${trip}` };
     case 'trip_reminder': {
       const s = stage;
-      if (s === 'week')     return { title: `${trip} - 1 week to go!!`, body: 'Check out your packing gear and get ready' };
-      if (s === 'tomorrow') return { title: `${trip} is tomorrow!`, body: 'Make your final checks, make sure you are ready' };
-      if (s === 'today')    return { title: `${trip} starts today 🤩`, body: 'Have a great trip - team Swellyo' };
-      if (s.startsWith('commit_')) return { title: `Lock your spot in ${trip}`, body: `${s.split('_')[1]} days out - commit now` };
+      if (s === 'week')     return { title: `${trip} — 1 week to go!`, body: 'Check out your packing gear and get ready' };
+      if (s === 'tomorrow') return { title: `${trip} is tomorrow!`, body: "Make your final checks and make sure you're ready" };
+      if (s === 'today')    return { title: `${trip} starts today 🤩`, body: 'Have a great trip — Team Swellyo' };
+      if (s.startsWith('commit_')) return { title: `Lock your spot in ${trip}`, body: `${s.split('_')[1]} days out — commit now` };
       if (s.startsWith('gear_'))   return { title: `${trip}: gear still needed`, body: 'Some items still need an owner' };
       return { title: trip, body: 'Trip update' };
     }
     case 'trip_ended':
       return { title: `${trip} has come to an end 🌅`, body: 'Share your photos & memories' };
+    case 'trip_invite_received':
+      return { title: "You're invited! 🌊", body: `${actor} invited you to join ${trip}` };
+    case 'trip_invite_accepted':
+      return { title: 'Invite accepted 🎉', body: `${actor} accepted your invite to ${trip}` };
+    case 'trip_invite_declined':
+      return { title: 'Invite update', body: `${actor} declined your invite to ${trip}` };
     default:
       return { title: trip, body: 'You have a new trip update' };
   }
