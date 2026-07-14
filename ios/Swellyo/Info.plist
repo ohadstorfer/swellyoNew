@@ -48,6 +48,11 @@
     </array>
     <key>CFBundleVersion</key>
     <string>43</string>
+    <key>LSApplicationQueriesSchemes</key>
+    <array>
+      <string>instagram</string>
+      <string>instagram-stories</string>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>

@@ -131,6 +131,13 @@
       ],
       "expo-secure-store",
       [
+        "react-native-share",
+        {
+          "ios": ["instagram", "instagram-stories"],
+          "android": ["com.instagram.android"]
+        }
+      ],
+      [
         "@sentry/react-native/expo",
         {
           "url": "https://sentry.io/",

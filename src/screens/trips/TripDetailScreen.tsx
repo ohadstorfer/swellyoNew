@@ -90,6 +90,8 @@ import { HostTag } from '../../components/trips/HostTag';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
 import { ReportTripSheet } from '../../components/ReportTripSheet';
+import { ShareTripStorySheet } from '../../components/trips/ShareTripStorySheet';
+import { isExpoGo } from '../../utils/keyboardAvoidingView';
 import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
@@ -339,6 +341,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // Discreet "report this whole trip" flow — available to members and non-members alike.
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
+  const [storySheetVisible, setStorySheetVisible] = useState(false);
   // Header kebab (⋮) overflow menu: Chat / Report / Share for everyone, plus
   // Complete / Cancel for the host.
   const [menuVisible, setMenuVisible] = useState(false);
@@ -1283,6 +1286,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // Report + Share — everyone, members and non-members alike.
       { key: 'report', icon: 'warning-outline', label: 'Report Trip', group: 1, onPress: () => setReportSheetVisible(true) },
       { key: 'share', icon: 'paper-plane-outline', label: 'Share Trip', group: 1, onPress: handleShare },
+      // Share to Instagram Story — native builds only (view-shot + share are
+      // native modules; the sheet itself degrades to a generic share sheet
+      // when Instagram isn't installed).
+      (Platform.OS !== 'web' && !isExpoGo) && {
+        key: 'shareStory',
+        icon: 'logo-instagram' as const,
+        label: 'Share to Story',
+        group: 1,
+        onPress: () => {
+          setStorySheetVisible(true);
+          logEvent('trip_story_share_opened', { tripId: trip.id });
+        },
+      },
       // Complete — host only, once the trip is underway and still live.
       (isHost && tripHasStarted && !isLocked) && {
         key: 'complete',
@@ -1882,6 +1898,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         hostName={participants.find(p => p.role === 'host')?.name ?? ''}
         onClose={() => setReportSheetVisible(false)}
       />
+
+      {/* Instagram-story share — mounted on demand so the story card (and its
+          full-size hero fetch) only render when the user asks for it. */}
+      {storySheetVisible && (
+        <ShareTripStorySheet
+          visible={storySheetVisible}
+          tripId={trip.id}
+          vm={buildTripDetailVM(
+            trip,
+            participants.length,
+            participants.find(p => p.role === 'host') ?? null,
+          )}
+          onClose={() => setStorySheetVisible(false)}
+        />
+      )}
 
       {/* Header overflow (⋮) menu. Rendered at the SafeAreaView root (not inside
           the header) so it isn't clipped, and above everything via zIndex. A
