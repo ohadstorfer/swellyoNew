@@ -87,6 +87,7 @@
 - [Expo SDK 55 Upgrade — Effort, Risk, minimizeBehavior](research_sdk55_upgrade.md) — RN 0.83; main risk=Reanimated v3→v4+Gradle overhaul; minimizeBehavior blocked by #4145
 - [Jumbo Emoji Chat — Trigger, Sizing, Bubble, Hermes Detection](research_jumbo_emoji_chat.md) — max 3 emoji triggers jumbo; use unicode-segmenter (Hermes-safe); avoid \p{Emoji}
 - [RNKC Android Edge-to-Edge + Interactive Dismiss Known Issues](research_rnkc_android_edge_to_edge_interactive_dismiss.md) — Discussion #984 nav-bar-gap fixed in 1.21.5 (v1.18.5 predates fix); navigationBarTranslucent workaround
+- [Instagram Stories Share — Mechanism, Link Sticker Verdict, RN Library](research_instagram_stories_share.md) — pasteboard/intent mechanism unchanged, link sticker NOT scriptable (manual paste only), react-native-share still best lib
 - [World Surfaris — Competitor Profile](research_world_surfaris_competitor.md) — AU surf travel agency (1997), consultant-led not self-serve, $2.5k–$20k+/person, boats+resorts (owns nothing), no instant booking, commission-from-operators model
 - [Chat Scroll-to-Bottom on Notification Open](research_chat_scroll_to_bottom_notification.md) — inverted FlatList=flipped-tableview pattern; Swellyo's isNearBottomRef default-true + dedupe already correct, no fix needed
 - [Notification Cold-Start Navigation — RNav v7 + expo-notifications](research_notification_coldstart_navigation.md) — linking-prop pattern vs queue; found exact bug: pushRootCard silently drops if !isReady(), DM path never migrated to pushRootCard unlike trip notifications
