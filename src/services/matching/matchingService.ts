@@ -9,6 +9,7 @@ import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { supabaseDatabaseService, SupabaseSurfer } from '../database/supabaseDatabaseService';
 import { TripPlanningRequest, MatchedUser, BUDGET_MAP, TRAVEL_EXPERIENCE_MAP, GROUP_TYPE_MAP } from '../../types/tripPlanning';
 import { analyzeMatchQuality, calculateDataCompleteness } from './matchQualityAnalyzer';
+import { assignGeoTiers, GeocodedPlace, GeoTier, UserDestinationGeoRow } from './geoTiering';
 
 // Helper function to convert travel_experience (integer or legacy enum string) to comparable numeric level
 // Returns: 1 (new_nomad/0-3), 2 (rising_voyager/4-9), 3 (wave_hunter/10-19), 4 (chicken_joe/20+)
@@ -917,6 +918,18 @@ export async function findMatchingUsers(
       generatedAreas = [];
     }
 
+    // Geo tiering: geocode the requested area in parallel with the surfer query.
+    // Any failure resolves to null → everyone stays Tier 3 (today's behavior).
+    const geocodedPlacePromise: Promise<GeocodedPlace | null> =
+      request.area && request.destination_country
+        ? supabase.functions
+            .invoke('geocode-place', {
+              body: { place: request.area, country: request.destination_country },
+            })
+            .then(({ data, error }) => (error ? null : (data as GeocodedPlace | null)))
+            .catch(() => null)
+        : Promise.resolve(null);
+
     // Step 2: Get current user's profile for comparison
     const currentUserSurfer = await supabaseDatabaseService.getSurferByUserId(requestingUserId);
     if (!currentUserSurfer) {
@@ -1364,17 +1377,48 @@ export async function findMatchingUsers(
       userEntry.points = points;
     }
 
-    // Step 14: Sort and return top 3
+    // Step 13.5: Geo tiering — promote survivors who surfed near the requested spot.
+    // Tiers only reorder the survivor set; they never add or remove anyone.
+    let geoTiers = new Map<string, GeoTier>();
+    const geocodedPlace = await geocodedPlacePromise;
+    if (geocodedPlace && userPoints.size > 0) {
+      try {
+        const survivorIds = Array.from(userPoints.keys());
+        const { data: geoRows, error: geoError } = await supabase
+          .from('user_destinations')
+          .select('user_id, lat, lng, geo_bucket_4, geo_bucket_5')
+          .in('user_id', survivorIds);
+        if (!geoError && geoRows) {
+          geoTiers = assignGeoTiers(geocodedPlace, geoRows as UserDestinationGeoRow[]);
+          console.log(
+            `Geo tiers for "${request.area}": ` +
+              `tier1=${[...geoTiers.values()].filter((t) => t === 1).length}, ` +
+              `tier2=${[...geoTiers.values()].filter((t) => t === 2).length}, ` +
+              `tier3=${survivorIds.length - geoTiers.size}`
+          );
+        }
+      } catch (e) {
+        console.warn('Geo tiering skipped (fetch failed):', e);
+      }
+    }
+    const geoTierOf = (userId: string): GeoTier => geoTiers.get(userId) ?? 3;
+
+    // Step 14: Sort (tier first, V2 score within tier) and return top 3
     console.log('Step 14: Sorting and selecting top 3 matches...');
     console.log(`Total users with points: ${userPoints.size}`);
-    
+
     const sortedUsers = Array.from(userPoints.values())
-      .sort((a, b) => b.points - a.points)
+      .sort(
+        (a, b) =>
+          geoTierOf(a.surfer.user_id) - geoTierOf(b.surfer.user_id) ||
+          b.points - a.points
+      )
       .slice(0, 3);
-    
+
     console.log('Top 3 matches:', sortedUsers.map(u => ({
       name: u.surfer.name,
       points: u.points,
+      geoTier: geoTierOf(u.surfer.user_id),
       days: u.daysInDestination,
       country_from: u.surfer.country_from
     })));
