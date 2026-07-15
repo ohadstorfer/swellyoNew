@@ -73,7 +73,7 @@ import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { MediaAlbumBubble } from '../components/MediaAlbumBubble';
 import { AlbumGridModal } from '../components/AlbumGridModal';
 import { AlbumMediaViewer } from '../components/AlbumMediaViewer';
-import { buildDisplayRows, findRowIndexByMessageId, describeAlbum, type ChatDisplayRow, type AlbumRow } from '../utils/mediaAlbums';
+import { buildDisplayRows, findRowIndexByMessageId, insertUnreadDivider, describeAlbum, type ChatDisplayRow, type AlbumRow } from '../utils/mediaAlbums';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { AudioMessageBubble } from '../components/AudioMessageBubble';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
@@ -729,6 +729,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Other user's last_read_at from conversation_members. Used to derive read receipts
   // (2V gris = delivered, 2V azul = read) for our own messages.
   const [otherUserLastReadAt, setOtherUserLastReadAt] = useState<string | null>(null);
+  // WhatsApp-style unread divider. The provider's cached unread_count and
+  // watermark both go stale, so the ONLY trusted source is MY last_read_at
+  // fetched fresh from the DB at open — racing (and in practice beating) the
+  // debounced markAsRead write that will clobber it. If the fetch loses that
+  // race the watermark reads as "now", zero messages qualify, and the divider
+  // is simply absent — never wrong.
+  const unreadOpenRef = useRef<{ conversationId: string; at: number } | null>(null);
+  // undefined = still fetching; null = never read (everything unread).
+  const [unreadOpenWatermark, setUnreadOpenWatermark] = useState<string | null | undefined>(undefined);
+  const unreadWatermarkFetchedRef = useRef<string | null>(null);
+  const [unreadMarker, setUnreadMarker] = useState<{ firstUnreadId: string; count: number } | null>(null);
+  const unreadMarkerResolvedRef = useRef<string | null>(null);
+  const unreadScrollConsumedRef = useRef<string | null>(null);
   // Reconnect catch-up: detect SUBSCRIBED after a prior disconnect and pull missed messages.
   const wasDisconnectedRef = useRef(false);
   const lastRealtimeEventAtRef = useRef<number>(Date.now());
@@ -865,6 +878,28 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
     getCurrentUser();
   }, []);
+
+  // Reset unread-divider state per conversation and stamp the open time —
+  // messages arriving after this moment are watched live and never count.
+  useEffect(() => {
+    if (!currentConversationId) return;
+    unreadOpenRef.current = { conversationId: currentConversationId, at: Date.now() };
+    setUnreadOpenWatermark(undefined);
+    setUnreadMarker(null);
+    unreadMarkerResolvedRef.current = null;
+    unreadScrollConsumedRef.current = null;
+  }, [currentConversationId]);
+
+  // Fetch MY read watermark from the DB as early as possible (see above).
+  useEffect(() => {
+    if (!currentConversationId || !currentUserId) return;
+    if (unreadWatermarkFetchedRef.current === currentConversationId) return;
+    unreadWatermarkFetchedRef.current = currentConversationId;
+    messagingService
+      .getMemberLastReadAt(currentConversationId, currentUserId)
+      .then((ts) => setUnreadOpenWatermark(ts))
+      .catch(() => { /* stays undefined → divider skipped */ });
+  }, [currentConversationId, currentUserId]);
 
   useEffect(() => {
     if (currentConversationId) {
@@ -3754,6 +3789,62 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     flatListRef.current?.scrollToIndex({ index: invertedIndex, viewPosition: 0.5, animated: true });
   }, [resolvingReplyJumpId, currentConversationId]);
 
+  // Resolve the unread-divider anchor once both the first window and the
+  // at-open DB watermark are in: first unread = oldest incoming message newer
+  // than the watermark. If the boundary predates the loaded window, resolve it
+  // server-side and re-anchor around it — automatically, no pill.
+  useEffect(() => {
+    const open = unreadOpenRef.current;
+    if (!open || open.conversationId !== currentConversationId) return;
+    if (!currentUserId || unreadOpenWatermark === undefined) return;
+    if (unreadMarkerResolvedRef.current === currentConversationId) return;
+    if (isFetchingMessages || messages.length === 0) return;
+    const convId = currentConversationId;
+
+    const lastReadMs = unreadOpenWatermark ? Date.parse(unreadOpenWatermark) : 0;
+    // Only messages that existed at open count — later arrivals are watched live.
+    const incoming = messages.filter(
+      (m) => !m.deleted && m.sender_id !== currentUserId && Date.parse(m.created_at) <= open.at,
+    );
+    const unread = incoming.filter((m) => Date.parse(m.created_at) > lastReadMs);
+    // Zero unread does NOT consume the guard: on a cache-hit open the window
+    // is stale and the async catch-up merges the unread messages in a moment
+    // later — the effect must re-run then. The open-time stamp keeps live
+    // arrivals from ever qualifying, so staying open can't misfire.
+    if (unread.length === 0) return;
+    unreadMarkerResolvedRef.current = currentConversationId;
+
+    // Boundary is inside the loaded window when we can also see a read
+    // incoming message, or the window reaches the start of the conversation,
+    // or the oldest loaded message predates the watermark.
+    const boundaryInWindow =
+      !hasMoreMessages ||
+      unread.length < incoming.length ||
+      Date.parse(messages[0].created_at) <= lastReadMs;
+    if (boundaryInWindow) {
+      setUnreadMarker({ firstUnreadId: unread[0].id, count: unread.length });
+      return;
+    }
+    (async () => {
+      try {
+        const first = await messagingService.getFirstUnread(convId, currentUserId, unreadOpenWatermark);
+        if (!first.id) return;
+        if (findRowIndexByMessageId(displayRowsRef.current, first.id) === -1) {
+          const result = await messagingService.getMessagesAround(convId, first.id, 25);
+          if (result.messages.length === 0) return;
+          setMessages(result.messages);
+          setHasMoreMessages(result.hasMoreOlder);
+          oldestMessageIdRef.current = result.messages[0]?.id ?? null;
+          hasNewerTrimmedRef.current = true;
+          setShowReturnToLatest(true);
+        }
+        setUnreadMarker({ firstUnreadId: first.id, count: first.count || unread.length });
+      } catch {
+        /* divider is best-effort — never block the chat */
+      }
+    })();
+  }, [currentConversationId, currentUserId, unreadOpenWatermark, isFetchingMessages, messages, hasMoreMessages]);
+
   // Opened from message search: once the first window is in, jump to the
   // target (re-anchoring via getMessagesAround if it's out of window) and
   // flash it — same path as tapping a reply preview. Consume-once.
@@ -4076,10 +4167,41 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // message id to a list index (reply-jump) must go through displayRowsRef.
   const displayRowsRef = useRef<ChatDisplayRow[]>([]);
   const displayRows = useMemo(() => {
-    const rows = buildDisplayRows(invertedMessages);
+    let rows = buildDisplayRows(invertedMessages);
+    if (unreadMarker) {
+      rows = insertUnreadDivider(rows, unreadMarker.firstUnreadId, unreadMarker.count);
+    }
     displayRowsRef.current = rows;
     return rows;
-  }, [invertedMessages]);
+  }, [invertedMessages, unreadMarker]);
+
+  // WhatsApp behavior: sending any message dismisses the unread divider.
+  // Watching `messages` for an own message newer than the open moment covers
+  // every send path (text, media, contact…) including optimistic rows.
+  useEffect(() => {
+    if (!unreadMarker) return;
+    const open = unreadOpenRef.current;
+    if (!open) return;
+    const sentSinceOpen = messages.some(
+      (m) => m.sender_id === currentUserId && Date.parse(m.created_at) > open.at,
+    );
+    if (sentSinceOpen) setUnreadMarker(null);
+  }, [messages, unreadMarker, currentUserId]);
+
+  // Open at first unread (WhatsApp behavior): once the divider row exists,
+  // position it near the top of the viewport — but only once per conversation
+  // and only if it isn't already visible near the bottom.
+  useEffect(() => {
+    if (!unreadMarker || !currentConversationId) return;
+    if (unreadScrollConsumedRef.current === currentConversationId) return;
+    const index = displayRows.findIndex((r) => r.kind === 'unread-divider');
+    if (index === -1) return;
+    unreadScrollConsumedRef.current = currentConversationId;
+    if (index < 4) return; // divider already on-screen at the bottom
+    setTimeout(() => {
+      flatListRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false });
+    }, 300);
+  }, [unreadMarker, displayRows, currentConversationId]);
 
   // Reacting to the newest message grows its cell — the badge hangs below the
   // bubble (MessageReactionsRow pulls itself up with a negative marginTop). The
@@ -4229,12 +4351,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     // (older, above visually) and cell[i-1] (newer, below visually). Compare with
     // the newer neighbor to decide same/different sender. Newest (index 0) sets
     // marginBottom to 0 — the composer's inputWrapper paddingTop owns that gap.
-    const rowSenderId = item.kind === 'album' ? item.sender_id : item.message.sender_id;
-    const newerRow = displayRows[index - 1];
-    const newerSenderId = newerRow
-      ? (newerRow.kind === 'album' ? newerRow.sender_id : newerRow.message.sender_id)
-      : null;
-    const sameSender = !!newerRow && newerSenderId === rowSenderId;
+    if (item.kind === 'unread-divider') {
+      return (
+        <View style={styles.unreadDividerRow}>
+          <Text style={styles.unreadDividerText}>
+            {item.count === 1 ? '1 unread message' : `${item.count} unread messages`}
+          </Text>
+        </View>
+      );
+    }
+    const rowSender = (row?: ChatDisplayRow): string | null =>
+      !row ? null : row.kind === 'album' ? row.sender_id : row.kind === 'message' ? row.message.sender_id : null;
+    const rowSenderId = rowSender(item);
+    const newerSenderId = rowSender(displayRows[index - 1]);
+    const sameSender = newerSenderId !== null && newerSenderId === rowSenderId;
     const messageGap = index === 0 ? 0 : (sameSender ? 3 : 9);
     // "Last/newest of run" — used in group chats to decide where to show the
     // sender name + avatar (per user spec, on the newest message of a run, not
@@ -4304,7 +4434,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // and mounts a new one mid-flight, cutting the entering animation in half.
   // Album rows key off their oldest item (see mediaAlbums.ts).
   const keyExtractor = useCallback(
-    (row: ChatDisplayRow) => (row.kind === 'album' ? row.key : (row.message.client_id || row.message.id)),
+    (row: ChatDisplayRow) =>
+      row.kind === 'message' ? (row.message.client_id || row.message.id) : row.key,
     [],
   );
 
@@ -6072,6 +6203,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
   },
   returnToLatestPill: { position: 'absolute', alignSelf: 'center', bottom: 90, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#111' },
+  // Negative horizontal margin cancels messagesContent's paddingHorizontal so
+  // the band runs edge-to-edge like WhatsApp.
+  unreadDividerRow: { alignSelf: 'stretch', alignItems: 'center', marginVertical: 10, marginHorizontal: -spacing.md, paddingVertical: 7, backgroundColor: 'rgba(17, 17, 17, 0.05)' },
+  unreadDividerText: { fontSize: 12.5, color: '#5E6066', fontWeight: '600' },
   returnToLatestText: { fontWeight: '600', color: '#fff', fontSize: 13 },
   headerContainer: {
     backgroundColor: '#212121',

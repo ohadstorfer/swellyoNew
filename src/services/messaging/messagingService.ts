@@ -2129,6 +2129,39 @@ class MessagingService {
   }
 
   /**
+   * Oldest message another member sent after the given read watermark, plus
+   * how many such messages exist — the anchor and label for the "N unread
+   * messages" divider when the watermark predates the loaded window. `null`
+   * watermark means everything counts as unread (never-read conversation).
+   */
+  async getFirstUnread(
+    conversationId: string,
+    excludeUserId: string,
+    sinceLastReadAt: string | null,
+  ): Promise<{ id: string | null; count: number }> {
+    if (!isSupabaseConfigured()) return { id: null, count: 0 };
+    try {
+      const { data, error, count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact' })
+        .eq('conversation_id', conversationId)
+        .eq('deleted', false)
+        .neq('sender_id', excludeUserId)
+        .gt('created_at', sinceLastReadAt ?? new Date(0).toISOString())
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (error) {
+        console.warn('[messagingService] getFirstUnread error:', error);
+        return { id: null, count: 0 };
+      }
+      return { id: data?.[0]?.id ?? null, count: count ?? 0 };
+    } catch (error) {
+      console.error('[messagingService] getFirstUnread failed:', error);
+      return { id: null, count: 0 };
+    }
+  }
+
+  /**
    * Set or clear the mute state for the current user on a conversation.
    * Pass `null` to unmute. Merges into preferences JSONB so other keys are preserved.
    */

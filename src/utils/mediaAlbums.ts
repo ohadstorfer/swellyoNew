@@ -32,7 +32,13 @@ export interface MessageRow {
   message: Message;
 }
 
-export type ChatDisplayRow = AlbumRow | MessageRow;
+export interface UnreadDividerRow {
+  kind: 'unread-divider';
+  key: 'unread-divider';
+  count: number;
+}
+
+export type ChatDisplayRow = AlbumRow | MessageRow | UnreadDividerRow;
 
 /** Media message that can live inside an album: image/video, alive, captionless. */
 export function qualifiesForAlbum(m: Message): boolean {
@@ -113,9 +119,27 @@ export function describeAlbum(items: Message[]): string {
 
 /** Display-row index containing the given message id (album items count). */
 export function findRowIndexByMessageId(rows: ChatDisplayRow[], id: string): number {
-  return rows.findIndex((row) =>
-    row.kind === 'message'
-      ? row.message.id === id || row.message.client_id === id
-      : row.items.some((m) => m.id === id || m.client_id === id),
-  );
+  return rows.findIndex((row) => {
+    if (row.kind === 'message') return row.message.id === id || row.message.client_id === id;
+    if (row.kind === 'album') return row.items.some((m) => m.id === id || m.client_id === id);
+    return false;
+  });
+}
+
+/**
+ * Insert the "N unread messages" divider directly ABOVE the first unread
+ * message. Rows are inverted (newest-first), so visually-above means the next
+ * array slot. If the first unread lives inside an album row the divider sits
+ * above the whole album. No-op when the anchor isn't in the loaded window.
+ */
+export function insertUnreadDivider(
+  rows: ChatDisplayRow[],
+  firstUnreadMessageId: string,
+  count: number,
+): ChatDisplayRow[] {
+  const index = findRowIndexByMessageId(rows, firstUnreadMessageId);
+  if (index === -1) return rows;
+  const next = rows.slice();
+  next.splice(index + 1, 0, { kind: 'unread-divider', key: 'unread-divider', count });
+  return next;
 }
