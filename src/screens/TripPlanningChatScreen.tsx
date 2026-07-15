@@ -85,13 +85,13 @@ const TRIP_PLANNING_SECOND_MESSAGE =
  *  shared "Yo!" intro, then a topic-specific tail. */
 const TRIP_PLANNING_FIRST_BY_TOPIC: Record<SwellyTopicId, string> = {
   travel_advice:
-    "Yo! Let’s get you connected with some other surf travellers! So you want to get a travel advice! Which destination are you heading to?",
+    "Yo! Let’s get you connected with some other surf travelers! So you want to get a travel advice! Which destination are you heading to?",
   travel_partners:
-    "Yo! Let’s get you connected with some other surf travellers! Right on! What's most important to you when looking for a travel partner?",
+    "Yo! Let’s get you connected with some other surf travelers! Right on! What's most important to you when looking for a travel partner?",
   like_minded_travellers:
-    "Yo! Let’s get you connected with some other surf travellers! I understand you’re on the hunt to meet a like-minded surfer 🤙🏼 wanna tell me some specifics?",
+    "Yo! Let’s get you connected with some other surf travelers! I understand you’re on the hunt to meet a like-minded surfer 🤙🏼 wanna tell me some specifics?",
   guidance:
-    "Yo! Let’s get you connected with some other surf travellers! What kind of surf guidance are you after for today?",
+    "Yo! Let’s get you connected with some other surf travelers! What kind of surf guidance are you after for today?",
 };
 
 /** True if we have at least one filter required for find-matches (matches backend validation). */
@@ -2298,7 +2298,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             onChangeText={setInputText}
             onSend={sendMessage}
             disabled={isLoading || hasUnresolvedActionRow || isAwaitingFilterRemovalResponse}
-            placeholder={hasUnresolvedActionRow ? 'Choose an option above to continue' : 'Type your message..'}
+            placeholder={hasUnresolvedActionRow ? 'Choose an option above to continue' : 'Type your message...'}
             autoFitPlaceholder
             maxLength={500}
             primaryColor="#B72DF2"

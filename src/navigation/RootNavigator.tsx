@@ -37,6 +37,7 @@ import { queryClient } from '../lib/queryClient';
 import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { approveJoinRequest, declineJoinRequest } from '../services/trips/groupTripsService';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
+import { useMessageSearchOpen } from './searchOverlayState';
 import { navigationRef, pushRootCard } from './navigationRef';
 import { friendlyErrorMessage } from '../utils/friendlyError';
 
@@ -251,6 +252,7 @@ function ChatCardScreen({ route, navigation }: NativeStackScreenProps<RootStackP
       surftripId={params.surftripId}
       reviewCommitment={params.reviewCommitment}
       sharedMedia={params.sharedMedia}
+      targetMessageId={params.targetMessageId}
       onBack={() => navigation.goBack()}
       onViewProfile={chatCard.onViewProfile}
       onOpenTripDetail={chatCard.onOpenTripDetail}
@@ -477,8 +479,10 @@ function HomeTabsExtras() {
     onRequestedChatCardConsumed();
   }, [requestedChatCard, onRequestedChatCardConsumed]);
 
-  // Swelly floating avatar — Lineup tab only, hidden while an overlay is up.
-  if (active !== 'lineup' || barSuppressed || !lineupProps.onSwellyPress) return null;
+  // Swelly floating avatar — Lineup tab only, hidden while an overlay is up
+  // (including the full-screen message search).
+  const messageSearchOpen = useMessageSearchOpen();
+  if (active !== 'lineup' || barSuppressed || messageSearchOpen || !lineupProps.onSwellyPress) return null;
   return (
     <TouchableOpacity
       testID="conversations-swelly-button"

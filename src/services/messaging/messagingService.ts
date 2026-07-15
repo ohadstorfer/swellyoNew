@@ -234,6 +234,19 @@ export interface AggregatedReaction {
 // Shared column list for message fetches. Embeds message_reactions via the
 // message_reactions_message_id_fkey FK so reactions land in the SAME round
 // trip as the messages — no separate hydration fetch, no late pop-in.
+/** One hit from the search_messages RPC (global or in-conversation search). */
+export interface MessageSearchResult {
+  messageId: string;
+  conversationId: string;
+  body: string;
+  createdAt: string;
+  senderId: string;
+  senderName: string | null;
+  senderAvatarUrl: string | null;
+  conversationIsDirect: boolean;
+  conversationName: string | null;
+}
+
 const MESSAGE_COLS_WITH_REACTIONS =
   'id, conversation_id, sender_id, body, attachments, client_id, is_system, edited, deleted, created_at, updated_at, type, image_metadata, video_metadata, audio_metadata, commitment_metadata, file_metadata, contact_metadata, reply_to_message_id, reply_to_snapshot, message_reactions(user_id, reaction, reacted_at)';
 
@@ -939,6 +952,43 @@ class MessagingService {
       console.error('Error fetching messages around target:', error);
       throw error;
     }
+  }
+
+  /**
+   * Search message text. Global when `conversationId` is omitted, scoped to
+   * one conversation when set. Backed by the search_messages RPC (substring
+   * ILIKE + pg_trgm index; membership-scoped; deleted/system excluded).
+   * Wildcard escaping happens inside the RPC — pass the raw query.
+   */
+  async searchMessages(
+    query: string,
+    opts?: { conversationId?: string; limit?: number; offset?: number }
+  ): Promise<MessageSearchResult[]> {
+    if (!isSupabaseConfigured()) throw new Error('Supabase is not configured');
+    // Server enforces 2..100 chars — mirror it here to skip doomed round trips.
+    const trimmed = query.trim().slice(0, 100);
+    if (trimmed.length < 2) return [];
+    const { data, error } = await supabase.rpc('search_messages', {
+      p_query: trimmed,
+      p_conversation_id: opts?.conversationId ?? null,
+      p_limit: opts?.limit ?? 30,
+      p_offset: opts?.offset ?? 0,
+    });
+    if (error) {
+      console.error('Error searching messages:', error);
+      throw error;
+    }
+    return (data ?? []).map((r: any) => ({
+      messageId: r.message_id,
+      conversationId: r.conversation_id,
+      body: r.body,
+      createdAt: r.message_created_at,
+      senderId: r.sender_id,
+      senderName: r.sender_name ?? null,
+      senderAvatarUrl: r.sender_avatar_url ?? null,
+      conversationIsDirect: !!r.conversation_is_direct,
+      conversationName: r.conversation_name ?? null,
+    }));
   }
 
   /**

@@ -33,6 +33,7 @@ import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
 import { Images } from '../../assets/images';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { hapticSuccess, hapticError } from '../../utils/haptics';
 
 type TripCoreData = import('../../hooks/trips/useTripDetail').TripCoreData;
 
@@ -114,12 +115,20 @@ export default function CommitmentScreen({
     const trimmed = note.trim();
     setSubmitting(true);
     const rollback = markPending(items, trimmed || null);
+
+    // The cache is already patched to 'pending', so pop straight back — the trip
+    // screen reads "Commitment request sent" immediately instead of waiting for
+    // the REST round trip. The write finishes in the background; on failure we
+    // roll the cache back and surface the error.
+    hapticSuccess();
+    setNoteSheetOpen(false);
+    onClose();
+
     try {
       await submitCommitment(tripId, currentUserId, items, trimmed || null);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
-      setNoteSheetOpen(false);
-      onClose();
     } catch (e: any) {
+      hapticError();
       rollback();
       setSubmitting(false);
       Alert.alert('Could not submit', friendlyErrorMessage(e, 'Please try again.'));
@@ -155,7 +164,7 @@ export default function CommitmentScreen({
         <View style={styles.divider} />
 
         <Text style={styles.heading}>In what way did you commit to the trip?</Text>
-        <Text style={styles.subheading}>Let the admin know how did you commit yourself</Text>
+        <Text style={styles.subheading}>Let the admin know how you committed yourself</Text>
 
         <View style={styles.options}>
           {COMMITMENT_OPTIONS.map(opt => {
@@ -235,7 +244,7 @@ export default function CommitmentScreen({
         }
       >
         <Text style={[styles.heading, styles.noteHeading]}>Please explain.</Text>
-        <Text style={styles.subheading}>Let the admin know how did you commit yourself</Text>
+        <Text style={styles.subheading}>Let the admin know how you committed yourself</Text>
         <View style={styles.inputWrap}>
           <Image source={Images.tripDeets.pencil} style={styles.inputPencil} resizeMode="contain" />
           <TextInput

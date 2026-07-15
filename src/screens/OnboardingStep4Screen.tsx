@@ -1150,7 +1150,7 @@ export const OnboardingStep4Screen: React.FC<OnboardingStep4ScreenProps> = ({
             </View>
 
             {/* Pronoun Selection - Inline Pills */}
-            <Text style={styles.pronounLabel}>How can we call you?</Text>
+            <Text style={styles.pronounLabel}>What should we call you?</Text>
             <View style={styles.pronounPillsRow}>
               {PRONOUN_OPTIONS.map((option) => {
                 const optionValue = option.toLowerCase();

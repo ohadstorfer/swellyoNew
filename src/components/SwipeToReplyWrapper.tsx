@@ -10,6 +10,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../styles/theme';
+import { hapticLight } from '../utils/haptics';
 
 const MAX_TRANSLATION = 60;
 const REPLY_THRESHOLD = 40;
@@ -46,6 +47,7 @@ export function SwipeToReplyWrapper({ enabled, onReply, children }: Props) {
           if (translateX.value >= REPLY_THRESHOLD) {
             // Fire immediately so the reply banner starts sliding up in parallel
             // with the bubble snapping back — no waiting for the spring to settle.
+            runOnJS(hapticLight)();
             runOnJS(onReply)();
           }
           translateX.value = withSpring(0, {

@@ -256,8 +256,8 @@ export function ReportUserScreen({ reportedUserId, reportedUserName, onBack, onR
             <View style={styles.descriptionRow}>
               <Text style={styles.descriptionText}>
                 {isMessageReport
-                  ? "We may review this message and the surrounding chat to understand what happened. Don't worry they won't know you reported them."
-                  : "We may review recent messages in this chat to understand what happened. Don't worry they won't know you reported them."}
+                  ? "We may review this message and the surrounding chat to understand what happened. Don't worry, they won't know you reported them."
+                  : "We may review recent messages in this chat to understand what happened. Don't worry, they won't know you reported them."}
               </Text>
             </View>
 

@@ -76,7 +76,7 @@ export const STAY_FAMILIARITY_OPTIONS: { slug: StayFamiliarity; label: string }[
   { slug: 'never_online', label: 'Never stayed, found it online' },
   {
     slug: 'never_recs',
-    label: 'Never stayed, got good recommendations from people I know that been there',
+    label: 'Never stayed, got good recommendations from people I know who have been there',
   },
   { slug: 'stayed_once', label: 'Stayed once, know the place' },
   { slug: 'stayed_multiple', label: 'Stayed multiple times, know the place very well' },

@@ -3323,7 +3323,7 @@ export default function CreateTripFlowA({
 
       <WizardBottomSheet
         visible={openSheet === 'style'}
-        title="Boards we will ride."
+        title="Boards we will ride"
         subtitle="You can select more than one"
         largeTitle
         titleAlign="left"

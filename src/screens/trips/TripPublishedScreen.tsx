@@ -214,7 +214,7 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
               <View style={styles.infoCount}>
                 <Ionicons name="people-outline" size={16} color="#333333" />
                 <Text style={styles.infoCountText}>
-                  {requestCount} request • {memberCount} members
+                  {requestCount} request{requestCount === 1 ? '' : 's'} • {memberCount} member{memberCount === 1 ? '' : 's'}
                 </Text>
               </View>
             </View>

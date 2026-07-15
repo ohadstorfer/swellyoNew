@@ -18,7 +18,10 @@ import { supabase } from '../config/supabase';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
-import { messagingService, Conversation, getMuteUntilFromMember } from '../services/messaging/messagingService';
+import { messagingService, Conversation, getMuteUntilFromMember, MessageSearchResult } from '../services/messaging/messagingService';
+import { MessageSearchOverlay } from '../components/MessageSearchOverlay';
+import { setMessageSearchOpen } from '../navigation/searchOverlayState';
+import { ff } from '../theme/fonts';
 import { blockingService } from '../services/blocking/blockingService';
 import { useMessaging } from '../context/MessagingProvider';
 import { useUserProfile } from '../context/UserProfileContext';
@@ -204,6 +207,7 @@ export default function ConversationsScreen({
     isDirect?: boolean;
     tripId?: string;
     surftripId?: string;
+    targetMessageId?: string;
   }) => {
     if (sel.id) setCurrentConversationId(sel.id);
     pushRootCard('ChatCard', {
@@ -214,6 +218,7 @@ export default function ConversationsScreen({
       isDirect: sel.isDirect,
       tripId: sel.tripId,
       surftripId: sel.surftripId,
+      targetMessageId: sel.targetMessageId,
     });
   };
 
@@ -237,6 +242,31 @@ export default function ConversationsScreen({
     return contextUser?.id?.toString() || null;
   });
   const [showMenu, setShowMenu] = useState(false);
+  // Full-screen global message search (opened from the search bar).
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
+  // Window Y of the search bar — the overlay's slide-up start position.
+  const searchBarRef = useRef<View>(null);
+  const [searchBarOriginY, setSearchBarOriginY] = useState<number | null>(null);
+  const [searchBarHeight, setSearchBarHeight] = useState<number | null>(null);
+
+  // Hide the floating Swelly avatar (rendered in RootNavigator) under the overlay.
+  useEffect(() => {
+    setMessageSearchOpen(showMessageSearch);
+    return () => setMessageSearchOpen(false);
+  }, [showMessageSearch]);
+
+  const openMessageSearch = () => {
+    const node = searchBarRef.current as any;
+    if (node?.measureInWindow) {
+      node.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+        setSearchBarOriginY(y);
+        if (h > 0) setSearchBarHeight(h);
+        setShowMessageSearch(true);
+      });
+    } else {
+      setShowMessageSearch(true);
+    }
+  };
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showCreateSurftripModal, setShowCreateSurftripModal] = useState(false);
   const [surftripsReloadKey, setSurftripsReloadKey] = useState(0);
@@ -668,8 +698,8 @@ export default function ConversationsScreen({
     );
   };
 
-  const handleConversationPress = (conv: Conversation) => {
-    // Handle both direct messages and group chats
+  // Open a conversation, optionally scrolled to a specific message (search).
+  const openConversationAt = (conv: Conversation, targetMessageId?: string) => {
     if (conv.is_direct && conv.other_user) {
       openConversation({
         id: conv.id,
@@ -677,6 +707,7 @@ export default function ConversationsScreen({
         otherUserName: conv.other_user.name || 'User',
         otherUserAvatar: conv.other_user.profile_image_url || null,
         isDirect: true,
+        targetMessageId,
       });
     } else if (!conv.is_direct) {
       const linkedTripId = typeof conv.metadata?.trip_id === 'string' ? conv.metadata.trip_id : undefined;
@@ -689,8 +720,34 @@ export default function ConversationsScreen({
         isDirect: false,
         tripId: linkedTripId,
         surftripId: linkedSurftripId,
+        targetMessageId,
       });
     }
+  };
+
+  // Global message search → open the hit's chat scrolled to that message.
+  // The conversation is usually in the loaded list; if not (very old chat
+  // beyond the loaded pages), fall back to the RPC row's name/direct flag.
+  const handleSearchMessagePress = (result: MessageSearchResult) => {
+    setShowMessageSearch(false);
+    const conv = conversations.find(c => c.id === result.conversationId);
+    if (conv) {
+      openConversationAt(conv, result.messageId);
+      return;
+    }
+    openConversation({
+      id: result.conversationId,
+      otherUserId: result.conversationIsDirect ? result.senderId : '',
+      otherUserName: result.conversationName || (result.conversationIsDirect ? 'User' : 'Group Chat'),
+      otherUserAvatar: result.conversationIsDirect ? result.senderAvatarUrl : null,
+      isDirect: result.conversationIsDirect,
+      targetMessageId: result.messageId,
+    });
+  };
+
+  const handleConversationPress = (conv: Conversation) => {
+    // Handle both direct messages and group chats
+    openConversationAt(conv);
     // Also call the callback if provided
     onConversationPress?.(conv.id);
   };
@@ -1190,13 +1247,24 @@ export default function ConversationsScreen({
       <View style={styles.contentAreaWrapper}>
         <View style={styles.contentArea}>
         <View style={styles.contentInner}>
-          {/* Search Bar */}
-          {/* <View style={styles.searchBarContainer}>
-            <View style={styles.searchBar}>
+          {/* Search Bar — opens the full-screen global message search */}
+          {/* Hidden (not unmounted — layout must hold) while the overlay's bar
+              takes over as the "same" bar sliding up. The opacity lives on the
+              WRAPPER, not the TouchableOpacity — the touchable animates its own
+              opacity for press feedback, and overriding it on its style makes
+              it flick when restored. */}
+          <View style={[styles.searchBarContainer, showMessageSearch && { opacity: 0 }]}>
+            <TouchableOpacity
+              ref={searchBarRef}
+              testID="conversations-search-bar"
+              style={styles.searchBar}
+              activeOpacity={0.7}
+              onPress={openMessageSearch}
+            >
               <Ionicons name="search" size={24} color="#7B7B7B" style={styles.searchIcon} />
               <Text style={styles.searchPlaceholder}>Search</Text>
-            </View>
-          </View> */}
+            </TouchableOpacity>
+          </View>
 
           {/* Filter buttons */}
           <View style={styles.filterContainer}>
@@ -1504,6 +1572,20 @@ export default function ConversationsScreen({
         </Modal>
       )}
 
+      {/* Global message search — full-screen overlay above the list */}
+      <MessageSearchOverlay
+        visible={showMessageSearch}
+        onClose={() => setShowMessageSearch(false)}
+        conversations={conversations}
+        onOpenConversation={(conv) => {
+          setShowMessageSearch(false);
+          handleConversationPress(conv);
+        }}
+        onOpenMessage={handleSearchMessagePress}
+        originY={searchBarOriginY}
+        originHeight={searchBarHeight}
+      />
+
       {/* User Search Modal */}
       <UserSearchModal
         visible={showSearchModal}
@@ -1586,6 +1668,8 @@ const styles = StyleSheet.create({
   },
   searchBarContainer: {
     paddingHorizontal: 16,
+    // Match the gap below (filterContainer's paddingTop: 20).
+    paddingTop: 20,
   },
   searchBar: {
     flexDirection: 'row',
@@ -1601,11 +1685,13 @@ const styles = StyleSheet.create({
   searchIcon: {
     marginRight: 0,
   },
+  // Must render with IDENTICAL metrics to MessageSearchOverlay's input
+  // placeholder — the overlay bar hands off to this one on close, and any
+  // font/line difference makes the "Search" word visibly shift.
   searchPlaceholder: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontFamily: ff('Inter'),
     fontSize: 14,
     fontWeight: '400',
-    lineHeight: 18,
     color: '#A7B8C2',
   },
   header: {

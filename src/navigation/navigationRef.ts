@@ -59,6 +59,8 @@ export type RootStackParamList = {
     reviewCommitment?: boolean;
     /** OS-share media handoff — prefills the composer's media preview on mount. */
     sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
+    /** Opened from message search — scroll to this message + flash it on load. */
+    targetMessageId?: string;
   };
   /** OS-share conversation picker ("Share to Swellyo"). The payload itself
    *  lives in shareIntake's module store, not in nav params. */

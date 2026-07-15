@@ -27,6 +27,7 @@ import { colors } from '../styles/theme';
 import { getStrongDirection } from '../utils/textDirection';
 import { useKeyboardDirection } from '../hooks/useKeyboardDirection';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
+import { hapticLight } from '../utils/haptics';
 import { useVoiceRecorder, type VoiceRecording } from '../hooks/useVoiceRecorder';
 import { RecordingOverlay } from './RecordingOverlay';
 import { LockedRecordingBar } from './LockedRecordingBar';
@@ -151,7 +152,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
     onSend,
     onPress,
     disabled = false,
-    placeholder = 'Type your message..',
+    placeholder = 'Type your message...',
     maxLength = 500,
     leftAccessory,
     primaryColor = '#B72DF2',
@@ -273,6 +274,7 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
   const handleSend = () => {
     if (disabled) return;
     if (!allowEmpty && !value.trim()) return;
+    hapticLight();
     claimFocusWindow();
 
     // Slow shrink animation when collapsing the composer back from multi-line
@@ -529,6 +531,10 @@ export const ChatTextInput = forwardRef<ChatTextInputRef, ChatTextInputProps>(fu
               <TextInput
                 ref={inputRef}
                 nativeID={nativeID}
+                // PostHog session-replay redaction: replay leaves text unmasked globally, so
+                // without this the message being typed would be readable in a recording even
+                // though the sent bubbles are masked. Same private content, other door.
+                accessibilityLabel="ph-no-capture"
                 style={[
                   styles.inputText,
                   {

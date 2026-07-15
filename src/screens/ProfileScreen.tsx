@@ -61,6 +61,7 @@ import { Gesture, GestureDetector, ScrollView as RNGHScrollView } from 'react-na
 import { ScrollView as RNScrollView } from 'react-native';
 import { LIFESTYLE_ICON_MAP } from '../utils/lifestyleIconMap';
 import { friendlyErrorMessage } from '../utils/friendlyError';
+import { hapticSuccess, hapticLight, hapticError } from '../utils/haptics';
 import { JoinRequestActionBar, JoinRequestActionState } from '../components/trips/JoinRequestActionBar';
 import { getIncomingJoinRequest, approveJoinRequest, declineJoinRequest, IncomingJoinRequest } from '../services/trips/groupTripsService';
 import { queryClient } from '../lib/queryClient';
@@ -258,7 +259,8 @@ const getDefaultSurfVideoPoster = (boardType: string, surfLevel: number): any | 
 
 // Profile cover banner: renders the wide (`__1280w`) thumbnail of the cover image
 // instead of the full-size original, falling back to the original if the thumbnail
-// isn't generated yet. Keeps ImageBackground so the gradient/overlay children stay.
+// isn't generated yet. Uses expo-image (memory-disk cache) with the overlay
+// children layered on top, since expo-image has no ImageBackground.
 const ProfileCoverBackground: React.FC<{
   uri?: string | null;
   style?: any;
@@ -271,16 +273,18 @@ const ProfileCoverBackground: React.FC<{
   }, [uri]);
   const src = uri ? (failed ? uri : thumb) : null;
   return (
-    <ImageBackground
-      source={src ? { uri: src } : Images.coverImage}
-      style={style}
-      resizeMode="cover"
-      onError={() => {
-        if (!failed && uri && thumb !== uri) setFailed(true);
-      }}
-    >
+    <View style={style}>
+      <ExpoImage
+        source={src ? { uri: src } : Images.coverImage}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+        onError={() => {
+          if (!failed && uri && thumb !== uri) setFailed(true);
+        }}
+      />
       {children}
-    </ImageBackground>
+    </View>
   );
 };
 
@@ -1255,6 +1259,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const handleApproveRequest = useCallback(async () => {
     if (!incomingRequest || requestActionState !== 'idle') return;
+    hapticSuccess();
     setRequestActionState('approving');
     try {
       await approveJoinRequest(incomingRequest.requestId);
@@ -1277,6 +1282,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
   const handleDeclineRequest = useCallback(async () => {
     if (!incomingRequest || requestActionState !== 'idle') return;
+    hapticLight();
     setRequestActionState('declining');
     try {
       await declineJoinRequest(incomingRequest.requestId);
@@ -1597,6 +1603,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     const uid = currentUserIdRef.current;
     if (!uid) return;
 
+    // Show the cropped local image as the avatar immediately — the upload and
+    // DB write happen in the background, rolling back on failure. No success
+    // alert: the avatar changing IS the confirmation.
+    const prevUrl = profileData?.profile_image_url ?? null;
+    setProfileData(prev => (prev ? { ...prev, profile_image_url: imageUri } : prev));
+
     setIsUploadingImage(true);
     try {
       // Upload image to storage
@@ -1611,17 +1623,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         // Update cached profile image for conversation screen header
         await updateCachedUserProfilePhoto(result.url, uid);
 
-        // Reload profile data to show new image
+        // Reload profile data to swap the local URI for the canonical URL
         await loadProfileData();
-        
-        Alert.alert('Success', 'Profile picture updated successfully!');
       } else {
         const errorMessage = result.error || 'Failed to upload image';
         console.error('Upload failed:', errorMessage);
+        hapticError();
+        setProfileData(prev => (prev ? { ...prev, profile_image_url: prevUrl ?? undefined } : prev));
         Alert.alert('Upload Failed', errorMessage);
       }
     } catch (error) {
       console.error('Error uploading profile image:', error);
+      setProfileData(prev => (prev ? { ...prev, profile_image_url: prevUrl ?? undefined } : prev));
       Alert.alert('Error', 'Failed to upload profile picture. Please try again.');
     } finally {
       setIsUploadingImage(false);
@@ -3091,8 +3104,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                 <Text style={styles.destinationsSheetTitle}>
                   {(() => {
                     const firstName = (profileData?.name || '').split(' ')[0].trim();
-                    if (isViewingOwnProfile || !firstName) return 'Where you surfed at';
-                    return `Where ${firstName} surfed at`;
+                    if (isViewingOwnProfile || !firstName) return "Where you've surfed";
+                    return `Where ${firstName} has surfed`;
                   })()}
                 </Text>
                 <TouchableOpacity onPress={() => setShowDestinationsSheet(false)} style={styles.destinationsSheetClose}>

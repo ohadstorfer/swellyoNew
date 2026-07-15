@@ -488,9 +488,9 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
       const item = d.item_name ?? d.gear_name ?? 'gear';
       return {
         title: who,
-        body: `Suggested to add ${item} to Group Gear`,
+        body: `suggested to add ${item} to Group Gear`,
         bodyParts: [
-          { t: 'Suggested to add ' },
+          { t: 'suggested to add ' },
           { t: item, b: true },
           { t: ' to ' },
           { t: 'Group Gear', b: true },
@@ -501,9 +501,9 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
     case 'commitment_request_received':
       return {
         title: who,
-        body: `Wants to commit to ${tripName}`,
+        body: `wants to commit to ${tripName}`,
         bodyParts: [
-          { t: 'Wants to ' },
+          { t: 'wants to ' },
           { t: 'commit', b: true },
           { t: ' to ' },
           { t: tripName, b: true },

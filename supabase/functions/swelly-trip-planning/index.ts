@@ -107,7 +107,7 @@ CRITICAL: Be smart and flexible when understanding user requests:
 CONVERSATION FLOW:
 
 STEP 1 - ENTRY POINT:
-ALWAYS start with this exact question in your FIRST response: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
+ALWAYS start with this exact question in your FIRST response: "Yo! Let’s travel! I can connect you with like-minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?"
 
 CRITICAL: If this is the first message in the conversation (new_chat), you MUST ask this question regardless of what the user said in their initial message. Treat their initial message as context/introduction, but still ask STEP 1's question. Only AFTER the user responds to this question should you interpret their response and proceed.
 
@@ -1489,7 +1489,7 @@ ${getPronounInstructions(userProfile.pronoun, userProfile.name)}`
       const messages: Message[] = [
         { role: 'system', content: systemPrompt },
         // Add explicit instruction for first response - MUST ask STEP 1 question
-        { role: 'system', content: 'CRITICAL: This is the FIRST message in a NEW conversation. The user has just introduced themselves or started the conversation. You MUST respond with STEP 1\'s question: "Yo! Let’s Travel! I can connect you with like minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?" Do NOT skip to STEP 2. Wait for the user to answer STEP 1 first. Treat their initial message as context/introduction only.' },
+        { role: 'system', content: 'CRITICAL: This is the FIRST message in a NEW conversation. The user has just introduced themselves or started the conversation. You MUST respond with STEP 1\'s question: "Yo! Let’s travel! I can connect you with like-minded surfers or surf travelers who have experience in specific destinations you are curious about. So, what are you looking for?" Do NOT skip to STEP 2. Wait for the user to answer STEP 1 first. Treat their initial message as context/introduction only.' },
         { role: 'user', content: body.message }
       ]
 

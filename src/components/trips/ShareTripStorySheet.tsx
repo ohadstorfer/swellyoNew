@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
 import { type TripDetailVM, formatDateRange } from './TripDetailView';
-import { toWidthThumbUrl } from '../../services/media/thumbnails';
+import { toWidthThumbUrl, toThumbUrl } from '../../services/media/thumbnails';
 import { Logo } from '../Logo';
 import { ff } from '../../theme/fonts';
 import { showErrorAlert } from '../../utils/friendlyError';
@@ -55,6 +55,9 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
   const [heroReady, setHeroReady] = useState(false);
+  // Thumb 404s (e.g. pre-backfill images) fall back to the original URL
+  // before giving up on the photo entirely.
+  const [heroUseOriginal, setHeroUseOriginal] = useState(false);
   const [heroFailed, setHeroFailed] = useState(false);
   const [igAvailable, setIgAvailable] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -63,8 +66,17 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
     if (visible) isInstagramStoriesAvailable().then(setIgAvailable);
   }, [visible]);
 
-  const heroUri = vm.heroImageUri ? toWidthThumbUrl(vm.heroImageUri, STORY_W) : null;
+  // NOTE: only the default WIDTH_VARIANT (1280w) exists in S3 — asking for
+  // other widths (e.g. 1080) 404s and the card silently loses its photo.
+  const heroUri = vm.heroImageUri
+    ? heroUseOriginal
+      ? vm.heroImageUri
+      : toWidthThumbUrl(vm.heroImageUri)
+    : null;
   const showHero = !!heroUri && !heroFailed;
+  // Tiny (~15 KB) square thumb as an instant, blurred stand-in while the
+  // full-width variant streams in on a cold cache.
+  const heroPlaceholderUri = vm.heroImageUri ? toThumbUrl(vm.heroImageUri, 320) : null;
   const canShare = !busy && (!showHero || heroReady);
 
   // Fit the 9:16 card inside the screen, leaving room for the controls below.
@@ -111,10 +123,7 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
     }
   };
 
-  const participantsLabel = vm.maxParticipants
-    ? `${vm.participantCount}/${vm.maxParticipants} surfers`
-    : `${vm.participantCount} surfer${vm.participantCount === 1 ? '' : 's'}`;
-  const metaLine = [vm.destinationLabel, formatDateRange(vm), participantsLabel]
+  const metaLine = [vm.destinationLabel, formatDateRange(vm)]
     .filter(Boolean)
     .join('  ·  ');
 
@@ -143,6 +152,14 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
             showing through the published story). */}
         <View style={[styles.cardClip, { width: cardW, height: cardH }]}>
           <View ref={cardRef} collapsable={false} style={styles.card}>
+            {showHero && !!heroPlaceholderUri && !heroReady && (
+              <Image
+                source={{ uri: heroPlaceholderUri }}
+                style={StyleSheet.absoluteFill}
+                resizeMode="cover"
+                blurRadius={6}
+              />
+            )}
             {showHero ? (
               <Image
                 // RN Image (not expo-image): expo-image has known blank-capture
@@ -151,7 +168,10 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
                 style={StyleSheet.absoluteFill}
                 resizeMode="cover"
                 onLoad={() => setHeroReady(true)}
-                onError={() => setHeroFailed(true)}
+                onError={() => {
+                  if (!heroUseOriginal) setHeroUseOriginal(true);
+                  else setHeroFailed(true);
+                }}
               />
             ) : (
               <LinearGradient

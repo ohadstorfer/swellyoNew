@@ -118,7 +118,7 @@ export function ReportMessageSheet({
 
             <Text style={styles.title}>Report this message</Text>
             <Text style={styles.description}>
-              We may review this message and the surrounding chat to understand what happened. Don't worry they won't know you reported them.
+              We may review this message and the surrounding chat to understand what happened. Don't worry, they won't know you reported them.
             </Text>
 
             {/* Reason dropdown */}

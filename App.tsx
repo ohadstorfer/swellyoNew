@@ -146,7 +146,18 @@ export default Sentry.wrap(function App() {
             autocapture={{ captureScreens: false }}
             options={{
               host: POSTHOG_HOST,
-              enableSessionReplay: Platform.OS === 'web',
+              enableSessionReplay: Platform.OS !== 'web',
+              sessionReplayConfig: {
+                // PostHog masks ALL text on RN by default (not just inputs), which makes
+                // replays unreadable grey boxes — that's already what Sentry's error replays
+                // give us. Text stays visible here so replays are actually useful; images
+                // stay masked so photos/avatars never leave the device.
+                maskAllTextInputs: false,
+                maskAllImages: true,
+                maskAllSandboxedViews: true,
+                captureLog: false,
+                throttleDelayMs: 1000,
+              },
               captureAppLifecycleEvents: true,
               captureDeepLinks: true,
               enableNativeNavigationTracking: false, // Disable navigation tracking to prevent useNavigationState errors

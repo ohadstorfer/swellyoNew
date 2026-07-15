@@ -45,12 +45,6 @@ export function GalleryPermissionOverlay({ visible, onAllow, onDismiss }: Galler
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleDismiss}>
       <Animated.View style={[styles.container, { opacity: fade, paddingTop: insets.top }]}>
-        {/* Back button */}
-        <TouchableOpacity style={[styles.backButton, { top: insets.top + 10 }]} onPress={handleDismiss} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={16} color="#333" />
-          <Text style={styles.backText}>Back</Text>
-        </TouchableOpacity>
-
         {/* Content */}
         <View style={styles.content}>
           {/* Divider line */}
@@ -62,7 +56,7 @@ export function GalleryPermissionOverlay({ visible, onAllow, onDismiss }: Galler
           </View>
 
           {/* Title */}
-          <Text style={styles.title}>Allow gallery access</Text>
+          <Text style={styles.title}>About gallery access</Text>
 
           {/* Description */}
           <Text style={styles.description}>
@@ -70,13 +64,14 @@ export function GalleryPermissionOverlay({ visible, onAllow, onDismiss }: Galler
           </Text>
         </View>
 
-        {/* Bottom buttons */}
+        {/*
+          App Review 5.1.1(iv): this screen explains the request but must never
+          gate it — no "Allow" wording and no exit affordance. Continue always
+          leads to the system prompt, where the user makes the actual choice.
+        */}
         <View style={[styles.bottomButtons, { paddingBottom: insets.bottom + 24 }]}>
           <TouchableOpacity style={styles.allowButton} onPress={handleAllow} activeOpacity={0.8}>
-            <Text style={styles.allowButtonText}>Allow</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleDismiss} activeOpacity={0.7}>
-            <Text style={styles.maybeLaterText}>Maybe later</Text>
+            <Text style={styles.allowButtonText}>Continue</Text>
           </TouchableOpacity>
         </View>
       </Animated.View>
@@ -88,28 +83,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-  },
-  backButton: {
-    position: 'absolute',
-    left: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
-    borderRadius: 48,
-    paddingLeft: 8,
-    paddingRight: 12,
-    paddingVertical: 10,
-    height: 40,
-    minWidth: 70,
-    zIndex: 10,
-  },
-  backText: {
-    fontSize: 12,
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    color: '#333333',
-    marginLeft: 4,
   },
   content: {
     flex: 1,
@@ -175,13 +148,5 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     textAlign: 'center',
     lineHeight: 24,
-  },
-  maybeLaterText: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    color: '#333333',
-    textAlign: 'center',
-    lineHeight: 22,
   },
 });

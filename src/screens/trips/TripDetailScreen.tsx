@@ -92,6 +92,8 @@ import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGea
 import { ReportTripSheet } from '../../components/ReportTripSheet';
 import { ShareTripStorySheet } from '../../components/trips/ShareTripStorySheet';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
+import { hapticMedium, hapticLight, hapticSuccess, hapticError } from '../../utils/haptics';
+import { toWidthThumbUrl } from '../../services/media/thumbnails';
 import { PersonalGearSheet } from '../../components/trips/gear/PersonalGearSheet';
 import ParticipantCard from '../../components/trips/ParticipantCard';
 import PendingRequestCard from '../../components/trips/PendingRequestCard';
@@ -345,6 +347,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Header kebab (⋮) overflow menu: Chat / Report / Share for everyone, plus
   // Complete / Cancel for the host.
   const [menuVisible, setMenuVisible] = useState(false);
+  // Warm RN Image's cache with the story-card hero while the user reads the
+  // menu, so ShareTripStorySheet opens with the photo already local (expo-image
+  // caches elsewhere in the app don't help RN Image — separate caches).
+  useEffect(() => {
+    if (!menuVisible || !trip?.hero_image_url) return;
+    const url = toWidthThumbUrl(trip.hero_image_url) ?? trip.hero_image_url;
+    Image.prefetch(url).catch(() => {});
+  }, [menuVisible, trip?.hero_image_url]);
   // placeholderData seeds the trip from the list cache with participants: []
   // and myRequest: null, so until the real fetch lands we DON'T know whether
   // the viewer is a member. Member-dependent chrome (join CTA, deep-link
@@ -373,8 +383,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // leaves, trip edits and admin updates invalidate the queries above.
   useTripRealtime(tripId);
 
-  const [submitting, setSubmitting] = useState(false);
-  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null);
   const [openingChat, setOpeningChat] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -561,22 +569,54 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Tapping "Request to join" sends the request straight away — no note sheet.
   const handleRequestToJoin = async () => {
     if (!currentUserId) return;
-    setSubmitting(true);
+    hapticMedium();
+
+    // Flip the CTA to "Requested" immediately, then fire the write in the
+    // background — same optimistic pattern as handleWithdraw below. The INSERT
+    // is ~10ms server-side but awaiting the REST round trip held a spinner for
+    // 6-8s whenever the call stalled (cold realtime socket / auth-lock on RN).
+    const prevRequest =
+      queryClient.getQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+        tripsKeys.detail(tripId)
+      )?.myRequest ?? null;
+    const optimistic: GroupTripJoinRequest = {
+      id: `optimistic-${currentUserId}`,
+      trip_id: tripId,
+      requester_id: currentUserId,
+      status: 'pending',
+      request_note: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      reviewed_at: null,
+      reviewed_by: null,
+      seen_decision_at: null,
+    };
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+      tripsKeys.detail(tripId),
+      prev => (prev ? { ...prev, myRequest: optimistic } : prev)
+    );
+
     try {
       const newReq = await requestToJoinTrip(tripId, currentUserId);
+      // Reconcile the optimistic row with the real one (real id/timestamps).
       queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
         tripsKeys.detail(tripId),
         prev => (prev ? { ...prev, myRequest: newReq } : prev)
       );
     } catch (e: any) {
+      // Roll back so the CTA reflects reality (write never committed).
+      queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+        tripsKeys.detail(tripId),
+        prev => (prev ? { ...prev, myRequest: prevRequest } : prev)
+      );
+      hapticError();
       Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
-    } finally {
-      setSubmitting(false);
     }
   };
 
   const handleWithdraw = async () => {
     if (!myRequest) return;
+    hapticMedium();
     const prevStatus = myRequest.status;
     const reqId = myRequest.id;
 
@@ -606,21 +646,64 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             ? { ...prev, myRequest: { ...prev.myRequest, status: prevStatus } }
             : prev
       );
+      hapticError();
       Alert.alert('Could not withdraw', friendlyErrorMessage(e, 'Please try again.'));
     }
   };
 
   const handleApprove = async (requestId: string) => {
-    setProcessingRequestId(requestId);
+    hapticSuccess();
+    const approved = pendingRequests.find(r => r.id === requestId);
+    // Snapshot both caches for rollback.
+    const prevRequests =
+      queryClient.getQueryData<import('../../hooks/trips/useTripDetail').TripRequestsData>(
+        tripsKeys.detailRequests(tripId)
+      );
+    const prevCore =
+      queryClient.getQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+        tripsKeys.detail(tripId)
+      );
+
+    // Optimistically move the row out of "pending" and into the participant list
+    // right away, instead of holding a spinner for the whole REST round trip. The
+    // invalidate on success reconciles with the server's canonical row.
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripRequestsData>(
+      tripsKeys.detailRequests(tripId),
+      prev => (prev ? { ...prev, pending: prev.pending.filter(r => r.id !== requestId) } : prev)
+    );
+    if (approved) {
+      const newParticipant: EnrichedParticipant = {
+        ...approved.requester,
+        role: 'member',
+        joined_at: new Date().toISOString(),
+        committed: false,
+        commitment_status: 'none',
+        commitment_items: [],
+        commitment_note: null,
+        personal_gear_by_host: [],
+        personal_gear_by_me: [],
+      };
+      queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+        tripsKeys.detail(tripId),
+        prev =>
+          prev && !prev.participants.some(p => p.user_id === newParticipant.user_id)
+            ? { ...prev, participants: [...prev.participants, newParticipant] }
+            : prev
+      );
+    }
+
     try {
       await approveJoinRequest(requestId);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequests(tripId) });
       queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
     } catch (e: any) {
+      // Roll back both caches — the approval never committed.
+      if (prevRequests)
+        queryClient.setQueryData(tripsKeys.detailRequests(tripId), prevRequests);
+      if (prevCore) queryClient.setQueryData(tripsKeys.detail(tripId), prevCore);
+      hapticError();
       Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
-    } finally {
-      setProcessingRequestId(null);
     }
   };
 
@@ -651,26 +734,36 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   };
 
   const handleDecline = async (requestId: string) => {
-    setProcessingRequestId(requestId);
-    try {
-      const moved = pendingRequests.find(r => r.id === requestId);
-      await declineJoinRequest(requestId);
-      queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripRequestsData>(
-        tripsKeys.detailRequests(tripId),
-        prev => {
-          if (!prev) return prev;
-          return {
-            pending: prev.pending.filter(r => r.id !== requestId),
-            declined: moved
-              ? [{ ...moved, status: 'declined' as const }, ...prev.declined.filter(r => r.id !== requestId)]
-              : prev.declined,
-          };
-        }
+    hapticLight();
+    const moved = pendingRequests.find(r => r.id === requestId);
+    const prevRequests =
+      queryClient.getQueryData<import('../../hooks/trips/useTripDetail').TripRequestsData>(
+        tripsKeys.detailRequests(tripId)
       );
+
+    // Optimistically move the row from "pending" to "declined" immediately,
+    // instead of holding a spinner until the REST round trip returns.
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripRequestsData>(
+      tripsKeys.detailRequests(tripId),
+      prev => {
+        if (!prev) return prev;
+        return {
+          pending: prev.pending.filter(r => r.id !== requestId),
+          declined: moved
+            ? [{ ...moved, status: 'declined' as const }, ...prev.declined.filter(r => r.id !== requestId)]
+            : prev.declined,
+        };
+      }
+    );
+
+    try {
+      await declineJoinRequest(requestId);
     } catch (e: any) {
+      // Roll back — the decline never committed.
+      if (prevRequests)
+        queryClient.setQueryData(tripsKeys.detailRequests(tripId), prevRequests);
+      hapticError();
       Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
-    } finally {
-      setProcessingRequestId(null);
     }
   };
 
@@ -863,7 +956,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // field (WhatsApp, etc.); `url` gives iOS a rich link target. Without
       // this the share pasted as plain text with no link.
       await Share.share({
-        message: `Yo! checkout my trip "${name}" on Swellyo! 🌊\n${url}`,
+        message: `Yo! check out my trip "${name}" on Swellyo! 🌊\n${url}`,
         url,
       });
       logEvent('trip_invite_shared', { tripId: trip.id });
@@ -1019,6 +1112,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await createGearRequest(tripId, currentUserId, itemName, note || undefined);
       Alert.alert('Request sent', 'The host will review your request.');
     } catch (e: any) {
+      hapticError();
       Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
       throw e;
     }
@@ -1049,6 +1143,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGear(tripId) });
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
+      hapticError();
       Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingGearRequestId(null);
@@ -1061,6 +1156,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       await declineGearRequest(request.id);
       queryClient.invalidateQueries({ queryKey: tripsKeys.detailGearRequests(tripId) });
     } catch (e: any) {
+      hapticError();
       Alert.alert('Could not decline', friendlyErrorMessage(e, 'Please try again.'));
     } finally {
       setProcessingGearRequestId(null);
@@ -1630,7 +1726,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 request={r}
                 onApprove={handleApprove}
                 onDecline={handleDecline}
-                isProcessing={processingRequestId === r.id}
                 hideDecline
                 approveLabel="Approve anyway"
               />
@@ -1703,7 +1798,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <CtaButton
             myRequest={myRequest}
             isFull={isFull}
-            submitting={submitting}
             onRequest={handleRequestToJoin}
             onWithdraw={handleWithdraw}
           />
@@ -1975,10 +2069,9 @@ const Header: React.FC<{ onBack: () => void; title?: string; rightAction?: React
 const CtaButton: React.FC<{
   myRequest: GroupTripJoinRequest | null;
   isFull: boolean;
-  submitting: boolean;
   onRequest: () => void;
   onWithdraw: () => void;
-}> = ({ myRequest, isFull, submitting, onRequest, onWithdraw }) => {
+}> = ({ myRequest, isFull, onRequest, onWithdraw }) => {
   // Trip is full and the user hasn't already got a request in flight → show a
   // non-pressable "Trip full" state instead of letting them request a spot that
   // can't be granted. Pending requesters keep their pending/withdraw row.
@@ -1997,13 +2090,8 @@ const CtaButton: React.FC<{
       <Pressable
         style={({ pressed }) => [styles.ctaBtn, styles.ctaRequested, pressed && styles.ctaPressed]}
         onPress={onWithdraw}
-        disabled={submitting}
       >
-        {submitting ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.ctaPrimaryText}>Requested</Text>
-        )}
+        <Text style={styles.ctaPrimaryText}>Requested</Text>
       </Pressable>
     );
   }
@@ -2016,13 +2104,8 @@ const CtaButton: React.FC<{
         <Pressable
           style={({ pressed }) => [styles.ctaBtn, styles.ctaPrimary, pressed && styles.ctaPressed]}
           onPress={onRequest}
-          disabled={submitting}
         >
-          {submitting ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.ctaPrimaryText}>Request again</Text>
-          )}
+          <Text style={styles.ctaPrimaryText}>Request again</Text>
         </Pressable>
       </View>
     );
@@ -2032,13 +2115,8 @@ const CtaButton: React.FC<{
     <Pressable
       style={({ pressed }) => [styles.ctaBtn, styles.ctaPrimary, pressed && styles.ctaPressed]}
       onPress={onRequest}
-      disabled={submitting}
     >
-      {submitting ? (
-        <ActivityIndicator color="#FFFFFF" />
-      ) : (
-        <Text style={styles.ctaPrimaryText}>Request to join</Text>
-      )}
+      <Text style={styles.ctaPrimaryText}>Request to join</Text>
     </Pressable>
   );
 };

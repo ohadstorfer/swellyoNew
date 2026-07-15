@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './Text';
+import { hapticSelection } from '../utils/haptics';
 
 export const QUICK_REACTION_EMOJIS: readonly string[] = [
   '🤙🏼',
@@ -42,7 +43,10 @@ export const MessageReactionsBar: React.FC<Props> = ({
               key={emoji}
               style={[styles.item, isActive && styles.itemActive]}
               activeOpacity={0.6}
-              onPress={() => onReact(emoji)}
+              onPress={() => {
+                hapticSelection();
+                onReact(emoji);
+              }}
             >
               <Text style={styles.emoji}>{emoji}</Text>
             </TouchableOpacity>

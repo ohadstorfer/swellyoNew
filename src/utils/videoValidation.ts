@@ -110,7 +110,7 @@ export const validateVideoFile = async (
       if (!ALLOWED_EXTENSIONS.includes(extension)) {
         return {
           valid: false,
-          error: `Invalid video format. Allowed formats: ${ALLOWED_EXTENSIONS.join(', ')}`,
+          error: `Invalid video format. Allowed formats: ${ALLOWED_EXTENSIONS.join(', ')}.`,
         };
       }
     }
@@ -134,7 +134,7 @@ export const validateVideoFile = async (
     if (actualFileSize && actualFileSize > MAX_FILE_SIZE) {
       return {
         valid: false,
-        error: `File too large. Maximum size is ${formatFileSize(MAX_FILE_SIZE)}`,
+        error: `File too large. Maximum size is ${formatFileSize(MAX_FILE_SIZE)}.`,
       };
     }
 
@@ -266,7 +266,7 @@ export const validateVideoComplete = async (
   if (metadata.fileSize > 0 && metadata.fileSize > MAX_FILE_SIZE) {
     return {
       valid: false,
-      error: `File too large. Maximum size is ${formatFileSize(MAX_FILE_SIZE)}`,
+      error: `File too large. Maximum size is ${formatFileSize(MAX_FILE_SIZE)}.`,
     };
   }
 

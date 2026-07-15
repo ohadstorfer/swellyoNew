@@ -197,7 +197,7 @@ export const ProfileEditSurfStyleScreen: React.FC<Props> = ({
                 activeOpacity={0.7}
               >
                 <Ionicons name="chevron-back" size={16} color={FIGMA.textPrimary} />
-                <Text style={styles.backButtonText}>Edit profile</Text>
+                <Text style={styles.backButtonText}>Back</Text>
               </TouchableOpacity>
             </View>
 

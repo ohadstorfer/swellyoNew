@@ -28,6 +28,7 @@ import {
 } from '../../services/database/supabaseDatabaseService';
 import { syncUserDestinations } from '../../services/destinations/userDestinationsSync';
 import { useUserProfile } from '../../context/UserProfileContext';
+import { hapticError } from '../../utils/haptics';
 import { Images } from '../../assets/images';
 import {
   getCountryImageFromStorage,
@@ -185,11 +186,57 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     }
   }, [surfVideoUpload.status, surfVideoUpload.error, surfer?.user_id, updateProfile]);
 
+  // Optimistic mapping of saveSurfer's camelCase patch keys onto the snake_case
+  // SupabaseSurfer row, so the profile UI reflects an edit instantly instead of
+  // waiting for the REST round trip. surfLevel is handled separately (0-4 app →
+  // 1-5 DB); derived fields (surf_level_category/description) reconcile from the
+  // server response a moment later.
+  const OPTIMISTIC_KEY_MAP: Record<string, keyof SupabaseSurfer> = useMemo(
+    () => ({
+      name: 'name',
+      dateOfBirth: 'date_of_birth',
+      pronoun: 'pronoun',
+      countryFrom: 'country_from',
+      surfboardType: 'surfboard_type',
+      travelExperience: 'travel_experience',
+      bio: 'bio',
+      profileImageUrl: 'profile_image_url',
+      coverImageUrl: 'cover_image_url',
+      profileVideoUrl: 'profile_video_url',
+      profileVideoThumbnailUrl: 'profile_video_thumbnail_url',
+      destinationsArray: 'destinations_array',
+      lifestyleKeywords: 'lifestyle_keywords',
+      lifestyleImageUrls: 'lifestyle_image_urls',
+      waveTypeKeywords: 'wave_type_keywords',
+      homeBreakPlaceId: 'home_break_place_id',
+      homeBreakFull: 'home_break_full',
+      homeBreakShort: 'home_break_short',
+      homeBreakLocality: 'home_break_locality',
+      homeBreakCountry: 'home_break_country',
+      homeBreakLat: 'home_break_lat',
+      homeBreakLng: 'home_break_lng',
+    }) as Record<string, keyof SupabaseSurfer>,
+    [],
+  );
+
   const persist = useCallback(
     async (
       target: SaveTarget,
       patch: Parameters<typeof supabaseDatabaseService.saveSurfer>[0],
     ) => {
+      // Apply the edit to the profile context immediately; roll back on failure.
+      const prevSurfer = surfer ? { ...surfer } : null;
+      if (prevSurfer) {
+        const optimistic: SupabaseSurfer = { ...prevSurfer };
+        for (const [camel, snake] of Object.entries(OPTIMISTIC_KEY_MAP)) {
+          const v = (patch as Record<string, unknown>)[camel];
+          if (v !== undefined) (optimistic as unknown as Record<string, unknown>)[snake] = v;
+        }
+        if (patch.surfLevel !== undefined) {
+          optimistic.surf_level = Math.max(1, Math.min(5, patch.surfLevel + 1));
+        }
+        updateProfile(optimistic);
+      }
       setSavingTarget(target);
       try {
         const updated = await supabaseDatabaseService.saveSurfer(patch);
@@ -207,6 +254,9 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         }
         updateProfile(next);
       } catch (err) {
+        // Roll back the optimistic patch — the write never committed.
+        hapticError();
+        if (prevSurfer) updateProfile(prevSurfer);
         console.error('[ProfileEditPanel] Save failed:', err);
         Alert.alert('Could not save', 'Please try again.');
         throw err;
@@ -214,7 +264,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         setSavingTarget(null);
       }
     },
-    [updateProfile],
+    [updateProfile, surfer, OPTIMISTIC_KEY_MAP],
   );
 
   const handleSurfStyleSave = useCallback(
@@ -1029,7 +1079,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                   </TouchableOpacity>
                 </Section>
 
-                <Section title="Where you surfed at">
+                <Section title="Where you've surfed">
                   <View style={styles.destinationsBlock}>
                     {destinations.length === 0 ? (
                       <Text style={styles.emptyText}>No destinations added yet.</Text>

@@ -29,7 +29,15 @@ export function SafeMessageBubble({ messageId, children }: Props) {
       }}
       fallback={<BubbleFallback />}
     >
-      {children}
+      {/*
+        accessibilityLabel="ph-no-capture" is PostHog's per-view redaction marker: in a
+        session replay this subtree is replaced by a solid block, so private DM content
+        never reaches PostHog while the rest of the chat screen stays readable. Every
+        bubble in both DM screens routes through here, so this is the one choke point.
+        Keep `accessible` unset — an accessible container would read the marker aloud to
+        VoiceOver instead of the message.
+      */}
+      <View accessibilityLabel="ph-no-capture">{children}</View>
     </ErrorBoundary>
   );
 }

@@ -39,6 +39,8 @@ interface MediaAlbumBubbleProps {
   timeLabel: string;
   /** Host-rendered ReadReceipt for the album's newest item (own sends only). */
   receipt?: React.ReactNode;
+  /** Whole-batch selected state (long-press). Renders a dim scrim over the grid. */
+  isSelected?: boolean;
 }
 
 const isVideoMessage = (m: Message): boolean => m.type === 'video' || !!m.video_metadata;
@@ -144,6 +146,7 @@ export const MediaAlbumBubble: React.FC<MediaAlbumBubbleProps> = ({
   onPressMore,
   timeLabel,
   receipt,
+  isSelected,
 }) => {
   const visible = items.slice(0, 4);
   const moreCount = items.length - 4;
@@ -171,6 +174,7 @@ export const MediaAlbumBubble: React.FC<MediaAlbumBubbleProps> = ({
         <Text style={styles.timestampText}>{timeLabel}</Text>
         {receipt}
       </View>
+      {isSelected && <View style={styles.selectedScrim} pointerEvents="none" />}
     </View>
   );
 };
@@ -224,5 +228,9 @@ const styles = StyleSheet.create({
     fontFamily: ff('Inter'),
     fontSize: 11,
     color: '#FFFFFF',
+  },
+  selectedScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
   },
 });

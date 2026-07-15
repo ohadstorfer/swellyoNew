@@ -28,7 +28,7 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata, ContactMetadata } from '../services/messaging/messagingService';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata, ContactMetadata, MessageSearchResult } from '../services/messaging/messagingService';
 import { AttachPanel } from '../components/AttachPanel';
 import { KeyboardIcon } from '../components/icons/KeyboardIcon';
 import { useAttachPanel } from '../hooks/useAttachPanel';
@@ -50,6 +50,7 @@ import { MessageReactionsRow } from '../components/MessageReactionsRow';
 import { JumboEmojiMessage, jumboBubbleStyle } from '../components/JumboEmojiMessage';
 import { getEmojiOnlyInfo, getEmojiFontSize } from '../utils/emoji';
 import { friendlyErrorMessage } from '../utils/friendlyError';
+import { hapticMedium } from '../utils/haptics';
 import { useMessageReactions } from '../hooks/useMessageReactions';
 import { ReplyPreviewBanner } from '../components/ReplyPreviewBanner';
 import { QuotedMessagePreview } from '../components/QuotedMessagePreview';
@@ -72,7 +73,7 @@ import { FullscreenVideoPlayer } from '../components/FullscreenVideoPlayer';
 import { MediaAlbumBubble } from '../components/MediaAlbumBubble';
 import { AlbumGridModal } from '../components/AlbumGridModal';
 import { AlbumMediaViewer } from '../components/AlbumMediaViewer';
-import { buildDisplayRows, findRowIndexByMessageId, type ChatDisplayRow, type AlbumRow } from '../utils/mediaAlbums';
+import { buildDisplayRows, findRowIndexByMessageId, describeAlbum, type ChatDisplayRow, type AlbumRow } from '../utils/mediaAlbums';
 import { ChatTextInput, ChatTextInputRef } from '../components/ChatTextInput';
 import { AudioMessageBubble } from '../components/AudioMessageBubble';
 import { WelcomeIntroMessage } from '../components/WelcomeIntroMessage';
@@ -96,6 +97,7 @@ import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { withTimeout } from '../services/messaging/withTimeout';
 import { sanitizeMessage } from '../services/messaging/messageSanitizer';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
+import { ChatSearchHeader } from '../components/chat/ChatSearchHeader';
 import { BubbleSpotlightDim, type SpotlightRect } from '../components/chat/BubbleSpotlightDim';
 import { SafeMessageBubble } from '../components/chat/SafeMessageBubble';
 
@@ -392,6 +394,8 @@ interface DirectMessageScreenProps {
   // OS-share handoff ("Share to Swellyo" → picked this chat): prefill the media
   // preview composer on mount so caption + Send reuse the upload-first pipeline.
   sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
+  // Opened from message search — scroll to this message + flash it once loaded.
+  targetMessageId?: string;
 }
 
 export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
@@ -408,6 +412,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   onOpenTripDetail,
   reviewCommitment = false,
   sharedMedia,
+  targetMessageId,
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
@@ -521,6 +526,12 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [showReturnToLatest, setShowReturnToLatest] = useState(false);
   const messagesRef = useRef<Message[]>([]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  // Whole-album reply: when set, the reply quote reads "N photos" instead of the
+  // single-tile "Photo" label. Cleared alongside replyingTo.
+  const [replyingToAlbumLabel, setReplyingToAlbumLabel] = useState<string | null>(null);
+  // Album long-press selection (for the whole-batch scrim + album-aware Reply).
+  const [selectedAlbumItems, setSelectedAlbumItems] = useState<Message[] | null>(null);
+  const [selectedAlbumKey, setSelectedAlbumKey] = useState<string | null>(null);
   const { setReaction, removeReaction } = useMessageReactions(
     currentConversationId,
     currentUserId,
@@ -2036,8 +2047,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             otherUserName ||
             '',
           type: replyingTo.type ?? 'text',
-          body:
-            replyingTo.type === 'image'
+          body: replyingToAlbumLabel
+            ? replyingToAlbumLabel
+            : replyingTo.type === 'image'
               ? 'Photo'
               : replyingTo.type === 'video'
                 ? 'Video'
@@ -2046,7 +2058,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   : (replyingTo.body ?? ''),
         }
       : undefined;
-    if (replyingTo) setReplyingTo(null);
+    if (replyingTo) { setReplyingTo(null); setReplyingToAlbumLabel(null); }
 
     // 1. Show message immediately (optimistic) - BEFORE conversation creation
     const tempConversationId = currentConversationId || `temp-conv-${Date.now()}`;
@@ -3349,7 +3361,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           sender_id: replyingTo.sender_id,
           sender_name: replyingTo.sender_name || replyingTo.sender?.name || otherUserName,
           type: replyingTo.type || 'text',
-          body: replyingTo.body,
+          body: replyingToAlbumLabel ?? replyingTo.body,
         }
       : null;
 
@@ -3357,7 +3369,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     const clientId = Crypto.randomUUID();
 
     // Clear the reply banner immediately — match the image/text flow.
-    if (replyingTo) setReplyingTo(null);
+    if (replyingTo) { setReplyingTo(null); setReplyingToAlbumLabel(null); }
 
     const recording = {
       durationMs: audio.durationMs,
@@ -3742,6 +3754,74 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     flatListRef.current?.scrollToIndex({ index: invertedIndex, viewPosition: 0.5, animated: true });
   }, [resolvingReplyJumpId, currentConversationId]);
 
+  // Opened from message search: once the first window is in, jump to the
+  // target (re-anchoring via getMessagesAround if it's out of window) and
+  // flash it — same path as tapping a reply preview. Consume-once.
+  const targetJumpConsumedRef = useRef(false);
+  useEffect(() => {
+    if (!targetMessageId || targetJumpConsumedRef.current) return;
+    if (isFetchingMessages || messages.length === 0) return;
+    targetJumpConsumedRef.current = true;
+    // Let the inverted list finish its first layout before scrollToIndex.
+    setTimeout(() => handleReplyPreviewPress(targetMessageId), 300);
+  }, [targetMessageId, isFetchingMessages, messages.length, handleReplyPreviewPress]);
+
+  // ---- In-conversation search (WhatsApp-style header mode) ----
+  const [chatSearchActive, setChatSearchActive] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
+  const [chatSearchHits, setChatSearchHits] = useState<MessageSearchResult[]>([]);
+  const [chatSearchIndex, setChatSearchIndex] = useState(0); // 0 = newest hit
+  const [chatSearchLoading, setChatSearchLoading] = useState(false);
+  const chatSearchReqRef = useRef(0);
+
+  // Debounced in-conversation search; jumps to the newest hit on new results.
+  useEffect(() => {
+    if (!chatSearchActive || !currentConversationId) return;
+    const trimmed = chatSearchQuery.trim();
+    if (trimmed.length < 2) {
+      setChatSearchHits([]);
+      setChatSearchIndex(0);
+      setChatSearchLoading(false);
+      return;
+    }
+    setChatSearchLoading(true);
+    const id = ++chatSearchReqRef.current;
+    const t = setTimeout(async () => {
+      try {
+        const hits = await messagingService.searchMessages(trimmed, {
+          conversationId: currentConversationId,
+          limit: 50,
+        });
+        if (chatSearchReqRef.current !== id) return;
+        setChatSearchHits(hits);
+        setChatSearchIndex(0);
+        if (hits.length > 0) handleReplyPreviewPress(hits[0].messageId);
+      } catch {
+        if (chatSearchReqRef.current !== id) return;
+        setChatSearchHits([]);
+        setChatSearchIndex(0);
+      } finally {
+        if (chatSearchReqRef.current === id) setChatSearchLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [chatSearchActive, chatSearchQuery, currentConversationId, handleReplyPreviewPress]);
+
+  const goToChatSearchHit = useCallback((index: number) => {
+    const hit = chatSearchHits[index];
+    if (!hit) return;
+    setChatSearchIndex(index);
+    handleReplyPreviewPress(hit.messageId);
+  }, [chatSearchHits, handleReplyPreviewPress]);
+
+  const closeChatSearch = useCallback(() => {
+    setChatSearchActive(false);
+    setChatSearchQuery('');
+    setChatSearchHits([]);
+    setChatSearchIndex(0);
+    chatSearchReqRef.current++;
+  }, []);
+
   // Handle long press on message
   // Build the report context for a message: a stable id/type plus a
   // human-readable snippet (text body, or a media label + storage path so a
@@ -3785,6 +3865,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // Commitment bubbles aren't editable, replyable, or copyable. No menu.
       return;
     }
+
+    // Menu (or failed-send sheet) is definitely opening — WhatsApp-style bump.
+    hapticMedium();
 
     const isOwnMessage = message.sender_id === currentUserId;
 
@@ -3865,6 +3948,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // with no reflow the measured cutout stays aligned.
       if (wasKeyboardOpen) chatInputRef.current?.focus?.();
     }, 0);
+  };
+
+  // Long-press a tile inside an album → select the WHOLE batch. Anchor the menu
+  // to the tapped tile (Report target + reply/scroll anchor), but remember the
+  // album so Reply quotes "N photos".
+  const handleAlbumLongPress = (album: AlbumRow, tappedMessage: Message, event: any) => {
+    setSelectedAlbumItems(album.items);
+    setSelectedAlbumKey(album.key);
+    handleMessageLongPress(tappedMessage, event, false);
   };
 
   // Check if message can be edited (within 15 minutes)
@@ -4101,8 +4193,9 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           >
             <MediaAlbumBubble
               items={album.items}
+              isSelected={menuVisible && selectedAlbumKey === album.key}
               onPressItem={(m) => openAlbumItem(album.items, m)}
-              onLongPressItem={(m, e) => handleMessageLongPress(m, e, false)}
+              onLongPressItem={(m, e) => handleAlbumLongPress(album, m, e)}
               onRetryItem={(m) => handleRetryUpload(m)}
               onPressMore={() => setAlbumModalItems(album.items)}
               timeLabel={formatTime(newest.created_at)}
@@ -5080,6 +5173,19 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       <View style={[styles.headerContainer, { paddingTop: insets.top + (Platform.OS === 'web' ? 24 : 12) }]}>
         <View style={styles.headerGradientBorder} />
         <View style={styles.header}>
+          {chatSearchActive ? (
+            <ChatSearchHeader
+              query={chatSearchQuery}
+              onChangeQuery={setChatSearchQuery}
+              currentIndex={chatSearchIndex}
+              total={chatSearchHits.length}
+              onPrev={() => goToChatSearchHit(chatSearchIndex + 1)}
+              onNext={() => goToChatSearchHit(chatSearchIndex - 1)}
+              onClose={closeChatSearch}
+              loading={chatSearchLoading}
+            />
+          ) : (
+          <>
           <View style={styles.headerLeft}>
             <TouchableOpacity
               style={styles.backButton}
@@ -5141,12 +5247,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           ) : (
             <View style={styles.menuButton} />
           )}
+          </>
+          )}
         </View>
       </View>
 
       {/* DM menu dropdown - rendered outside header to avoid overflow clipping */}
       {showDmMenu && (
         <View style={styles.dmMenuDropdown}>
+          <TouchableOpacity
+            style={styles.dmMenuItem}
+            activeOpacity={0.7}
+            onPress={() => { setShowDmMenu(false); setChatSearchActive(true); }}
+          >
+            <Ionicons name="search-outline" size={20} color="#222B30" />
+            <Text style={styles.dmMenuItemText}>Search</Text>
+          </TouchableOpacity>
           {mutedUntil ? (
             <TouchableOpacity
               style={styles.dmMenuItem}
@@ -5356,7 +5472,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 message={replyingTo}
                 currentUserId={currentUserId}
                 otherUserName={otherUserName}
-                onCancel={() => setReplyingTo(null)}
+                previewOverride={replyingToAlbumLabel ?? undefined}
+                onCancel={() => { setReplyingTo(null); setReplyingToAlbumLabel(null); }}
               />
             )}
             <View style={styles.inputWrapper}>
@@ -5377,7 +5494,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 onPress={panelOpen ? requestKeyboard : undefined}
                 onSaveEdit={() => { if (editingMessageId) handleEditMessage(editingMessageId, editingText); }}
                 disabled={isLoading}
-                placeholder={editingMessageId ? 'Edit message' : 'Type your message..'}
+                placeholder={editingMessageId ? 'Edit message' : 'Type your message...'}
                 maxLength={500}
                 // Send button tracks the other user's advice-role bubble color so
                 // the composer feels "themed" per chat: teal for seekers, beige
@@ -5804,6 +5921,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           setMenuVisible(false);
           setSelectedMessage(null);
           setBubbleRect(null);
+          setSelectedAlbumItems(null);
+          setSelectedAlbumKey(null);
         }}
         onEdit={() => {
           if (selectedMessage && canEditMessage(selectedMessage)) {
@@ -5839,6 +5958,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         onReply={() => {
           if (selectedMessage) {
             setReplyingTo(selectedMessage);
+            setReplyingToAlbumLabel(selectedAlbumItems ? describeAlbum(selectedAlbumItems) : null);
             // Focus the input so the keyboard comes up right away.
             chatInputRef.current?.focus?.();
           }

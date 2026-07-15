@@ -189,7 +189,7 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose
               resizeMode="contain"
             />
 
-            <Text style={styles.title}>{`Yo!  What are we\nfocusing on today?`}</Text>
+            <Text style={styles.title}>{`Yo! What are we\nfocusing on today?`}</Text>
 
             <View style={styles.grid}>
               {[0, 2].map((rowStart) => (

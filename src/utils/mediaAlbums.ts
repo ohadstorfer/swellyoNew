@@ -98,6 +98,19 @@ export function buildDisplayRows(inverted: Message[]): ChatDisplayRow[] {
   return rows;
 }
 
+/** Whole-album reply label: "N photos" / "N videos" / "N photos, M videos". */
+export function describeAlbum(items: Message[]): string {
+  const isVideo = (m: Message): boolean => m.type === 'video' || !!m.video_metadata;
+  const videos = items.filter(isVideo).length;
+  const photos = items.length - videos;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (photos > 0 && videos > 0) {
+    return `${plural(photos, 'photo', 'photos')}, ${plural(videos, 'video', 'videos')}`;
+  }
+  if (videos > 0) return plural(videos, 'video', 'videos');
+  return plural(photos, 'photo', 'photos');
+}
+
 /** Display-row index containing the given message id (album items count). */
 export function findRowIndexByMessageId(rows: ChatDisplayRow[], id: string): number {
   return rows.findIndex((row) =>

@@ -680,7 +680,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       accessibilityRole="button"
                     >
                       <Text style={styles.seeMore}>
-                        {aboutHostExpanded ? 'See less' : 'See More'}
+                        {aboutHostExpanded ? 'See less' : 'See more'}
                       </Text>
                     </TouchableOpacity>
                   ) : null}
@@ -715,7 +715,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       activeOpacity={0.7}
                       accessibilityRole="button"
                     >
-                      <Text style={styles.seeMore}>{aboutExpanded ? 'See less' : 'See More'}</Text>
+                      <Text style={styles.seeMore}>{aboutExpanded ? 'See less' : 'See more'}</Text>
                     </TouchableOpacity>
                   ) : null}
                 </>

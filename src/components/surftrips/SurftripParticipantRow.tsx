@@ -44,7 +44,7 @@ export const SurftripParticipantRow: React.FC<SurftripParticipantRowProps> = ({
         <View style={styles.nameRow}>
           <Text style={styles.name} numberOfLines={1}>
             {name || 'User'}
-            {isMe ? <Text style={styles.youTag}>  You</Text> : null}
+            {isMe ? <Text style={styles.youTag}> You</Text> : null}
           </Text>
           {roleLabel ? (
             <View style={styles.rolePill}>

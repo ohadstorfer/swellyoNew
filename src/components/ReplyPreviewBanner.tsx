@@ -11,6 +11,8 @@ interface ReplyPreviewBannerProps {
   message: Message;
   currentUserId: string | null;
   otherUserName?: string;
+  /** Overrides the derived preview label (e.g. album reply "N photos"). */
+  previewOverride?: string;
   onCancel: () => void;
 }
 
@@ -18,13 +20,16 @@ export const ReplyPreviewBanner: React.FC<ReplyPreviewBannerProps> = ({
   message,
   currentUserId,
   otherUserName,
+  previewOverride,
   onCancel,
 }) => {
   const isOwn = !!currentUserId && message.sender_id === currentUserId;
   const displayName = isOwn ? 'You' : (message.sender_name || otherUserName || 'User');
 
   let preview: string;
-  if (message.type === 'image') {
+  if (previewOverride) {
+    preview = previewOverride;
+  } else if (message.type === 'image') {
     preview = 'Photo';
   } else if (message.type === 'video') {
     preview = 'Video';
