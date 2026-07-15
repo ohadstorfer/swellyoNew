@@ -521,9 +521,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Per-message refs to the MessageBubbleHighlight, so handleMessageLongPress
   // can measureInWindow the exact bubble rect for the dim cutout.
   const bubbleRefsRef = useRef<Map<string, any>>(new Map());
+  // Per-album refs to the whole grid bubble frame (keyed by album.key) —
+  // album tiles aren't in bubbleRefsRef, so the spotlight dim measures this.
+  const albumRefsRef = useRef<Map<string, any>>(new Map());
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [resolvingReplyJumpId, setResolvingReplyJumpId] = useState<string | null>(null);
   const [showReturnToLatest, setShowReturnToLatest] = useState(false);
+  // WhatsApp-style "new messages while scrolled up" badge: counts incoming
+  // messages that arrive while the user is reading history; tapping jumps to
+  // the bottom. Cleared the moment the user is back near the bottom.
+  const [newWhileAwayCount, setNewWhileAwayCount] = useState(0);
   const messagesRef = useRef<Message[]>([]);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   // Whole-album reply: when set, the reply quote reads "N photos" instead of the
@@ -696,6 +703,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   }, [reloadLatestWindow, scrollToBottomBase]);
   // The "Return to latest" pill awaits the reload THEN scrolls, so it lands on the
   // fresh window instead of the stale one.
+  const handleJumpToNew = useCallback(() => {
+    setNewWhileAwayCount(0);
+    scrollToBottom();
+  }, [scrollToBottom]);
+
   const handleReturnToLatest = useCallback(async () => {
     await reloadLatestWindow();
     requestAnimationFrame(() => scrollToBottomBase(true));
@@ -888,6 +900,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     setUnreadMarker(null);
     unreadMarkerResolvedRef.current = null;
     unreadScrollConsumedRef.current = null;
+    setNewWhileAwayCount(0);
   }, [currentConversationId]);
 
   // Fetch MY read watermark from the DB as early as possible (see above).
@@ -1113,7 +1126,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             // scrolled up reading history, an incoming message must not yank them
             // down (and scrollToBottom now reloads the latest window if trimmed).
             // Sending a message keeps you at the bottom, so this still scrolls then.
-            if (isNearBottomRef.current) scrollToBottom();
+            if (isNearBottomRef.current) {
+              scrollToBottom();
+            } else if (me && newMessage.sender_id !== me) {
+              setNewWhileAwayCount((c) => c + 1);
+            }
           },
           onMessageUpdated: (updatedMessage) => {
             lastRealtimeEventAtRef.current = Date.now();
@@ -4044,10 +4061,40 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Long-press a tile inside an album → select the WHOLE batch. Anchor the menu
   // to the tapped tile (Report target + reply/scroll anchor), but remember the
   // album so Reply quotes "N photos".
-  const handleAlbumLongPress = (album: AlbumRow, tappedMessage: Message, event: any) => {
+  const handleAlbumLongPress = (
+    album: AlbumRow,
+    tappedMessage: Message,
+    event: any,
+    isLastInRun: boolean = false,
+  ) => {
     setSelectedAlbumItems(album.items);
     setSelectedAlbumKey(album.key);
     handleMessageLongPress(tappedMessage, event, false);
+    // Spotlight the WHOLE album bubble: the tapped tile has no entry in
+    // bubbleRefsRef (only single-message bubbles register there), so the
+    // measurement inside handleMessageLongPress no-ops and the dim cutout
+    // never appears. Measure the album's grid frame instead — same
+    // bubbleRect + editDimRect pair the single-bubble path produces.
+    const isOwnMessage = tappedMessage.sender_id === currentUserId;
+    const tailCorner = isLastInRun ? 2 : 16;
+    const radii = isOwnMessage
+      ? { topLeft: 16, topRight: 16, bottomLeft: 16, bottomRight: tailCorner }
+      : { topLeft: 16, topRight: 16, bottomLeft: tailCorner, bottomRight: 16 };
+    editDimRadiiRef.current = radii;
+    const node = albumRefsRef.current.get(album.key);
+    const dimHost = dimHostRef.current;
+    if (node && typeof node.measureInWindow === 'function') {
+      node.measureInWindow((x: number, y: number, width: number, height: number) => {
+        if (width > 0 && height > 0) {
+          setBubbleRect({ x, y, width, height, radii, isOwn: isOwnMessage });
+          if (dimHost && typeof dimHost.measureInWindow === 'function') {
+            dimHost.measureInWindow((hx: number, hy: number) => {
+              setEditDimRect({ x: x - hx, y: y - hy, width, height, radii });
+            });
+          }
+        }
+      });
+    }
   };
 
   // Check if message can be edited (within 15 minutes)
@@ -4299,7 +4346,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
           {/* Same bubble frame as a single media message: colored background,
               rounded corners with a tail on the run's last bubble, and the
               3px WhatsApp-style inset the grid's own 13px radius is concentric
-              with (16 - 3 = 13, see MediaAlbumBubble's `bubble` style). */}
+              with (16 - 3 = 13, see MediaAlbumBubble's `bubble` style).
+              The ref wrapper feeds the long-press spotlight (dim cutout around
+              the WHOLE album). collapsable so measureInWindow works on Android. */}
+          <View
+            collapsable={false}
+            ref={(node) => {
+              if (node) albumRefsRef.current.set(album.key, node);
+              else albumRefsRef.current.delete(album.key);
+            }}
+          >
           <MessageBubbleHighlight
             isHighlighted={isHighlighted}
             onAnimationEnd={() => setHighlightedMessageId(null)}
@@ -4317,7 +4373,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               items={album.items}
               isSelected={menuVisible && selectedAlbumKey === album.key}
               onPressItem={(m) => openAlbumItem(album.items, m)}
-              onLongPressItem={(m, e) => handleAlbumLongPress(album, m, e)}
+              onLongPressItem={(m, e) => handleAlbumLongPress(album, m, e, isLastInRun)}
               onRetryItem={(m) => handleRetryUpload(m)}
               onPressMore={() => setAlbumModalItems(album.items)}
               timeLabel={formatTime(newest.created_at)}
@@ -4328,6 +4384,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               }
             />
           </MessageBubbleHighlight>
+          </View>
           {mergedReactions.length > 0 && (
             <MessageReactionsRow
               reactions={mergedReactions}
@@ -5544,6 +5601,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               // onScroll during initial layout can't leave a fresh mount un-pinned.
               if (nearBottom) {
                 isNearBottomRef.current = true;
+                // Back at the bottom — the new messages are visible now.
+                setNewWhileAwayCount((c) => (c === 0 ? c : 0));
               } else if (hasUserScrolledRef.current) {
                 isNearBottomRef.current = false;
               }
@@ -5708,6 +5767,16 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               {showReturnToLatest && (
                 <TouchableOpacity style={styles.returnToLatestPill} onPress={handleReturnToLatest}>
                   <Text style={styles.returnToLatestText}>Return to latest ↓</Text>
+                </TouchableOpacity>
+              )}
+              {newWhileAwayCount > 0 && (
+                <TouchableOpacity style={styles.newMessagesFab} onPress={handleJumpToNew} activeOpacity={0.8}>
+                  <View style={styles.newMessagesFabBadge}>
+                    <Text style={styles.newMessagesFabBadgeText}>
+                      {newWhileAwayCount > 99 ? '99+' : newWhileAwayCount}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-down" size={22} color="#111" />
                 </TouchableOpacity>
               )}
               {editDimRect && (menuVisible || editingMessageId) && (
@@ -6203,6 +6272,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
   },
   returnToLatestPill: { position: 'absolute', alignSelf: 'center', bottom: 90, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#111' },
+  // WhatsApp-style round jump-to-new button with a count badge riding its top edge.
+  newMessagesFab: { position: 'absolute', right: 16, bottom: 112, width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 5 },
+  newMessagesFabBadge: { position: 'absolute', top: -8, left: -8, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: '#05BCD3', alignItems: 'center', justifyContent: 'center', zIndex: 1 },
+  newMessagesFabBadgeText: { color: '#fff', fontSize: 11.5, fontWeight: '700' },
   // Negative horizontal margin cancels messagesContent's paddingHorizontal so
   // the band runs edge-to-edge like WhatsApp.
   unreadDividerRow: { alignSelf: 'stretch', alignItems: 'center', marginVertical: 10, marginHorizontal: -spacing.md, paddingVertical: 7, backgroundColor: 'rgba(17, 17, 17, 0.05)' },
