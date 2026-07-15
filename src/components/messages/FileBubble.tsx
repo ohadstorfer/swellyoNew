@@ -5,7 +5,9 @@
  * Tapping downloads the file to the cache (named by message id, never the
  * sender's display_name — unescaped chars break a file:// uri on Android) and
  * then, for an image / pdf / text file, opens it in-app via FileViewerModal.
- * Everything else is handed to the OS share sheet as before.
+ * On iOS an Office document (doc/xls/ppt/rtf) opens in-app via QuickLook.
+ * Everything else — and any of the above when its viewer is unavailable — is
+ * handed to the OS share sheet as before.
  *
  * Security note: rendering a RECEIVED file in-app is a deliberate reversal of
  * the old "never render" posture. Images already decode in-process via
@@ -25,6 +27,7 @@ import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { ff, fs } from '../../theme/fonts';
 import { iconForExt } from './fileIcon';
 import { FileViewerModal } from '../FileViewerModal';
+import { previewFile } from '../../../modules/swellyo-quicklook';
 
 interface FileBubbleProps {
   message: Message;
@@ -76,6 +79,14 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign, maxWidth = 
       if (kind !== 'none') {
         setViewer({ uri: localUri });
         return;
+      }
+
+      // iOS Office documents: present in-app via QuickLook. On failure (module
+      // absent in Expo Go / an old build, or nothing to present from) fall
+      // through to the share sheet — the honest fallback.
+      if (quickLook) {
+        const shown = await previewFile(localUri);
+        if (shown) return;
       }
 
       let shared = false;
