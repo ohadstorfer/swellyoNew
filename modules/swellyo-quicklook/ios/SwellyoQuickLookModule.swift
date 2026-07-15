@@ -33,9 +33,12 @@ public class SwellyoQuickLookModule: Module {
 
     AsyncFunction("preview") { (path: String, promise: Promise) in
       DispatchQueue.main.async {
-        // Accept both a file:// uri and a bare filesystem path.
-        let fileURL: URL? = path.hasPrefix("file://") ? URL(string: path) : URL(fileURLWithPath: path)
-        guard let url = fileURL, FileManager.default.fileExists(atPath: url.path) else {
+        // Accept both a file:// uri and a bare filesystem path. Use
+        // fileURLWithPath for both so an unencoded space/accent/# in the path
+        // does not defeat URL parsing (URL(string:) returns nil for those).
+        let filePath = path.hasPrefix("file://") ? String(path.dropFirst("file://".count)) : path
+        let fileURL = URL(fileURLWithPath: filePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
           promise.resolve(false)
           return
         }
@@ -43,7 +46,7 @@ public class SwellyoQuickLookModule: Module {
           promise.resolve(false)
           return
         }
-        let src = QuickLookSource(url: url)
+        let src = QuickLookSource(url: fileURL)
         self.source = src
         let controller = QLPreviewController()
         controller.dataSource = src
