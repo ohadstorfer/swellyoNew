@@ -19,7 +19,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '../../services/messaging/messagingService';
-import { formatBytes, previewKindForExt } from '../../services/messaging/fileAttachmentPolicy';
+import { formatBytes, previewKindForExt, isQuickLookExt } from '../../services/messaging/fileAttachmentPolicy';
 import { getFileDownloadUrl } from '../../services/messaging/fileUploadService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { ff, fs } from '../../theme/fonts';
@@ -62,10 +62,13 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign, maxWidth = 
 
       const LegacyFS = require('expo-file-system/legacy');
       const kind = previewKindForExt(meta.ext);
-      // The in-app readers (pdf/text/image) reject a file:// uri whose name carries
-      // spaces/accents/#, so renderable files get an id-only cache name. The share
-      // sheet has no such limit, so a shared file keeps its human-readable name.
-      const target = kind !== 'none'
+      // QuickLook (iOS Office preview) is the same class of consumer as the in-app
+      // readers: it can choke on a file:// uri whose name carries spaces/accents/#.
+      const quickLook = Platform.OS === 'ios' && isQuickLookExt(meta.ext);
+      // The in-app readers (pdf/text/image) AND QuickLook reject an unsafe file://
+      // name, so those get an id-only cache name. The share sheet has no such
+      // limit, so a share-only file keeps its human-readable name.
+      const target = (kind !== 'none' || quickLook)
         ? `${LegacyFS.cacheDirectory}${message.id}.${meta.ext}`
         : `${LegacyFS.cacheDirectory}${message.id}-${meta.display_name}`;
       const { uri: localUri } = await LegacyFS.downloadAsync(url, target);
