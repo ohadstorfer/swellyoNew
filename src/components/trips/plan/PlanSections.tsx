@@ -24,6 +24,8 @@ import { AdminUpdateRow, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import Thumb from '../../Thumb';
+import { Image } from 'expo-image';
+import { Images } from '../../../assets/images';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -82,9 +84,6 @@ const PressableScale: React.FC<{
 
 // ---------------------------------------------------------------------------
 // Avatar + stack (gear contributors)
-const initialsOf = (name: string | null): string =>
-  (name || '?').trim().charAt(0).toUpperCase() || '?';
-
 const Avatar: React.FC<{ url: string | null; name: string | null; size?: number }> = ({
   url,
   name,
@@ -101,11 +100,7 @@ const Avatar: React.FC<{ url: string | null; name: string | null; size?: number 
         cachePolicy="memory-disk"
       />
     );
-  return (
-    <View style={[styles.avatarImg, styles.avatarFallback, dim]}>
-      <Text style={[styles.avatarInitial, { fontSize: size * 0.42 }]}>{initialsOf(name)}</Text>
-    </View>
-  );
+  return <Image source={Images.defaultAvatar} style={[styles.avatarImg, dim]} contentFit="cover" />;
 };
 
 const AvatarStack: React.FC<{
@@ -364,9 +359,11 @@ export const TripMemberSection: React.FC<{
                       cachePolicy="memory-disk"
                     />
                   ) : (
-                    <View style={[styles.memberAvatar, styles.memberAvatarEmpty]}>
-                      <Ionicons name="person" size={24} color="#FFFFFF" />
-                    </View>
+                    <Image
+                      source={Images.defaultAvatar}
+                      style={styles.memberAvatar}
+                      contentFit="cover"
+                    />
                   )}
                   {m.isHost ? (
                     <View style={styles.memberBadge}>
@@ -825,7 +822,6 @@ const styles = StyleSheet.create({
   memberScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'flex-start' },
   memberItem: { width: 68, alignItems: 'center' },
   memberAvatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#9CB6C0' },
-  memberAvatarEmpty: { alignItems: 'center', justifyContent: 'center' },
   // Passport badge — the Figma scalloped teal badge (CommittedPassportIcon
   // brings its own teal fill + white ring), notched into the avatar's
   // bottom-right. This is just the positioning wrapper.
@@ -962,8 +958,6 @@ const styles = StyleSheet.create({
 
   // Avatars
   avatarImg: { backgroundColor: '#E6E6E6' },
-  avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
-  avatarInitial: { color: '#FFFFFF', fontWeight: '700' },
   // Figma avatars chip (node 12833:13012): pill (bg #f7f7f7, border #cfcfcf,
   // full radius, 1px pad) with 28px overlapping avatars + a trailing number.
   avatarChip: {

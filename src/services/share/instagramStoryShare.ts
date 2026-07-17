@@ -14,8 +14,15 @@ export async function isInstagramStoriesAvailable(): Promise<boolean> {
     return false;
   }
   try {
-    return await Linking.canOpenURL('instagram-stories://share');
-  } catch {
+    const canOpen = await Linking.canOpenURL('instagram-stories://share');
+    if (!canOpen) {
+      console.warn(
+        '[instagramStoryShare] canOpenURL=false — Instagram not installed, or the running binary lacks instagram-stories in LSApplicationQueriesSchemes'
+      );
+    }
+    return canOpen;
+  } catch (e) {
+    console.warn('[instagramStoryShare] canOpenURL threw:', e);
     return false;
   }
 }

@@ -15,6 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../Text';
 import { Thumb } from '../Thumb';
+import { Image } from 'expo-image';
+import { Images } from '../../assets/images';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
 import type { AddableDmPartner } from '../../services/surftrips/surftripsService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
@@ -292,11 +294,7 @@ const PartnerRow: React.FC<PartnerRowProps> = ({
             cachePolicy="memory-disk"
           />
         ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarInitial}>
-              {(name || 'U').charAt(0).toUpperCase()}
-            </Text>
-          </View>
+          <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
         )}
       </View>
       <View style={styles.info}>
@@ -416,12 +414,6 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: '#F2F2F2',
   },
-  avatarPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#A8DDE0',
-  },
-  avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
   info: { flex: 1, minWidth: 0 },
   name: {
     fontSize: 15,

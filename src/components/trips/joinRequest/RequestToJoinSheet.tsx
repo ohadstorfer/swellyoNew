@@ -15,6 +15,7 @@ import {
   Animated,
 } from 'react-native';
 import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
+import { Images } from '../../../assets/images';
 import { Ionicons } from '@expo/vector-icons';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 
@@ -73,7 +74,6 @@ export const RequestToJoinSheet: React.FC<Props> = ({
     ? SURF_LEVEL_LABEL[profile.surfLevel] ?? `${profile.surfLevel} surfer`
     : 'Surfer';
   const displayName = profile?.name?.trim() || 'You';
-  const initial = displayName.charAt(0).toUpperCase();
 
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, close);
   return (
@@ -111,9 +111,7 @@ export const RequestToJoinSheet: React.FC<Props> = ({
                   {profile?.avatarUrl ? (
                     <Image source={{ uri: profile.avatarUrl }} style={styles.avatar} />
                   ) : (
-                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                      <Text style={styles.avatarInitial}>{initial}</Text>
-                    </View>
+                    <Image source={Images.defaultAvatar} style={styles.avatar} />
                   )}
                   <View style={styles.profileText}>
                     <Text style={styles.profileName}>{displayName}</Text>
@@ -212,8 +210,6 @@ const styles = StyleSheet.create({
   },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E5E7EB' },
-  avatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontSize: 18, fontWeight: '700', color: '#4A5565' },
   profileText: { flex: 1 },
   profileName: { fontSize: 15, fontWeight: '700', color: '#222B30' },
   profileSub: { fontSize: 13, color: '#7B7B7B', marginTop: 2 },

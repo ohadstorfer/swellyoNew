@@ -20,6 +20,7 @@ import { getStorageThumbUrl } from '../../../services/media/imageService';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
 import { getGroupTripInviteUrl } from '../../../services/trips/groupTripsService';
 import { YoureInIllustration } from './YoureInIllustration';
+import { Images } from '../../../assets/images';
 
 const DOODLES = require('../../../assets/images/trips/welcome-doodles.png');
 
@@ -51,10 +52,7 @@ function formatDateRange(startIso: string | null, endIso: string | null): string
   return `${startStr} - ${MONTHS[end.getMonth()]} ${end.getDate()}, ${end.getFullYear()}`;
 }
 
-const initialsOf = (name: string | null | undefined): string =>
-  (name || '?').trim().charAt(0).toUpperCase() || '?';
-
-// Round avatar with initials fallback (matches the gear/member avatars elsewhere).
+// Round avatar with default-avatar fallback (matches the gear/member avatars elsewhere).
 const Avatar: React.FC<{
   url: string | null;
   name: string | null;
@@ -74,9 +72,11 @@ const Avatar: React.FC<{
     );
   }
   return (
-    <View style={[dim, styles.avatarFallback, ring && styles.avatarRing]}>
-      <Text style={[styles.avatarInitial, { fontSize: size * 0.42 }]}>{initialsOf(name)}</Text>
-    </View>
+    <CachedImage
+      source={Images.defaultAvatar}
+      style={[dim, ring && styles.avatarRing]}
+      contentFit="cover"
+    />
   );
 };
 
@@ -514,14 +514,4 @@ const styles = StyleSheet.create({
 
   // Avatars
   avatarRing: { borderWidth: 1.5, borderColor: '#FFFFFF' },
-  avatarFallback: {
-    backgroundColor: '#0788B0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontFamily: ff('Montserrat', '700'),
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
 });

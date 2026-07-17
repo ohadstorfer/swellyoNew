@@ -29,6 +29,8 @@ import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
 import { TripIcon } from '../tripIcons';
 import Thumb from '../../Thumb';
+import { Image } from 'expo-image';
+import { Images } from '../../../assets/images';
 import type { EnrichedGearItem, GearContributor } from '../../../services/trips/groupTripsService';
 
 interface Props {
@@ -60,7 +62,6 @@ const C = {
 
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.9;
 
-const initialOf = (name: string | null) => (name || '?').trim().charAt(0).toUpperCase() || '?';
 const badgeText = (qty: number) => (qty > 1 ? `x${qty}` : '1');
 
 // One contributor: 48px avatar + quantity badge (bottom-right) + name below.
@@ -77,9 +78,11 @@ const Contributor: React.FC<{ c: GearContributor; me?: boolean }> = ({ c, me }) 
           cachePolicy="memory-disk"
         />
       ) : (
-        <View style={[styles.avatar, styles.avatarFallback, me && styles.avatarMe]}>
-          <Text style={styles.avatarInitial}>{initialOf(c.name)}</Text>
-        </View>
+        <Image
+          source={Images.defaultAvatar}
+          style={[styles.avatar, me && styles.avatarMe]}
+          contentFit="cover"
+        />
       )}
       <View style={styles.qtyBadge}>
         <Text style={styles.qtyBadgeText}>{badgeText(c.quantity)}</Text>
@@ -362,8 +365,6 @@ const styles = StyleSheet.create({
   avatarWrap: { width: 48, height: 48 },
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.track },
   avatarMe: { borderWidth: 2, borderColor: C.accent },
-  avatarFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
-  avatarInitial: { fontFamily: ff('Inter', '700'), fontWeight: '700', fontSize: 18, color: C.white },
   qtyBadge: {
     position: 'absolute',
     right: 0,

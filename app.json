@@ -2,8 +2,8 @@
   "expo": {
     "name": "Swellyo",
     "slug": "swellyo",
-    "version": "2.0.2",
-    "runtimeVersion": "2.0.2",
+    "version": "2.0.3",
+    "runtimeVersion": "2.0.3",
     "updates": {
       "url": "https://u.expo.dev/c14ee9e6-bad8-43e2-b37a-d196b49f638f"
     },
@@ -43,7 +43,7 @@
           "INSendMessageIntent"
         ]
       },
-      "runtimeVersion": "2.0.2"
+      "runtimeVersion": "2.0.3"
     },
     "android": {
       "package": "com.swellyo.app",

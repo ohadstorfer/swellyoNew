@@ -71,7 +71,16 @@ export function edgeFunctionsCheck(): Check {
       const deepHeaders = { authorization: `Bearer ${key}`, apikey: key };
 
       const results = await Promise.all(
-        DEEP.map((fn) => ping(base, fn, deepHeaders)),
+        DEEP.map(async (fn) => {
+          const r = await ping(base, fn, deepHeaders);
+          // A cold start can take ~5s and trip the ping timeout even though the
+          // function is healthy; retry once — the second hit lands on the warm
+          // isolate. Only timeouts retry; 404/5xx are real failures.
+          if (r === `${fn}:timeout (>${PING_TIMEOUT_MS}ms)`) {
+            return ping(base, fn, deepHeaders);
+          }
+          return r;
+        }),
       );
 
       const broken = results.filter((r): r is string => r !== null);

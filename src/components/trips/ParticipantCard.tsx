@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Image, Platform, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ParticipantProfile } from '../../services/trips/groupTripsService';
+import { Images } from '../../assets/images';
 
 interface ParticipantCardProps {
   participant: ParticipantProfile & { role?: 'host' | 'member'; committed?: boolean };
@@ -57,9 +58,7 @@ export const ParticipantCard: React.FC<ParticipantCardProps> = ({
           {profile_image_url ? (
             <Image source={{ uri: profile_image_url }} style={styles.avatar} />
           ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
-            </View>
+            <Image source={Images.defaultAvatar} style={styles.avatar} />
           )}
           {committed && (
             <View
@@ -126,8 +125,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: '#F2F2F2',
   },
-  avatarPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
-  avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 18 },
   committedBadge: {
     position: 'absolute',
     bottom: -2,

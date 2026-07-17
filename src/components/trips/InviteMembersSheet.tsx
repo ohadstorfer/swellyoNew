@@ -10,6 +10,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetShell } from '../BottomSheetShell';
 import Thumb from '../Thumb';
+import { Image } from 'expo-image';
+import { Images } from '../../assets/images';
 import { listInviteCandidates, inviteUserToTrip, type InviteCandidate } from '../../services/trips/tripInvitesService';
 import type { TripInviteCriteria } from '../../services/trips/tripInviteMatching';
 import { ff } from '../../theme/fonts';
@@ -82,9 +84,7 @@ export function InviteMembersSheet({
           {item.profile_image_url ? (
             <Thumb uri={item.profile_image_url} size={128} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
           ) : (
-            <View style={[styles.avatar, styles.avatarEmpty]}>
-              <Ionicons name="person" size={22} color="#FFFFFF" />
-            </View>
+            <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
           )}
           <View style={styles.rowText}>
             <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
@@ -189,7 +189,6 @@ const styles = StyleSheet.create({
   rowMain: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, marginRight: 12 },
   rowText: { flex: 1 },
   avatar: { width: 44, height: 44, borderRadius: 22 },
-  avatarEmpty: { backgroundColor: '#C9CED2', alignItems: 'center', justifyContent: 'center' },
   name: { fontFamily: ff('Montserrat', '600'), fontSize: 15, color: '#212121', includeFontPadding: false },
   meta: { fontFamily: ff('Inter', '400'), fontSize: 12, color: '#7B7B7B', marginTop: 2, includeFontPadding: false },
   metaError: { color: '#C0392B' },

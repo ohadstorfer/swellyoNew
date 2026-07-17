@@ -14,6 +14,7 @@ import { QUICK_REACTION_EMOJIS } from './MessageReactionsBar';
 import { getStorageThumbUrl } from '../services/media/imageService';
 import { AggregatedReaction } from '../services/messaging/messagingService';
 import { colors } from '../styles/theme';
+import { Images } from '../assets/images';
 
 export interface ReactorInfo {
   name?: string;
@@ -192,11 +193,7 @@ export function ReactionsDetailSheet({
                   {thumb ? (
                     <Image source={{ uri: thumb }} style={styles.avatar} />
                   ) : (
-                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                      <Text style={styles.avatarInitial}>
-                        {(name || '?').charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
+                    <Image source={Images.defaultAvatar} style={styles.avatar} />
                   )}
                   <View style={styles.reactorText}>
                     <Text style={styles.reactorName} numberOfLines={1}>
@@ -315,15 +312,6 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: colors.backgroundGray,
-  },
-  avatarPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textSecondary,
   },
   reactorText: {
     flex: 1,

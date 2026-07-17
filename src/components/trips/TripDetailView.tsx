@@ -793,9 +793,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
               {vm.leader.avatarUrl ? (
                 <Image source={{ uri: vm.leader.avatarUrl }} style={styles.leaderAvatar} />
               ) : (
-                <View style={[styles.leaderAvatar, styles.leaderAvatarEmpty]}>
-                  <Ionicons name="person" size={22} color="#FFFFFF" />
-                </View>
+                <Image source={Images.defaultAvatar} style={styles.leaderAvatar} />
               )}
               <View style={{ flex: 1 }}>
                 <Text style={styles.leaderName} numberOfLines={1}>
@@ -1512,11 +1510,6 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 26,
     backgroundColor: C.surfaceMuted,
-  },
-  leaderAvatarEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#9CB6C0',
   },
   leaderName: {
     fontFamily: FONT_MONTSERRAT,

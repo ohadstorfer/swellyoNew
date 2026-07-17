@@ -17,6 +17,7 @@ import Svg, { Path } from 'react-native-svg';
 import { ff } from '../../../theme/fonts';
 import Thumb from '../../Thumb';
 import { getStorageThumbUrl } from '../../../services/media/imageService';
+import { Images } from '../../../assets/images';
 import type { UnseenJoinDecision } from '../../../services/trips/groupTripsService';
 
 // Full doodle illustration (line + icons) — Figma node 13073:15813, native
@@ -36,10 +37,7 @@ interface Props {
   onMessageAdmin?: (decision: UnseenJoinDecision) => void;
 }
 
-const initialsOf = (name: string | null | undefined): string =>
-  (name || '?').trim().charAt(0).toUpperCase() || '?';
-
-// Round avatar with initials fallback — mirrors JoinDecisionOverlay's Avatar.
+// Round avatar with default-avatar fallback — mirrors JoinDecisionOverlay's Avatar.
 const Avatar: React.FC<{
   url: string | null;
   name: string | null;
@@ -59,9 +57,11 @@ const Avatar: React.FC<{
     );
   }
   return (
-    <View style={[dim, styles.avatarFallback, ring && styles.avatarRing]}>
-      <Text style={[styles.avatarInitial, { fontSize: size * 0.42 }]}>{initialsOf(name)}</Text>
-    </View>
+    <CachedImage
+      source={Images.defaultAvatar}
+      style={[dim, ring && styles.avatarRing]}
+      contentFit="cover"
+    />
   );
 };
 
@@ -432,14 +432,4 @@ const styles = StyleSheet.create({
 
   // Avatars
   avatarRing: { borderWidth: 1.5, borderColor: '#FFFFFF' },
-  avatarFallback: {
-    backgroundColor: '#0788B0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitial: {
-    fontFamily: ff('Montserrat', '700'),
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
 });

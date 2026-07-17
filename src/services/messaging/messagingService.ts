@@ -190,7 +190,11 @@ export interface Message {
   upload_progress?: number;     // 0-100, only during 'uploading'
   upload_error?: string;        // Error message if upload_state === 'failed'
   _localPreviewUri?: string;    // Local file URI used as fallback preview while upload is in flight
-  
+  // For videos, _localPreviewUri is the poster JPEG — NOT a valid upload
+  // source. The actual local video file lives here so Retry re-uploads the
+  // video, never the thumbnail.
+  _localVideoUri?: string;
+
   // Existing fields
   is_system: boolean;
   edited: boolean;
