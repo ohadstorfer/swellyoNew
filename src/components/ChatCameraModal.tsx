@@ -23,7 +23,7 @@
  * working), gallery is owned by RecentMediaStrip (deny → strip shows an allow
  * tile, camera unaffected).
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Alert,
@@ -45,6 +45,8 @@ import {
   type FlashMode,
 } from 'expo-camera';
 import Svg, { Path, Rect, Circle } from 'react-native-svg';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RecentMediaStrip, type GalleryAsset, type StripFrame } from './RecentMediaStrip';
 import { ImagePreviewContent } from './ImagePreviewContent';
@@ -100,6 +102,15 @@ interface ChatCameraModalProps {
 
 const HOLD_TO_RECORD_MS = 200;
 const MAX_VIDEO_SECONDS = 60;
+
+// Pinch-to-zoom. CameraView's `zoom` prop is a normalized 0..1 value, but the
+// two platforms map it to wildly different optical ranges: iOS spreads the
+// device's full zoom factor (often 1×..100×+) across 0..1, so even tiny values
+// are a big jump — Android's range is much gentler. Hence a per-platform
+// sensitivity that scales the pinch delta (finger spread) into zoom units.
+// Tune these on-device if the feel is off; they're the only knobs.
+const MAX_ZOOM = 1;
+const ZOOM_SENSITIVITY = Platform.OS === 'ios' ? 0.04 : 0.5;
 
 const CloseIcon = () => (
   <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
@@ -172,6 +183,12 @@ export function ChatCameraModal({
 
   const [facing, setFacing] = useState<CameraType>('back');
   const [flash, setFlash] = useState<FlashMode>('off');
+  // Pinch-to-zoom: `zoom` feeds CameraView's prop (needs a JS value, so state).
+  // zoomRef mirrors it for the gesture worklets, and pinchBaseRef snapshots the
+  // zoom at the start of each pinch so the delta accumulates from there.
+  const [zoom, setZoom] = useState(0);
+  const zoomRef = useRef(0);
+  const pinchBaseRef = useRef(0);
   const [mode, setMode] = useState<'picture' | 'video'>('picture');
   const [isRecording, setIsRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
@@ -274,6 +291,8 @@ export function ChatCameraModal({
     modeAnim.setValue(1);
     setIsRecording(false);
     setRecordSeconds(0);
+    zoomRef.current = 0;
+    setZoom(0);
   }, [visible, modeAnim]);
 
   // Recording timer readout.
@@ -517,8 +536,46 @@ export function ChatCameraModal({
   }, []);
 
   const flipCamera = useCallback(() => {
+    // Front/back cameras have different zoom ranges — reset so the flipped
+    // camera doesn't inherit a wildly-off zoom factor.
+    zoomRef.current = 0;
+    setZoom(0);
     setFacing(prev => (prev === 'back' ? 'front' : 'back'));
   }, []);
+
+  // ── Pinch-to-zoom ─────────────────────────────────────────────────────────
+  const applyZoom = useCallback((z: number) => {
+    const clamped = Math.min(Math.max(z, 0), MAX_ZOOM);
+    zoomRef.current = clamped;
+    setZoom(clamped);
+  }, []);
+
+  const handlePinchStart = useCallback(() => {
+    pinchBaseRef.current = zoomRef.current;
+  }, []);
+
+  const handlePinchScale = useCallback(
+    (scale: number) => {
+      // scale is cumulative from the pinch start (1 = no change). Grow/shrink
+      // the zoom from the snapshot taken in handlePinchStart.
+      applyZoom(pinchBaseRef.current + (scale - 1) * ZOOM_SENSITIVITY);
+    },
+    [applyZoom]
+  );
+
+  const pinchGesture = useMemo(
+    () =>
+      Gesture.Pinch()
+        .onStart(() => {
+          'worklet';
+          runOnJS(handlePinchStart)();
+        })
+        .onUpdate((e) => {
+          'worklet';
+          runOnJS(handlePinchScale)(e.scale);
+        }),
+    [handlePinchStart, handlePinchScale]
+  );
 
   // Dismiss the inline preview back to the live camera (swipe-down / close ✕).
   const handlePreviewCancel = useCallback(() => {
@@ -671,7 +728,7 @@ export function ChatCameraModal({
       statusBarTranslucent={Platform.OS === 'android'}
       navigationBarTranslucent={Platform.OS === 'android'}
     >
-      <View style={styles.container}>
+      <GestureHandlerRootView style={styles.container}>
         {/* iOS runs the native session in video mode PERMANENTLY: flipping mode
             reconfigures the running AVCaptureSession (preset + movie output +
             mic attach/detach), and each reconfiguration blanks the preview /
@@ -684,19 +741,28 @@ export function ChatCameraModal({
             - the mic attaches once via `mute` flipping false when permission
               lands, not on every mode flip.
             Android keeps the per-tab mode flips (different native stack). */}
-        {cameraPermission?.granted && (
-          <CameraView
-            ref={cameraRef}
-            style={StyleSheet.absoluteFill}
-            facing={facing}
-            flash={flash}
-            enableTorch={isRecording && flash !== 'off'}
-            mode={Platform.OS === 'ios' ? 'video' : mode}
-            mute={Platform.OS === 'ios' ? !micPermission?.granted : false}
-            videoQuality="1080p"
-            pictureSize={Platform.OS === 'ios' ? '1920x1080' : undefined}
-          />
-        )}
+        {/* Pinch-to-zoom lives on a full-screen layer BEHIND the controls
+            (header/bottom sit at zIndex 2), so two-finger pinches on the live
+            preview zoom, while taps/hold-to-record on the shutter and the other
+            buttons keep working untouched. */}
+        <GestureDetector gesture={pinchGesture}>
+          <View style={StyleSheet.absoluteFill}>
+            {cameraPermission?.granted && (
+              <CameraView
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                facing={facing}
+                flash={flash}
+                enableTorch={isRecording && flash !== 'off'}
+                mode={Platform.OS === 'ios' ? 'video' : mode}
+                mute={Platform.OS === 'ios' ? !micPermission?.granted : false}
+                videoQuality="1080p"
+                pictureSize={Platform.OS === 'ios' ? '1920x1080' : undefined}
+                zoom={zoom}
+              />
+            )}
+          </View>
+        </GestureDetector>
 
         {/* Header: close ✕ / recording timer / flash */}
         <View style={[styles.header, { top: insets.top + 8 }]}>
@@ -746,7 +812,9 @@ export function ChatCameraModal({
           </View>
           <View style={styles.controlsRow}>
             {isRecording ? (
-              <View style={styles.sideButton} />
+              // Transparent spacer, not styles.sideButton — keeps the shutter
+              // centered without drawing a gray circle mid-recording.
+              <View style={styles.sideButtonSpacer} />
             ) : (
               <Pressable
                 style={({ pressed }) => [styles.sideButton, pressed && styles.buttonPressed]}
@@ -781,7 +849,7 @@ export function ChatCameraModal({
               </View>
             </Pressable>
             {isRecording ? (
-              <View style={styles.sideButton} />
+              <View style={styles.sideButtonSpacer} />
             ) : (
               <Pressable
                 style={({ pressed }) => [styles.sideButton, pressed && styles.buttonPressed]}
@@ -863,7 +931,7 @@ export function ChatCameraModal({
             )}
           </View>
         )}
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -953,6 +1021,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Same footprint as sideButton but invisible — holds the shutter centered
+  // during recording without the gray circle.
+  sideButtonSpacer: {
+    width: 48,
+    height: 48,
   },
   shutterRing: {
     width: SHUTTER_SIZE,

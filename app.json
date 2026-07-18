@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
       "appleTeamId": "683UA9HZYT",
-      "buildNumber": "43",
+      "buildNumber": "44",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -133,8 +133,13 @@
       [
         "react-native-share",
         {
-          "ios": ["instagram", "instagram-stories"],
-          "android": ["com.instagram.android"]
+          "ios": [
+            "instagram",
+            "instagram-stories"
+          ],
+          "android": [
+            "com.instagram.android"
+          ]
         }
       ],
       [

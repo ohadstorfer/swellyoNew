@@ -521,6 +521,95 @@ const swellyFloatingStyles = StyleSheet.create({
   },
 });
 
+// Both variants of every tab icon. Rendered once, off-screen, by NavIconWarmer
+// so RCTImageLoader decodes + caches them at mount. react-native-bottom-tabs
+// loads EVERY tab icon through RCTImageLoader.loadImage on each switch (its own
+// `TabViewProvider.loadIcons` has a "TODO: diff and update only changed items"),
+// and that load is async (background decode → main-thread dispatch). If the
+// filled asset isn't cached, the first tap of each tab pays the decode cost and
+// the icon visibly swaps a frame or two after the selection — the "not smooth"
+// lag. Warming the cache makes the load hit memory and swap near-instantly.
+const NAV_ICON_WARM = [
+  Images.nav.theLineup, Images.nav.theLineupFilled,
+  Images.nav.trips, Images.nav.tripsFilled,
+  Images.nav.profile, Images.nav.profileFilled,
+];
+
+function NavIconWarmer() {
+  return (
+    <View
+      pointerEvents="none"
+      style={{ position: 'absolute', left: -9999, top: 0, opacity: 0 }}
+    >
+      {NAV_ICON_WARM.map((src, i) => (
+        <Image key={i} source={src} style={{ width: 1, height: 1 }} fadeDuration={0} />
+      ))}
+    </View>
+  );
+}
+
+// Flip this on device to compare the two tab-bar looks, then keep the winner:
+//   'swap' → outline when inactive, filled when active (the shape changes).
+//            Optimized (memoized navigator + NavIconWarmer), but the library
+//            still reloads the icon through RCTImageLoader async on each tap, so
+//            the swap lands a frame or two after the selection.
+//   'tint' → native tint: ONE icon per tab, UIKit swaps image/selectedImage
+//            (dark active / grey inactive) instantly with zero JS — perfectly
+//            smooth. Same shape both states. Uses the FILLED glyph so the active
+//            tab still reads as "filled"; inactive is that shape in grey. To try
+//            the outline glyph instead, swap `filled` → `outline` in tabIcon().
+const TAB_ICON_MODE: 'swap' | 'tint' = 'swap';
+
+// Builds the tabBarIcon for a tab from its filled + outline sources, honoring
+// TAB_ICON_MODE. In 'tint' mode the returned source is focus-independent, so the
+// icons array stays stable across switches — the library never re-fires its
+// async icon load and UIKit does the active/inactive swap natively.
+const tabIcon = (filled: number, outline: number) =>
+  TAB_ICON_MODE === 'tint'
+    ? () => filled
+    : ({ focused }: { focused: boolean }) => (focused ? filled : outline);
+
+// The native tab bar itself. Memoized on `barSuppressed` — its ONLY real input —
+// so the churn in MainNavContext (requestedTab / trip-card / chat-card opens,
+// handler identity) during navigation flows no longer re-renders the navigator.
+// A navigator re-render rebuilds the icons array, which re-fires loadIcons and
+// reloads all three icons async → jank stacked on top of the tab switch. React
+// Navigation still drives real tab switches from the navigator's own internal
+// state, so memoizing the outer wrapper doesn't block them.
+const TabsNavigator = React.memo(function TabsNavigator({ barSuppressed }: { barSuppressed: boolean }) {
+  return (
+    <Tab.Navigator
+      initialRouteName="Trips"
+      backBehavior="none"
+      // Dark active, muted inactive. On iOS 26 the bar itself is
+      // Liquid Glass (background OS-controlled); the tint + icons are ours.
+      tabBarActiveTintColor="#333333"
+      tabBarInactiveTintColor="#8A9BA3"
+      // iOS 26: collapse to a pill on scroll-down (the behavior Eyal chose).
+      minimizeBehavior="onScrollDown"
+      labeled
+      hapticFeedbackEnabled
+      tabBarHidden={barSuppressed}
+    >
+      <Tab.Screen
+        name="Lineup"
+        component={LineupTabScreen}
+        options={{ title: 'The Lineup', tabBarIcon: tabIcon(Images.nav.theLineupFilled, Images.nav.theLineup) }}
+      />
+      <Tab.Screen
+        name="Trips"
+        component={TripsTabScreen}
+        options={{ title: 'Trips', tabBarIcon: tabIcon(Images.nav.tripsFilled, Images.nav.trips) }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileTabScreen}
+        options={{ title: 'Profile', tabBarIcon: tabIcon(Images.nav.profileFilled, Images.nav.profile) }}
+      />
+    </Tab.Navigator>
+  );
+});
+
 function HomeTabs() {
   // barSuppressed hides the entire native bar while a full-screen JS overlay
   // (match-loading, Swelly shaper, own-profile, profile editor) is up — those
@@ -529,35 +618,8 @@ function HomeTabs() {
   const { barSuppressed } = useMainNav();
   return (
     <>
-      <Tab.Navigator
-        initialRouteName="Trips"
-        backBehavior="none"
-        // Brand teal active, muted inactive. On iOS 26 the bar itself is
-        // Liquid Glass (background OS-controlled); the tint + icons are ours.
-        tabBarActiveTintColor="#05BCD3"
-        tabBarInactiveTintColor="#8A9BA3"
-        // iOS 26: collapse to a pill on scroll-down (the behavior Eyal chose).
-        minimizeBehavior="onScrollDown"
-        labeled
-        hapticFeedbackEnabled
-        tabBarHidden={barSuppressed}
-      >
-        <Tab.Screen
-          name="Lineup"
-          component={LineupTabScreen}
-          options={{ title: 'The Lineup', tabBarIcon: () => Images.nav.theLineup }}
-        />
-        <Tab.Screen
-          name="Trips"
-          component={TripsTabScreen}
-          options={{ title: 'Trips', tabBarIcon: () => Images.nav.trips }}
-        />
-        <Tab.Screen
-          name="Profile"
-          component={ProfileTabScreen}
-          options={{ title: 'Profile', tabBarIcon: () => Images.nav.profile }}
-        />
-      </Tab.Navigator>
+      <TabsNavigator barSuppressed={barSuppressed} />
+      <NavIconWarmer />
       <HomeTabsExtras />
     </>
   );

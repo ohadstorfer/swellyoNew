@@ -28,6 +28,10 @@ interface ChatSearchHeaderProps {
   onNext: () => void; // newer (▼)
   onClose: () => void;
   loading: boolean;
+  /** A hit jump is fetching an off-window message — show a spinner in the counter. */
+  jumping?: boolean;
+  /** Hit list reached the server cap — more matches exist beyond `total`. */
+  capped?: boolean;
 }
 
 export const ChatSearchHeader: React.FC<ChatSearchHeaderProps> = ({
@@ -39,6 +43,8 @@ export const ChatSearchHeader: React.FC<ChatSearchHeaderProps> = ({
   onNext,
   onClose,
   loading,
+  jumping = false,
+  capped = false,
 }) => {
   const inputRef = useRef<TextInput>(null);
   // Enter: quick fade + slight rise (strong ease-out); focus rides along so
@@ -100,9 +106,17 @@ export const ChatSearchHeader: React.FC<ChatSearchHeaderProps> = ({
           </TouchableOpacity>
         ) : null}
       </View>
-      <Text style={styles.counter}>
-        {hasHits ? `${currentIndex + 1} of ${total}` : query.trim().length >= 2 && !loading ? '0 of 0' : ''}
-      </Text>
+      {jumping ? (
+        <View style={styles.counterSpinner}>
+          <ActivityIndicator size="small" color="#05BCD3" />
+        </View>
+      ) : (
+        <Text style={styles.counter}>
+          {hasHits
+            ? `${currentIndex + 1} of ${total}${capped ? '+' : ''}`
+            : query.trim().length >= 2 && !loading ? '0 of 0' : ''}
+        </Text>
+      )}
       <TouchableOpacity
         onPress={onPrev}
         disabled={!canGoOlder}
@@ -157,5 +171,12 @@ const styles = StyleSheet.create({
     color: '#A7B8C2',
     minWidth: 44,
     textAlign: 'center',
+  },
+  // Same footprint as the counter text so swapping in the spinner never shifts
+  // the ▲/▼ layout.
+  counterSpinner: {
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

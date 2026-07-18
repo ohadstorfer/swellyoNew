@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swellyo — Full UX Audit</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --card:#ffffff; --ink:#1a1d21; --muted:#5b626b;
+    --line:#e4e7eb; --brand:#0788B0;
+    --crit:#e5484d; --high:#f5820b; --med:#e0b000; --low:#3aa0ff;
+    --crit-bg:#fdecec; --high-bg:#fef1e2; --med-bg:#fbf5da; --low-bg:#e9f3ff;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:0 0 80px;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:0 20px}
+  header{
+    background:linear-gradient(135deg,#0788B0,#0aa6cf); color:#fff;
+    padding:40px 20px 34px; margin-bottom:28px;
+  }
+  header .wrap{padding:0 20px}
+  h1{margin:0 0 8px; font-size:30px; letter-spacing:-.02em}
+  header p{margin:4px 0; opacity:.94; font-size:14px}
+  h2{font-size:22px; margin:38px 0 14px; letter-spacing:-.01em; padding-bottom:8px; border-bottom:2px solid var(--line)}
+  h3{font-size:16px; margin:22px 0 8px; color:var(--brand)}
+  a{color:var(--brand)}
+  code{
+    background:#eef0f3; padding:1px 6px; border-radius:5px;
+    font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:#31363c;
+  }
+  .legend{display:flex; flex-wrap:wrap; gap:10px; margin:0 0 8px}
+  .pill{display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600;
+    padding:4px 10px; border-radius:999px; border:1px solid transparent}
+  .pill.c{color:var(--crit); background:var(--crit-bg); border-color:#f6c6c8}
+  .pill.h{color:#b8630a; background:var(--high-bg); border-color:#f7d3a6}
+  .pill.m{color:#8a7400; background:var(--med-bg); border-color:#ecdd97}
+  .pill.l{color:#1f6fd0; background:var(--low-bg); border-color:#bfdcff}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin:14px 0;
+    box-shadow:0 1px 2px rgba(20,24,30,.04)}
+  .themes{counter-reset:t; list-style:none; padding:0; margin:0}
+  .themes li{position:relative; padding:12px 0 12px 44px; border-bottom:1px solid var(--line)}
+  .themes li:last-child{border-bottom:0}
+  .themes li::before{counter-increment:t; content:counter(t); position:absolute; left:0; top:12px;
+    width:28px; height:28px; border-radius:8px; background:var(--brand); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px}
+  .themes b{display:block; margin-bottom:2px}
+  table{width:100%; border-collapse:collapse; margin:12px 0; font-size:14px}
+  thead th{text-align:left; background:#eef1f4; padding:9px 12px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.04em; color:var(--muted); border-bottom:1px solid var(--line)}
+  tbody td{padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  tbody tr:hover{background:#fafbfc}
+  td.n{font-weight:700; color:var(--muted); width:34px}
+  td.area{white-space:nowrap; font-weight:600; width:96px}
+  td.loc code{white-space:nowrap}
+  .sev{border-left:4px solid var(--line); padding-left:16px; margin:16px 0}
+  .sev.high{border-color:var(--high)}
+  .sev.med{border-color:var(--med)}
+  .sev.low{border-color:var(--low)}
+  ul.f{margin:6px 0 0; padding-left:18px}
+  ul.f li{margin:6px 0}
+  .dom{font-weight:700; margin:16px 0 4px}
+  .seq{list-style:none; counter-reset:s; padding:0; margin:0}
+  .seq li{position:relative; padding:10px 0 10px 40px; border-bottom:1px solid var(--line)}
+  .seq li:last-child{border-bottom:0}
+  .seq li::before{counter-increment:s; content:counter(s); position:absolute; left:0; top:10px;
+    width:26px; height:26px; border-radius:50%; background:#fff; border:2px solid var(--brand);
+    color:var(--brand); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px}
+  .muted{color:var(--muted)}
+  .foot{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font-size:13px; color:var(--muted)}
+  @media(max-width:640px){
+    h1{font-size:24px}
+    td.area{white-space:normal}
+    table{font-size:13px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>Swellyo — Full UX Audit</h1>
+    <p><strong>Goal:</strong> reach WhatsApp / Instagram-level polish.</p>
+    <p><strong>Method:</strong> six senior-designer passes over the whole app, reading the actual screen code. Every finding cites <code>file:line</code> + a fix.</p>
+    <p><strong>Date:</strong> 2026-07-17</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="legend">
+    <span class="pill c">🔴 Critical</span>
+    <span class="pill h">🟠 High</span>
+    <span class="pill m">🟡 Medium</span>
+    <span class="pill l">🔵 Low</span>
+  </div>
+  <p class="muted">Critical = breaks flow / looks broken / silent data loss · High = clearly below the WA/IG bar · Medium = polish · Low = nitpick. Per-domain deep-dives live in <code>docs/ux-audit/audit-01…06.md</code>.</p>
+
+  <h2>The 6 systemic themes</h2>
+  <p class="muted">These patterns repeat across every domain — fixing the pattern is higher-leverage than fixing individual screens.</p>
+  <div class="card">
+    <ol class="themes">
+      <li><b>Silent failure / “success on failure.”</b> The biggest theme. Errors are <code>catch</code>→<code>console.error</code>→continue: delete-account, report, block, avatar upload, onboarding step 7, matching, privacy toggle. Users are told things worked when they didn't. → Gate every success UI on a real success response; on failure show a friendly, retryable error (<code>friendlyErrorMessage</code> already exists).</li>
+      <li><b>Loading = a text swap or nothing, never a proper indicator.</b> CTAs say “Signing in…” instead of a spinner; awaited actions sit dead; chats/profiles/blocked-list open blank; cold caches render false empty states. → Spinner-in-button convention + skeletons + distinguish empty/loading/error.</li>
+      <li><b>No offline / connection feedback.</b> DM, group, provider, and matching all <em>track</em> realtime health and reconnect, but never surface it; no global offline banner. → “Connecting…” pill in chat + global NetInfo strip.</li>
+      <li><b>No global crash boundary.</b> <code>PostHogErrorBoundary</code> re-throws everything else → any render crash = permanent white screen. → Top-level branded “Something went wrong — Reload”.</li>
+      <li><b>Font weights render wrong on iOS at ~700 call sites</b> (728 bare <code>fontFamily</code>+<code>fontWeight</code> vs 316 <code>ff()</code>). Headings/buttons ship thinner than Figma. → Sweep to <code>ff()</code>.</li>
+      <li><b>Theming &amp; primitive drift.</b> <code>Button</code>/<code>Input</code> unused; “dark” spelled 4+ ways; two reds, two greens; 282 blocking <code>Alert.alert</code> and no toast primitive. → Real <code>&lt;Button variant&gt;</code> + tokens + toast.</li>
+    </ol>
+  </div>
+
+  <h2>🔴 Critical — fix first</h2>
+  <table>
+    <thead><tr><th>#</th><th>Area</th><th>Issue</th><th>Location</th></tr></thead>
+    <tbody>
+      <tr><td class="n">1</td><td class="area">Safety</td><td><b>Delete-account</b> shows “Request received” + logs out even when the request threw. Nothing was sent.</td><td class="loc"><code>DeleteAccountScreen.tsx:109-125</code></td></tr>
+      <tr><td class="n">2</td><td class="area">Safety</td><td><b>Report</b> shows “Report received” on failure; “also block” checkbox can silently no-op while navigating away as if blocked.</td><td class="loc"><code>ReportUserScreen.tsx:212-234</code></td></tr>
+      <tr><td class="n">3</td><td class="area">Onboarding</td><td><b>Create Profile</b> marks onboarding complete + enters the app even when the profile save fails — possibly-missing <code>surfers</code> row, no error.</td><td class="loc"><code>AppContent.tsx:1045-1054</code></td></tr>
+      <tr><td class="n">4</td><td class="area">Auth</td><td><b>Developer error copy ships to users</b> on sign-in failure (“A database trigger is failing”, “check the Supabase dashboard settings”).</td><td class="loc"><code>WelcomeScreen.tsx:683-728</code></td></tr>
+      <tr><td class="n">5</td><td class="area">Global</td><td><b>No crash boundary</b> — any render error = permanent white screen.</td><td class="loc"><code>PostHogErrorBoundary.tsx:34</code></td></tr>
+      <tr><td class="n">6</td><td class="area">Chat</td><td><b>No day/date separators</b> in DM or group; only HH:MM. Can't tell when anything was sent — the #1 missing WhatsApp affordance.</td><td class="loc"><code>DirectMessageScreen.tsx:4721</code>, <code>DirectGroupChat.tsx:4605</code></td></tr>
+      <tr><td class="n">7</td><td class="area">Chat</td><td><b>No offline / “Connecting…” feedback</b> despite full health tracking; dead socket = messages silently stop, queued sends look sent.</td><td class="loc"><code>DirectMessageScreen.tsx:1006</code>, <code>MessagingProvider.tsx:1392</code></td></tr>
+      <tr><td class="n">8</td><td class="area">Chat</td><td><b>Blank chat on cold open</b> — <code>listEmptyComponent</code> returns <code>null</code> while fetching (an unused skeleton style already exists).</td><td class="loc"><code>DirectMessageScreen.tsx:4690</code>, <code>DirectGroupChat.tsx:4574</code></td></tr>
+      <tr><td class="n">9</td><td class="area">Chat</td><td><b>Multi-photo OS share drops all but the first image</b> while previewing “N photos.”</td><td class="loc"><code>ShareToChatScreen.tsx:111-120</code></td></tr>
+      <tr><td class="n">10</td><td class="area">Chat</td><td><b>Swelly AI send-failure has no recovery</b> — optimistic bubble stays looking sent, no retry.</td><td class="loc"><code>ChatScreen.tsx:553-555</code></td></tr>
+      <tr><td class="n">11</td><td class="area">Matching</td><td><b>Network/timeout errors dressed up as “no surfers found”</b> (blames the user's filters); no timeout, no retry.</td><td class="loc"><code>TripPlanningChatScreen.tsx:1191-1196</code></td></tr>
+      <tr><td class="n">12</td><td class="area">Matching</td><td><b>Zero-match state has no CTA</b> — the most important screen in a hard-filter search is one gray sentence; action row only renders when matches &gt; 0.</td><td class="loc"><code>TripPlanningChatScreen.tsx:1164</code>, <code>:1906</code></td></tr>
+      <tr><td class="n">13</td><td class="area">Matching</td><td><b>Silent 30s loading timeout</b> kills the spinner with no message and never aborts the request → dead end.</td><td class="loc"><code>TripPlanningChatScreen.tsx:1059-1066</code></td></tr>
+      <tr><td class="n">14</td><td class="area">Trips</td><td><b>Trip-detail load failure = infinite skeleton, no retry</b> (<code>isError</code>/<code>refetch</code> never checked).</td><td class="loc"><code>TripDetailScreen.tsx:1298-1305</code></td></tr>
+      <tr><td class="n">15</td><td class="area">Trips</td><td><b>Leave-trip &amp; Remove-participant</b> await the round-trip but their loading states are never rendered → app sits silent.</td><td class="loc"><code>TripDetailScreen.tsx:861-890</code>, <code>:770-799</code></td></tr>
+      <tr><td class="n">16</td><td class="area">Trips</td><td><b>Non-members can “Request to join” a past/ended trip</b> (<code>showJoinCta</code> checks <code>!isCancelled</code> but not <code>isLocked</code>).</td><td class="loc"><code>TripDetailScreen.tsx:1319-1321</code></td></tr>
+      <tr><td class="n">17</td><td class="area">Trips</td><td><b>Create wizard has no progress indicator and no Android back guard</b> — back bypasses the exit-confirm + draft flush.</td><td class="loc"><code>CreateTripFlowA.tsx:1237</code>, <code>CreateTripWizardChrome.tsx:98-99</code></td></tr>
+      <tr><td class="n">18</td><td class="area">Trips</td><td><b>Hung publish traps the user</b> — sequential upload→create→destination awaits with no timeout, exit disabled during submit.</td><td class="loc"><code>CreateTripFlowA.tsx:1745-1935</code></td></tr>
+      <tr><td class="n">19</td><td class="area">Trips</td><td><b>Legacy surftrips: every action awaits + full refetch, zero optimism</b> — the exact slow-CTA pattern group trips already fixed.</td><td class="loc"><code>SurftripDetailScreen.tsx:254-391</code></td></tr>
+      <tr><td class="n">20</td><td class="area">Onboarding</td><td><b>Create-Profile looks like a dead button</b> — CTAs never spin, Step-4 required-field errors are border-only, no message, no scroll-to-error.</td><td class="loc"><code>OnboardingStep4Screen.tsx:925-927</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2>🟠 High — below the WhatsApp/Instagram bar</h2>
+
+  <div class="sev high">
+    <div class="dom">Messaging &amp; chat</div>
+    <ul class="f">
+      <li><b>Groups are anonymous:</b> delivery/read ticks hard-disabled (no “sent” confirmation), typing shows anonymous dots though identities are tracked, no member roster / member-count subtitle. <code>DirectGroupChat.tsx:114, :4178, :5456</code></li>
+      <li><b>Failed voice message is a dead bubble</b> — no tap-to-retry (image/album paths retry). <code>AudioMessageBubble.tsx:173</code></li>
+      <li><b>Hardcoded Spanish</b> in the DM failed-text menu inside an English app. <code>DirectMessageScreen.tsx:4156</code></li>
+      <li><b>Android list jumps</b> on prepend/trim — <code>maintainVisibleContentPosition</code> is iOS-only. <code>DirectMessageScreen.tsx:5792</code></li>
+      <li><b>List-wide re-renders + un-memoized bubbles</b> — opening the menu / a read receipt re-renders every visible cell. <code>DirectMessageScreen.tsx:4665, :4728</code></li>
+      <li><b>Red “Sending…” spinner reads as an error</b> for a normal in-flight group text. <code>DirectGroupChat.tsx:5363-5367</code></li>
+      <li><b>Swelly AI init failure = dead screen</b> (one-shot Alert, empty chat, no retry). <code>ChatScreen.tsx:323-330</code></li>
+    </ul>
+  </div>
+
+  <div class="sev high">
+    <div class="dom">Trips</div>
+    <ul class="f">
+      <li><b>No pull-to-refresh</b> on trip detail / members / surftrips; detail relies solely on realtime. <code>TripDetailScreen.tsx:1471</code></li>
+      <li><b>Cold-cache false empties</b> on six sub-screens (gear, updates, members) — “No items yet” instead of a skeleton when deep-linked. <code>PackingAndGearScreen.tsx:154</code>, <code>TripMembersScreen.tsx:304</code></li>
+      <li><b>My Trips has no error state</b> — a failed cold load renders the “you haven't joined any trips” empty. <code>TripsScreen.tsx:1150-1160</code></li>
+      <li><b>Cancel / Complete trip awaited</b> — highest-stakes host actions hold the UI on the round-trip. <code>TripDetailScreen.tsx:801-859</code></li>
+      <li><b>All member-management awaited</b> with no per-row feedback and re-tappable rows. <code>TripMembersScreen.tsx:135-198</code></li>
+      <li><b>Trip-not-found is a dead-end</b> — bare text, no icon/CTA, doesn't distinguish 404 from network error. <code>TripDetailScreen.tsx:1286-1295</code></li>
+      <li><b>No image-upload progress</b> in the create wizard; <b>zero haptics</b> in the entire wizard. <code>CreateTripFlowA.tsx:494-524, :1745</code></li>
+      <li><b>Two destructive-reds + two success-greens + <code>#0788B0</code> hardcoded ~15×.</b> <code>TripDetailScreen.tsx:321/2041/2643</code></li>
+      <li><b>CTA buttons lack accessibility labels/roles.</b> <code>TripDetailScreen.tsx:2090-2115</code></li>
+    </ul>
+  </div>
+
+  <div class="sev high">
+    <div class="dom">Matching &amp; Swelly AI</div>
+    <ul class="f">
+      <li><b>Match cards are anonymous &amp; generic</b> — name + “age | country” only, one shared cover, can render literally “User”, no image placeholder/fade/onError, and <b>no “Message” button</b> (the handler exists). <code>MatchedUserCard.tsx:21-59</code></li>
+      <li><b>Free-text only; yes/no parsed by substring</b> — “not now” contains “now” → read as YES. No quick-reply chips. <code>TripPlanningChatScreen.tsx:1220-1289</code></li>
+      <li><b>Carousel auto-jumps to the middle card</b>, hiding the top matches. <code>MatchedUsersCarousel.tsx:33-39</code></li>
+      <li><b>Destination pickers fail silently</b> — Places autocomplete (no-results/error/missing-key all → “nothing appears”), decorative map covering the form, cleared duration desyncs data. <code>DestinationMapPickerCard.tsx:450-609</code></li>
+      <li><b>SwellyShaper has no loading timeout</b> — a hung request spins forever with input disabled. <code>SwellyShaperScreen.tsx:190-252</code></li>
+      <li><b>sendMessage failure uses a native Alert</b> and loses the turn. <code>TripPlanningChatScreen.tsx:1447</code></li>
+    </ul>
+  </div>
+
+  <div class="sev high">
+    <div class="dom">Profile, settings &amp; safety</div>
+    <ul class="f">
+      <li><b>Block / unblock failures are invisible</b>; a failed blocked-list load shows the same “No blocked users” as genuinely empty. <code>BlockUserOverlay.tsx:40-50</code>, <code>BlockedUsersScreen.tsx:44-84</code></li>
+      <li><b>Other-user profile loads to a blank screen</b> (header only); load-failure offers only “Go Back”, no retry. <code>ProfileScreen.tsx:2045-2104</code></li>
+      <li><b>Switch-account errors swallowed; no loading/disabled state</b> → double-tap fires two sign-in attempts. <code>SettingsScreen.tsx:123-137</code></li>
+      <li><b>Delete-account sits in the neutral list</b> with no danger styling. <code>SettingsScreen.tsx:224-227</code></li>
+    </ul>
+  </div>
+
+  <div class="sev high">
+    <div class="dom">Global / cross-cutting</div>
+    <ul class="f">
+      <li><b>Global <code>StatusBar style="light"</code></b> paints white icons on every light screen. <code>App.tsx:130</code></li>
+      <li><b>No global network-offline indicator.</b> (Theme #3.)</li>
+      <li><b>Raw error text leaked in logout alerts</b> + 49 generic “Error” titles + no success/confirmation toast. <code>ConversationsScreen.tsx:600</code>, <code>SettingsScreen.tsx:79</code></li>
+      <li><b>Fullscreen image viewer has no pinch-to-zoom, no share/save, no web gestures.</b> <code>FullscreenImageViewer.tsx</code></li>
+      <li><b>53 raw <code>&lt;Modal&gt;</code> usages</b> vs the excellent <code>BottomSheetShell</code> (18) → backdrop/dismiss/Android-nav-bar drift. <code>AppContent.tsx:1999</code></li>
+      <li><b>No React Navigation <code>linking</code> config</b> — deep links hand-parsed in a 2353-line <code>AppContent</code>; a killed app never restores its stack. <code>App.tsx:141</code></li>
+      <li><b><code>LoadingScreen</code> fakes safe-area with a magic <code>90</code></b> instead of <code>useSafeAreaInsets()</code>. <code>LoadingScreen.tsx:609</code></li>
+    </ul>
+  </div>
+
+  <h2>🟡 Medium — polish that adds up</h2>
+
+  <div class="sev med">
+    <div class="dom">Messaging</div>
+    <ul class="f">
+      <li>No conversation-row actions (mute/delete/archive/mark read-unread/pin); no pull-to-refresh on the list. <code>ConversationsScreen.tsx:973-977, :1279</code></li>
+      <li>Fake “Swellyo Team” row shows a permanent unread “1” every launch. <code>ConversationsScreen.tsx:475</code></li>
+      <li>No single-tick “sent” vs double-tick; no haptic on send / reaction-apply; copy has no “Copied” confirmation. <code>DirectMessageScreen.tsx:126, :4146, :3914</code></li>
+      <li>Video signing round-trip has no loading/error state (frozen poster, failure just closes). <code>DirectMessageScreen.tsx:5016-5031</code></li>
+      <li>No Forward / mark-as-unread / @mentions / pinned; 500-char hard cap silently truncates a pasted paragraph. <code>DirectMessageScreen.tsx:5862, :6293</code></li>
+      <li>Received group message can show the <b>group name</b> as author on missing sender enrichment. <code>DirectGroupChat.tsx:4655</code></li>
+      <li>Group empty chat renders nothing; heavy un-gated <code>console.log</code> in hot paths. <code>DirectGroupChat.tsx:4578</code>, <code>MessagingProvider.tsx:1091-1314</code></li>
+    </ul>
+  </div>
+
+  <div class="sev med">
+    <div class="dom">Onboarding</div>
+    <ul class="f">
+      <li>Age-verification sheet is a <b>trap</b>: no Cancel, backdrop-tap only closes in error state, no Android back. <code>WelcomeScreen.tsx:991</code></li>
+      <li>Silent avatar upload fallback persists a base64 blob as the profile image. <code>OnboardingStep4Screen.tsx:961-985</code></li>
+      <li>Surf-video upload is fire-and-forget (<code>console.error</code> only), no progress/retry. <code>OnboardingVideoUploadScreen.tsx:424-430</code></li>
+      <li>~20s restore on bad network showing only a spinning logo; “Select 3 or more!” never enforced; pronoun defaults to “sis” for everyone. <code>OnboardingContext.tsx:39-48</code>, <code>OnboardingStep6LifestyleScreen.tsx:194</code>, <code>OnboardingStep4Screen.tsx:773</code></li>
+      <li><code>allowFontScaling={false}</code> across onboarding breaks Dynamic Type. <code>OnboardingWelcomeScreen.tsx:83-98</code></li>
+    </ul>
+  </div>
+
+  <div class="sev med">
+    <div class="dom">Trips</div>
+    <ul class="f">
+      <li>No section-level loading in trip detail (participants/gear/updates pop in as empty→filled). <code>TripDetailScreen.tsx:341-376</code></li>
+      <li>Gear claim awaited in two screens but optimistic in <code>YourGearScreen</code> — inconsistent. <code>PackingAndGearScreen.tsx:85</code></li>
+      <li>My Trips card hides capacity that Explore shows; gear-request pops a blocking Alert while join succeeds silently. <code>TripsScreen.tsx:203-322</code>, <code>TripDetailScreen.tsx:1113</code></li>
+      <li>Draft can't restore images (local URIs go stale); <code>void firstErrorField</code> → no scroll-to-first-error; budget allows a $0–$0 range. <code>CreateTripFlowA.tsx:314-329, :3152, :1651</code></li>
+      <li>Reorder failure swallowed to console in <code>ManageGearScreen</code>; no bookmark/save anywhere; three copies of <code>formatRelativeTime</code>. <code>ManageGearScreen.tsx:110-112</code></li>
+    </ul>
+  </div>
+
+  <div class="sev med">
+    <div class="dom">Matching</div>
+    <ul class="f">
+      <li>No suggested-reply chips; no tap-to-edit a filter; filter removal is immediate with no undo. <code>TripPlanningChatScreen.tsx:1593, :1709</code></li>
+      <li>Input disables globally on an unresolved action row even when scrolled off-screen. <code>TripPlanningChatScreen.tsx:2300</code></li>
+      <li>Rich “closest matches + reason” logic exists in legacy <code>matchingService.ts</code> but the live server path throws it away.</li>
+      <li>Three bespoke infinite carousels + duplicated <code>TypingIndicator</code>; <code>BudgetButtonSelector</code> fakes a 300ms delay. <code>BoardCarousel.tsx</code>, <code>BudgetButtonSelector.tsx:37</code></li>
+    </ul>
+  </div>
+
+  <div class="sev med">
+    <div class="dom">Profile / settings</div>
+    <ul class="f">
+      <li>Avatar upload has no visible progress ring (<code>isUploadingImage</code> never rendered). <code>ProfileScreen.tsx:1079</code></li>
+      <li>Home-break “unset” dim overlay shows on <em>other</em> users' profiles; empty lifestyle/destinations sections vanish. <code>ProfileScreen.tsx:2890, :2930, :3008</code></li>
+      <li>Privacy analytics toggle never reverts on failure; “Blocked accounts” buried under a mislabeled “Contacts” row; toggles have no <code>accessibilityRole="switch"</code>. <code>PrivacyPreferencesScreen.tsx:85-138</code></li>
+      <li>Report “Other” reason has no free-text field; web avatar-crop has no busy guard (double-tap → double upload). <code>ReportUserScreen.tsx:105</code>, <code>AvatarCropModal.tsx:100-111</code></li>
+      <li>Header/back affordance + title fonts differ across ProfileScreen vs the whole Settings stack. <code>SettingsScreen.tsx:282</code></li>
+    </ul>
+  </div>
+
+  <div class="sev med">
+    <div class="dom">Global</div>
+    <ul class="f">
+      <li><code>allowFontScaling=false</code> set globally (accessibility) — prefer a capped <code>maxFontSizeMultiplier</code>. <code>App.tsx:84-87</code></li>
+      <li><code>BottomSheetShell</code> <code>avoidKeyboard</code> uses <code>behavior="height"</code> on Android (clips inputs on fixed-height sheets). <code>BottomSheetShell.tsx:144</code></li>
+      <li><code>AppContent.tsx</code> (2353 lines) documents multiple past freezes from its re-render fan-out — decompose. <code>AppContent.tsx:1801-1849</code></li>
+      <li>Color-token drift (266 <code>#FFFFFF</code>, 246 <code>#333333</code>, “dark” in 4 hexes); shared <code>Button</code>/<code>Input</code> near-dead.</li>
+    </ul>
+  </div>
+
+  <h2>🔵 Low — nitpicks &amp; cleanup</h2>
+  <div class="card">
+    <p class="muted" style="margin:0">Representative sample (full list in per-domain files): aggressive <code>activeOpacity={0.2}</code> on conversation rows · near-limit character counter missing · hardcoded “10:45” timestamp in the team-welcome chat · “3 More” button label hardcoded regardless of count · dead styles shipping (<code>opacity:0</code> “REMOVED” board container, <code>skipButton opacity:0</code>) · clipped Delete-account back button (<code>fontSize:16 / lineHeight:15</code>) · <code>GoogleSignInTest.tsx</code> / <code>handleLogin</code> dead stubs · hardcoded dimensions on match cards · duplicate <code>TripPublished</code> share-cancel string matching.</p>
+  </div>
+
+  <h2>Suggested sequencing</h2>
+  <div class="card">
+    <ol class="seq">
+      <li><b>Stop lying to users (1 day):</b> the 🔴 silent-failure set — delete-account, report+block, onboarding step-7, matching-error-vs-empty. Pure <code>catch</code> → gate-on-success + friendly retry. Highest trust impact, lowest effort.</li>
+      <li><b>Stop blank/dead screens (1–2 days):</b> global crash boundary (#5), chat cold-load skeletons (#8), trip-detail error/retry (#14), “Create Profile” spinner + inline errors (#20).</li>
+      <li><b>WhatsApp table-stakes in chat (2–3 days):</b> day/date separators (#6), offline/“Connecting…” pill (#7), group send-ticks + who's-typing, failed-voice retry, drop the Spanish strings.</li>
+      <li><b>Trip CTA latency (1–2 days):</b> make leave / remove / cancel / complete / member-mgmt / surftrips optimistic (the join/withdraw handlers are the working template).</li>
+      <li><b>Matching payoff (1–2 days):</b> real zero-match CTA, quick-reply chips, richer match cards + Message button, kill the silent 30s timeout.</li>
+      <li><b>Systemic polish (ongoing):</b> font sweep to <code>ff()</code>, per-screen StatusBar, toast primitive, <code>&lt;Button&gt;</code>/tokens, pinch-zoom viewer, NetInfo offline banner, <code>linking</code> config.</li>
+    </ol>
+  </div>
+
+  <div class="card" style="background:#f0f9fc; border-color:#bfe6f2">
+    <b>Worth remembering:</b> a lot is genuinely <em>above</em> the bar already — optimistic send + upload-first media + reactions in DMs, the explore deck, the commitment flow, <code>BottomSheetShell</code>, <code>FullscreenVideoPlayer</code>, and <code>friendlyError</code>. The gaps cluster in <b>error / empty / loading states and host-management paths</b>, not core plumbing.
+  </div>
+
+  <p class="foot">Generated from six parallel domain audits. For every finding's full rationale and fix, see <code>docs/ux-audit/audit-01-onboarding-auth.md</code> … <code>audit-06-global-crosscutting.md</code>.</p>
+
+</div>
+</body>
+</html>

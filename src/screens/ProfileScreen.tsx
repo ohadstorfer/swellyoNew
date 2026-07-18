@@ -29,6 +29,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
+import { ff, fs } from '../theme/fonts';
+import { NotificationCenter } from '../components/notifications/NotificationCenter';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
 import { getImageUrl, getCountryImageFromStorage, getCountryImageFallback, getCountryImageFromPexels, getLifestyleImageFromPexels, uploadCountryImageToStorage } from '../services/media/imageService';
@@ -1894,6 +1896,151 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     }, intervalMs);
   };
 
+  // Standard app black header (#212121 bar): back/settings · first-name title ·
+  // notification bell + edit/⋮-menu, with the signature teal gradient hairline —
+  // the same header used by The Lineup / Trips (MainHeader) and the chat screen,
+  // so the profile is visually consistent with the rest of the app. Replaces the
+  // old rounded buttons that floated over the cover. Suppressed on the post-
+  // onboarding own-profile, which keeps its immersive, button-free cover and its
+  // "Got it!" bottom button.
+  const renderProfileHeader = () => {
+    if (fromOnboardingChat && isViewingOwnProfile) return null;
+
+    const firstName = (profileData?.name || '').trim().split(/\s+/)[0] || '';
+    // Single ⋮ menu on the right (matches Figma exactly): own profile → Edit +
+    // Settings; other user → Report + Block. Shown whenever it has any item.
+    const ownMenuHasItems = isViewingOwnProfile && (!!onEdit || !!onSettings);
+    const otherMenuHasItems = !isViewingOwnProfile && !!userId;
+    const showMenuRight = ownMenuHasItems || otherMenuHasItems;
+
+    return (
+      <View
+        style={[
+          styles.profileHeaderContainer,
+          // Height metrics MUST equal The Lineup's MainHeader exactly:
+          // paddingTop (web 16 / native 8) + 44 row + paddingBottom 24
+          // (= MainHeader's spaceBelow on Lineup) + insets.top. Keep in sync
+          // with MainHeader if its metrics ever change.
+          { paddingTop: insets.top + (Platform.OS === 'web' ? 16 : 8) },
+        ]}
+      >
+        <View style={styles.profileHeaderRow}>
+          {/* Left: back chevron (own-profile root's onBack returns to the
+              previous tab). */}
+          <TouchableOpacity
+            style={styles.profileHeaderLeftBtn}
+            onPress={handleBackPress}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          <RNText style={styles.profileHeaderTitle} numberOfLines={1}>
+            {firstName}
+          </RNText>
+
+          <View style={styles.profileHeaderRight}>
+            {/* Bell = the logged-in user's notifications (never the viewed user). */}
+            <NotificationCenter userId={currentUserId} bare />
+
+            {showMenuRight ? (
+              <TouchableOpacity
+                style={styles.profileHeaderActionBtn}
+                onPress={() => setShowProfileMenu((v) => !v)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="More options"
+              >
+                <Ionicons name="ellipsis-vertical" size={22} color="#FFFFFF" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Signature teal→sand gradient hairline (matches MainHeader). */}
+        <LinearGradient
+          colors={['#05BCD3', '#DBCDBC']}
+          locations={[0, 0.7]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.profileHeaderHairline}
+        />
+      </View>
+    );
+  };
+
+  // Dropdown for the ⋮ menu. Own profile → Edit + Settings; other user →
+  // Report + Block (matches Figma). Rendered at the screen root — not inside the
+  // short header bar — so its full-screen dismiss layer covers the whole page
+  // and the dropdown isn't clipped by the bar.
+  const renderProfileMenuOverlay = () => {
+    if (!showProfileMenu) return null;
+    if (fromOnboardingChat && isViewingOwnProfile) return null;
+    if (!isViewingOwnProfile && !userId) return null;
+
+    return (
+      <>
+        <TouchableOpacity
+          style={styles.profileMenuDismiss}
+          activeOpacity={1}
+          onPress={() => setShowProfileMenu(false)}
+        />
+        <View
+          style={[
+            styles.profileMenuDropdown,
+            { top: insets.top + (Platform.OS === 'web' ? 16 : 8) + 52 },
+          ]}
+        >
+          {isViewingOwnProfile ? (
+            <>
+              {onEdit && (
+                <TouchableOpacity
+                  style={styles.profileMenuItem}
+                  activeOpacity={0.7}
+                  onPress={() => { setShowProfileMenu(false); onEdit(); }}
+                >
+                  <Ionicons name="create-outline" size={20} color="#222B30" />
+                  <RNText style={styles.profileMenuItemText}>Edit</RNText>
+                </TouchableOpacity>
+              )}
+              {onSettings && (
+                <TouchableOpacity
+                  style={styles.profileMenuItem}
+                  activeOpacity={0.7}
+                  onPress={() => { setShowProfileMenu(false); onSettings(); }}
+                >
+                  <Ionicons name="settings-outline" size={20} color="#222B30" />
+                  <RNText style={styles.profileMenuItemText}>Settings</RNText>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={styles.profileMenuItem}
+                activeOpacity={0.7}
+                onPress={() => { setShowProfileMenu(false); setShowReportOverlay(true); }}
+              >
+                <Ionicons name="alert-circle-outline" size={20} color="#222B30" />
+                <RNText style={styles.profileMenuItemText}>Report</RNText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.profileMenuItem}
+                activeOpacity={0.7}
+                onPress={() => { setShowProfileMenu(false); setShowBlockOverlay(true); }}
+              >
+                <Ionicons name="ban-outline" size={20} color="#222B30" />
+                <RNText style={styles.profileMenuItemText}>Block</RNText>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </>
+    );
+  };
+
   // Render nothing during load to prevent "No profile data found" flash
   if (loading || authChecking) {
     return (
@@ -1904,38 +2051,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           animatedSwipeStyle,
         ]}
       >
-        <SafeAreaView style={styles.fill}>
-          {fromOnboardingChat && isViewingOwnProfile ? (
-            // Post-onboarding profile: no header buttons. The "Got it!"
-            // floating button at the bottom is the only action.
-            null
-          ) : (
-            <>
-              {/* Same header rule as the loaded state: own-profile ROOT shows
-                  the gear top-left (no back) — including while LOADING. */}
-              {isViewingOwnProfile && onSettings ? (
-                <TouchableOpacity style={styles.backButton} onPress={onSettings}>
-                  <View style={styles.backButtonContainer}>
-                    <Ionicons name="settings-outline" size={24} color="#333" />
-                  </View>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-                  <View style={styles.backButtonContainer}>
-                    <BackButtonIcon />
-                  </View>
-                </TouchableOpacity>
-              )}
-              {isViewingOwnProfile && onEdit ? (
-                <TouchableOpacity style={styles.editButton} onPress={onEdit}>
-                  <View style={styles.editButtonContainer}>
-                    <EditButtonIcon />
-                  </View>
-                </TouchableOpacity>
-              ) : null}
-            </>
-          )}
-        </SafeAreaView>
+        <View style={styles.fill}>
+          {/* Same standard black header as the loaded state — including while
+              LOADING — so there's no header shift once the profile resolves. */}
+          {renderProfileHeader()}
+        </View>
       </Reanimated.View>
     );
   }
@@ -2486,6 +2606,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </TouchableOpacity>
         )}
 
+        {/* Standard black app header — pinned above the cover; pushes the cover
+            (and any Approve/Decline bar) down. */}
+        {renderProfileHeader()}
+
         {/* Approve/Decline header — host viewing a pending requester's profile.
             Solid bar pinned above the cover; pushes the cover down. */}
         {incomingRequest && !isViewingOwnProfile && (
@@ -2535,64 +2659,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
           </ProfileCoverBackground>
         </View>
 
-        {/* Header Buttons */}
-        {fromOnboardingChat && isViewingOwnProfile ? (
-          // Post-onboarding profile: no header buttons. The "Got it!"
-          // floating button at the bottom is the only action.
-          null
-        ) : (
-          <>
-            {/* Top-left: on the own-profile ROOT the gear (Settings) lives
-                here INSTEAD of a back button — roots have no back. Cards and
-                other-user profiles keep the back button. */}
-            {isViewingOwnProfile && onSettings ? (
-              <TouchableOpacity style={styles.backButton} onPress={onSettings}>
-                <View style={styles.backButtonContainer}>
-                  <Ionicons name="settings-outline" size={24} color="#333" />
-                </View>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
-                <View style={styles.backButtonContainer}>
-                  <BackButtonIcon />
-                </View>
-              </TouchableOpacity>
-            )}
-
-            {/* Edit Button - Only visible when viewing own profile */}
-            {isViewingOwnProfile && onEdit ? (
-              <TouchableOpacity style={styles.editButton} onPress={onEdit}>
-                <View style={styles.editButtonContainer}>
-                  <EditButtonIcon />
-                </View>
-              </TouchableOpacity>
-            ) : null}
-
-            {/* Three-dot menu - Only visible when viewing another user's profile */}
-            {!isViewingOwnProfile && userId && (
-              <>
-                <TouchableOpacity style={styles.profileMenuButton} onPress={() => setShowProfileMenu(!showProfileMenu)}>
-                  <Ionicons name="ellipsis-vertical" size={20} color="#333" />
-                </TouchableOpacity>
-                {showProfileMenu && (
-                  <>
-                    <TouchableOpacity style={styles.profileMenuDismiss} activeOpacity={1} onPress={() => setShowProfileMenu(false)} />
-                    <View style={styles.profileMenuDropdown}>
-                      <TouchableOpacity style={styles.profileMenuItem} activeOpacity={0.7} onPress={() => { setShowProfileMenu(false); setShowReportOverlay(true); }}>
-                        <Ionicons name="alert-circle-outline" size={20} color="#222B30" />
-                        <RNText style={styles.profileMenuItemText}>Report</RNText>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.profileMenuItem} activeOpacity={0.7} onPress={() => { setShowProfileMenu(false); setShowBlockOverlay(true); }}>
-                        <Ionicons name="ban-outline" size={20} color="#222B30" />
-                        <RNText style={styles.profileMenuItemText}>Block</RNText>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                )}
-              </>
-            )}
-          </>
-        )}
+        {/* Header buttons now live in the standard black header (rendered above
+            the ScrollView). The ⋮ Report/Block dropdown is rendered at the
+            screen root — see renderProfileMenuOverlay() below. */}
 
         {/* Profile Picture - Centered */}
         <View style={styles.profilePictureContainer}>
@@ -2952,6 +3021,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         </View>
       </ScrollView>
       </MaybeGestureDetector>
+
+      {/* ⋮ menu (Report / Block) — rendered above the ScrollView so its
+          full-screen dismiss layer works and the dropdown isn't clipped. */}
+      {renderProfileMenuOverlay()}
       </ImageBackground>
       {/* Message / Connect button — floats at the bottom of any other user's
           profile, INCLUDING when reviewing a join request. Approve/Decline lives
@@ -3246,6 +3319,59 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
+  },
+  // Standard black app header (#212121 bar) — see renderProfileHeader().
+  profileHeaderContainer: {
+    backgroundColor: '#212121',
+    // 24 = MainHeader's `spaceBelow` on The Lineup, so total header height
+    // matches exactly (see renderProfileHeader's paddingTop comment).
+    paddingBottom: 24,
+    position: 'relative',
+    zIndex: 100,
+    elevation: 100,
+  },
+  profileHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: spacing.md, // 16
+    paddingRight: spacing.sm, // 8
+    minHeight: 44,
+  },
+  profileHeaderLeftBtn: {
+    width: 32,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+  },
+  profileHeaderTitle: {
+    flex: 1,
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: fs(22), // match the "Trips" header title size
+    lineHeight: 28,
+    color: '#FFFFFF',
+    marginLeft: 4,
+    ...(Platform.OS === 'web'
+      ? { fontWeight: '700' as const }
+      : { includeFontPadding: false }),
+  },
+  profileHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  profileHeaderActionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileHeaderHairline: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
   },
   backButton: {
     position: 'absolute',
