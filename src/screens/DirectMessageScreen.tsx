@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition, withTiming, Easing } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
@@ -931,7 +932,15 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       .catch(() => { /* stays undefined → divider skipped */ });
   }, [currentConversationId, currentUserId]);
 
+  // FOCUS-GATED (same discipline as useTripRealtime): the root card stack keeps
+  // covered screens MOUNTED, so without this gate a chat buried under other
+  // cards held its message channel (~6 bindings) open for its whole stack
+  // lifetime — the channel-pileup pattern behind the June freeze (a03352f).
+  // On blur the cleanup below tears the subscription down; on refocus the
+  // effect re-runs in full, and loadMessages() doubles as the catch-up fetch.
+  const isFocused = useIsFocused();
   useEffect(() => {
+    if (!isFocused) return;
     if (currentConversationId) {
       if (reconnectAttempt === 0) {
         hasTriedReconnectRef.current = false;
@@ -1319,7 +1328,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         setMessagingCurrentConversationId(null);
       }
     };
-  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId]);
+  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId, isFocused]);
 
   // Separate useEffect to mark as read when currentUserId becomes available
   useEffect(() => {

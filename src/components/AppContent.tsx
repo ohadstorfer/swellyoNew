@@ -52,6 +52,7 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { logEvent } from '../services/analytics/eventLogger';
+import { trackEvent } from '../services/analytics/posthogService';
 import Constants from 'expo-constants';
 
 const APP_OPENED_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
@@ -1815,20 +1816,23 @@ export const AppContent: React.FC = () => {
     showProfile ||
     showProfileEditor;
 
-  // Dev-only perf watchdog. SILENT when healthy — only logs when the JS thread
-  // actually freezes (a 2s timer that fires >1s late = the thread was blocked).
-  // Quiet Metro = the app is genuinely fine. A "⚠️ PERF" line = a REAL foreground
-  // stall, with how long it blocked + open realtime channel count for context.
+  // Perf watchdog. SILENT when healthy — only acts when the JS thread actually
+  // freezes (a 2s timer that fires >1s late = the thread was blocked). Dev:
+  // logs a "⚠️ PERF" line to Metro. Production: reports a rate-limited
+  // `js_thread_stall` PostHog event carrying the realtime channel census, the
+  // current route and the root-stack depth — so field freeze reports arrive
+  // with their own diagnosis attached instead of needing a repro.
   //
   // Critically: iOS suspends JS timers while the app is backgrounded / the phone
   // is locked, so a plain timer-drift check reports huge FAKE "freezes" (e.g.
   // 28s) that are really just you switching apps. We track AppState and skip the
   // warning whenever the app was anything but 'active' across the interval — so a
-  // ⚠️ line means a genuine on-screen freeze, not a suspended timer.
+  // report means a genuine on-screen freeze, not a suspended timer.
   useEffect(() => {
-    if (!__DEV__) return;
     let last = Date.now();
     let leftActive = false;
+    let lastReportAt = 0;
+    let reportsThisSession = 0;
     const sub = AppState.addEventListener('change', (s) => {
       if (s !== 'active') leftActive = true;
     });
@@ -1838,13 +1842,64 @@ export const AppContent: React.FC = () => {
       last = now;
       const wasBackgrounded = leftActive || AppState.currentState !== 'active';
       leftActive = AppState.currentState !== 'active';
-      if (lag > 1000 && !wasBackgrounded) {
-        let channels = 0;
-        try { channels = supabase.getChannels().length; } catch { /* noop */ }
+      if (lag <= 1000 || wasBackgrounded) return;
+      let channels = 0;
+      let channelStates = '';
+      try {
+        const chans = supabase.getChannels();
+        channels = chans.length;
+        const tally: Record<string, number> = {};
+        for (const c of chans) tally[c.state] = (tally[c.state] ?? 0) + 1;
+        channelStates = Object.entries(tally).map(([state, n]) => `${state}:${n}`).join(' ');
+      } catch { /* noop */ }
+      if (__DEV__) {
         console.log(`⚠️ PERF: JS thread blocked ${Math.round(lag)}ms (realtime channels: ${channels})`);
       }
+      // Rate-limited so a long degradation doesn't flood PostHog: at most one
+      // report per 30s and 10 per session. The stall itself delays this timer,
+      // so each report's blocked_ms reflects the worst block since the last tick.
+      if (reportsThisSession >= 10 || now - lastReportAt < 30_000) return;
+      reportsThisSession += 1;
+      lastReportAt = now;
+      let route = '';
+      let rootStackDepth = 0;
+      try {
+        route = navigationRef.getCurrentRoute()?.name ?? '';
+        rootStackDepth = navigationRef.isReady() ? (navigationRef.getRootState()?.routes.length ?? 0) : 0;
+      } catch { /* noop */ }
+      trackEvent('js_thread_stall', {
+        blocked_ms: Math.round(lag),
+        realtime_channels: channels,
+        channel_states: channelStates,
+        route,
+        root_stack_depth: rootStackDepth,
+      });
     }, 2000);
     return () => { sub.remove(); clearInterval(id); };
+  }, []);
+
+  // Dev-only realtime channel tracker — logs ONLY when the channel set changes,
+  // silent while stable. Catches the "cycling screens leaks channels" failure:
+  // opening/closing trips should net back to the same set; a steadily climbing
+  // count (or topics stuck in leaving/errored) = leaked channels, each of which
+  // still participates in every socket-error rejoin storm.
+  useEffect(() => {
+    if (!__DEV__) return;
+    let prev = '';
+    const id = setInterval(() => {
+      try {
+        const chans = supabase.getChannels();
+        const topics = chans.map((c) => `${c.topic}[${c.state}]`).sort();
+        const snapshot = topics.join(' ');
+        if (snapshot === prev) return;
+        prev = snapshot;
+        const tally: Record<string, number> = {};
+        for (const c of chans) tally[c.state] = (tally[c.state] ?? 0) + 1;
+        const states = Object.entries(tally).map(([s, n]) => `${s}:${n}`).join(' ');
+        console.log(`📡 RT-CHANNELS: ${chans.length} (${states})`, topics);
+      } catch { /* noop */ }
+    }, 3000);
+    return () => clearInterval(id);
   }, []);
   //
   // Several of the handlers above are plain (non-useCallback) functions that

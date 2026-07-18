@@ -17,19 +17,35 @@
  * back), so a plain useEffect would hold this channel open forever and they'd
  * pile up — saturating the realtime socket. useFocusEffect tears the channel
  * down on blur and re-opens it on focus, so only the screen you're looking at
- * holds a live line. On re-focus we force a refetch to catch anything that
- * changed while we were unsubscribed. (This is the pattern React Navigation
- * v8's inactiveBehavior="pause" will automate.)
+ * holds a live line. Channel setup/teardown goes through acquireTopic
+ * (tripsRealtime.ts) so fast blur→refocus reuses the live channel instead of
+ * churning join/leave on the socket.
+ *
+ * CATCH-UP is split by why we're focusing:
+ *  - Re-focus after a blur: the channel was DOWN, events were missed, and this
+ *    screen stays mounted so nothing else refetches — invalidate every key the
+ *    broadcast handler can touch. (A host once didn't see a pending join
+ *    request because only `detail` was caught up here.)
+ *  - First focus (fresh mount): the queries are mounting and manage their own
+ *    freshness. We only invalidate when the cached detail is older than
+ *    FIRST_FOCUS_FRESH_MS — a just-prefetched open (press-in / deck viewport)
+ *    skips the burst entirely. This matters at scale: each invalidateQueries
+ *    call is 2 synchronous O(total-cache) scans in query-core, and the old
+ *    unconditional 5-key burst (10 scans + a refetch fan-out, per open) grew
+ *    quadratically over a heavy browse session — a measured contributor to the
+ *    progressive-lag freeze (docs/superpowers/plans/js-thread-freeze-spec.md).
  */
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../../config/supabase';
 import { tripsKeys } from './useTripQueries';
-import { tripTopic } from '../../services/trips/tripsRealtime';
+import { tripTopic, acquireTopic } from '../../services/trips/tripsRealtime';
+
+const FIRST_FOCUS_FRESH_MS = 30_000;
 
 export function useTripRealtime(tripId: string) {
   const queryClient = useQueryClient();
+  const hasBlurredRef = useRef(false);
 
   useFocusEffect(useCallback(() => {
     if (!tripId) return;
@@ -38,25 +54,22 @@ export function useTripRealtime(tripId: string) {
       keys.forEach((queryKey) => queryClient.invalidateQueries({ queryKey }));
     };
 
-    // Catch up on anything that changed while this screen was blurred (and its
-    // channel was closed). Must cover EVERY key the broadcast handler below can
-    // touch — the event that would have invalidated it was missed while the
-    // channel was down, and this screen stays mounted in the card stack so
-    // there's no refetch-on-mount to save us. (A host once didn't see a pending
-    // join request for this exact reason: only `detail` was caught up here, so
-    // the Plan tab's requests section stayed stale indefinitely.) Invalidating
-    // is only a fetch for keys with a mounted observer; the rest just go stale.
-    invalidate(
-      [...tripsKeys.detail(tripId)],
-      [...tripsKeys.detailRequests(tripId)],
-      [...tripsKeys.detailUpdates(tripId)],
-      [...tripsKeys.detailGear(tripId)],
-      [...tripsKeys.detailGearRequests(tripId)],
-    );
+    const detailState = queryClient.getQueryState(tripsKeys.detail(tripId));
+    const detailAgeMs = detailState?.dataUpdatedAt
+      ? Date.now() - detailState.dataUpdatedAt
+      : Infinity;
+    if (hasBlurredRef.current || detailAgeMs > FIRST_FOCUS_FRESH_MS) {
+      invalidate(
+        [...tripsKeys.detail(tripId)],
+        [...tripsKeys.detailRequests(tripId)],
+        [...tripsKeys.detailUpdates(tripId)],
+        [...tripsKeys.detailGear(tripId)],
+        [...tripsKeys.detailGearRequests(tripId)],
+      );
+    }
 
-    const channel = supabase
-      .channel(tripTopic(tripId), { config: { private: true } })
-      .on('broadcast', { event: 'trip_changed' }, ({ payload }: any) => {
+    const release = acquireTopic(tripTopic(tripId), (channel) => {
+      channel.on('broadcast', { event: 'trip_changed' }, ({ payload }: any) => {
         switch (payload?.table as string | undefined) {
           case 'group_trips':
             invalidate([...tripsKeys.detail(tripId)], [...tripsKeys.explore], ['trips', 'my']);
@@ -87,11 +100,12 @@ export function useTripRealtime(tripId: string) {
             // safe blanket refresh of the core query.
             invalidate([...tripsKeys.detail(tripId)]);
         }
-      })
-      .subscribe();
+      });
+    });
 
     return () => {
-      try { supabase.removeChannel(channel); } catch { /* noop */ }
+      hasBlurredRef.current = true;
+      release();
     };
   }, [tripId, queryClient]));
 }

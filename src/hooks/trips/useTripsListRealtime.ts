@@ -25,9 +25,8 @@ import { useCallback } from 'react';
 import { InteractionManager } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../../config/supabase';
 import { tripsKeys } from './useTripQueries';
-import { TRIPS_LIST_TOPIC, tripsMineTopic } from '../../services/trips/tripsRealtime';
+import { TRIPS_LIST_TOPIC, tripsMineTopic, acquireTopic } from '../../services/trips/tripsRealtime';
 
 // Survives remounts within a session — throttles the focus catch-up so that
 // returning to Trips within 5 minutes of the last refresh does not re-fetch
@@ -78,23 +77,23 @@ export function useTripsListRealtime(userId: string | undefined) {
         invalidateMineSoon();
       }
 
-      const exploreChannel = supabase
-        .channel(TRIPS_LIST_TOPIC, { config: { private: true } })
-        .on('broadcast', { event: 'trips_list_changed' }, invalidateExploreSoon)
-        .subscribe();
-
-      const mineChannel = userId
-        ? supabase
-            .channel(tripsMineTopic(userId), { config: { private: true } })
-            .on('broadcast', { event: 'trips_mine_changed' }, invalidateMineSoon)
-            .subscribe()
+      // acquireTopic (tripsRealtime.ts): every card open blurs this screen and
+      // every back re-focuses it, so these two constant topics used to churn a
+      // join/leave pair per navigation — the linger window makes the round trip
+      // free, and teardown is serialized against the same-topic re-subscribe
+      // race in realtime-js.
+      const releaseExplore = acquireTopic(TRIPS_LIST_TOPIC, (channel) => {
+        channel.on('broadcast', { event: 'trips_list_changed' }, invalidateExploreSoon);
+      });
+      const releaseMine = userId
+        ? acquireTopic(tripsMineTopic(userId), (channel) => {
+            channel.on('broadcast', { event: 'trips_mine_changed' }, invalidateMineSoon);
+          })
         : null;
 
       teardown = () => {
-        try { supabase.removeChannel(exploreChannel); } catch { /* noop */ }
-        if (mineChannel) {
-          try { supabase.removeChannel(mineChannel); } catch { /* noop */ }
-        }
+        releaseExplore();
+        releaseMine?.();
       };
     });
 

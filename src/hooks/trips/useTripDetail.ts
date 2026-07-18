@@ -49,6 +49,7 @@ export type TripRequestsData = {
 function seedFromListCache(
   queryClient: ReturnType<typeof useQueryClient>,
   tripId: string,
+  currentUserId: string | null,
 ): TripCoreData | undefined {
   // Seed from the no-filter Explore page (the default deck). Filtered explore
   // variants live under different keys; the unfiltered page is the common case.
@@ -59,12 +60,13 @@ function seedFromListCache(
   const exploreTrip = exploreTrips.find(t => t.id === tripId);
   if (exploreTrip) return { trip: exploreTrip, participants: [], myRequest: null };
 
-  // Try every cached my-trips key (userId is baked into the key).
-  for (const q of queryClient.getQueryCache().getAll()) {
-    const key = q.queryKey as string[];
-    if (key[0] === 'trips' && key[1] === 'my') {
-      const myData = q.state.data as MyTripsData | undefined;
-      if (!myData) continue;
+  // My-trips lookup by exact key (userId is baked into it). This used to scan
+  // getQueryCache().getAll() — an O(total-cache) walk on every mount, which
+  // compounds over a long browse session; only the current user's key can
+  // exist, so a direct read is equivalent.
+  if (currentUserId) {
+    const myData = queryClient.getQueryData<MyTripsData>(tripsKeys.my(currentUserId));
+    if (myData) {
       const all = [
         ...myData.buckets.approved,
         ...myData.buckets.pending,
@@ -76,6 +78,13 @@ function seedFromListCache(
   }
   return undefined;
 }
+
+/** Trip-detail cache entries outlive their screen (card pop) by this much.
+ *  Deliberately shorter than the app-wide 30-min default: a heavy Explore
+ *  session touches dozens of trips (opens + viewport prefetches) and every
+ *  entry pins memory AND lengthens the synchronous cache scans that every
+ *  invalidateQueries call performs (see js-thread-freeze-spec.md). */
+export const TRIP_DETAIL_GC_MS = 1000 * 60 * 5;
 
 // ---------------------------------------------------------------------------
 // Core: trip + participants + myRequest (one query key)
@@ -103,7 +112,8 @@ export function useTripCore(tripId: string, currentUserId: string | null) {
   return useQuery<TripCoreData>({
     queryKey: tripsKeys.detail(tripId),
     queryFn: ({ signal }) => fetchTripCore(tripId, currentUserId, signal),
-    placeholderData: () => seedFromListCache(queryClient, tripId),
+    placeholderData: () => seedFromListCache(queryClient, tripId, currentUserId),
+    gcTime: TRIP_DETAIL_GC_MS,
   });
 }
 
@@ -111,6 +121,7 @@ export function useTripAdminUpdates(tripId: string) {
   return useQuery<AdminUpdate[]>({
     queryKey: tripsKeys.detailUpdates(tripId),
     queryFn: () => listAdminUpdates(tripId),
+    gcTime: TRIP_DETAIL_GC_MS,
   });
 }
 
@@ -118,6 +129,7 @@ export function useTripGear(tripId: string, currentUserId: string | null) {
   return useQuery<EnrichedGearItem[]>({
     queryKey: tripsKeys.detailGear(tripId),
     queryFn: () => listGearItems(tripId, currentUserId),
+    gcTime: TRIP_DETAIL_GC_MS,
   });
 }
 
@@ -132,6 +144,7 @@ export function useTripRequests(tripId: string, isHost: boolean) {
       ]);
       return { pending, declined };
     },
+    gcTime: TRIP_DETAIL_GC_MS,
   });
 }
 
@@ -140,5 +153,6 @@ export function useTripGearRequests(tripId: string, isHost: boolean) {
     queryKey: tripsKeys.detailGearRequests(tripId),
     enabled: isHost,
     queryFn: () => listGearRequests(tripId, 'pending'),
+    gcTime: TRIP_DETAIL_GC_MS,
   });
 }
