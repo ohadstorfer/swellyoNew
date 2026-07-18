@@ -1,0 +1,98 @@
+diff --git a/node_modules/react-native-bottom-tabs/ios/TabItem.swift b/node_modules/react-native-bottom-tabs/ios/TabItem.swift
+index 3866c59..b7e1e48 100644
+--- a/node_modules/react-native-bottom-tabs/ios/TabItem.swift
++++ b/node_modules/react-native-bottom-tabs/ios/TabItem.swift
+@@ -1,10 +1,17 @@
+ import SwiftUI
++#if canImport(UIKit)
++import UIKit
++#endif
+ 
+ struct TabItem: View {
+   var title: String?
+   var icon: PlatformImage?
+   var sfSymbol: String?
+   var labeled: Bool?
++  // Swellyo patch: whether THIS tab is the selected one, so we can fill the
++  // symbol only when selected (SwiftUI's TabView otherwise fills every tab
++  // symbol). Defaults false so non-updated call sites still compile.
++  var focused: Bool = false
+ 
+   var body: some View {
+     if let icon {
+@@ -14,11 +21,45 @@ struct TabItem: View {
+       Image(uiImage: icon)
+ #endif
+     } else if let sfSymbol, !sfSymbol.isEmpty {
+-      Image(systemName: sfSymbol)
+-        .noneSymbolVariant()
++      // Swellyo patch: outline when unselected, `.fill` when selected — restores
++      // the app's outline-inactive look while adding fill-on-select. Upstream
++      // called `.noneSymbolVariant()` which forced `.none` on BOTH states (no
++      // selected fill); SwiftUI's default fills BOTH. Driving the variant off
++      // `focused` gives the WhatsApp-style outline→fill, and on iOS 17+ the
++      // content transition animates it as SF Symbols "Magic Replace".
++      symbolImage(sfSymbol)
++        .environment(\.symbolVariants, focused ? .fill : .none)
++        .modifier(SymbolMorphTransition())
+     }
+     if labeled != false {
+       Text(title ?? "")
+     }
+   }
++
++  // `Image(systemName:)` resolves ONLY system symbols; a custom app-bundled
++  // symbol (asset-catalog Symbol Image Set) must load via `Image(_:)`.
++  @ViewBuilder
++  private func symbolImage(_ name: String) -> some View {
++#if os(macOS)
++    Image(systemName: name)
++#else
++    if UIImage(systemName: name) != nil {
++      Image(systemName: name)
++    } else {
++      Image(name)
++    }
++#endif
++  }
++}
++
++// Animates the outline↔fill variant change as SF Symbols "Magic Replace" where
++// available (iOS 17+). No-op on older OSes — the states still switch correctly.
++private struct SymbolMorphTransition: ViewModifier {
++  func body(content: Content) -> some View {
++    if #available(iOS 17.0, macOS 14.0, tvOS 17.0, visionOS 1.0, *) {
++      content.contentTransition(.symbolEffect(.replace))
++    } else {
++      content
++    }
++  }
+ }
+diff --git a/node_modules/react-native-bottom-tabs/ios/TabView/LegacyTabView.swift b/node_modules/react-native-bottom-tabs/ios/TabView/LegacyTabView.swift
+index 5bfc58f..8206f34 100644
+--- a/node_modules/react-native-bottom-tabs/ios/TabView/LegacyTabView.swift
++++ b/node_modules/react-native-bottom-tabs/ios/TabView/LegacyTabView.swift
+@@ -56,7 +56,8 @@ struct LegacyTabView: AnyTabView {
+               title: tabData.title,
+               icon: icon,
+               sfSymbol: tabData.sfSymbol,
+-              labeled: props.labeled
++              labeled: props.labeled,
++              focused: isFocused
+             )
+             .accessibilityIdentifier(tabData.testID ?? "")
+           }
+diff --git a/node_modules/react-native-bottom-tabs/ios/TabView/NewTabView.swift b/node_modules/react-native-bottom-tabs/ios/TabView/NewTabView.swift
+index 9e8dd80..a711513 100644
+--- a/node_modules/react-native-bottom-tabs/ios/TabView/NewTabView.swift
++++ b/node_modules/react-native-bottom-tabs/ios/TabView/NewTabView.swift
+@@ -48,7 +48,8 @@ struct NewTabView: AnyTabView {
+                 title: tabData.title,
+                 icon: icon,
+                 sfSymbol: tabData.sfSymbol,
+-                labeled: props.labeled
++                labeled: props.labeled,
++                focused: isFocused
+               )
+             }
+             #if !os(tvOS)

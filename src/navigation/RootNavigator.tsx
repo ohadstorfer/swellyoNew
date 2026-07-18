@@ -8,6 +8,7 @@ import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navig
 // exact module specifier to src/navigation/bottomTabsWebShim.tsx (a JS bar),
 // because @bottom-tabs imports RN internals that can't bundle for web.
 import { createNativeBottomTabNavigator } from '@bottom-tabs/react-navigation';
+import type { SFSymbol } from 'sf-symbols-typescript';
 import ConversationsStack from './ConversationsStack';
 import { DirectMessageScreen } from '../screens/DirectMessageScreen';
 import { DirectGroupChat } from '../screens/DirectGroupChat';
@@ -548,26 +549,72 @@ function NavIconWarmer() {
   );
 }
 
-// Flip this on device to compare the two tab-bar looks, then keep the winner:
-//   'swap' → outline when inactive, filled when active (the shape changes).
-//            Optimized (memoized navigator + NavIconWarmer), but the library
-//            still reloads the icon through RCTImageLoader async on each tap, so
-//            the swap lands a frame or two after the selection.
-//   'tint' → native tint: ONE icon per tab, UIKit swaps image/selectedImage
-//            (dark active / grey inactive) instantly with zero JS — perfectly
-//            smooth. Same shape both states. Uses the FILLED glyph so the active
-//            tab still reads as "filled"; inactive is that shape in grey. To try
-//            the outline glyph instead, swap `filled` → `outline` in tabIcon().
-const TAB_ICON_MODE: 'swap' | 'tint' = 'swap';
+// Flip this on device to compare the tab-bar looks, then keep the winner:
+//   'swap'     → outline inactive, filled active (the shape changes). Optimized
+//                (memoized navigator + NavIconWarmer), but the library still
+//                reloads the icon through RCTImageLoader async on each tap, so
+//                the swap lands a frame or two after the selection.
+//   'tint'     → native tint: ONE icon per tab, UIKit swaps image/selectedImage
+//                (dark active / grey inactive) instantly with zero JS — perfectly
+//                smooth, but same SHAPE both states (no outline→fill).
+//   'sfsymbol' → the WhatsApp effect: iOS renders an SF Symbol and MORPHS it
+//                outline→`.fill` on selection (iOS 26 = Liquid Glass "Magic
+//                Replace"). Requires the patches/react-native-bottom-tabs patch
+//                (drops `.noneSymbolVariant()`) + a NATIVE rebuild — iOS only,
+//                NOT OTA-able, dead in Expo Go. Android has no SF Symbols, so it
+//                always falls back to the 'swap' raster path below.
+//                ⚠ The symbols below are PLACEHOLDERS to see the morph quality.
+//                Matching the real brand icons needs custom SF Symbols authored
+//                with a baked-in fill layer (.symbolset in an asset catalog) —
+//                two separate PNGs will NOT morph. Keep default 'swap' for ship
+//                builds until the custom symbols exist.
+const TAB_ICON_MODE = 'swap' as 'swap' | 'tint' | 'sfsymbol';
 
-// Builds the tabBarIcon for a tab from its filled + outline sources, honoring
-// TAB_ICON_MODE. In 'tint' mode the returned source is focus-independent, so the
-// icons array stays stable across switches — the library never re-fires its
-// async icon load and UIKit does the active/inactive swap natively.
-const tabIcon = (filled: number, outline: number) =>
-  TAB_ICON_MODE === 'tint'
-    ? () => filled
-    : ({ focused }: { focused: boolean }) => (focused ? filled : outline);
+type TabKey = 'lineup' | 'trips' | 'profile';
+
+// SYSTEM symbols chosen to match the current brand icons (all have a `.fill`
+// variant, so the outline→fill morph fires). These give the WhatsApp effect with
+// ZERO custom-symbol authoring — the pragmatic alternative to Phase 2.
+//   lineup : the current icon IS a paperplane/send → near-exact match.
+//   trips  : matches the current map icon.
+//   profile: person-in-circle, like the avatar.
+// Swap-in alternatives that also morph:
+//   lineup : 'person.2' | 'person.3' | 'dot.radiowaves.left.and.right' | 'figure.surfing'
+//   trips  : 'suitcase' | 'beach.umbrella' | 'location'   (NOT 'airplane' — no .fill)
+//   profile: 'person' | 'person.circle'
+const TAB_SF_SYMBOLS: Record<TabKey, SFSymbol> = {
+  lineup: 'paperplane',
+  trips: 'map',
+  profile: 'person.crop.circle',
+};
+
+// Phase 2 target — CUSTOM brand symbols. Once the outline+fill pairs are authored
+// in the SF Symbols app and dropped into ios/Swellyo/Images.xcassets (each as a
+// Symbol Image Set named exactly like below, plus its `.fill` twin), swap
+// TAB_SF_SYMBOLS above for TAB_CUSTOM_SYMBOLS. The patched TabItem.swift loads
+// these via Image(name) (systemName can't) and the `.fill` resolves by convention.
+// Cast to SFSymbol because the type only knows system names — these are ours.
+const TAB_CUSTOM_SYMBOLS: Record<TabKey, SFSymbol> = {
+  lineup: 'co.swellyo.lineup' as SFSymbol,
+  trips: 'co.swellyo.trips' as SFSymbol,
+  profile: 'co.swellyo.profile' as SFSymbol,
+};
+void TAB_CUSTOM_SYMBOLS; // referenced once authored; keeps it from being dropped
+
+// Builds the tabBarIcon for a tab, honoring TAB_ICON_MODE.
+//   sfsymbol (iOS): returns an AppleIcon → native outline→fill morph.
+//   tint: focus-independent single source → stable icons array, native tint swap.
+//   swap: outline vs filled raster per focus (also the Android fallback).
+const tabIcon = (key: TabKey, filled: number, outline: number) => {
+  if (TAB_ICON_MODE === 'sfsymbol' && Platform.OS === 'ios') {
+    const sfSymbol = TAB_SF_SYMBOLS[key];
+    return () => ({ sfSymbol });
+  }
+  if (TAB_ICON_MODE === 'tint') {
+    return () => filled;
+  }
+  return ({ focused }: { focused: boolean }) => (focused ? filled : outline);
+};
 
 // The native tab bar itself. Memoized on `barSuppressed` — its ONLY real input —
 // so the churn in MainNavContext (requestedTab / trip-card / chat-card opens,
@@ -594,17 +641,17 @@ const TabsNavigator = React.memo(function TabsNavigator({ barSuppressed }: { bar
       <Tab.Screen
         name="Lineup"
         component={LineupTabScreen}
-        options={{ title: 'The Lineup', tabBarIcon: tabIcon(Images.nav.theLineupFilled, Images.nav.theLineup) }}
+        options={{ title: 'The Lineup', tabBarIcon: tabIcon('lineup', Images.nav.theLineupFilled, Images.nav.theLineup) }}
       />
       <Tab.Screen
         name="Trips"
         component={TripsTabScreen}
-        options={{ title: 'Trips', tabBarIcon: tabIcon(Images.nav.tripsFilled, Images.nav.trips) }}
+        options={{ title: 'Trips', tabBarIcon: tabIcon('trips', Images.nav.tripsFilled, Images.nav.trips) }}
       />
       <Tab.Screen
         name="Profile"
         component={ProfileTabScreen}
-        options={{ title: 'Profile', tabBarIcon: tabIcon(Images.nav.profileFilled, Images.nav.profile) }}
+        options={{ title: 'Profile', tabBarIcon: tabIcon('profile', Images.nav.profileFilled, Images.nav.profile) }}
       />
     </Tab.Navigator>
   );
