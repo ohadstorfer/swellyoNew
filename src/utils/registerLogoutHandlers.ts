@@ -9,6 +9,7 @@ import { logoutRegistry } from './logoutRegistry';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { clearConversationListCache } from '../services/messaging/conversationListCache';
 import { resetForLogout as imageUploadResetForLogout } from '../services/messaging/imageUploadService';
+import { resetSignedVideoUrlCache } from '../services/messaging/videoUploadService';
 import { clearAllMatchedUsers } from './tripPlanningStorage';
 import { clearCachedUserProfile } from './userProfileCache';
 import { clearPreloadCache } from '../services/media/videoPreloadService';
@@ -35,6 +36,9 @@ export function registerLogoutHandlers(): void {
   logoutRegistry.register(() => chatHistoryCache.clearAll());
   logoutRegistry.register(() => clearConversationListCache());
   logoutRegistry.register(() => imageUploadResetForLogout());
+  // Presigned DM video URLs are readable by anyone holding them — they must not
+  // outlive the session that was authorised to get them.
+  logoutRegistry.register(() => resetSignedVideoUrlCache());
   logoutRegistry.register(() => clearAllMatchedUsers());
   logoutRegistry.register(async () => {
     try {

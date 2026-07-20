@@ -7,8 +7,11 @@ import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { Platform } from 'react-native';
 import { VideoMetadata } from './messagingService';
 
-const MAX_VIDEO_SIZE_MB = 250;
-const MAX_VIDEO_DURATION_SECONDS = 120; // 2 minutes for DMs
+// Limits live in their own dependency-free module so the send path can enforce
+// them without pulling this service in — see videoLimits.ts for why that matters.
+import { assertVideoWithinLimits } from './videoLimits';
+
+export { assertVideoWithinLimits } from './videoLimits';
 
 export interface VideoProcessingResult {
   originalUri: string;
@@ -76,7 +79,7 @@ const uriToBlob = async (uri: string): Promise<Blob> => {
   });
 };
 
-const getAuthHeaders = async (): Promise<HeadersInit> => {
+const getAuthHeaders = async (): Promise<{ headers: HeadersInit; userId: string }> => {
   const { data: { session }, error } = await supabase.auth.getSession();
   if (error || !session) {
     throw new Error('Not authenticated');
@@ -85,10 +88,18 @@ const getAuthHeaders = async (): Promise<HeadersInit> => {
   if (!anonKey) {
     throw new Error('EXPO_PUBLIC_SUPABASE_ANON_KEY is not set');
   }
+  // The userId rides along because the session already carries it. Callers used
+  // to follow this with `supabase.auth.getUser()`, which is a round trip to
+  // /auth/v1/user for a value we are already holding — and auth in this app has
+  // been measured at ~2.5s. It was pure latency on the tap-to-play path.
+  // Authorisation is unaffected: the Edge Function authorises off the JWT.
   return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${session.access_token}`,
-    'apikey': anonKey,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session.access_token}`,
+      'apikey': anonKey,
+    } as HeadersInit,
+    userId: session.user.id,
   };
 };
 
@@ -100,10 +111,31 @@ const getEdgeFunctionUrl = (): string => {
 // ─── On-demand signing ───────────────────────────────────────────────────────
 
 /**
- * Get a fresh short-lived presigned URL for a DM video, signed on-demand when
- * the user opens it. DM videos are private (not public-readable), so we never
- * persist a playable URL — we sign per playback instead. The Edge Function
- * authorizes against conversation membership.
+ * Signed URLs already handed out, keyed by S3 key. Re-opening a video is common
+ * (open, close, reopen; scrolling back through a chat) and each re-open
+ * otherwise paid the full auth + Edge Function round trip again for a URL that
+ * was still perfectly valid.
+ *
+ * TTL is deliberately far below the presign's own lifetime — this is a latency
+ * cache, not a lifetime cache, so we can never hand back an expired URL.
+ */
+const SIGNED_URL_TTL_MS = 5 * 60 * 1000;
+const signedUrlCache = new Map<string, { url: string; expiresAt: number }>();
+const signingInFlight = new Map<string, Promise<string | null>>();
+
+/** Drop every cached signing — call on logout so a URL can't outlive the session. */
+export function resetSignedVideoUrlCache(): void {
+  signedUrlCache.clear();
+  signingInFlight.clear();
+}
+
+/**
+ * Get a short-lived presigned URL for a DM video, signed on-demand when the user
+ * opens it. DM videos are private (not public-readable), so we never persist a
+ * playable URL — we sign per playback instead. The Edge Function authorizes
+ * against conversation membership.
+ *
+ * Served from `signedUrlCache` when still fresh, so a re-open is instant.
  *
  * @param storagePath The S3 key stored in video_metadata.storage_path
  *                    (e.g. "uploads/dm/{convId}/{msgId}/video-{ts}.mp4")
@@ -112,34 +144,50 @@ const getEdgeFunctionUrl = (): string => {
 export async function signDmVideoUrl(storagePath: string): Promise<string | null> {
   if (!storagePath || !isSupabaseConfigured()) return null;
 
-  try {
-    const functionUrl = getEdgeFunctionUrl();
-    const headers = await getAuthHeaders();
+  const cached = signedUrlCache.get(storagePath);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+  // A second tap while the first is still signing rides the same request
+  // instead of starting a competing round trip.
+  const existing = signingInFlight.get(storagePath);
+  if (existing) return existing;
 
-    const response = await fetch(functionUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        action: 'sign-dm-video',
-        userId: user.id,
-        storagePath,
-      }),
-    });
+  const request = (async (): Promise<string | null> => {
+    try {
+      const functionUrl = getEdgeFunctionUrl();
+      const { headers, userId } = await getAuthHeaders();
 
-    if (!response.ok) {
-      console.warn('[videoUploadService] sign-dm-video failed:', await response.text());
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'sign-dm-video',
+          userId,
+          storagePath,
+        }),
+      });
+
+      if (!response.ok) {
+        console.warn('[videoUploadService] sign-dm-video failed:', await response.text());
+        return null;
+      }
+
+      const result = await response.json();
+      const url = result.ready && result.videoUrl ? result.videoUrl : null;
+      if (url) {
+        signedUrlCache.set(storagePath, { url, expiresAt: Date.now() + SIGNED_URL_TTL_MS });
+      }
+      return url;
+    } catch (error) {
+      console.warn('[videoUploadService] sign-dm-video error:', error);
       return null;
+    } finally {
+      signingInFlight.delete(storagePath);
     }
+  })();
 
-    const result = await response.json();
-    return result.ready && result.videoUrl ? result.videoUrl : null;
-  } catch (error) {
-    console.warn('[videoUploadService] sign-dm-video error:', error);
-    return null;
-  }
+  signingInFlight.set(storagePath, request);
+  return request;
 }
 
 // ─── Video Processing ───────────────────────────────────────────────────────
@@ -155,7 +203,7 @@ export async function processVideo(
   uri: string,
   hints?: VideoMetadataHints,
 ): Promise<VideoProcessingResult> {
-  console.log('[videoUploadService] Processing video:', uri.substring(0, 50));
+  const startedAt = Date.now();
 
   let width = hints?.width ?? 0;
   let height = hints?.height ?? 0;
@@ -259,16 +307,16 @@ export async function processVideo(
     }
   }
 
-  // Validate
-  if (fileSize > MAX_VIDEO_SIZE_MB * 1024 * 1024) {
-    throw new Error(`Video is too large (max ${MAX_VIDEO_SIZE_MB}MB)`);
-  }
+  assertVideoWithinLimits({ fileSize, duration });
 
-  if (duration > MAX_VIDEO_DURATION_SECONDS) {
-    throw new Error(`Video is too long (max ${MAX_VIDEO_DURATION_SECONDS}s)`);
-  }
-
-  console.log('[videoUploadService] Video processed:', { width, height, duration, fileSize });
+  console.log('[videoUploadService] video metadata + poster ready', {
+    platform: Platform.OS,
+    width,
+    height,
+    duration,
+    fileSize,
+    elapsedMs: Date.now() - startedAt,
+  });
 
   return {
     originalUri: uri,
@@ -291,22 +339,25 @@ export async function uploadVideoToS3(
   videoUri: string,
   conversationId: string,
   messageId: string,
+  onProgress?: (pct: number) => void,
 ): Promise<{ s3Key: string; processedKey: string; originalUrl: string }> {
-  console.log('[videoUploadService] Getting presigned URL for S3 upload');
+  // Stage logs, interpolated rather than object args (log collectors drop
+  // object payloads). Every await below can stall — auth in this app has been
+  // measured at 2.5s — and a stall here looks identical to a slow upload from
+  // the outside: a bubble stuck on "Uploading…". These say which one it is.
+  const t0 = Date.now();
+  console.log('[videoUploadService] upload step 1/4: auth headers');
 
   const functionUrl = getEdgeFunctionUrl();
-  const headers = await getAuthHeaders();
+  const { headers, userId } = await getAuthHeaders();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  // Get presigned upload URL
+  console.log(`[videoUploadService] upload step 2/4: presign fetch (+${Date.now() - t0}ms)`);
   const presignResponse = await fetch(functionUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       action: 'get-upload-url',
-      userId: user.id,
+      userId,
       prefix: `dm/${conversationId}/${messageId}`,
     }),
   });
@@ -317,23 +368,50 @@ export async function uploadVideoToS3(
   }
 
   const { uploadUrl, s3Key, processedKey, originalUrl } = await presignResponse.json();
-  console.log('[videoUploadService] Got presigned URL, uploading to S3:', s3Key);
+  console.log(`[videoUploadService] upload step 3/4: presigned OK (+${Date.now() - t0}ms)`);
 
   const isNativeFileUri = Platform.OS !== 'web' &&
     (videoUri.startsWith('file://') || videoUri.startsWith('content://') || videoUri.startsWith('ph://'));
 
   if (isNativeFileUri) {
-    // Native: use expo-file-system uploadAsync with BINARY_CONTENT so the native HTTP stack
-    // streams the file directly as the PUT body. This avoids the RN Blob shim which has
-    // historically produced 0-byte uploads for large video files.
+    // uploadAsync is the proven native binary PUT transport for exported iOS
+    // files. Timeout policy belongs to the send orchestration layer.
     const LegacyFS = require('expo-file-system/legacy');
-    const result = await LegacyFS.uploadAsync(uploadUrl, videoUri, {
-      httpMethod: 'PUT',
-      uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
-      headers: { 'Content-Type': 'video/mp4' },
-    });
-    if (result.status < 200 || result.status >= 300) {
-      throw new Error(`S3 upload failed: ${result.status} ${result.body?.slice(0, 200)}`);
+    // The size of what we're ACTUALLY putting on the wire. This is the number
+    // that decides whether a send takes 3s or 3min, so it gets logged before
+    // the PUT rather than inferred afterwards from how long it took.
+    let putBytes = 0;
+    try {
+      putBytes = (await LegacyFS.getInfoAsync(videoUri, { size: true }))?.size ?? 0;
+    } catch {}
+    console.log(
+      `[videoUploadService] upload step 4/4: PUT ${Math.round(putBytes / 1024)}KB ` +
+      `(+${Date.now() - t0}ms)`,
+    );
+    // createUploadTask (vs uploadAsync) is the same native transport but
+    // reports byte-level progress for the bubble's progress ring.
+    const task = LegacyFS.createUploadTask(
+      uploadUrl,
+      videoUri,
+      {
+        httpMethod: 'PUT',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': 'video/mp4' },
+      },
+      onProgress
+        ? (p: { totalBytesSent: number; totalBytesExpectedToSend: number }) => {
+            if (p.totalBytesExpectedToSend > 0) {
+              onProgress((p.totalBytesSent / p.totalBytesExpectedToSend) * 100);
+            }
+          }
+        : undefined,
+    );
+    const result = await task.uploadAsync();
+    console.log(
+      `[videoUploadService] PUT returned ${result?.status} (+${Date.now() - t0}ms)`,
+    );
+    if (!result || result.status < 200 || result.status >= 300) {
+      throw new Error(`S3 upload failed: ${result?.status} ${result?.body?.slice(0, 200)}`);
     }
   } else {
     let uploadBody: Blob;
@@ -342,20 +420,27 @@ export async function uploadVideoToS3(
     } else {
       uploadBody = await uriToBlob(videoUri);
     }
-
-    const s3Response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'video/mp4' },
-      body: uploadBody,
+    // fetch() cannot observe request-body progress — XHR can.
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl, true);
+      xhr.setRequestHeader('Content-Type', 'video/mp4');
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            onProgress((e.loaded / e.total) * 100);
+          }
+        };
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`S3 upload failed: ${xhr.status} ${String(xhr.response ?? '').slice(0, 200)}`));
+      };
+      xhr.onerror = () => reject(new Error('S3 upload failed (network error)'));
+      xhr.send(uploadBody);
     });
-
-    if (!s3Response.ok) {
-      const errorText = await s3Response.text();
-      throw new Error(`S3 upload failed: ${errorText}`);
-    }
   }
 
-  console.log('[videoUploadService] Video uploaded to S3:', s3Key);
   return { s3Key, processedKey, originalUrl };
 }
 
@@ -426,10 +511,7 @@ export async function pollForProcessedDmVideo(
   const maxAttempts = 28;
   const delayMs = 15000; // 15 seconds (28 × 15s ≈ 7 min, sized for 250 MB videos)
 
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  const headers = await getAuthHeaders();
+  const { headers, userId } = await getAuthHeaders();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -442,7 +524,7 @@ export async function pollForProcessedDmVideo(
         headers,
         body: JSON.stringify({
           action: 'get-processed-url',
-          userId: user.id,
+          userId,
           processedKey,
         }),
       });

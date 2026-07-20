@@ -28,6 +28,7 @@ import {
 import { useNavigation, StackActions } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
+import { Images } from '../assets/images';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 
@@ -207,13 +208,11 @@ export function ShareToChatScreen() {
             >
               {avatar ? (
                 <Image source={{ uri: avatar }} style={styles.avatar} contentFit="cover" />
+              ) : item.is_direct ? (
+                <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
               ) : (
                 <View style={[styles.avatar, styles.avatarFallback]}>
-                  <Ionicons
-                    name={item.is_direct ? 'person' : 'people'}
-                    size={18}
-                    color="#FFFFFF"
-                  />
+                  <Ionicons name="people" size={18} color="#FFFFFF" />
                 </View>
               )}
               <Text style={styles.rowTitle} numberOfLines={1}>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
 import {
   aggregateReactions,
@@ -107,8 +108,15 @@ export function useMessageReactions(
   // list. The broadcast_reaction_change DB trigger emits `reaction_changed` on a
   // private per-conversation topic; we refetch the affected message's reactions
   // on each event (idempotent, simpler than diffing payloads).
+  //
+  // FOCUS-GATED (same discipline as useTripRealtime): the root card stack keeps
+  // covered chat screens mounted, so without this gate every buried chat held a
+  // second live channel indefinitely. Reaction staleness while blurred is
+  // covered by the hydration effect above re-running on refocus-driven message
+  // reloads.
+  const isFocused = useIsFocused();
   useEffect(() => {
-    if (!conversationId) return;
+    if (!conversationId || !isFocused) return;
 
     const channel = supabase
       .channel(reactionsTopic(conversationId), { config: { private: true } })
@@ -126,7 +134,7 @@ export function useMessageReactions(
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId, refreshOne]);
+  }, [conversationId, refreshOne, isFocused]);
 
   const optimisticApply = useCallback(
     (messageId: string, nextEmoji: string | null) => {

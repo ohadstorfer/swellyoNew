@@ -31,6 +31,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { subscribeInAppBanner, InAppBannerPayload } from '../../services/notifications/inAppBannerBus';
 import { ff, fs } from '../../theme/fonts';
+import { Images } from '../../assets/images';
 
 const ENTER_FADE_MS = 200; // opacity resolves early so the spring reads as a slide
 const EXIT_MS = 260; // still shorter than the ~520ms enter spring, but unhurried
@@ -143,9 +144,7 @@ export const InAppBannerHost: React.FC = () => {
             {payload.avatarUrl ? (
               <ExpoImage source={{ uri: payload.avatarUrl }} style={styles.avatar} />
             ) : (
-              <View style={[styles.avatar, styles.avatarFallback]}>
-                <Text style={styles.avatarInitial}>{payload.title.charAt(0).toUpperCase()}</Text>
-              </View>
+              <ExpoImage source={Images.defaultAvatar} style={styles.avatar} />
             )}
             <View style={styles.texts}>
               <Text style={styles.title} numberOfLines={1}>{payload.title}</Text>
@@ -187,8 +186,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   pressed: { opacity: 0.85 },
   avatar: { width: 52, height: 52, borderRadius: 26 },
-  avatarFallback: { backgroundColor: '#05BCD3', alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { color: '#FFFFFF', fontSize: fs(20), fontFamily: ff('Inter', '700'), includeFontPadding: false },
   texts: { flex: 1, marginLeft: 12 },
   title: { color: '#FFFFFF', fontSize: fs(16), fontFamily: ff('Inter', '600'), includeFontPadding: false },
   body: { color: 'rgba(255,255,255,0.8)', fontSize: fs(15), fontFamily: ff('Inter', '400'), includeFontPadding: false, marginTop: 2 },

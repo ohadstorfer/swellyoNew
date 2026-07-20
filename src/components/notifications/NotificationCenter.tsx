@@ -20,6 +20,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { pushRootCard } from '../../navigation/navigationRef';
 import { Ionicons } from '@expo/vector-icons';
 import { getStorageThumbUrl } from '../../services/media/imageService';
+import { Images } from '../../assets/images';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   notificationsService,
@@ -644,7 +645,11 @@ const NotificationAvatar: React.FC<{
   const tripThumb = getStorageThumbUrl(tripUrl, THUMB_PX);
 
   const fallbackNode = initial ? (
-    <Text style={styles.avatarInitial}>{initial}</Text>
+    <ExpoImage
+      source={Images.defaultAvatar}
+      style={{ width: '100%', height: '100%', borderRadius: AVATAR / 2 }}
+      contentFit="cover"
+    />
   ) : (
     <Ionicons name={icon as any} size={24} color="#596E7C" />
   );
@@ -1063,12 +1068,6 @@ const styles = StyleSheet.create({
     left: AVATAR_PEEK,
     top: 0,
     zIndex: 1,
-  },
-  avatarInitial: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#596E7C',
   },
   rowBody: {
     flex: 1,

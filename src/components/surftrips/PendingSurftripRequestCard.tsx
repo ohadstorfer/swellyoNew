@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, ActivityIndicator, Image } from 're
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
 import type { EnrichedSurftripRequest } from '../../types/surftrips';
+import { Images } from '../../assets/images';
 
 interface PendingSurftripRequestCardProps {
   request: EnrichedSurftripRequest;
@@ -27,9 +28,7 @@ export const PendingSurftripRequestCard: React.FC<PendingSurftripRequestCardProp
       {profile_image_url ? (
         <Image source={{ uri: profile_image_url }} style={styles.avatar} />
       ) : (
-        <View style={[styles.avatar, styles.avatarPlaceholder]}>
-          <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
-        </View>
+        <Image source={Images.defaultAvatar} style={styles.avatar} />
       )}
       <View style={styles.info}>
         <Text style={styles.name} numberOfLines={1}>{name || 'User'}</Text>
@@ -101,8 +100,6 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10, backgroundColor: '#F2F2F2' },
-  avatarPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
-  avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
   info: { flex: 1, minWidth: 0 },
   name: { fontSize: 14, fontWeight: '600', color: '#222B30' },
   detail: { fontSize: 12, color: '#7B7B7B', marginTop: 2 },

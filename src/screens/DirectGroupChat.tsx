@@ -15,9 +15,11 @@ import {
   Dimensions,
   Linking,
   Keyboard,
+  BackHandler,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 import Reanimated, { useAnimatedStyle, FadeIn, FadeOut, LinearTransition, withTiming, Easing } from 'react-native-reanimated';
 import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 import { KeyboardGestureArea, isExpoGo } from '../utils/keyboardAvoidingView';
@@ -65,6 +67,7 @@ import { FilePreviewModal, type PickedFilePreview } from '../components/FilePrev
 import { ContactPreviewModal } from '../components/ContactPreviewModal';
 import { VideoPreviewModal } from '../components/VideoPreviewModal';
 import { MediaReviewModal, type MediaReviewItem } from '../components/MediaReviewModal';
+import UploadProgressRing from '../components/UploadProgressRing';
 import { ChatCameraModal, type CapturedAsset } from '../components/ChatCameraModal';
 import { getImageCropPicker, isPickerCancelError } from '../utils/imageCropModule';
 import { getSenderColor } from '../utils/senderColor';
@@ -84,7 +87,12 @@ import { ReportUserScreen, ReportedMessageContext } from './ReportUserScreen';
 import { ReportMessageSheet } from '../components/ReportMessageSheet';
 import { ReactionsDetailSheet, ReactorInfo } from '../components/ReactionsDetailSheet';
 import { hapticMedium } from '../utils/haptics';
-import { withTimeout } from '../services/messaging/withTimeout';
+import { withTimeout, mediaUploadTimeoutMs } from '../services/messaging/withTimeout';
+// Static — the send path must reach the optimistic bubble with ZERO awaits, and
+// this used to arrive via `await import(videoUploadService)`. See videoLimits.ts.
+import { assertVideoWithinLimits } from '../services/messaging/videoLimits';
+import { enqueueMediaUpload } from '../services/messaging/mediaSendQueue';
+import { uploadVideoWithOptionalThumbnail } from '../services/messaging/videoSendOrchestration';
 import { sanitizeMessage } from '../services/messaging/messageSanitizer';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
 import { ChatSearchHeader } from '../components/chat/ChatSearchHeader';
@@ -395,6 +403,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
+  // Loader effects read the provider list through a ref so they don't have to
+  // depend on it (which would re-run the loader on every list update).
+  const providerConversationsRef = useRef(providerConversations);
+  providerConversationsRef.current = providerConversations;
   // Current user's avatar — used for own voice-message bubbles (optimistic rows
   // have no enriched sender_avatar yet).
   const { profile: myProfile } = useUserProfile();
@@ -705,6 +717,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [unreadMarker, setUnreadMarker] = useState<{ firstUnreadId: string; count: number } | null>(null);
   const unreadMarkerResolvedRef = useRef<string | null>(null);
   const unreadScrollConsumedRef = useRef<string | null>(null);
+  // True while the window may be NON-contiguous: the loader seeded the
+  // provider's newest message ahead of the cached window and the catch-up
+  // fetch hasn't filled the gap yet. While set, the divider resolver must not
+  // trust window-local counts and asks the server instead.
+  const seededGapRef = useRef(false);
   // Reconnect catch-up: detect SUBSCRIBED after a prior disconnect and pull missed messages.
   const wasDisconnectedRef = useRef(false);
   const lastRealtimeEventAtRef = useRef<number>(Date.now());
@@ -857,6 +874,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     setUnreadMarker(null);
     unreadMarkerResolvedRef.current = null;
     unreadScrollConsumedRef.current = null;
+    seededGapRef.current = false;
     setNewWhileAwayCount(0);
   }, [currentConversationId]);
 
@@ -871,7 +889,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       .catch(() => { /* stays undefined → divider skipped */ });
   }, [currentConversationId, currentUserId]);
 
+  // FOCUS-GATED (same discipline as useTripRealtime): the root card stack keeps
+  // covered screens MOUNTED, so without this gate a group chat buried under
+  // other cards held its message channel (~6 bindings) open for its whole stack
+  // lifetime — the channel-pileup pattern behind the June freeze (a03352f).
+  // On blur the cleanup below tears the subscription down; on refocus the
+  // effect re-runs in full, and loadMessages() doubles as the catch-up fetch.
+  const isFocused = useIsFocused();
   useEffect(() => {
+    if (!isFocused) return;
     if (currentConversationId) {
       if (reconnectAttempt === 0) {
         hasTriedReconnectRef.current = false;
@@ -1051,6 +1077,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                         upload_progress: existing.upload_progress,
                         upload_error: existing.upload_error,
                         _localPreviewUri: existing._localPreviewUri,
+                        _localVideoUri: existing._localVideoUri,
                       }
                     : m);
                 }
@@ -1116,6 +1143,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   upload_progress: existing.upload_progress,
                   upload_error: existing.upload_error,
                   _localPreviewUri: existing._localPreviewUri,
+                  _localVideoUri: existing._localVideoUri,
                 };
                 toPersist = merged;
                 updated = prev.map(msg =>
@@ -1259,7 +1287,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         setMessagingCurrentConversationId(null);
       }
     };
-  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId]);
+  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId, isFocused]);
 
   // Separate useEffect to mark as read when currentUserId becomes available
   useEffect(() => {
@@ -1399,6 +1427,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   }, [currentConversationId, currentUserId]);
 
   // Mute state derived synchronously from the provider so the menu opens with the
+  // Group display name for the media-review chip. otherUserName can arrive
+  // empty for groups opened outside the conversations list, so fall back to the
+  // conversation's title (the group name).
+  const groupDisplayName = useMemo(() => {
+    const conv = providerConversations.find(c => c.id === currentConversationId);
+    return conv?.title || otherUserName || undefined;
+  }, [providerConversations, currentConversationId, otherUserName]);
+
   // correct Mute/Unmute label immediately — no async fetch on mount.
   const mutedUntil = useMemo(() => {
     if (!currentConversationId || !currentUserId) return null;
@@ -1587,10 +1623,25 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       // Preserve any local-only (un-acked optimistic) messages for THIS
       // conversation across a reconnect-triggered reload (CHANNEL_ERROR bumps
       // reconnectAttempt). Mirrors the server-fetch guard below.
+      // The conversations-list channel usually already delivered the newest
+      // message (the list preview/badge show it) — merge it in NOW so the
+      // thread doesn't render seconds behind the list while the catch-up
+      // fetch below is in flight. Any messages between the cached window and
+      // this one still arrive via the catch-up.
+      const providerLast = providerConversationsRef.current.find(c => c.id === currentConversationId)?.last_message;
+      const seedIt = providerLast && providerLast.conversation_id === currentConversationId && !providerLast.deleted
+        && !cachedMessages.some(m => m.id === providerLast.id);
+      const seededMessages = seedIt
+        ? chatHistoryCache.mergeMessages(cachedMessages, [providerLast])
+        : cachedMessages;
+      // Messages may exist between the cached window and the seeded one —
+      // don't let the divider resolver count from this window until the
+      // catch-up below confirms the window is contiguous again.
+      if (seedIt) seededGapRef.current = true;
       setMessages((prev) => {
         const localForThisConvo = prev.filter(m => m.conversation_id === currentConversationId);
-        if (localForThisConvo.length === 0) return cachedMessages;
-        return chatHistoryCache.mergeMessages(localForThisConvo, cachedMessages);
+        if (localForThisConvo.length === 0) return seededMessages;
+        return chatHistoryCache.mergeMessages(localForThisConvo, seededMessages);
       });
       setIsFetchingMessages(false);
 
@@ -1603,6 +1654,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       if (newestCachedTimestamp) {
         messagingService.getMessagesUpdatedSince(currentConversationId, new Date(newestCachedTimestamp).getTime(), 50)
           .then((newMessages) => {
+            // Window is contiguous again (everything newer than the cache is here).
+            seededGapRef.current = false;
             if (newMessages.length > 0) {
               console.log(`[DirectMessageScreen] 📬 Catch-up found ${newMessages.length} missed messages`);
               setMessages((prev) => {
@@ -1683,10 +1736,19 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         // Preserve any local-only (un-acked optimistic) messages for THIS
         // conversation across a reconnect-triggered reload. Mirrors the
         // server-fetch guard.
+        // Seed the provider's newest message immediately (see memory-cache
+        // branch above) so the thread isn't seconds behind the list preview.
+        const providerLastAsync = providerConversationsRef.current.find(c => c.id === currentConversationId)?.last_message;
+        const seedItAsync = providerLastAsync && providerLastAsync.conversation_id === currentConversationId && !providerLastAsync.deleted
+          && !asyncCachedMessages.some(m => m.id === providerLastAsync.id);
+        const seededAsync = seedItAsync
+          ? chatHistoryCache.mergeMessages(asyncCachedMessages, [providerLastAsync])
+          : asyncCachedMessages;
+        if (seedItAsync) seededGapRef.current = true;
         setMessages((prev) => {
           const localForThisConvo = prev.filter(m => m.conversation_id === currentConversationId);
-          if (localForThisConvo.length === 0) return asyncCachedMessages;
-          return chatHistoryCache.mergeMessages(localForThisConvo, asyncCachedMessages);
+          if (localForThisConvo.length === 0) return seededAsync;
+          return chatHistoryCache.mergeMessages(localForThisConvo, seededAsync);
         });
         setIsFetchingMessages(false);
 
@@ -1697,6 +1759,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         if (newestCachedTimestamp) {
           messagingService.getMessagesUpdatedSince(currentConversationId, new Date(newestCachedTimestamp).getTime(), 50)
             .then((newMessages) => {
+              // Window is contiguous again (everything newer than the cache is here).
+              seededGapRef.current = false;
               if (newMessages.length > 0) {
                 console.log(`[DirectMessageScreen] 📬 Catch-up found ${newMessages.length} missed messages (AsyncStorage path)`);
                 setMessages((prev) => {
@@ -2481,10 +2545,17 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               }
             }
 
-            if (__DEV__) console.log('[DirectMessageScreen] launching native image picker');
+            if (__DEV__) console.log('[DirectGroupChat] launching native image picker');
+            const pickerStartedAt = Date.now();
             const result = await ImagePicker.launchImageLibraryAsync({
               mediaTypes: ['images', 'videos'],
               quality: 1,
+              // videoExportPreset stays at its Passthrough default ON PURPOSE.
+              // Any other preset makes expo-image-picker skip its
+              // PHAssetResourceManager fast-path AND run a blocking
+              // AVAssetExportSession before it resolves, so the preview only
+              // appears once the whole clip has transcoded. We shrink the file
+              // after send instead (transcodeVideoForUpload), off the UI path.
               // WhatsApp-style multi-select. One asset keeps the single-item
               // flow below; ≥2 route to MediaReviewModal.
               allowsMultipleSelection: true,
@@ -2513,15 +2584,24 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             const canceled = result.canceled === true || (result as { cancelled?: boolean }).cancelled === true;
             if (__DEV__) {
               console.log(
-                '[DirectMessageScreen] picker result — canceled=', canceled,
-                'uri=', typeof uri === 'string' ? uri.slice(0, 80) : uri,
+                '[DirectGroupChat] picker result — canceled=', canceled,
                 'assetType=', asset?.type,
               );
             }
             if (uri && !canceled) {
               const isVideo = asset?.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
-              if (__DEV__) console.log('[DirectMessageScreen] classified as', isVideo ? 'video' : 'image');
+              if (__DEV__) console.log('[DirectGroupChat] classified as', isVideo ? 'video' : 'image');
               if (isVideo) {
+                // Picker hand-back latency. On Passthrough this should be well
+                // under a second; if it ever creeps up, something has knocked
+                // expo-image-picker off its PHAssetResourceManager fast-path.
+                console.log('[DirectGroupChat] video picker returned', {
+                  platform: Platform.OS,
+                  width: asset?.width ?? 0,
+                  height: asset?.height ?? 0,
+                  fileSize: asset?.fileSize ?? 0,
+                  elapsedMs: Date.now() - pickerStartedAt,
+                });
                 selectedVideoMetadataRef.current = {
                   width: asset?.width,
                   height: asset?.height,
@@ -2689,6 +2769,25 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     setSelectedImageUri(result.uri);
   };
 
+  // Feeds the optimistic bubble's UploadProgressRing. Throttled to ≥2-percent
+  // steps so byte-level callbacks don't storm setMessages, capped at 99 (the
+  // ring disappears when the row flips to 'sent' — never show a lingering
+  // 100%), and deliberately NOT persisted to the chat-history cache: progress
+  // is transient UI state that would be stale the moment it's re-read.
+  const makeUploadProgressUpdater = (rowId: string) => {
+    let last = -1;
+    return (pct: number) => {
+      const stepped = Math.min(99, Math.floor(pct));
+      if (stepped - last < 2) return;
+      last = stepped;
+      setMessages((prev) => prev.map(m =>
+        m.id === rowId && m.upload_state === 'uploading'
+          ? { ...m, upload_progress: stepped }
+          : m
+      ));
+    };
+  };
+
   // Handle image send. `overrideImageUri` is no longer used by the picker
   // (which now always routes through ImagePreviewModal) but is kept for the
   // recovery path that re-uploads pending messages with the cached local URI.
@@ -2701,20 +2800,24 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     convId: string,
     clientId: string,
     localUri: string,
-    caption: string | undefined
+    caption: string | undefined,
+    onProgress?: (pct: number) => void
   ): Promise<{ created: Message; imageMetadata: any }> => {
     const { processImage, uploadImageToStorage } = await import('../services/messaging/imageUploadService');
     const processed = await processImage(localUri);
-    const imageUrl = await withTimeout(
-      uploadImageToStorage(processed.originalUri, convId, clientId, false),
-      60000,
-      'media-upload'
-    );
-    const thumbnailUrl = await withTimeout(
-      uploadImageToStorage(processed.thumbnailUri, convId, clientId, true),
-      60000,
-      'media-upload'
-    );
+    const [imageUrl, thumbnailUrl] = await Promise.all([
+      withTimeout(
+        // Progress tracks the original only — the thumbnail is a rounding error.
+        uploadImageToStorage(processed.originalUri, convId, clientId, false, (p) => onProgress?.(p.progress)),
+        mediaUploadTimeoutMs(processed.fileSize),
+        'media-upload'
+      ),
+      withTimeout(
+        uploadImageToStorage(processed.thumbnailUri, convId, clientId, true),
+        60000,
+        'media-upload'
+      ),
+    ]);
     const imageMetadata = {
       image_url: imageUrl,
       thumbnail_url: thumbnailUrl,
@@ -2792,7 +2895,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
     try {
       // Upload FIRST; only create the message row if the upload succeeded.
-      const { created, imageMetadata } = await uploadAndCreateImage(conversationId, clientId, uriToUse, caption);
+      const { created, imageMetadata } = await enqueueMediaUpload(() =>
+        uploadAndCreateImage(conversationId, clientId, uriToUse, caption, makeUploadProgressUpdater(clientId))
+      );
 
       // Success — swap the optimistic row (id === clientId) for the server row.
       // The Realtime INSERT carrying client_id will be deduped by onNewMessage.
@@ -2831,11 +2936,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     localUri: string,
     baseMeta: { display_name: string; ext: string; mime_type: string; size_bytes: number },
     caption?: string,
+    onProgress?: (pct: number) => void,
   ): Promise<{ created: Message; fileMetadata: FileMetadata }> => {
     const { uploadFileToStorage } = await import('../services/messaging/fileUploadService');
     const { storagePath } = await withTimeout(
-      uploadFileToStorage(localUri, convId, clientId, baseMeta.ext),
-      60000,
+      uploadFileToStorage(localUri, convId, clientId, baseMeta.ext, onProgress),
+      mediaUploadTimeoutMs(baseMeta.size_bytes),
       'file-upload',
     );
     const fileMetadata: FileMetadata = {
@@ -2885,7 +2991,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     scrollToBottom();
 
     try {
-      const { created, fileMetadata } = await uploadAndCreateFile(conversationId, clientId, localUri, baseMeta, caption);
+      const { created, fileMetadata } = await enqueueMediaUpload(() =>
+        uploadAndCreateFile(conversationId, clientId, localUri, baseMeta, caption, makeUploadProgressUpdater(clientId))
+      );
       setMessages((prev) => {
         const next = prev.map(m =>
           m.id === clientId
@@ -3005,14 +3113,33 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     clientId: string,
     localUri: string,
     caption: string | undefined,
-    videoHints?: any
+    videoHints?: any,
+    preprocessed?: import('../services/messaging/videoUploadService').VideoProcessingResult,
+    onProgress?: (pct: number) => void,
   ): Promise<{ created: Message; videoMetadata: any; thumbnailUri: string; processedKey: string }> => {
     const { processVideo, uploadVideoToS3, uploadThumbnailToStorage } = await import('../services/messaging/videoUploadService');
-    const processed = await processVideo(localUri, videoHints);
-    const [uploadResult, thumbnailUrl] = await withTimeout(Promise.all([
-      uploadVideoToS3(localUri, convId, clientId),
+    // Reuse the poster's processVideo result instead of regenerating (the caller
+    // already ran processVideo to build the optimistic thumbnail).
+    const processed = preprocessed ?? await processVideo(localUri, videoHints);
+    // Shrink the camera-roll original (often 4K HEVC) before it goes near the
+    // network. Safe to await here: the optimistic bubble is already on screen,
+    // so this costs the user no visible wait, and it always resolves — a failed
+    // export just hands back the original uri.
+    const { transcodeVideoForUpload } = await import('../services/messaging/videoTranscode');
+    const shrunk = await transcodeVideoForUpload(localUri, {
+      width: processed.width,
+      height: processed.height,
+      fileSize: processed.fileSize,
+    });
+    // Timeout must track what we actually PUT, not the pre-transcode original.
+    const uploadBytes = shrunk.finalBytes || processed.fileSize;
+    const { uploadResult, thumbnailUrl } = await uploadVideoWithOptionalThumbnail(
+      // If the size is still unknown (fileSize 0), assume the 250MB max so an
+      // unknown-but-large video gets the full timeout budget, not the 2-min floor.
+      uploadVideoToS3(shrunk.uri, convId, clientId, onProgress),
       uploadThumbnailToStorage(processed.thumbnailUri, convId, clientId),
-    ]), 60000, 'media-upload');
+      mediaUploadTimeoutMs(uploadBytes || 250 * 1024 * 1024),
+    );
     const { s3Key, processedKey, originalUrl } = uploadResult;
     // `original_url` is playable immediately; `video_url` is filled by the
     // server-side Lambda once MediaConvert writes the compressed output.
@@ -3021,10 +3148,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       original_url: originalUrl,
       thumbnail_url: thumbnailUrl,
       duration: processed.duration,
+      // Dimensions stay the source's: the 720p preset letterboxes nothing, it
+      // scales to fit, so the aspect ratio the bubble needs is unchanged.
       width: processed.width,
       height: processed.height,
-      file_size: processed.fileSize,
-      mime_type: processed.mimeType,
+      file_size: uploadBytes,
+      mime_type: shrunk.transcoded ? 'video/mp4' : processed.mimeType,
       storage_path: s3Key,
     };
     const created = await messagingService.createVideoMessageWithMetadata(
@@ -3074,12 +3203,25 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
     inFlightUploads.add(clientId);
 
-    // Generate the thumbnail BEFORE injecting the bubble so the poster renders
-    // with the correct aspect ratio (no black box / stretched portrait).
+    // The picker already told us the clip's shape, so we can size the bubble and
+    // enforce the limits without reading the file — which lets the bubble land on
+    // the first frame after Send (WhatsApp-style) and the poster fill in a beat
+    // later. A TRIMMED clip has no hints: there we must still decode first, or
+    // the bubble would fall back to 16/9 and stretch a portrait video.
+    //
+    // NOTHING may be awaited between here and setMessages below. `videoUploadService`
+    // is deliberately NOT imported yet: it is a lazy chunk, and awaiting it here
+    // cost ~5s of dead screen under Metro before the bubble even appeared.
+    const canDeferPoster = !!(videoHints?.width && videoHints?.height);
+
     let processed: any;
     try {
-      const { processVideo } = await import('../services/messaging/videoUploadService');
-      processed = await processVideo(videoUri, videoHints);
+      if (canDeferPoster) {
+        assertVideoWithinLimits({ fileSize: videoHints.fileSize, duration: videoHints.duration });
+      } else {
+        const { processVideo } = await import('../services/messaging/videoUploadService');
+        processed = await processVideo(videoUri, videoHints);
+      }
     } catch (error: any) {
       console.error('Error processing video:', error);
       inFlightUploads.delete(clientId);
@@ -3090,11 +3232,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     const posterMetadata = {
       video_url: '',
       thumbnail_url: '',
-      duration: processed.duration,
-      width: processed.width,
-      height: processed.height,
-      file_size: processed.fileSize,
-      mime_type: processed.mimeType,
+      duration: processed?.duration ?? videoHints?.duration ?? 0,
+      width: processed?.width ?? videoHints?.width ?? 0,
+      height: processed?.height ?? videoHints?.height ?? 0,
+      file_size: processed?.fileSize ?? videoHints?.fileSize ?? 0,
+      mime_type: processed?.mimeType ?? videoHints?.mimeType ?? 'video/mp4',
       storage_path: '',
     };
 
@@ -3113,7 +3255,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       upload_state: 'uploading',
-      _localPreviewUri: processed.thumbnailUri,
+      // Undefined until the poster is decoded (deferred path) — the bubble
+      // renders its no-thumbnail branch under the Uploading overlay until then.
+      _localPreviewUri: processed?.thumbnailUri,
+      _localVideoUri: videoUri,
       video_metadata: posterMetadata,
     } as Message;
 
@@ -3125,16 +3270,39 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     scrollToBottom();
 
     try {
+      // Decode the poster now if we deferred it to get the bubble on screen
+      // first, and patch it in the moment it lands. The lazy chunk is pulled
+      // here, behind the bubble, where its load time is invisible.
+      if (!processed) {
+        const { processVideo } = await import('../services/messaging/videoUploadService');
+        processed = await processVideo(videoUri, videoHints);
+        const decoded = processed;
+        setMessages((prev) => prev.map(m =>
+          m.id === clientId
+            ? {
+                ...m,
+                _localPreviewUri: decoded.thumbnailUri,
+                video_metadata: {
+                  ...posterMetadata,
+                  duration: decoded.duration,
+                  file_size: decoded.fileSize,
+                  mime_type: decoded.mimeType,
+                },
+              }
+            : m
+        ));
+      }
+
       // Upload FIRST; only create the message row if the upload succeeded.
-      const { created, videoMetadata, processedKey } = await uploadAndCreateVideo(
-        conversationId, clientId, videoUri, caption, videoHints
+      const { created, videoMetadata, processedKey } = await enqueueMediaUpload(() =>
+        uploadAndCreateVideo(conversationId, clientId, videoUri, caption, videoHints, processed, makeUploadProgressUpdater(clientId))
       );
 
       // Success — swap the optimistic row (id === clientId) for the server row.
       setMessages((prev) => {
         const next = prev.map(m =>
           m.id === clientId
-            ? { ...created, video_metadata: created.video_metadata ?? videoMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined }
+            ? { ...created, video_metadata: created.video_metadata ?? videoMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined, _localVideoUri: undefined }
             : m
         );
         chatHistoryCache.saveMessages(conversationId, next).catch(() => {});
@@ -3344,13 +3512,17 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       const midF = message.id;
       const clientIdF = message.client_id ?? midF;
       inFlightUploads.add(midF);
+      // upload_progress cleared so the ring restarts instead of resuming the
+      // failed attempt's stale percentage.
       setMessages((prev) => prev.map(m =>
-        m.id === midF ? { ...m, upload_state: 'uploading' as const, upload_error: undefined } : m
+        m.id === midF ? { ...m, upload_state: 'uploading' as const, upload_error: undefined, upload_progress: undefined } : m
       ));
       try {
-        const { created, fileMetadata } = await uploadAndCreateFile(convId, clientIdF, localUri, {
-          display_name: fm.display_name, ext: fm.ext, mime_type: fm.mime_type, size_bytes: fm.size_bytes,
-        }, message.body || undefined);
+        const { created, fileMetadata } = await enqueueMediaUpload(() =>
+          uploadAndCreateFile(convId, clientIdF, localUri, {
+            display_name: fm.display_name, ext: fm.ext, mime_type: fm.mime_type, size_bytes: fm.size_bytes,
+          }, message.body || undefined, makeUploadProgressUpdater(midF))
+        );
         setMessages((prev) => {
           const next = prev.map(m =>
             m.id === midF ? { ...created, file_metadata: created.file_metadata ?? fileMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
@@ -3378,7 +3550,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       : message.type === 'audio'
         ? 'audio'
         : 'image';
-    if (!localUri) {
+    // Videos MUST retry from _localVideoUri — _localPreviewUri is the poster
+    // JPEG, and uploading it as the video is exactly the bug that produced
+    // unplayable "sent" videos (thumbnail + dead play button).
+    const sourceUri = mediaType === 'video' ? message._localVideoUri : localUri;
+    if (!sourceUri) {
       const label = mediaType === 'video' ? 'video' : mediaType === 'audio' ? 'voice message' : 'photo';
       Alert.alert(
         `${mediaType === 'audio' ? 'Voice message' : mediaType === 'video' ? 'Video' : 'Photo'} unavailable`,
@@ -3395,17 +3571,19 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // so the re-create stays idempotent against any prior partial attempt.
     const clientId = message.client_id ?? mid;
     inFlightUploads.add(mid);
+    // upload_progress cleared so the ring restarts instead of resuming the
+    // failed attempt's stale percentage.
     setMessages((prev) => prev.map(m =>
-      m.id === mid ? { ...m, upload_state: 'uploading' as const, upload_error: undefined } : m
+      m.id === mid ? { ...m, upload_state: 'uploading' as const, upload_error: undefined, upload_progress: undefined } : m
     ));
     try {
       if (mediaType === 'video') {
-        const { created, videoMetadata, processedKey } = await uploadAndCreateVideo(
-          convId, clientId, localUri, message.body || undefined
+        const { created, videoMetadata, processedKey } = await enqueueMediaUpload(() =>
+          uploadAndCreateVideo(convId, clientId, sourceUri, message.body || undefined, undefined, undefined, makeUploadProgressUpdater(mid))
         );
         setMessages((prev) => {
           const next = prev.map(m =>
-            m.id === mid ? { ...created, video_metadata: created.video_metadata ?? videoMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
+            m.id === mid ? { ...created, video_metadata: created.video_metadata ?? videoMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined, _localVideoUri: undefined } : m
           );
           chatHistoryCache.saveMessages(convId, next).catch(() => {});
           return next;
@@ -3421,8 +3599,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           mimeType: md?.mime_type ?? 'audio/m4a',
           sizeBytes: md?.size_bytes ?? 0,
         };
-        const { created, audioMetadata } = await uploadAndCreateVoice(
-          convId, clientId, localUri, recording, message.reply_to_snapshot ?? null
+        const { created, audioMetadata } = await enqueueMediaUpload(() =>
+          uploadAndCreateVoice(convId, clientId, sourceUri, recording, message.reply_to_snapshot ?? null)
         );
         setMessages((prev) => {
           const next = prev.map(m =>
@@ -3432,10 +3610,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           return next;
         });
       } else {
-        const { created, imageMetadata } = await uploadAndCreateImage(convId, clientId, localUri, message.body || undefined);
+        const { created, imageMetadata } = await enqueueMediaUpload(() =>
+          uploadAndCreateImage(convId, clientId, sourceUri, message.body || undefined, makeUploadProgressUpdater(mid))
+        );
         setMessages((prev) => {
           const next = prev.map(m =>
-            m.id === mid ? { ...created, image_metadata: created.image_metadata ?? imageMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined } : m
+            m.id === mid ? { ...created, image_metadata: created.image_metadata ?? imageMetadata, upload_state: 'sent' as const, _localPreviewUri: undefined, _localVideoUri: undefined } : m
           );
           chatHistoryCache.saveMessages(convId, next).catch(() => {});
           return next;
@@ -3582,8 +3762,38 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   // Tap on a reply preview → scroll the original message to vertical center,
   // then briefly flash it. If the parent is older than what's loaded, page in
   // older messages until found (capped to avoid infinite loops).
-  const handleReplyPreviewPress = useCallback(async (parentMessageId: string) => {
-    if (resolvingReplyJumpId || !currentConversationId) return;
+  // Guard + latest-tap-wins state for the jump-to-message path (reply previews
+  // AND in-chat search ▲/▼). Kept in refs so this callback stays identity-stable
+  // — it used to depend on `resolvingReplyJumpId` state, and every out-of-window
+  // jump toggling that state re-created the callback, which re-fired the search
+  // effect and snapped the user back to hit #1.
+  const resolvingReplyJumpIdRef = useRef<string | null>(null);
+  const pendingJumpTargetRef = useRef<string | null>(null);
+  const pendingJumpOptsRef = useRef<{ animated?: boolean; span?: number; silent?: boolean } | undefined>(undefined);
+  const handleReplyPreviewPressRef =
+    useRef<((id: string, opts?: { animated?: boolean; span?: number; silent?: boolean }) => void) | undefined>(undefined);
+
+  const handleReplyPreviewPress = useCallback(async (
+    parentMessageId: string,
+    opts?: { animated?: boolean; span?: number; silent?: boolean },
+  ) => {
+    const animated = opts?.animated ?? true;
+    const span = opts?.span ?? 20;
+    // Search navigation passes silent: a modal alert mid-▲/▼ browsing is
+    // jarring; the jump just doesn't happen. Reply-preview taps keep the alert.
+    const silent = opts?.silent ?? false;
+    if (!currentConversationId) return;
+
+    // A re-anchor fetch is already in flight. Don't drop this tap — that made
+    // rapid search ▲/▼ feel dead. Remember the latest target and chase it once
+    // the current jump settles (latest-tap-wins).
+    if (resolvingReplyJumpIdRef.current) {
+      // Queue the target AND its opts together — the chase must replay THIS
+      // call's intent (silent/animated/span), not the in-flight call's.
+      pendingJumpTargetRef.current = parentMessageId;
+      pendingJumpOptsRef.current = opts;
+      return;
+    }
 
     // Display rows, not raw messages: the target may live INSIDE an album row,
     // in which case we scroll to the album (no per-item highlight there).
@@ -3594,12 +3804,15 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
     if (invertedIndex === -1) {
       // Not in the current window: re-anchor via a centered fetch instead of
-      // paging through history (keeps memory bounded).
+      // paging through history (keeps memory bounded). A wider span for search
+      // keeps neighbouring hits in-window, so most ▲/▼ steps skip the refetch.
+      resolvingReplyJumpIdRef.current = parentMessageId;
       setResolvingReplyJumpId(parentMessageId);
       try {
-        const result = await messagingService.getMessagesAround(currentConversationId, parentMessageId, 20);
+        const result = await messagingService.getMessagesAround(currentConversationId, parentMessageId, span);
         if (result.messages.length === 0) {
-          Alert.alert('Message not available', 'We couldn’t find the original message.');
+          if (!silent) Alert.alert('Message not available', 'We couldn’t find the original message.');
+          pendingJumpTargetRef.current = null;
           return;
         }
         setMessages(result.messages);
@@ -3610,17 +3823,31 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         await new Promise<void>((r) => setTimeout(r, 0)); // let the new window lay out
         invertedIndex = findInvertedIndex(parentMessageId);
       } catch {
-        Alert.alert('Message not available', 'We couldn’t find the original message.');
+        if (!silent) Alert.alert('Message not available', 'We couldn’t find the original message.');
+        pendingJumpTargetRef.current = null;
         return;
       } finally {
+        resolvingReplyJumpIdRef.current = null;
         setResolvingReplyJumpId(null);
       }
     }
 
-    if (invertedIndex === -1) return;
-    setHighlightedMessageId(parentMessageId);
-    flatListRef.current?.scrollToIndex({ index: invertedIndex, viewPosition: 0.5, animated: true });
-  }, [resolvingReplyJumpId, currentConversationId]);
+    if (invertedIndex !== -1) {
+      setHighlightedMessageId(parentMessageId);
+      flatListRef.current?.scrollToIndex({ index: invertedIndex, viewPosition: 0.5, animated });
+    }
+
+    // Latest-tap-wins: if the user tapped ▲/▼ again mid-fetch, chase the most
+    // recent target now that the window has settled.
+    const pending = pendingJumpTargetRef.current;
+    const pendingOpts = pendingJumpOptsRef.current;
+    pendingJumpTargetRef.current = null;
+    pendingJumpOptsRef.current = undefined;
+    if (pending && pending !== parentMessageId) {
+      handleReplyPreviewPressRef.current?.(pending, pendingOpts);
+    }
+  }, [currentConversationId]);
+  handleReplyPreviewPressRef.current = handleReplyPreviewPress;
 
   // Resolve the unread-divider anchor once both the first window and the
   // at-open DB watermark are in: first unread = oldest incoming message newer
@@ -3650,10 +3877,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     // Boundary is inside the loaded window when we can also see a read
     // incoming message, or the window reaches the start of the conversation,
     // or the oldest loaded message predates the watermark.
+    // A seeded gap means window-local counts can't be trusted (the seeded
+    // newest message sits ahead of a possible hole) — force the server path.
     const boundaryInWindow =
-      !hasMoreMessages ||
-      unread.length < incoming.length ||
-      Date.parse(messages[0].created_at) <= lastReadMs;
+      !seededGapRef.current &&
+      (!hasMoreMessages ||
+        unread.length < incoming.length ||
+        Date.parse(messages[0].created_at) <= lastReadMs);
     if (boundaryInWindow) {
       setUnreadMarker({ firstUnreadId: unread[0].id, count: unread.length });
       return;
@@ -3697,6 +3927,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const [chatSearchIndex, setChatSearchIndex] = useState(0); // 0 = newest hit
   const [chatSearchLoading, setChatSearchLoading] = useState(false);
   const chatSearchReqRef = useRef(0);
+  // Last message the search navigated to (auto-jump or ▲/▼). Gates the
+  // auto-jump so retyping doesn't re-scroll/re-flash the bubble we're already
+  // on; reset on query-clear/close so a fresh search always shows its top hit.
+  const lastSearchJumpRef = useRef<string | null>(null);
 
   // Debounced in-conversation search; jumps to the newest hit on new results.
   useEffect(() => {
@@ -3706,6 +3940,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       setChatSearchHits([]);
       setChatSearchIndex(0);
       setChatSearchLoading(false);
+      lastSearchJumpRef.current = null;
       return;
     }
     setChatSearchLoading(true);
@@ -3719,7 +3954,12 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         if (chatSearchReqRef.current !== id) return;
         setChatSearchHits(hits);
         setChatSearchIndex(0);
-        if (hits.length > 0) handleReplyPreviewPress(hits[0].messageId);
+        const top = hits[0]?.messageId ?? null;
+        // Jump only when the top hit is a message we're not already parked on.
+        if (top && top !== lastSearchJumpRef.current) {
+          lastSearchJumpRef.current = top;
+          handleReplyPreviewPress(top, { animated: false, span: 40, silent: true });
+        }
       } catch {
         if (chatSearchReqRef.current !== id) return;
         setChatSearchHits([]);
@@ -3734,8 +3974,10 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   const goToChatSearchHit = useCallback((index: number) => {
     const hit = chatSearchHits[index];
     if (!hit) return;
+    Keyboard.dismiss(); // arrows mean "show me the messages" — free the screen
     setChatSearchIndex(index);
-    handleReplyPreviewPress(hit.messageId);
+    lastSearchJumpRef.current = hit.messageId;
+    handleReplyPreviewPress(hit.messageId, { animated: false, span: 40, silent: true });
   }, [chatSearchHits, handleReplyPreviewPress]);
 
   const closeChatSearch = useCallback(() => {
@@ -3744,7 +3986,19 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     setChatSearchHits([]);
     setChatSearchIndex(0);
     chatSearchReqRef.current++;
+    lastSearchJumpRef.current = null;
   }, []);
+
+  // Android hardware back closes the search bar instead of leaving the chat
+  // (mirrors the global MessageSearchOverlay's handler).
+  useEffect(() => {
+    if (!chatSearchActive) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeChatSearch();
+      return true;
+    });
+    return () => sub.remove();
+  }, [chatSearchActive, closeChatSearch]);
 
   // Build the report context for a message: a stable id/type plus a
   // human-readable snippet (text body, or a media label + storage path so a
@@ -3783,6 +4037,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       return;
     }
     if (message.is_system) {
+      return;
+    }
+    // Still uploading (photo/video/file/voice) — the message has no server row
+    // yet, so reply/copy/edit/delete/react would all target a phantom. Ignore the
+    // long-press entirely (no haptic, no spotlight) until it lands as 'sent' or
+    // flips to 'failed' (handled below with the retry sheet).
+    if (message.upload_state === 'pending' || message.upload_state === 'uploading') {
       return;
     }
 
@@ -3913,6 +4174,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     if (!currentUserId || message.sender_id !== currentUserId) return false;
     if (message.deleted) return false;
     if (message.is_system) return false; // Prevent system message edit
+    // Edit only applies to text messages — contacts, files, and other media
+    // have no editable text body. (Legacy rows with no `type` are text.)
+    if (message.type && message.type !== 'text') return false;
     // Not yet confirmed by the server (id is still the temporary client id):
     // an edit would target a non-existent DB row and error out.
     if (!!message.client_id && message.id === message.client_id) return false;
@@ -4059,8 +4323,18 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     if (index === -1) return;
     unreadScrollConsumedRef.current = currentConversationId;
     if (index < 4) return; // divider already on-screen at the bottom
+    const count = unreadMarker.count;
     setTimeout(() => {
       flatListRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false });
+      // We're now positioned up at the divider, not at the bottom: un-pin so a
+      // live incoming message increments the badge instead of yanking the user
+      // down mid-read.
+      hasUserScrolledRef.current = true;
+      isNearBottomRef.current = false;
+      // WhatsApp: opening positioned up at the divider shows the jump-down
+      // badge with the unread count. If the jump actually landed near the
+      // bottom (few unread), the resulting onScroll clears it immediately.
+      setNewWhileAwayCount((c) => Math.max(c, count));
     }, 300);
   }, [unreadMarker, displayRows, currentConversationId]);
 
@@ -4201,11 +4475,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 showLoadingIndicator={false}
               />
             ) : (
-              <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
-                <Text style={styles.messageAvatarPlaceholderText}>
-                  {senderName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
+              <ExpoImage source={Images.defaultAvatar} style={styles.messageAvatar} />
             )}
           </TouchableOpacity>
         )}
@@ -4538,11 +4808,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                 showLoadingIndicator={false}
               />
             ) : (
-              <View style={[styles.messageAvatar, styles.messageAvatarPlaceholder]}>
-                <Text style={styles.messageAvatarPlaceholderText}>
-                  {senderName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
+              <ExpoImage source={Images.defaultAvatar} style={styles.messageAvatar} />
             )}
           </TouchableOpacity>
         )}
@@ -4650,7 +4916,13 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               </View>
               {message.upload_state === 'uploading' && (
                 <View style={styles.attachmentStatusRow}>
-                  <ActivityIndicator size="small" color={isOwnMessage ? '#FFFFFF' : '#05BCD3'} />
+                  <UploadProgressRing
+                    progress={message.upload_progress}
+                    size={16}
+                    strokeWidth={2}
+                    color={isOwnMessage ? '#FFFFFF' : '#05BCD3'}
+                    trackColor={isOwnMessage ? 'rgba(255,255,255,0.3)' : 'rgba(5,188,211,0.25)'}
+                  />
                   <Text style={[styles.attachmentStatusText, { color: isOwnMessage ? 'rgba(255,255,255,0.9)' : '#6B7076' }]}>Uploading…</Text>
                 </View>
               )}
@@ -4795,8 +5067,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                       </View>
                     ) : (
                       <View style={styles.uploadOverlay}>
-                        <ActivityIndicator size="large" color="#FFFFFF" />
-                        <Text style={styles.uploadProgressText}>Uploading...</Text>
+                        <UploadProgressRing progress={message.upload_progress} />
                       </View>
                     )}
                     {/* Timestamp overlay */}
@@ -4892,12 +5163,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                     />
                     {message.upload_state === 'uploading' && (
                       <View style={styles.uploadOverlay}>
-                        <ActivityIndicator size="large" color="#FFFFFF" />
-                        {message.upload_progress !== undefined && (
-                          <Text style={styles.uploadProgressText}>
-                            {Math.round(message.upload_progress)}%
-                          </Text>
-                        )}
+                        <UploadProgressRing progress={message.upload_progress} />
                       </View>
                     )}
                     {message.upload_state === 'failed' && (
@@ -5266,6 +5532,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
               onNext={() => goToChatSearchHit(chatSearchIndex - 1)}
               onClose={closeChatSearch}
               loading={chatSearchLoading}
+              jumping={resolvingReplyJumpId !== null}
+              capped={chatSearchHits.length >= 50} // 50 = the `limit` passed to searchMessages
             />
           ) : (
           <>
@@ -5532,13 +5800,26 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
             ListEmptyComponent={listEmptyComponent}
             keyboardShouldPersistTaps="handled"
             onScrollToIndexFailed={(info) => {
+              // Target row isn't measured yet (jump beyond the render window,
+              // no getItemLayout). Hop to an estimated offset first so the
+              // rows around the target render, then retry the precise scroll;
+              // if that fails too, this handler re-fires and converges.
+              flatListRef.current?.scrollToOffset({
+                offset: info.averageItemLength * info.index,
+                animated: false,
+              });
               setTimeout(() => {
-                flatListRef.current?.scrollToIndex({
-                  index: info.index,
-                  viewPosition: 0.5,
-                  animated: true,
-                });
-              }, 200);
+                // The window can be replaced by a re-anchor fetch between the
+                // failure and this retry, leaving info.index out of range —
+                // an out-of-range scrollToIndex throws and crashes the screen.
+                if (info.index < displayRowsRef.current.length) {
+                  flatListRef.current?.scrollToIndex({
+                    index: info.index,
+                    viewPosition: 0.5,
+                    animated: false,
+                  });
+                }
+              }, 120);
             }}
             keyboardDismissMode={
               // iOS handles interactive dismiss natively. On Android, KeyboardGestureArea
@@ -5973,6 +6254,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           onCancel={() => setMultiReviewItems(null)}
           onCropImage={Platform.OS !== 'web' && getImageCropPicker() ? cropImage : undefined}
           primaryColor={composerPrimaryColor}
+          recipientName={groupDisplayName}
         />
       )}
 
@@ -6855,11 +7137,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: spacing.xs,
-  },
-  uploadProgressText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
   },
   failedOverlay: {
     position: 'absolute',

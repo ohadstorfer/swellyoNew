@@ -2926,9 +2926,7 @@ export default function CreateTripFlowA({
           {s?.profile_image_url ? (
             <Image source={{ uri: s.profile_image_url }} style={localStyles.leaderAvatar} />
           ) : (
-            <View style={[localStyles.leaderAvatar, localStyles.leaderAvatarEmpty]}>
-              <Ionicons name="person" size={28} color="#FFFFFF" />
-            </View>
+            <Image source={Images.defaultAvatar} style={localStyles.leaderAvatar} />
           )}
           <View style={{ flex: 1 }}>
             <Text style={localStyles.leaderName} numberOfLines={1}>
@@ -4406,11 +4404,6 @@ const localStyles = StyleSheet.create({
     height: 76,
     borderRadius: 38,
     backgroundColor: COLORS.surfaceMuted,
-  },
-  leaderAvatarEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#9CB6C0',
   },
   leaderName: {
     fontFamily: FONT_INTER,

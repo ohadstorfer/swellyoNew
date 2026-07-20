@@ -63,6 +63,14 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
       realtime: {
         params: { eventsPerSecond: 10 },   // pin the client→server event rate (10 = current default)
         heartbeatIntervalMs: 45000,        // lengthen socket keepalive (default 30s) to trim traffic at scale
+        // Jittered backoff for socket reconnect AND every channel's rejoin
+        // timer (RealtimeChannel shares this function via socket.reconnectAfterMs).
+        // The library default is a fixed [1s,2s,5s,10s] with NO jitter, so after
+        // a socket error every open channel re-joined in the same JS macrotask —
+        // an O(N²) synchronous burst that pegged the JS thread on loaded
+        // sessions (js-thread-freeze-spec.md). Jitter spreads the rejoins out.
+        reconnectAfterMs: (tries: number) =>
+          ([1000, 2000, 5000, 10000][tries - 1] ?? 10000) + Math.floor(Math.random() * 1500),
       },
     });
 

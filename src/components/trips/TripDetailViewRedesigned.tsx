@@ -41,6 +41,7 @@ import {
   CATEGORY_TITLE,
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
+import { Images } from '../../assets/images';
 import { TripIcon, type TripIconName } from './tripIcons';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { Thumb } from '../Thumb';
@@ -615,9 +616,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       cachePolicy="memory-disk"
                     />
                   ) : (
-                    <View style={[styles.aboutHostAvatar, styles.aboutHostAvatarEmpty]}>
-                      <Ionicons name="person" size={22} color="#FFFFFF" />
-                    </View>
+                    <CachedImage
+                      source={Images.defaultAvatar}
+                      style={styles.aboutHostAvatar}
+                      contentFit="cover"
+                    />
                   )}
                   <Text style={styles.aboutHostName} numberOfLines={1}>
                     {aboutHost.name
@@ -829,9 +832,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                         cachePolicy="memory-disk"
                       />
                     ) : (
-                      <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                        <Ionicons name="person" size={24} color="#FFFFFF" />
-                      </View>
+                      <CachedImage
+                        source={Images.defaultAvatar}
+                        style={styles.avatar}
+                        contentFit="cover"
+                      />
                     )}
                   </TouchableOpacity>
                 ))}
@@ -1398,10 +1403,6 @@ const styles = StyleSheet.create({
     borderColor: C.surface,
     backgroundColor: C.avatarBg,
   },
-  aboutHostAvatarEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   aboutHostName: {
     flex: 1,
     fontFamily: FONT_INTER,
@@ -1623,10 +1624,6 @@ const styles = StyleSheet.create({
   },
   avatarGap: {
     marginLeft: 8,
-  },
-  avatarPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   avatarExtra: {
     backgroundColor: C.brandTeal,

@@ -138,6 +138,21 @@ export function previewKindForExt(ext: string): FilePreviewKind {
   return 'none';
 }
 
+/**
+ * Office formats that iOS QuickLook can render in-app but our own dark viewer
+ * cannot. Kept separate from previewKindForExt: these do NOT go through the
+ * in-app FilePreviewBody — FileBubble hands them to the native QLPreviewController
+ * on iOS, and to the OS share sheet everywhere else.
+ */
+const QUICK_LOOK_EXTS = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf']);
+
+/** True for Office formats iOS QuickLook should open in-app. Blocked exts never qualify. */
+export function isQuickLookExt(ext: string): boolean {
+  const e = String(ext ?? '').toLowerCase();
+  if (!isAllowedExt(e)) return false;
+  return QUICK_LOOK_EXTS.has(e);
+}
+
 export type FileValidationResult =
   | { ok: true; ext: string; displayName: string; contentType: string }
   | { ok: false; reason: string };

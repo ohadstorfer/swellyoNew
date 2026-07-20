@@ -47,9 +47,9 @@ export interface UploadProgress {
 const PENDING_UPLOAD_KEY_PREFIX = '@pending_upload_';
 const MAX_RETRIES = 3;
 const MAX_IMAGE_SIZE_MB = 15;
-const MAX_IMAGE_DIMENSIONS = 2560;
+const MAX_IMAGE_DIMENSIONS = 1920;
 const THUMBNAIL_WIDTH = 600;
-const ORIGINAL_JPEG_QUALITY = 0.95;
+const ORIGINAL_JPEG_QUALITY = 0.8;
 const THUMBNAIL_JPEG_QUALITY = 0.85;
 
 /**
@@ -85,6 +85,35 @@ const uriToBlob = async (uri: string): Promise<Blob> => {
     xhr.send(null);
   });
 };
+
+/**
+ * PUT a blob with upload-progress reporting. fetch() cannot observe request
+ * body progress, so the web upload path goes through XHR instead.
+ */
+export const putWithProgress = (
+  url: string,
+  body: Blob,
+  contentType: string,
+  onProgress?: (progress: UploadProgress) => void,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url, true);
+    xhr.setRequestHeader('Content-Type', contentType);
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0) {
+          onProgress({ progress: (e.loaded / e.total) * 100, uploaded: e.loaded, total: e.total });
+        }
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`S3 upload failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('S3 upload failed (network error)'));
+    xhr.send(body);
+  });
 
 /**
  * Build a FormData body from a native file URI.
@@ -419,23 +448,36 @@ export async function uploadImageToStorage(
 
     if (isNativeFileUri) {
       // Stream the file directly (RN Blob shim can PUT 0-byte bodies).
+      // createUploadTask (vs uploadAsync) is the same native transport but
+      // reports byte-level progress for the bubble's progress ring.
       const LegacyFS = require('expo-file-system/legacy');
-      const result = await LegacyFS.uploadAsync(uploadUrl, imageUri, {
-        httpMethod: 'PUT',
-        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
-        headers: { 'Content-Type': 'image/jpeg' },
-      });
-      if (result.status < 200 || result.status >= 300) {
-        throw new Error(`S3 upload failed (${result.status})`);
+      const task = LegacyFS.createUploadTask(
+        uploadUrl,
+        imageUri,
+        {
+          httpMethod: 'PUT',
+          uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+          headers: { 'Content-Type': 'image/jpeg' },
+        },
+        onProgress
+          ? (p: { totalBytesSent: number; totalBytesExpectedToSend: number }) => {
+              if (p.totalBytesExpectedToSend > 0) {
+                onProgress({
+                  progress: (p.totalBytesSent / p.totalBytesExpectedToSend) * 100,
+                  uploaded: p.totalBytesSent,
+                  total: p.totalBytesExpectedToSend,
+                });
+              }
+            }
+          : undefined,
+      );
+      const result = await task.uploadAsync();
+      if (!result || result.status < 200 || result.status >= 300) {
+        throw new Error(`S3 upload failed (${result?.status})`);
       }
     } else {
       const uploadBody = imageUri.startsWith('data:') ? dataURLtoBlob(imageUri) : await uriToBlob(imageUri);
-      const res = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'image/jpeg' },
-        body: uploadBody,
-      });
-      if (!res.ok) throw new Error(`S3 upload failed (${res.status})`);
+      await putWithProgress(uploadUrl, uploadBody, 'image/jpeg', onProgress);
     }
 
     return publicUrl;

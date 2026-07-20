@@ -59,6 +59,7 @@ export async function uploadFileToStorage(
   conversationId: string,
   messageId: string,
   ext: string,
+  onProgress?: (pct: number) => void,
 ): Promise<{ storagePath: string }> {
   if (!isSupabaseConfigured()) throw new Error('Supabase is not configured');
 
@@ -74,23 +75,50 @@ export async function uploadFileToStorage(
     (localUri.startsWith('file://') || localUri.startsWith('content://') || localUri.startsWith('ph://'));
 
   if (isNativeFileUri) {
+    // createUploadTask (vs uploadAsync) is the same native transport but
+    // reports byte-level progress for the bubble's progress ring.
     const LegacyFS = require('expo-file-system/legacy');
-    const result = await LegacyFS.uploadAsync(uploadUrl, localUri, {
-      httpMethod: 'PUT',
-      uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
-      headers: { 'Content-Type': ct },
-    });
-    if (result.status < 200 || result.status >= 300) {
-      throw new Error(`S3 upload failed (${result.status})`);
+    const task = LegacyFS.createUploadTask(
+      uploadUrl,
+      localUri,
+      {
+        httpMethod: 'PUT',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: { 'Content-Type': ct },
+      },
+      onProgress
+        ? (p: { totalBytesSent: number; totalBytesExpectedToSend: number }) => {
+            if (p.totalBytesExpectedToSend > 0) {
+              onProgress((p.totalBytesSent / p.totalBytesExpectedToSend) * 100);
+            }
+          }
+        : undefined,
+    );
+    const result = await task.uploadAsync();
+    if (!result || result.status < 200 || result.status >= 300) {
+      throw new Error(`S3 upload failed (${result?.status})`);
     }
   } else {
     const body = await uriToBlob(localUri);
-    const res = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': ct },
-      body,
+    // fetch() cannot observe request-body progress — XHR can.
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl, true);
+      xhr.setRequestHeader('Content-Type', ct);
+      if (onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            onProgress((e.loaded / e.total) * 100);
+          }
+        };
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error(`S3 upload failed (${xhr.status})`));
+      };
+      xhr.onerror = () => reject(new Error('S3 upload failed (network error)'));
+      xhr.send(body);
     });
-    if (!res.ok) throw new Error(`S3 upload failed (${res.status})`);
   }
 
   return { storagePath: key as string };

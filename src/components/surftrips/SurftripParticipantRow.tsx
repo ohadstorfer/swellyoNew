@@ -3,6 +3,7 @@ import { View, StyleSheet, Image, Platform, TouchableOpacity } from 'react-nativ
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
 import type { EnrichedSurftripMember } from '../../types/surftrips';
+import { Images } from '../../assets/images';
 
 interface SurftripParticipantRowProps {
   participant: EnrichedSurftripMember;
@@ -34,9 +35,7 @@ export const SurftripParticipantRow: React.FC<SurftripParticipantRowProps> = ({
         {profile_image_url ? (
           <Image source={{ uri: profile_image_url }} style={styles.avatar} />
         ) : (
-          <View style={[styles.avatar, styles.avatarPlaceholder]}>
-            <Text style={styles.avatarInitial}>{(name || 'U').charAt(0).toUpperCase()}</Text>
-          </View>
+          <Image source={Images.defaultAvatar} style={styles.avatar} />
         )}
       </View>
 
@@ -104,8 +103,6 @@ const styles = StyleSheet.create({
   },
   avatarWrap: { marginRight: 12 },
   avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#F2F2F2' },
-  avatarPlaceholder: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#A8DDE0' },
-  avatarInitial: { color: '#FFFFFF', fontWeight: '700', fontSize: 18 },
   info: { flex: 1, minWidth: 0 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   name: {

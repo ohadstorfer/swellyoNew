@@ -1,4 +1,4 @@
-import { withTimeout, TimeoutError } from '../withTimeout';
+import { withTimeout, TimeoutError, mediaUploadTimeoutMs } from '../withTimeout';
 
 describe('withTimeout', () => {
   beforeEach(() => jest.useFakeTimers());
@@ -18,5 +18,20 @@ describe('withTimeout', () => {
     const assertion = expect(p).rejects.toBeInstanceOf(TimeoutError);
     jest.advanceTimersByTime(5000);
     await assertion;
+  });
+});
+
+describe('mediaUploadTimeoutMs', () => {
+  it('returns the 2-minute floor for tiny/unknown files', () => {
+    expect(mediaUploadTimeoutMs(0)).toBe(120_000);
+    expect(mediaUploadTimeoutMs(500_000)).toBe(125_000); // 0.5MB -> +5s
+  });
+
+  it('scales ~1s per 100KB (assumes 100 KB/s worst-case uplink)', () => {
+    expect(mediaUploadTimeoutMs(10_000_000)).toBe(220_000); // 10MB -> 120s + 100s
+  });
+
+  it('caps at 10 minutes', () => {
+    expect(mediaUploadTimeoutMs(250 * 1024 * 1024)).toBe(600_000);
   });
 });

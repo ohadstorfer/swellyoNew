@@ -7,7 +7,7 @@ export const Images = {
   swellyWelcomeMessage: require('./swelly-welcome-message.png'),
   swellyPopout: require('./swelly-popout.png'),
   deleteAccountSurfer: require('./delete-account-surfer.png'),
-  surferPlaceholder: require('./surfer.png'),
+  defaultAvatar: require('./default-avatar.png'),
   doubleTick: require('./double-tick.png'),
   userAvatar1: require('./user-avatar-1.png'),
   userAvatar2: require('./user-avatar-2.png'),
@@ -82,6 +82,10 @@ export const Images = {
     theLineup: require('./nav/the-lineup-icon.png'),
     trips: require('./nav/trips-icon.png'),
     profile: require('./nav/profile-icon.png'),
+    // Filled (solid) variants shown when the tab is the active one.
+    theLineupFilled: require('./nav/the-lineup-icon-filled.png'),
+    tripsFilled: require('./nav/trips-icon-filled.png'),
+    profileFilled: require('./nav/profile-icon-filled.png'),
   },
   createTrip: {
     plannedTogether: require('./create-trip/planned-together.png'),

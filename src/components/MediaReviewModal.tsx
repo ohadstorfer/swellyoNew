@@ -32,6 +32,8 @@ import {
   Pressable,
   KeyboardAvoidingView,
   useWindowDimensions,
+  Animated,
+  Easing,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -61,6 +63,8 @@ interface MediaReviewModalProps {
     height: number,
   ) => Promise<{ uri: string; width: number; height: number } | null>;
   primaryColor?: string;
+  /** Recipient / group name shown bottom-left, WhatsApp-style. */
+  recipientName?: string;
 }
 
 const CloseIcon = () => (
@@ -154,6 +158,28 @@ const ActiveVideoPage: React.FC<{ uri: string }> = ({ uri }) => {
   );
 };
 
+/**
+ * Fades a filmstrip thumbnail in on mount with a short, index-staggered delay.
+ * Keyed by uri upstream, so instances persist across reorders/deletes — only
+ * a newly-mounted thumb (or the whole strip on open) plays the fade.
+ */
+const AnimatedThumb: React.FC<{ index: number; children: React.ReactNode }> = ({
+  index,
+  children,
+}) => {
+  const opacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: 1,
+      duration: 220,
+      delay: Math.min(index, 6) * 40,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [opacity, index]);
+  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
+};
+
 export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
   visible,
   items: initialItems,
@@ -161,6 +187,7 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
   onCancel,
   onCropImage,
   primaryColor = '#B72DF2',
+  recipientName,
 }) => {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -332,7 +359,56 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
           style={styles.chromeFill}
           pointerEvents="box-none"
         >
-          <View style={[styles.bottomChrome, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+          <View style={styles.bottomChrome}>
+            {/* Filmstrip — above the caption, centered when it fits, scrollable
+                when it doesn't. Tapping a thumb jumps to it; tapping the ACTIVE
+                thumb reveals a trash overlay and deletes it (WhatsApp-style). */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.strip}
+              contentContainerStyle={styles.stripContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {items.map((it, i) => {
+                const isActive = i === activeIndex;
+                return (
+                  <AnimatedThumb key={it.uri} index={i}>
+                    <Pressable
+                      onPress={() => (isActive ? removeCurrent() : jumpTo(i))}
+                      style={styles.thumbShadow}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        isActive ? 'Remove this item' : `View item ${i + 1}`
+                      }
+                    >
+                      <View style={[styles.thumb, isActive && styles.thumbActive]}>
+                        {it.isVideo ? (
+                          videoThumbs[it.uri] ? (
+                            <Image source={{ uri: videoThumbs[it.uri] }} style={styles.thumbImage} />
+                          ) : (
+                            <View style={[styles.thumbImage, styles.posterFallback]} />
+                          )
+                        ) : (
+                          <Image source={{ uri: it.uri }} style={styles.thumbImage} />
+                        )}
+                        {it.isVideo && !isActive && (
+                          <View style={styles.thumbPlayOverlay} pointerEvents="none">
+                            <PlayIcon size={18} />
+                          </View>
+                        )}
+                        {isActive && (
+                          <View style={styles.thumbTrashOverlay} pointerEvents="none">
+                            <TrashIcon />
+                          </View>
+                        )}
+                      </View>
+                    </Pressable>
+                  </AnimatedThumb>
+                );
+              })}
+            </ScrollView>
+
             <TextInput
               style={styles.captionInput}
               value={activeItem ? (captions[activeItem.uri] ?? '') : ''}
@@ -346,40 +422,19 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
               maxLength={500}
               multiline
             />
-            <View style={styles.stripRow}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.flex}
-                contentContainerStyle={styles.stripContent}
-                keyboardShouldPersistTaps="handled"
-              >
-                {items.map((it, i) => (
-                  <Pressable
-                    key={it.uri}
-                    onPress={() => jumpTo(i)}
-                    style={[
-                      styles.thumb,
-                      i === activeIndex && { borderColor: primaryColor, borderWidth: 2 },
-                    ]}
-                  >
-                    {it.isVideo ? (
-                      videoThumbs[it.uri] ? (
-                        <Image source={{ uri: videoThumbs[it.uri] }} style={styles.thumbImage} />
-                      ) : (
-                        <View style={[styles.thumbImage, styles.posterFallback]} />
-                      )
-                    ) : (
-                      <Image source={{ uri: it.uri }} style={styles.thumbImage} />
-                    )}
-                    {it.isVideo && (
-                      <View style={styles.thumbPlayOverlay} pointerEvents="none">
-                        <PlayIcon size={18} />
-                      </View>
-                    )}
-                  </Pressable>
-                ))}
-              </ScrollView>
+
+            {/* Name bottom-left, send FAB bottom-right. Dark scrim spans only
+                this row (edge-to-edge), not the filmstrip or caption. */}
+            <View style={[styles.bottomRow, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+              {recipientName ? (
+                <View style={styles.nameChip}>
+                  <Text style={styles.nameText} numberOfLines={1}>
+                    {recipientName}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.flex} />
+              )}
               <Pressable
                 style={[styles.sendFab, { backgroundColor: primaryColor }]}
                 onPress={handleSend}
@@ -421,17 +476,6 @@ export const MediaReviewModal: React.FC<MediaReviewModalProps> = ({
               </Pressable>
             </View>
           )}
-          <View style={styles.iconButton}>
-            <Pressable
-              style={styles.iconFill}
-              onPress={removeCurrent}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel="Remove this item"
-            >
-              <TrashIcon />
-            </Pressable>
-          </View>
         </View>
       </View>
     </Modal>
@@ -477,15 +521,57 @@ const styles = StyleSheet.create({
     fontSize: 16,
     maxHeight: 100,
   },
-  stripRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  strip: {
+    flexGrow: 0,
   },
   stripContent: {
-    gap: 6,
-    paddingVertical: 2,
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     alignItems: 'center',
+    // Centers the strip when it's narrower than the viewport; still scrolls
+    // once the thumbnails overflow.
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  bottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    // Break out of bottomChrome's 8px horizontal padding so the scrim reaches
+    // the screen edges.
+    marginHorizontal: -8,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
+  },
+  nameChip: {
+    flexShrink: 1,
+    maxWidth: '70%',
+    backgroundColor: 'rgba(40, 40, 40, 0.85)',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  nameText: {
+    fontFamily: ff('Inter', '500'),
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  thumbShadow: {
+    borderRadius: 8,
+    backgroundColor: '#1A1A1A',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000000',
+        shadowOpacity: 0.35,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
   thumb: {
     width: THUMB_SIZE,
@@ -493,6 +579,16 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     backgroundColor: '#1A1A1A',
+  },
+  thumbActive: {
+    borderColor: '#FFFFFF',
+    borderWidth: 2,
+  },
+  thumbTrashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   thumbImage: {
     width: '100%',
@@ -534,7 +630,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(40, 40, 40, 0.85)',
+    backgroundColor: '#282828',
   },
   iconFill: {
     flex: 1,

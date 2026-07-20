@@ -35,11 +35,7 @@ export const MatchedUserCard: React.FC<MatchedUserCardProps> = ({
           {profileImageUri ? (
             <Image source={{ uri: profileImageUri }} style={styles.profilePic} />
           ) : (
-            <View style={[styles.profilePic, styles.profilePicPlaceholder]}>
-              <Text style={styles.profilePicInitial}>
-                {(user.name || 'U').charAt(0).toUpperCase()}
-              </Text>
-            </View>
+            <Image source={Images.defaultAvatar} style={styles.profilePic} />
           )}
         </View>
         <View style={styles.cardInfo}>
@@ -104,16 +100,6 @@ const styles = StyleSheet.create({
     borderRadius: 64,
     borderWidth: 3.5,
     borderColor: '#FFFFFF',
-  },
-  profilePicPlaceholder: {
-    backgroundColor: '#A8DDE0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  profilePicInitial: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
   cardInfo: {
     alignItems: 'center',

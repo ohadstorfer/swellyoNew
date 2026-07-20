@@ -188,11 +188,16 @@ export const MessageActionsMenu: React.FC<MessageActionsMenuProps> = ({
     Animated.parallel([
       Animated.timing(fade, { toValue: 0, duration: 110, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       Animated.timing(scale, { toValue: 0.96, duration: 110, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-    ]).start(({ finished }) => {
-      if (finished) {
-        after?.();
-        onClose();
-      }
+    ]).start(() => {
+      // Run unconditionally — even on finished:false (animation interrupted by
+      // backgrounding or a navigation push). Gating on `finished` left the menu
+      // mounted forever: `visible` never flipped, and the stuck closingRef made
+      // every later close attempt a no-op, so the full-screen tap-catcher ate
+      // all touches until the screen unmounted. Same self-healing pattern as
+      // MessageSearchOverlay.
+      closingRef.current = false;
+      after?.();
+      onClose();
     });
   };
 

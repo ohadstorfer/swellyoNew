@@ -40,7 +40,7 @@ import { formatPrice, formatPriceRange, FALLBACK_USD_TO_ILS, isIsraeli, usdToIls
 import { useUserProfile } from '../../context/UserProfileContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys, type ExploreFilterKey } from '../../hooks/trips/useTripQueries';
-import { fetchTripCore } from '../../hooks/trips/useTripDetail';
+import { fetchTripCore, TRIP_DETAIL_GC_MS } from '../../hooks/trips/useTripDetail';
 import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
 import { ff, fs } from '../../theme/fonts';
@@ -426,6 +426,7 @@ const ExploreTripCard: React.FC<{
       onPressIn={() => queryClient.prefetchQuery({
         queryKey: tripsKeys.detail(trip.id),
         queryFn: ({ signal }) => fetchTripCore(trip.id, userId ?? null, signal),
+        gcTime: TRIP_DETAIL_GC_MS,
       })}
       accessibilityRole="button"
       accessibilityLabel={`${headline}${showLocation ? ', ' + location : ''}, ${formatTripDates(trip)}${spotsLeft != null ? `, ${spotsLeft} spots left` : ''}`}
@@ -610,6 +611,11 @@ const TripDeck: React.FC<{
     InteractionManager.runAfterInteractions(() => {
       queryClient.prefetchQuery({
         queryKey: tripsKeys.detail(id),
+        // Short gcTime: most viewport-prefetched trips are scrolled past and
+        // never opened — without this each one pinned the cache for 30 min,
+        // growing every invalidateQueries scan (js-thread-freeze-spec.md).
+        // Opening the trip mounts useTripCore, which extends the entry's life.
+        gcTime: 1000 * 60 * 2,
         queryFn: ({ signal }) => fetchTripCore(id, userId ?? null, signal),
       });
     });
@@ -1113,6 +1119,7 @@ const MyTripsView: React.FC<{
     queryClient.prefetchQuery({
       queryKey: tripsKeys.detail(id),
       queryFn: ({ signal }) => fetchTripCore(id, userId, signal),
+      gcTime: TRIP_DETAIL_GC_MS,
     });
   }, [queryClient, userId]);
   // Flips true once the initial stagger window has elapsed, so scrolling /

@@ -10,6 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { SheetOptionRow } from '../sheets/SheetOptionRow';
 import Thumb from '../Thumb';
+import { Image } from 'expo-image';
+import { Images } from '../../assets/images';
 import { ff } from '../../theme/fonts';
 import type { EnrichedParticipant } from '../../services/trips/groupTripsService';
 
@@ -56,9 +58,7 @@ export function TripMemberSheet({
               {m.profile_image_url ? (
                 <Thumb uri={m.profile_image_url} size={128} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
               ) : (
-                <View style={[styles.avatar, styles.avatarEmpty]}>
-                  <Ionicons name="person" size={34} color="#FFFFFF" />
-                </View>
+                <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
               )}
               <Text style={styles.name} numberOfLines={1}>{m.name ?? 'User'}</Text>
               <Text style={styles.sub} numberOfLines={1}>{joinedAgo(m.joined_at)}</Text>
@@ -88,7 +88,6 @@ const styles = StyleSheet.create({
   sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 24 },
   header: { alignItems: 'center', paddingHorizontal: 20, marginBottom: 12 },
   avatar: { width: 64, height: 64, borderRadius: 32 },
-  avatarEmpty: { backgroundColor: '#C9CED2', alignItems: 'center', justifyContent: 'center' },
   name: { fontFamily: ff('Montserrat', '700'), fontSize: 18, color: '#212121', marginTop: 12, includeFontPadding: false },
   sub: { fontFamily: ff('Inter', '400'), fontSize: 13, color: '#7B7B7B', marginTop: 4, includeFontPadding: false },
   group: { marginTop: 4 },

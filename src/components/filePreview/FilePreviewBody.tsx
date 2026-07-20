@@ -17,11 +17,32 @@ import { View, Text, ScrollView, ActivityIndicator, StyleSheet, Platform } from 
 import { Image } from 'expo-image';
 import {
   previewKindForExt,
+  isQuickLookExt,
   MAX_TEXT_PREVIEW_BYTES,
 } from '../../services/messaging/fileAttachmentPolicy';
+import { previewFile } from '../../../modules/swellyo-quicklook';
 import { PdfRendererView, type PdfRendererProps } from './pdfRenderer';
 import { FileCard } from './FileCard';
 import { fs } from '../../theme/fonts';
+
+/**
+ * iOS Office docs (docx/xlsx/pptx/…) can't render in the dark in-app viewer, but
+ * QuickLook can. Hand the local file to the same QLPreviewController the receive
+ * side uses. If the native module can't present (shouldn't happen while
+ * foregrounded), fall back to the OS share sheet so the tap is never inert.
+ */
+async function openInQuickLook(uri: string): Promise<void> {
+  const shown = await previewFile(uri);
+  if (shown) return;
+  try {
+    const Sharing = require('expo-sharing');
+    if (Sharing && (await Sharing.isAvailableAsync())) {
+      await Sharing.shareAsync(uri);
+    }
+  } catch {
+    /* expo-sharing unavailable — nothing left to try; the card stays put. */
+  }
+}
 
 interface FilePreviewBodyProps {
   uri: string;
@@ -173,6 +194,21 @@ export function FilePreviewBody({ uri, displayName, ext, sizeBytes }: FilePrevie
       <RenderBoundary key={uri} fallback={card}>
         <TextPreview uri={uri} />
       </RenderBoundary>
+    );
+  }
+
+  // iOS Office docs: not renderable in-app, but QuickLook can preview them.
+  // Show the card as a tap target that opens QLPreviewController over this
+  // modal. Non-iOS keeps the plain card (no in-app Office viewer there).
+  if (Platform.OS === 'ios' && isQuickLookExt(ext)) {
+    return (
+      <FileCard
+        displayName={displayName}
+        ext={ext}
+        sizeBytes={sizeBytes}
+        onPress={() => { void openInQuickLook(uri); }}
+        actionLabel="Tap to preview"
+      />
     );
   }
 

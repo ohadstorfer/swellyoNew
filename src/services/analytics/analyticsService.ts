@@ -63,6 +63,17 @@ class AnalyticsService {
       this.posthogInstance = new PostHog(POSTHOG_API_KEY, {
         host: POSTHOG_HOST,
         enableSessionReplay: true,
+        // This instance initializes replay first at boot (App.tsx:97, before the
+        // PostHogProvider mounts), so it — not App.tsx — sets the native masking.
+        // Keep this in sync with App.tsx's sessionReplayConfig: all masking off
+        // so replays are fully visible (text, images, sandboxed views).
+        sessionReplayConfig: {
+          maskAllTextInputs: false,
+          maskAllImages: false,
+          maskAllSandboxedViews: false,
+          captureLog: false,
+          throttleDelayMs: 1000,
+        },
         captureAppLifecycleEvents: true, // Fixed: should be captureAppLifecycleEvents, not captureApplicationLifecycleEvents
         captureDeepLinks: true,
         flushAt: 20, // Flush after 20 events

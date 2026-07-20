@@ -217,9 +217,9 @@ export const ProfileImage: React.FC<ProfileImageProps> = React.memo(({
       {!hasValidImage && (
         <View style={[styles.loadingIconContainer, { borderRadius }]}>
           <Image
-            source={Images.surferPlaceholder}
+            source={Images.defaultAvatar}
             style={styles.placeholderImage}
-            contentFit="contain"
+            contentFit="cover"
           />
         </View>
       )}
@@ -314,10 +314,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   placeholderImage: {
-    // Smaller than the container so the surfer reads as an icon centered on
-    // the gray background, rather than filling the whole avatar circle.
-    width: '90%',
-    height: '90%',
+    // The default-avatar asset is itself a full circle (transparent corners),
+    // so it fills the whole avatar; the container's borderRadius clips edges.
+    width: '100%',
+    height: '100%',
   },
   onlineIndicator: {
     position: 'absolute',

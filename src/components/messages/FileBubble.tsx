@@ -5,7 +5,9 @@
  * Tapping downloads the file to the cache (named by message id, never the
  * sender's display_name — unescaped chars break a file:// uri on Android) and
  * then, for an image / pdf / text file, opens it in-app via FileViewerModal.
- * Everything else is handed to the OS share sheet as before.
+ * On iOS an Office document (doc/xls/ppt/rtf) opens in-app via QuickLook.
+ * Everything else — and any of the above when its viewer is unavailable — is
+ * handed to the OS share sheet as before.
  *
  * Security note: rendering a RECEIVED file in-app is a deliberate reversal of
  * the old "never render" posture. Images already decode in-process via
@@ -19,12 +21,13 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Message } from '../../services/messaging/messagingService';
-import { formatBytes, previewKindForExt } from '../../services/messaging/fileAttachmentPolicy';
+import { formatBytes, previewKindForExt, isQuickLookExt } from '../../services/messaging/fileAttachmentPolicy';
 import { getFileDownloadUrl } from '../../services/messaging/fileUploadService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { ff, fs } from '../../theme/fonts';
 import { iconForExt } from './fileIcon';
 import { FileViewerModal } from '../FileViewerModal';
+import { previewFile } from '../../../modules/swellyo-quicklook';
 
 interface FileBubbleProps {
   message: Message;
@@ -62,10 +65,13 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign, maxWidth = 
 
       const LegacyFS = require('expo-file-system/legacy');
       const kind = previewKindForExt(meta.ext);
-      // The in-app readers (pdf/text/image) reject a file:// uri whose name carries
-      // spaces/accents/#, so renderable files get an id-only cache name. The share
-      // sheet has no such limit, so a shared file keeps its human-readable name.
-      const target = kind !== 'none'
+      // QuickLook (iOS Office preview) is the same class of consumer as the in-app
+      // readers: it can choke on a file:// uri whose name carries spaces/accents/#.
+      const quickLook = Platform.OS === 'ios' && isQuickLookExt(meta.ext);
+      // The in-app readers (pdf/text/image) AND QuickLook reject an unsafe file://
+      // name, so those get an id-only cache name. The share sheet has no such
+      // limit, so a share-only file keeps its human-readable name.
+      const target = (kind !== 'none' || quickLook)
         ? `${LegacyFS.cacheDirectory}${message.id}.${meta.ext}`
         : `${LegacyFS.cacheDirectory}${message.id}-${meta.display_name}`;
       const { uri: localUri } = await LegacyFS.downloadAsync(url, target);
@@ -73,6 +79,14 @@ export function FileBubble({ message, isOwn, onLongPress, textAlign, maxWidth = 
       if (kind !== 'none') {
         setViewer({ uri: localUri });
         return;
+      }
+
+      // iOS Office documents: present in-app via QuickLook. On failure (module
+      // absent in Expo Go / an old build, or nothing to present from) fall
+      // through to the share sheet — the honest fallback.
+      if (quickLook) {
+        const shown = await previewFile(localUri);
+        if (shown) return;
       }
 
       let shared = false;

@@ -82,6 +82,10 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
   // Fit the 9:16 card inside the screen, leaving room for the controls below.
   const cardH = Math.min(screenH * 0.62, ((screenW - 48) * 16) / 9);
   const cardW = (cardH * 9) / 16;
+  // Tuner-approved layout (2026-07-15): logoTop 9% · textBottom 10% · sidePad 6%
+  // · title 21px on the tuner's 340px-wide card. ts() maps those tuner pixels
+  // to this card's real width so preview and capture keep the approved look.
+  const ts = (tunerPx: number) => (cardW / 340) * tunerPx;
 
   const capture = async (result: 'base64' | 'tmpfile'): Promise<string> => {
     // Lazy require — native module, absent in Expo Go (sheet unreachable there).
@@ -187,16 +191,23 @@ export const ShareTripStorySheet: React.FC<ShareTripStorySheetProps> = ({
               style={styles.scrim}
             />
 
-            <View style={styles.brandRow}>
-              <Logo size={30} iconOnly />
-              <Text style={styles.brandText}>Swellyo</Text>
+            <View style={[styles.brandRow, { top: '9%', left: '6%', gap: ts(7) }]}>
+              <Logo size={ts(26)} iconOnly />
+              <Text style={[styles.brandText, { fontSize: ts(13) }]}>Swellyo</Text>
             </View>
 
-            <View style={styles.cardTextBlock}>
-              <Text style={styles.cardTitle} numberOfLines={2}>
+            <View style={[styles.cardTextBlock, { left: '6%', right: '6%', bottom: '10%' }]}>
+              <Text
+                style={[styles.cardTitle, { fontSize: ts(21), lineHeight: ts(21) * 1.18 }]}
+                numberOfLines={2}
+              >
                 {vm.title || 'Surf trip'}
               </Text>
-              {!!metaLine && <Text style={styles.cardMeta}>{metaLine}</Text>}
+              {!!metaLine && (
+                <Text style={[styles.cardMeta, { fontSize: ts(11), marginTop: ts(6) }]}>
+                  {metaLine}
+                </Text>
+              )}
             </View>
           </View>
         </View>
@@ -289,34 +300,23 @@ const styles = StyleSheet.create({
   },
   brandRow: {
     position: 'absolute',
-    top: 18,
-    left: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
   brandText: {
     color: '#FFFFFF',
-    fontSize: 16,
     fontFamily: ff('Montserrat', '700'),
     letterSpacing: 0.4,
   },
   cardTextBlock: {
     position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 20,
   },
   cardTitle: {
     color: '#FFFFFF',
-    fontSize: 26,
-    lineHeight: 31,
     fontFamily: ff('Montserrat', '700'),
   },
   cardMeta: {
     color: 'rgba(255,255,255,0.92)',
-    fontSize: 13,
-    marginTop: 8,
     fontFamily: ff('Inter', '500'),
   },
   controls: {
