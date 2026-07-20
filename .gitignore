@@ -64,3 +64,6 @@ scripts/.jwt
 
 # Visual brainstorming companion (local mockups)
 .superpowers/
+
+# Local Expo module build output — regenerated, never commit
+modules/*/android/build/

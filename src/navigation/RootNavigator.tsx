@@ -568,7 +568,7 @@ function NavIconWarmer() {
 //                with a baked-in fill layer (.symbolset in an asset catalog) —
 //                two separate PNGs will NOT morph. Keep default 'swap' for ship
 //                builds until the custom symbols exist.
-const TAB_ICON_MODE = 'swap' as 'swap' | 'tint' | 'sfsymbol';
+const TAB_ICON_MODE = 'sfsymbol' as 'swap' | 'tint' | 'sfsymbol';
 
 type TabKey = 'lineup' | 'trips' | 'profile';
 
@@ -599,7 +599,7 @@ const TAB_CUSTOM_SYMBOLS: Record<TabKey, SFSymbol> = {
   trips: 'co.swellyo.trips' as SFSymbol,
   profile: 'co.swellyo.profile' as SFSymbol,
 };
-void TAB_CUSTOM_SYMBOLS; // referenced once authored; keeps it from being dropped
+void TAB_SF_SYMBOLS; // system-symbol set kept for a quick A/B against the brand symbols
 
 // Builds the tabBarIcon for a tab, honoring TAB_ICON_MODE.
 //   sfsymbol (iOS): returns an AppleIcon → native outline→fill morph.
@@ -607,7 +607,10 @@ void TAB_CUSTOM_SYMBOLS; // referenced once authored; keeps it from being droppe
 //   swap: outline vs filled raster per focus (also the Android fallback).
 const tabIcon = (key: TabKey, filled: number, outline: number) => {
   if (TAB_ICON_MODE === 'sfsymbol' && Platform.OS === 'ios') {
-    const sfSymbol = TAB_SF_SYMBOLS[key];
+    // Custom brand symbols (co.swellyo.*) live in ios/Swellyo/Images.xcassets as
+    // outline + `.fill` pairs. The patched TabItem loads them via Image(name) and
+    // fills only the focused tab → outline stays identical, selected morphs to fill.
+    const sfSymbol = TAB_CUSTOM_SYMBOLS[key];
     return () => ({ sfSymbol });
   }
   if (TAB_ICON_MODE === 'tint') {

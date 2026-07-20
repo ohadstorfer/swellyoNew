@@ -4,6 +4,33 @@ Goal: the WhatsApp-style outline→fill **morph** on the native iOS 26 tab bar.
 That morph only fires for **SF Symbols** (system or custom), never raster PNGs.
 So each of the 3 tabs needs a **custom symbol pair**: an outline + a `.fill`.
 
+## ✅ AUTO-GENERATED (no SF Symbols app needed)
+
+The 6 `.symbolset` folders are now generated **programmatically** from the source
+vectors below — no manual SF Symbols-app authoring. They live in
+`generated/` here and are copied into `ios/Swellyo/Images.xcassets/`.
+
+- Generator: `generated/gen_symbols2.py` (+ `generated/masters.py` for the paths,
+  `generated/foxhunt.svg` = a real Apple export template used as the skeleton).
+- Needs `pip install shapely svgpathtools`. Run `python3 gen_symbols2.py`.
+- What it does: expands the outline **strokes** into filled closed paths (round
+  cap/join buffer — SF Symbols disallow strokes), keeps the solid paths for the
+  `.fill` twin, then **injects the artwork into Apple's real weight/scale template**
+  (Notes + Guides + Ultralight/Regular/Black-S groups), mapping the 24×24 design box
+  onto the template cell (baseline origin, centered, ~cap-height tall). Writes each
+  `Name.symbolset/{Contents.json, name.svg}`.
+- ⚠️ **`actool` rejects a flat 24×24 SVG** ("must have a glyph for Regular weight
+  Medium size") — the weight-group template structure is required. Verified: the
+  generated set compiles clean via `xcrun actool` (Assets.car produced, no errors).
+- **Size knob:** `S` in `gen_symbols2.py` (default 70 ≈ cap-height). Bump/drop it if
+  the icon looks too big/small on device, then regenerate + recopy into the catalog.
+
+`TAB_ICON_MODE` is set to `'sfsymbol'` and points at `TAB_CUSTOM_SYMBOLS` in
+`src/navigation/RootNavigator.tsx`. **Still needs a native rebuild + device test.**
+If the render looks off on device, the SF Symbols-app recipe below is the fallback.
+
+---
+
 ## Source vectors (from Figma)
 
 Pulled from Figma `Swellyo Data Entry App` → node `14113-29295` (Nav Bar 4):

@@ -96,3 +96,71 @@ index 9e8dd80..a711513 100644
                )
              }
              #if !os(tvOS)
+diff --git a/node_modules/react-native-bottom-tabs/ios/TabViewImpl.swift b/node_modules/react-native-bottom-tabs/ios/TabViewImpl.swift
+index 14732fd..53e01dd 100644
+--- a/node_modules/react-native-bottom-tabs/ios/TabViewImpl.swift
++++ b/node_modules/react-native-bottom-tabs/ios/TabViewImpl.swift
+@@ -72,6 +72,8 @@ struct TabViewImpl: View {
+           tabBar = tabController.tabBar
+           updateTabBarAppearance(props: props, tabBar: tabController.tabBar)
+           updateExperimentalBakedTintColors(props: props, tabBar: tabController.tabBar)
++          // Swellyo patch: UIKit-level outline/fill pair → lens hover-fill.
++          updateCustomSymbolItemImages(props: props, tabBar: tabController.tabBar)
+           if !props.tabBarHidden {
+             onTabBarMeasured(
+               Int(tabController.tabBar.frame.size.height)
+@@ -92,6 +94,9 @@ struct TabViewImpl: View {
+               UIView.setAnimationsEnabled(true)
+             }
+           }
++          // Swellyo patch: selection re-renders the SwiftUI labels, which can
++          // clobber our UIKit-level images — re-register the outline/fill pair.
++          updateCustomSymbolItemImages(props: props, tabBar: tabBar)
+         #endif
+         #if os(tvOS) || os(macOS) || os(visionOS)
+           onSelect(newValue)
+@@ -129,6 +134,44 @@ struct TabViewImpl: View {
+     }
+   }
+ 
++  // Swellyo patch: register the outline/fill pair of CUSTOM SF Symbols directly on
++  // the UIKit tab bar items (`image` / `selectedImage`), the way a classic UIKit
++  // app (e.g. WhatsApp) does. At this layer the SYSTEM owns the selected-state
++  // swap, which is what lets the iOS 26 Liquid Glass lens preview the `.fill`
++  // variant while it hovers a tab mid-drag — a transient state SwiftUI never
++  // exposes (`isFocused` only changes on commit). System symbols are left alone:
++  // they resolve their `.fill` automatically. Mirrors the apply-then-async-reapply
++  // pattern of updateExperimentalBakedTintColors above (SwiftUI regenerates the
++  // items asynchronously and would otherwise clobber the images).
++  private func updateCustomSymbolItemImages(props: TabViewProps, tabBar: UITabBar?) {
++    guard applyCustomSymbolItemImages(props: props, tabBar: tabBar) else { return }
++
++    DispatchQueue.main.async { [weak tabBar] in
++      applyCustomSymbolItemImages(props: props, tabBar: tabBar)
++    }
++  }
++
++  @discardableResult
++  private func applyCustomSymbolItemImages(props: TabViewProps, tabBar: UITabBar?) -> Bool {
++    guard let tabBar, let items = tabBar.items else { return false }
++
++    var didSetAny = false
++    for (tabBarIndex, item) in items.enumerated() {
++      guard let tabData = props.filteredItems[safe: tabBarIndex],
++        !tabData.sfSymbol.isEmpty,
++        UIImage(systemName: tabData.sfSymbol) == nil,
++        let outline = UIImage(named: tabData.sfSymbol)
++      else { continue }
++
++      item.image = outline
++      if let fill = UIImage(named: "\(tabData.sfSymbol).fill") {
++        item.selectedImage = fill
++      }
++      didSetAny = true
++    }
++    return didSetAny
++  }
++
+   private func updateTabBarAppearance(props: TabViewProps, tabBar: UITabBar?) {
+     guard let tabBar else { return }
+ 
