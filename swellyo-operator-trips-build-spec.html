@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Operator Trips — Build Spec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cyan:#05BCD3; --cyan-deep:#0788B0; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --sand:#DBCDBC; --sand-tint:#F7F3EE;
+    --ink:#212121; --ink-black:#0A0A0A;
+    --text:#333; --text-2:#596E7C; --muted:#7B7B7B;
+    --line:#EAEDEF; --canvas:#FAFAFA;
+    --ok:#12A594; --ok-bg:#E7F7F5;
+    --warn:#C77700; --warn-bg:#FFF4E2;
+    --stop:#D93A4C; --stop-bg:#FDECEE;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{scroll-behavior:smooth;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  body{
+    font-family:'Inter',-apple-system,'Segoe UI',sans-serif;
+    color:var(--text);background:#fff;font-size:15px;line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4,.pill,.stepnum,.tag{font-family:'Montserrat','Inter',sans-serif;}
+  code,.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.86em;}
+
+  .wrap{max-width:920px;margin:0 auto;padding:0 28px;}
+
+  /* ---------- hero ---------- */
+  .hero{background:var(--ink-black);color:#fff;padding:52px 0 46px;position:relative;overflow:hidden;}
+  .hero::after{
+    content:"";position:absolute;left:-15%;bottom:-70%;width:130%;height:130%;
+    background:radial-gradient(closest-side,rgba(5,188,211,.20),rgba(5,188,211,0));
+  }
+  .hero .wrap{position:relative;z-index:2;}
+  .hero-top{display:flex;align-items:center;gap:14px;margin-bottom:34px;}
+  .hero-top .mark{width:38px;height:38px;}
+  .hero-top .word{width:104px;color:#fff;}
+  .hero h1{font-size:40px;font-weight:800;letter-spacing:-.03em;line-height:1.06;margin-bottom:16px;max-width:17ch;}
+  .hero p{color:rgba(255,255,255,.72);font-size:17px;max-width:60ch;}
+  .hero-meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:26px;padding-top:20px;border-top:1px solid rgba(255,255,255,.14);font-size:12.5px;color:rgba(255,255,255,.55);}
+  .hero-meta b{color:#fff;font-weight:600;}
+  .gradbar{height:4px;background:linear-gradient(90deg,#06BDD4 0%,var(--sand) 72%,var(--sand) 100%);}
+
+  /* ---------- nav ---------- */
+  nav{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);}
+  nav .wrap{display:flex;gap:4px;overflow-x:auto;padding-top:11px;padding-bottom:11px;}
+  nav a{
+    font-size:12.5px;font-weight:500;color:var(--text-2);text-decoration:none;
+    padding:6px 12px;border-radius:999px;white-space:nowrap;
+  }
+  nav a:hover{background:var(--cyan-tint);color:var(--cyan-dark);}
+
+  /* ---------- sections ---------- */
+  section{padding:56px 0 8px;}
+  section + section{border-top:1px solid var(--line);}
+  .kicker{
+    font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--cyan-deep);display:block;margin-bottom:10px;
+  }
+  h2{font-size:27px;font-weight:700;letter-spacing:-.025em;color:var(--ink);line-height:1.2;margin-bottom:12px;}
+  .sub{color:var(--text-2);font-size:15.5px;max-width:70ch;margin-bottom:30px;}
+  h3{font-size:16px;font-weight:700;color:var(--ink);letter-spacing:-.01em;margin-bottom:8px;}
+  h4{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+  p{max-width:76ch;}
+
+  /* ---------- pills ---------- */
+  .pill{
+    display:inline-block;font-size:10px;font-weight:700;letter-spacing:.1em;
+    text-transform:uppercase;padding:3px 9px;border-radius:999px;vertical-align:2px;
+  }
+  .p-ok{background:var(--ok-bg);color:var(--ok);}
+  .p-warn{background:var(--warn-bg);color:var(--warn);}
+  .p-stop{background:var(--stop-bg);color:var(--stop);}
+
+  /* ---------- decision cards ---------- */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:26px;}
+  .card{
+    border:1px solid var(--line);border-radius:16px;padding:20px 22px;background:#fff;
+  }
+  .card .top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px;}
+  .card h3{margin:0;}
+  .card .decision{font-size:14.5px;color:var(--ink);font-weight:500;margin-bottom:10px;}
+  .card .why{font-size:13px;color:var(--text-2);line-height:1.6;}
+  .card .why b{color:var(--ink);font-weight:600;}
+
+  /* ---------- open questions ---------- */
+  .q{
+    border:1px solid var(--line);border-left:4px solid var(--warn);
+    border-radius:0 16px 16px 0;padding:20px 24px;margin-bottom:14px;background:#fff;
+  }
+  .q.blocker{border-left-color:var(--stop);}
+  .q .top{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
+  .q h3{margin:0;}
+  .q p{font-size:14px;color:var(--text-2);margin-bottom:10px;}
+  .q .who{
+    font-size:12.5px;font-weight:600;color:var(--cyan-dark);
+    background:var(--cyan-tint);display:inline-block;padding:4px 11px;border-radius:999px;
+  }
+
+  /* ---------- tables ---------- */
+  table{width:100%;border-collapse:collapse;margin-bottom:24px;font-size:14px;}
+  th{
+    text-align:left;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;
+    letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+    padding:0 14px 10px 0;border-bottom:2px solid var(--line);
+  }
+  td{padding:13px 14px 13px 0;border-bottom:1px solid var(--line);vertical-align:top;color:var(--text-2);}
+  td:first-child{color:var(--ink);font-weight:600;width:26%;}
+  td b{color:var(--ink);font-weight:600;}
+  .sep{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 8px;border-radius:6px;}
+  .s-new{background:var(--cyan-tint);color:var(--cyan-dark);}
+  .s-share{background:var(--ok-bg);color:var(--ok);}
+  .s-none{background:#F3F4F5;color:var(--muted);}
+
+  /* ---------- feature columns ---------- */
+  .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-bottom:10px;}
+  .feat{border-top:2px solid var(--cyan);padding-top:16px;}
+  .feat h3{margin-bottom:12px;}
+  .feat ul{list-style:none;}
+  .feat li{
+    position:relative;padding:0 0 9px 15px;font-size:13.5px;color:var(--text-2);line-height:1.5;
+  }
+  .feat li::before{
+    content:"";position:absolute;left:0;top:.55em;width:5px;height:5px;
+    border-radius:50%;background:var(--cyan);
+  }
+  .feat li b{color:var(--ink);font-weight:600;}
+
+  /* ---------- code / schema ---------- */
+  .schema{
+    background:var(--ink-black);color:#E8EDEF;border-radius:16px;padding:22px 24px;
+    font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.85;
+    overflow-x:auto;margin-bottom:22px;white-space:pre;
+  }
+  .schema .t{color:var(--cyan);font-weight:500;}
+  .schema .c{color:#77878F;}
+
+  /* ---------- steps ---------- */
+  .steps{counter-reset:s;margin-bottom:26px;}
+  .step{
+    display:grid;grid-template-columns:44px 1fr;gap:0 16px;
+    padding:16px 0;border-top:1px solid var(--line);
+  }
+  .step:first-child{border-top:none;}
+  .stepnum{
+    font-size:19px;font-weight:800;color:var(--cyan);letter-spacing:-.03em;
+  }
+  .step p{font-size:13.5px;color:var(--text-2);margin:0;}
+
+  /* ---------- callout ---------- */
+  .callout{
+    background:var(--sand-tint);border-radius:16px;padding:22px 26px;margin-bottom:26px;
+    border:1px solid #EDE4D9;
+  }
+  .callout h3{margin-bottom:8px;}
+  .callout p{font-size:14px;color:var(--text-2);}
+
+  .note{
+    background:var(--canvas);border-radius:14px;padding:18px 22px;
+    font-size:13.5px;color:var(--text-2);border:1px solid var(--line);margin-bottom:22px;
+  }
+  .note b{color:var(--ink);}
+
+  footer{background:var(--ink-black);color:rgba(255,255,255,.5);padding:34px 0;margin-top:60px;font-size:13px;}
+  footer .wrap{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap;}
+  footer .mark{width:28px;height:28px;opacity:.85;}
+
+  @media (max-width:820px){
+    .cards,.feats{grid-template-columns:1fr;}
+    .hero h1{font-size:30px;}
+    h2{font-size:22px;}
+  }
+  @media print{
+    nav{display:none;}
+    section{page-break-inside:auto;padding-top:28px;}
+    .card,.q,.feat,.schema{page-break-inside:avoid;}
+    .hero{padding:34px 0;}
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="rg" x1="3" y1="59" x2="115" y2="59" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#05BCD3"/><stop offset="0.7" stop-color="#DBCDBC"/>
+  </linearGradient>
+  <symbol id="mk" viewBox="0 0 118 118">
+    <circle cx="59" cy="59" r="57.5" fill="black" stroke="url(#rg)" stroke-width="3"/>
+    <path d="M88.8802 84.3185C85.2448 82.6892 81.2109 82.5989 76.1879 84.0291C71.3958 85.3942 66.3694 87.9419 61.0485 90.6385C55.443 93.4789 49.6483 96.4147 43.611 98.213C39.7546 99.3605 36.1208 99.9343 32.651 99.9343C31.1697 99.9343 29.7202 99.8289 28.2958 99.6198C36.8321 106.077 47.4657 109.909 58.9964 109.909C74.2915 109.909 88.0098 103.168 97.3429 92.4986C94.9962 88.5324 92.1592 85.7873 88.8819 84.3185H88.8802Z" fill="white"/>
+    <path d="M23.3715 68.129C36.4589 71.7523 49.2767 63.8533 61.6745 56.2135C67.7436 52.4731 73.4747 48.9418 79.2074 46.7354C85.9963 44.1224 91.8428 43.8414 97.0801 45.8755C102.225 47.8745 106.515 52.065 109.908 58.3815C109.776 47.5952 106.288 37.6185 100.438 29.4434C99.4067 28.0031 98.1162 26.7653 96.6265 25.8084C93.0379 23.5049 89.3506 22.1349 85.6029 21.72C74.1408 20.4487 64.3207 28.1855 54.8237 35.668C47.1678 41.6985 39.8667 47.4513 32.3246 47.4513C30.8266 47.4513 29.3202 47.2255 27.7987 46.7287C22.5832 45.0274 18.3937 40.3736 15.3055 32.8694C10.9202 40.1695 8.31581 48.6558 8.08984 57.7325C12.6359 63.0838 17.7727 66.58 23.3715 68.1307V68.129Z" fill="white"/>
+    <path d="M95.018 51.1784C91.1064 49.6594 86.7327 49.9355 81.2511 52.0449C76.0105 54.0606 70.497 57.4598 64.6605 61.0563C54.1475 67.5352 42.4828 74.7216 30.0801 74.7233C27.3702 74.7233 24.6269 74.3803 21.8517 73.6125C17.0998 72.2977 12.6643 69.8587 8.60035 66.3374C9.83393 74.8956 13.1949 82.7662 18.1359 89.3939C20.5796 91.1754 23.1606 92.4752 25.8655 93.2765C36.8355 96.5318 47.8356 90.958 58.4759 85.5665C64.0479 82.7427 69.3103 80.0763 74.6279 78.5607C80.9247 76.7658 86.3495 76.9515 91.2085 79.1295C95.013 80.8341 98.3053 83.7147 101.045 87.7244C104.594 82.542 107.208 76.6721 108.646 70.3555C105.459 59.9054 100.88 53.4567 95.0197 51.18L95.018 51.1784Z" fill="white"/>
+  </symbol>
+  <symbol id="wd" viewBox="0 0 245 37">
+    <path d="M18.1871 8.40314C15.4658 8.40314 14.3364 9.37814 14.3364 10.6245C14.3364 14.7457 30.317 13.821 30.317 24.8275C30.317 32.2556 24.1391 36.3717 15.4133 36.3717C8.38959 36.3717 2.77902 34.0397 0 29.9739L7.0815 23.0332C8.66801 25.7974 11.841 27.9636 15.7495 27.9636C18.5233 27.9636 20.0573 27.1494 20.0573 25.5763C20.0573 20.8068 4.13438 22.214 4.13438 11.3181C4.13438 4.17644 10.3123 0 18.9225 0C25.4945 0 30.7636 2.54808 32.8071 6.34256L25.3841 12.4137C24.1916 10.2476 21.7016 8.40314 18.1871 8.40314Z" fill="currentColor"/>
+    <path d="M92.7635 0.814242L75.3697 35.5626H63.5812L62.1103 12.4138L52.7068 35.5626H41.3753L36.0957 0.814242H46.408L49.0137 23.8525L57.9706 0.814242H70.5524L71.913 23.7972L82.3934 0.814242H92.7635Z" fill="currentColor"/>
+    <path d="M121.552 0.814242L120.133 8.8907H105.345L104.436 14.1477H116.96L115.542 22.1689H103.018L102.109 27.6973H116.897L115.479 35.5576H91.3398L97.4127 0.814242H121.552Z" fill="currentColor"/>
+    <path d="M136.004 0.814242L131.412 27.1595H147.903L146.432 35.5626H120.596L126.653 0.814242H136.004Z" fill="currentColor"/>
+    <path d="M165.811 0.814242L161.22 27.1595H177.71L176.239 35.5626H150.403L156.46 0.814242H165.811Z" fill="currentColor"/>
+    <path d="M194.437 24.1792L192.456 35.5626H183.105L185.086 24.1792L175.735 0.814242H185.369L191.038 15.4494L201.466 0.814242H211.72L194.437 24.1792Z" fill="currentColor"/>
+    <path d="M224.859 37C215.418 37 207.57 31.1198 207.57 20.827C207.57 9.58928 216.569 1.76411 227.711 1.76411C237.152 1.76411 245 7.64429 245 17.9371C245 29.592 236.001 37 224.853 37H224.853ZM226.892 10.4286C221.733 10.4286 217.394 14.1577 217.394 20.2993C217.394 24.5511 220.031 28.3355 225.683 28.3355C230.79 28.3355 235.176 24.6064 235.176 18.4096C235.176 14.1577 232.487 10.4286 226.886 10.4286H226.892Z" fill="currentColor"/>
+  </symbol>
+</defs></svg>
+
+<div class="gradbar"></div>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-top">
+      <svg class="mark"><use href="#mk"/></svg>
+      <svg class="word" viewBox="0 0 245 37"><use href="#wd"/></svg>
+    </div>
+    <h1>Operator Trips — build spec</h1>
+    <p>Everything we've decided, why we decided it, what's still open, and the order we build it in. Read it as a review document: every decision below is meant to be challenged before code gets written.</p>
+    <div class="hero-meta">
+      <span>Version <b>Draft v1</b></span>
+      <span>Written <b>20 July 2026</b></span>
+      <span>For <b>Eyal &amp; Ohad</b></span>
+      <span>Status <b>Pre-build</b></span>
+    </div>
+  </div>
+</header>
+
+<nav><div class="wrap">
+  <a href="#what">What it is</a>
+  <a href="#decisions">Decisions</a>
+  <a href="#open">Open questions</a>
+  <a href="#arch">Architecture</a>
+  <a href="#schema">Data model</a>
+  <a href="#features">Features</a>
+  <a href="#payments">Payments</a>
+  <a href="#order">Build order</a>
+  <a href="#risks">Risks</a>
+</div></nav>
+
+<!-- ============ WHAT ============ -->
+<section id="what"><div class="wrap">
+  <span class="kicker">The shape of it</span>
+  <h2>What we're actually building</h2>
+  <p class="sub">Swellyo today is a free peer-to-peer trips product — a user hosts a trip, others request to join, no money moves. We're adding a <b>second, parallel product</b> for professional operators: real payments, a structured traveller onboarding, and a management dashboard.</p>
+
+  <div class="callout">
+    <h3>The one-line success criterion</h3>
+    <p>One design-partner operator runs one real trip end-to-end inside Swellyo — creates it, their travellers onboard and pay and upload documents, and they manage the whole thing to completion without falling back to spreadsheets and WhatsApp. <b>Depth over breadth. One operator, done properly, beats five half-served.</b></p>
+  </div>
+
+  <div class="note">
+    <b>How it relates to the existing product.</b> Peer trips and their live users are completely unaffected — no schema, RLS or behaviour change to anything running today. Operator trips reuse the chat system and can optionally appear in the explore feed, but otherwise run on their own rails. Peer hosts don't get operator features in v1.
+  </div>
+</div></section>
+
+<!-- ============ DECISIONS ============ -->
+<section id="decisions"><div class="wrap">
+  <span class="kicker">Locked — but reviewable</span>
+  <h2>Decisions we've taken</h2>
+  <p class="sub">These came out of the spec interview. Each one includes the reasoning so you can judge whether you still agree. If any of these flip, the sections below change with them.</p>
+
+  <div class="cards">
+    <div class="card">
+      <div class="top"><h3>Operator identity</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">A normal Swellyo account with an <code>is_operator</code> flag we set by hand.</div>
+      <div class="why">No self-serve signup, no application queue, no verification UI in v1. Eyal onboards each operator personally. <b>Why:</b> at this stage the constraint is finding good operators, not scaling access to them — building signup infrastructure for six people is wasted work.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Payments</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Real money collection, <b>both rails at launch</b> — Stripe Connect for US/international, per-operator gateway integration for Israeli operators.</div>
+      <div class="why">Not payment-tracking. Travellers actually pay inside Swellyo. <b>Why both:</b> tashlumim and Bit only exist on the Israeli rail, so an Israeli operator without it can't sell the way they sell today. See the payments section.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Israeli commission</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Operator remits manually against the totals we track.</div>
+      <div class="why">Their gateway account is theirs, so we can't deduct at source without an Israeli entity. Because payment happens inside Swellyo, we still see the amounts — the tracking is real even though the collection isn't automatic.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Discovery</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Per-trip visibility toggle: private (link only) or listed in explore.</div>
+      <div class="why">Operators distribute their own link to their own audience by default. Listing is the growth lever they opt into, trip by trip. Listed operator trips need a badge and a price so users can tell them from peer trips.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>New traveller entry</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Full Swellyo onboarding first, then trip onboarding.</div>
+      <div class="why">One consistent funnel. <b>Flagged risk:</b> this is the likeliest place in the whole flow to lose an operator's paying customer — someone who booked a surf trip and is now being asked to build a social profile. Instrument it and be ready to revisit.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Capacity</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">A spot is secured when the <b>deposit is paid</b> — not before.</div>
+      <div class="why">Prevents ghost reservations blocking real buyers. Someone mid-onboarding can lose their spot to someone who pays first, so the UI has to say that plainly rather than surprise them.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Waivers</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Operator uploads the waiver, traveller reads it and taps "I agree". We record name, timestamp and waiver version.</div>
+      <div class="why">Legally reasonable for this use case and trivial to build. Drawn signatures or DocuSign are available later if an operator's insurer demands it.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Staff</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Display-only profiles — name, photo, role, bio.</div>
+      <div class="why">No accounts, no permissions, no access. Staff exist so travellers can see who's guiding them. Giving guides real trip access is a v2 conversation.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Communication</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Reuse group chat and admin updates, plus <b>automated deadline reminders</b> and a <b>1:1 operator↔traveller DM</b>.</div>
+      <div class="why">Automated reminders are what actually removes the chasing — without them the operator is still the one nagging. The DM exists because payment and medical questions don't belong in a group thread.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Desktop</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Read and review only — payments, trip info, exports. All real management on mobile.</div>
+      <div class="why">Keeps the web surface tiny at a time when web isn't a platform we maintain. Document review and exports are genuinely painful on a phone, so those are the things that earn a desktop view.</div>
+    </div>
+
+    <div class="card">
+      <div class="top"><h3>Architecture</h3><span class="pill p-ok">Locked</span></div>
+      <div class="decision">Separate data model, bridged to the existing chat system. Live tables untouched.</div>
+      <div class="why">Full reasoning in the architecture section — the short version is that bookings behave nothing like join-requests, and the live trip tables are more entangled than they look.</div>
+    </div>
+
+  </div>
+</div></section>
+
+<!-- ============ OPEN ============ -->
+<section id="open"><div class="wrap">
+  <span class="kicker">Not decided</span>
+  <h2>Open questions — do not invent answers</h2>
+  <p class="sub">Each of these blocks a specific part of the build. Two need a conversation with the design-partner operators; one needs research and probably a lawyer; one is ours to decide.</p>
+
+  <div class="q blocker">
+    <div class="top"><h3>Pricing model</h3><span class="pill p-stop">Blocker</span></div>
+    <p>Flat price per person, or room types (shared vs private), or options plus add-ons (transfers, board rental, extra nights)? Real surf trips almost never have one flat price. <b>Blocks:</b> payment amounts, the booking table shape, capacity semantics.</p>
+    <span class="who">Ask the design-partner operators</span>
+  </div>
+
+  <div class="q blocker">
+    <div class="top"><h3>Payment timing</h3><span class="pill p-stop">Blocker</span></div>
+    <p>Where does payment sit in the onboarding? Deposit during onboarding with the balance as a later open task, full payment upfront, or operator-configurable per trip? Note the tension already flagged in the operator guide: operators often need cash upfront for suppliers, which fights against holding funds until after the trip. <b>Blocks:</b> onboarding step order, booking state machine.</p>
+    <span class="who">Ask the design-partner operators</span>
+  </div>
+
+  <div class="q blocker">
+    <div class="top"><h3>Refund &amp; chargeback liability</h3><span class="pill p-stop">Blocker</span></div>
+    <p>We charge the card, so Stripe disputes land on us — and if an operator refuses to refund, we're stuck in the middle. Candidate structure to validate: operator is contractually liable for delivery and refunds, chargebacks debited from their connected account (<code>debit_negative_balances: true</code>), refunds only ever executed on operator instruction, deposit explicitly non-refundable. <b>Do not finalise the money-holding design until this is settled.</b></p>
+    <span class="who">Research + design partners + likely a lawyer</span>
+  </div>
+
+  <div class="q">
+    <div class="top"><h3>Document retention</h3><span class="pill p-warn">Open</span></div>
+    <p>Two candidates, both acceptable: <b>(a)</b> private bucket with auto-delete N days after the trip ends — lower liability; or <b>(b)</b> private bucket, kept, so returning travellers never re-upload their passport. Option (b) is a real product benefit and a real liability increase. Access control is identical either way.</p>
+    <span class="who">Eyal &amp; Ohad decide</span>
+  </div>
+
+</div></section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section id="arch"><div class="wrap">
+  <span class="kicker">Architecture</span>
+  <h2>Separate model, bridged to chat</h2>
+  <p class="sub">The decision that most affects how this gets built, and the one worth understanding properly.</p>
+
+  <h3 style="margin-bottom:10px;">Why not just add a flag to <code>group_trips</code></h3>
+  <p style="margin-bottom:14px;color:var(--text-2);font-size:14.5px;">Two reasons, both concrete:</p>
+  <p style="margin-bottom:14px;color:var(--text-2);font-size:14.5px;"><b>1. The live tables are more entangled than they look.</b> A single <code>SECURITY DEFINER</code> function, <code>is_trip_host()</code>, gates six tables — participants, join requests, commitment requests, gear items, gear requests and admin updates. It was hand-patched to production as recently as 8 July 2026 with an explicit "do not db push" warning. Bolting a payment and document lifecycle onto that means every operator change has a blast radius covering six features that have nothing to do with money.</p>
+  <p style="margin-bottom:22px;color:var(--text-2);font-size:14.5px;"><b>2. A booking is not a join-request.</b> It holds real inventory, its state is gated on payment, and it has to prevent double-selling. That isn't an incremental extension of request-to-join — it's a different lifecycle wearing the same word.</p>
+
+  <div class="note">
+    <b>The lucky part.</b> Chat is already loosely coupled — <code>messagingService.createGroupConversation</code> stores <code>trip_id</code> inside <code>conversations.metadata</code> (JSONB), not as a foreign key to <code>group_trips.id</code>. Operator trips can create group conversations through exactly the same path with <b>zero migration</b>.
+  </div>
+
+  <h3 style="margin-top:32px;">What's shared and what's separate</h3>
+  <table>
+    <thead><tr><th>Concern</th><th>Treatment</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Trips</td><td><span class="sep s-new">Separate</span></td><td>New <code>operator_trips</code></td></tr>
+      <tr><td>Participants</td><td><span class="sep s-new">Separate</span></td><td><code>operator_trip_bookings</code> — a real state machine, not join-requests</td></tr>
+      <tr><td>Chat</td><td><span class="sep s-share">Shared</span></td><td>Reuse messaging via <code>conversations.metadata.trip_id</code></td></tr>
+      <tr><td>Gear</td><td><span class="sep s-share">Either</span></td><td>Loosely coupled and low-risk — decide at build time</td></tr>
+      <tr><td>Admin updates</td><td><span class="sep s-new">Separate</span></td><td>Mirror the pattern rather than widening the live table</td></tr>
+      <tr><td>Payments, documents, tasks</td><td><span class="sep s-new">New</span></td><td>No equivalent exists today</td></tr>
+      <tr><td>Explore feed</td><td><span class="sep s-share">View</span></td><td>Read-only <code>UNION</code> over both trip types — never a shared write table</td></tr>
+      <tr><td>Live <code>group_trip_*</code> tables</td><td><span class="sep s-none">Untouched</span></td><td>No schema, RLS or behaviour change</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<!-- ============ SCHEMA ============ -->
+<section id="schema"><div class="wrap">
+  <span class="kicker">Data model</span>
+  <h2>New tables</h2>
+  <p class="sub">Shapes firm up once the pricing model and payment timing are answered — those two decide the booking and payment columns. Everything else is stable.</p>
+
+  <div class="schema">
+<span class="t">operator_trips</span>
+  operator_id, trip content, capacity, visibility (private | listed),
+  payment config, onboarding requirements config,
+  waiver (text/file + version), staff (jsonb), status
+
+<span class="t">operator_trip_bookings</span>
+  trip_id, traveller_id, state, chosen price option, amounts
+  <span class="c">state: onboarding_started → deposit_paid (spot secured)</span>
+  <span class="c">       → fully_paid → completed | cancelled</span>
+
+<span class="t">operator_trip_payment_events</span>   <span class="c">← immutable ledger</span>
+  booking_id, source (stripe | gateway | manual), type, amount,
+  currency, external_ref, occurred_at
+  <span class="c">Webhooks and manual marks APPEND events.</span>
+  <span class="c">Payment status is DERIVED, never mutated directly.</span>
+
+<span class="t">operator_trip_traveler_documents</span>
+  booking_id, type (passport | insurance | visa | flights),
+  storage_path, uploaded_at, deleted_at, reclaimed_at
+
+<span class="t">operator_trip_tasks</span>
+  trip_id, definition, deadline
+  + per-traveller completion state
+  </div>
+
+  <div class="callout">
+    <h3>The one non-obvious design choice</h3>
+    <p>The payment ledger is <b>append-only</b>. Webhooks never mutate a booking's payment status directly — they append an event, and status is computed from the event history. This is what makes the dashboard's money numbers trustworthy and replayable when a webhook arrives twice, out of order, or late. It's the single easiest thing to get wrong and the most expensive to fix afterwards.</p>
+  </div>
+</div></section>
+
+<!-- ============ FEATURES ============ -->
+<section id="features"><div class="wrap">
+  <span class="kicker">Scope</span>
+  <h2>Features, by side</h2>
+  <p class="sub">Straight from the three feature sketches, cleaned up and de-duplicated.</p>
+
+  <div class="feats">
+    <div class="feat">
+      <h3>Traveller</h3>
+      <ul>
+        <li><b>Extended onboarding</b> on top of normal Swellyo onboarding</li>
+        <li>Passport upload</li>
+        <li>Waiver — read and agree</li>
+        <li>Medical form: allergies, dietary, injuries, regular medication</li>
+        <li>Payment (position TBD)</li>
+        <li><b>Deadline-gated, skippable:</b> insurance, visa, flight tickets</li>
+        <li><b>Overview:</b> staff highlighting, improved "what's included"</li>
+        <li><b>Plan:</b> open tasks, uploaded items, "my medical card" + edit, helpful links</li>
+        <li>Carried over: chat, gear, admin updates, profiles, notifications</li>
+      </ul>
+    </div>
+
+    <div class="feat">
+      <h3>Operator</h3>
+      <ul>
+        <li>Trip creation — current wizard <b>plus:</b></li>
+        <li>Set onboarding requirements per trip</li>
+        <li>Set open tasks and deadlines</li>
+        <li>Set payment requirement timing</li>
+        <li>Fill in staff info</li>
+        <li>Configure notifications — self and customers</li>
+        <li>Set visibility and capacity</li>
+        <li><b>Simple management:</b> a dedicated edit space, simpler than the creation wizard</li>
+        <li>Communication: chat, admin updates, gear lists</li>
+        <li>Mobile only</li>
+      </ul>
+    </div>
+
+    <div class="feat">
+      <h3>Dashboard</h3>
+      <ul>
+        <li>Trips list → select trip or create new</li>
+        <li><b>Pay status:</b> paid in full, total in $ and ₪, open payments, deposits paid, tashlumim total</li>
+        <li><b>Documents:</b> completion counts (14/15 passports), visas, insurance, flights + view all</li>
+        <li><b>Medical flags:</b> allergies, food prefs, injuries + view all</li>
+        <li><b>Surf demographics:</b> levels, board types, age ranges, nationalities</li>
+        <li>Each with its own page + export all</li>
+        <li><b>Per traveller:</b> profile, documents (view/export/delete+reclaim), medical (view only)</li>
+        <li><b>Actions:</b> message, remove from trip, send reminder</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:26px;">
+    <b>"Delete + reclaim"</b> means the operator deletes a traveller's uploaded document and the system automatically re-opens it as a task for that traveller, with a notification — e.g. because the passport scan was unreadable. It's a delete plus a re-request, not just a delete.
+  </div>
+</div></section>
+
+<!-- ============ PAYMENTS ============ -->
+<section id="payments"><div class="wrap">
+  <span class="kicker">Payments</span>
+  <h2>Two rails, one dashboard</h2>
+
+  <div class="callout" style="background:var(--stop-bg);border-color:#F7D4D9;">
+    <h3>Correction worth knowing before you plan anything</h3>
+    <p><b>Stripe can do deposits. Stripe cannot do tashlumim.</b> A deposit plus balance is straightforward on Stripe (two charges, or auth-then-capture). Israeli interest-free instalments run over SHVA and require Israeli domestic acquiring, which a US entity can't get on Stripe — confirmed across several earlier research passes. Splitit stacks instalments onto Stripe but adds cost rather than removing it, so it isn't a substitute. <b>This is precisely why both rails are in v1.</b></p>
+  </div>
+
+  <h3>US / international — Stripe Connect</h3>
+  <p style="color:var(--text-2);font-size:14.5px;margin-bottom:20px;">Live account approved, Connect enabled, test connected account exists. Direction already agreed from earlier research: <b>Express</b> accounts, destination charges, ~12% commission, funds held until after the trip. The remaining build-time decisions there (charge type, loss liability) now interlock with the refund-liability question above.</p>
+
+  <h3>Israel — per-operator gateway integration</h3>
+  <p style="color:var(--text-2);font-size:14.5px;margin-bottom:20px;">The operator connects <b>their own</b> gateway account (API key / webhooks) so payments report amount and payer back into Swellyo automatically. This is what makes the ₪, deposit and tashlumim numbers on the dashboard real rather than trust-based. We're not in the money flow; commission is remitted manually against tracked totals. <b>Consequence to accept:</b> this only works for operators on a gateway we've integrated.</p>
+
+  <div class="note">
+    <b>Dashboard money view.</b> Both rails shown together, in dollars and shekels — total collected, paid in full, deposits paid, outstanding, tashlumim.
+  </div>
+</div></section>
+
+<!-- ============ ORDER ============ -->
+<section id="order"><div class="wrap">
+  <span class="kicker">Sequencing</span>
+  <h2>Build order</h2>
+  <p class="sub">Ordered so that the parts blocked on operator conversations come after the parts that aren't.</p>
+
+  <div class="steps">
+    <div class="step"><div class="stepnum">01</div><div><h4>Operator flag + trip creation</h4><p>The <code>is_operator</code> flag, operator trip creation, visibility toggle, capacity. No payments yet.</p></div></div>
+    <div class="step"><div class="stepnum">02</div><div><h4>Traveller onboarding</h4><p>Documents, waiver, medical form, tasks with deadlines. The biggest single chunk of product value and it needs no payment decisions.</p></div></div>
+    <div class="step"><div class="stepnum">03</div><div><h4>Dashboard — mobile</h4><p>Trip snapshot, per-traveller view, exports.</p></div></div>
+    <div class="step"><div class="stepnum">04</div><div><h4>Payment rail #1 + the ledger</h4><p>Whichever rail the first design partner actually needs. The append-only ledger lands here.</p></div></div>
+    <div class="step"><div class="stepnum">05</div><div><h4>Reminders + 1:1 DM</h4><p>Automated deadline reminders and the operator↔traveller thread.</p></div></div>
+    <div class="step"><div class="stepnum">06</div><div><h4>Payment rail #2</h4><p>The other rail, once the first is proven in a real trip.</p></div></div>
+    <div class="step"><div class="stepnum">07</div><div><h4>Desktop read-only dashboard</h4><p>Payments, info, exports. Review surface only.</p></div></div>
+  </div>
+
+  <h3>Files this touches</h3>
+  <table>
+    <thead><tr><th>Kind</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>New</td><td><code>supabase/migrations/</code> (operator tables) · <code>src/screens/operator/</code> · <code>src/screens/trips/operator-onboarding/</code> · <code>src/services/operator/</code> · <code>supabase/functions/</code> (Stripe checkout + webhook, gateway webhook receiver)</td></tr>
+      <tr><td>Modified</td><td>Explore feed query (UNION view) · messaging service (bridge operator trips to group conversations) · profile model (<code>is_operator</code>) · navigation</td></tr>
+      <tr><td>Untouched</td><td><code>group_trips</code> and every existing <code>group_trip_*</code> table and its RLS</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<!-- ============ RISKS ============ -->
+<section id="risks"><div class="wrap">
+  <span class="kicker">Watch list</span>
+  <h2>Risks and what we do about them</h2>
+
+  <table>
+    <thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Feed fragmentation</td><td>Two trip types in one feed — solved with the read-only <code>UNION</code> view rather than merging write paths.</td></tr>
+      <tr><td>Two parallel permission systems</td><td>Strict naming and documentation discipline, no shared foreign keys between the two models.</td></tr>
+      <tr><td>Payment webhook correctness</td><td>Append-only ledger with derived status — handles duplicate, out-of-order and late webhooks.</td></tr>
+      <tr><td>Onboarding drop-off</td><td>Full Swellyo onboarding before trip onboarding is the likeliest place to lose an operator's paying customer. Instrument it from day one and be willing to reverse the decision.</td></tr>
+      <tr><td>Sensitive data</td><td>Passports and medical records are the most sensitive data Swellyo will ever hold. Private bucket, RLS limited to the traveller and that trip's operator, short-lived signed URLs, medical view-only with no export, retention policy shown before upload.</td></tr>
+      <tr><td>Gateway lock-in per operator</td><td>Only operators on an integrated gateway get automatic tracking. Accept it, and pick the first gateway based on real signed operators rather than research preference.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout" style="margin-top:10px;">
+    <h3>Before any of this gets built</h3>
+    <p><b>1.</b> A design-partner conversation covering pricing model, payment timing, refund expectations, which gateway they use, and what they do in spreadsheets today — use <code>docs/operator-conversation-guide.md</code>. <b>2.</b> A decision on document retention. <b>3.</b> The refund and chargeback liability question resolved.</p>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div>
+    <div style="color:#fff;font-weight:600;margin-bottom:3px;">Operator Trips — Build Spec, Draft v1</div>
+    <div>Companion files: <code>SPEC.md</code> · <code>docs/operator-trips-architecture-recommendation.md</code> · <code>docs/operator-conversation-guide.md</code></div>
+  </div>
+  <svg class="mark"><use href="#mk"/></svg>
+</div></footer>
+
+</body>
+</html>

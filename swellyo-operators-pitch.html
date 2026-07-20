@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Swellyo for Operators</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --cyan:#05BCD3;
+    --cyan-deep:#0788B0;
+    --cyan-dark:#066B8C;
+    --cyan-tint:#E6F4F8;
+    --sand:#DBCDBC;
+    --sand-tint:#F5F0EA;
+    --ink:#212121;
+    --ink-black:#0A0A0A;
+    --text:#333333;
+    --text-2:#596E7C;
+    --muted:#7B7B7B;
+    --line:#EEEEEE;
+    --canvas:#FAFAFA;
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+
+  body{
+    font-family:'Inter',-apple-system,'Segoe UI',sans-serif;
+    color:var(--text);
+    background:#DDE3E6;
+    font-size:10.5pt;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .page{
+    width:210mm;
+    min-height:297mm;
+    padding:20mm 19mm 26mm;
+    margin:0 auto 8mm;
+    background:#fff;
+    position:relative;
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* signature 4px cyan→sand bar from the app header */
+  .page::before{
+    content:"";
+    position:absolute;
+    top:0;left:0;right:0;
+    height:4px;
+    background:linear-gradient(90deg,#06BDD4 0%,var(--sand) 72%,var(--sand) 100%);
+  }
+  .cover::before{display:none;}
+
+  h1,h2,h3,.num,.eyebrow,.stat,.pull,.closer,.cta .name,.mail{font-family:'Montserrat','Inter',sans-serif;}
+
+  .eyebrow{
+    font-size:8pt;
+    font-weight:600;
+    letter-spacing:.2em;
+    text-transform:uppercase;
+    color:var(--cyan-deep);
+  }
+
+  h1{font-size:42pt;font-weight:800;line-height:1.03;letter-spacing:-.028em;}
+  h2{font-size:24pt;font-weight:700;line-height:1.15;letter-spacing:-.022em;color:var(--ink);}
+  h3{font-size:12.5pt;font-weight:700;line-height:1.3;letter-spacing:-.01em;color:var(--ink);}
+
+  .lede{font-size:12pt;line-height:1.58;color:var(--text-2);max-width:60ch;}
+  p{max-width:66ch;}
+  strong{font-weight:600;color:var(--ink);}
+
+  /* ---------------- cover ---------------- */
+  .cover{
+    background:var(--ink-black);
+    color:#fff;
+    justify-content:space-between;
+    padding:19mm 18mm 16mm;
+  }
+  .cover{justify-content:flex-start;}
+  .cover > div:nth-of-type(2){margin-top:auto;margin-bottom:auto;padding-bottom:6mm;}
+  .cover::after{
+    content:"";
+    position:absolute;
+    left:-25%;bottom:-42%;
+    width:150%;height:95%;
+    background:
+      radial-gradient(closest-side, rgba(5,188,211,.20) 0%, rgba(5,188,211,0) 70%),
+      radial-gradient(closest-side at 78% 40%, rgba(219,205,188,.13) 0%, rgba(219,205,188,0) 70%);
+    pointer-events:none;
+  }
+  .cover > *{position:relative;z-index:2;}
+
+  .cover-top{display:flex;align-items:center;gap:5mm;}
+  .cover-top .mark{width:15mm;height:15mm;}
+  .cover-top .wordmark{width:34mm;height:auto;color:#fff;}
+
+  .cover h1{max-width:14ch;margin-bottom:8mm;}
+  .cover .lede{color:rgba(255,255,255,.80);font-size:12.5pt;max-width:50ch;}
+
+  .grad-rule{
+    width:56mm;height:3px;
+    background:linear-gradient(90deg,var(--cyan) 0%,var(--sand) 78%);
+    margin-bottom:8mm;
+  }
+
+  .cover .eyebrow{color:var(--cyan);margin-bottom:6mm;display:block;}
+
+  .cover-foot{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    font-size:8.5pt;
+    color:rgba(255,255,255,.55);
+    letter-spacing:.06em;
+    border-top:1px solid rgba(255,255,255,.14);
+    padding-top:5mm;
+  }
+
+  /* ---------------- furniture ---------------- */
+  .page-head{margin-bottom:10mm;}
+  .page-head .eyebrow{display:block;margin-bottom:4mm;}
+
+  .folio{
+    position:absolute;
+    left:19mm;right:19mm;bottom:10mm;
+    display:flex;
+    justify-content:space-between;
+    font-size:7pt;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:#B8C2C7;
+    border-top:1px solid var(--line);
+    padding-top:3mm;
+  }
+  .spacer{flex:1;}
+
+  /* ---------------- problem ---------------- */
+  .pain-list{list-style:none;margin:0 0 9mm;}
+  .pain-list li{
+    position:relative;
+    padding:0 0 7mm 10mm;
+    font-size:12pt;
+    line-height:1.55;
+    color:var(--text);
+    max-width:59ch;
+  }
+  .pain-list li::before{
+    content:"";
+    position:absolute;
+    left:0;top:.62em;
+    width:5.5mm;height:2px;
+    background:var(--cyan);
+  }
+
+  .arithmetic{
+    background:var(--canvas);
+    border-radius:16px;
+    padding:10mm 10mm;
+    margin-bottom:12mm;
+    border:1px solid var(--line);
+    position:relative;
+    overflow:hidden;
+  }
+  .arithmetic::before{
+    content:"";
+    position:absolute;
+    left:0;top:0;bottom:0;
+    width:4px;
+    background:linear-gradient(180deg,var(--cyan) 0%,var(--sand) 100%);
+  }
+  .arithmetic .stat{
+    font-size:20pt;
+    font-weight:700;
+    letter-spacing:-.025em;
+    color:var(--ink);
+    line-height:1.2;
+    margin-bottom:2.5mm;
+  }
+  .arithmetic .stat b{color:var(--cyan-deep);font-weight:700;}
+  .arithmetic p{font-size:10pt;color:var(--muted);margin:0;}
+
+  .closer{
+    font-size:15pt;
+    font-weight:700;
+    line-height:1.4;
+    letter-spacing:-.02em;
+    color:var(--ink);
+    max-width:33ch;
+  }
+  .closer em{font-style:normal;color:var(--cyan-deep);}
+
+  /* ---------------- pillars ---------------- */
+  .pillar{
+    display:grid;
+    grid-template-columns:20mm 1fr;
+    gap:0 6mm;
+    padding:9.5mm 0;
+    border-top:1px solid var(--line);
+  }
+  .pillar:first-of-type{border-top:none;padding-top:2mm;}
+  .num{
+    font-size:28pt;
+    font-weight:800;
+    line-height:.9;
+    color:var(--cyan);
+    letter-spacing:-.04em;
+  }
+  .pillar h3{margin-bottom:2.5mm;}
+  .pillar p{font-size:10.5pt;color:var(--text-2);line-height:1.65;}
+  .pillar .kicker{
+    display:block;
+    margin-top:3mm;
+    font-size:9pt;
+    font-weight:600;
+    color:var(--cyan-dark);
+  }
+
+  /* ---------------- split / lists ---------------- */
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:0 11mm;margin-bottom:9mm;}
+  .split h3{margin-bottom:4mm;}
+
+  .ticks{list-style:none;}
+  .ticks li{
+    position:relative;
+    padding:0 0 4mm 6.5mm;
+    font-size:10pt;
+    line-height:1.5;
+    color:var(--text-2);
+  }
+  .ticks li::before{
+    content:"";
+    position:absolute;
+    left:0;top:.5em;
+    width:3mm;height:3mm;
+    border-radius:50%;
+    background:var(--cyan);
+  }
+  .ticks li strong{display:block;color:var(--ink);font-weight:600;}
+
+  .pull{
+    margin:0 0 8mm;
+    padding-top:6mm;
+    border-top:2px solid var(--cyan);
+    font-size:15.5pt;
+    font-weight:700;
+    line-height:1.32;
+    letter-spacing:-.022em;
+    color:var(--ink);
+    max-width:30ch;
+  }
+
+  .chips{display:flex;flex-wrap:wrap;gap:2.2mm;}
+  .chip{
+    background:#F7F7F7;
+    border:1px solid var(--line);
+    color:var(--text);
+    border-radius:999px;
+    padding:1.8mm 4mm;
+    font-size:8.5pt;
+    font-weight:500;
+  }
+
+  /* ---------------- offer ---------------- */
+  .offer{
+    background:var(--ink);
+    color:#fff;
+    border-radius:20px;
+    padding:8mm 9mm 7.5mm;
+    margin-bottom:6mm;
+    position:relative;
+    overflow:hidden;
+  }
+  .offer::before{
+    content:"";
+    position:absolute;
+    top:0;left:0;right:0;height:4px;
+    background:linear-gradient(90deg,#06BDD4 0%,var(--sand) 72%,var(--sand) 100%);
+  }
+  .offer::after{
+    content:"";
+    position:absolute;
+    right:-18%;top:-55%;
+    width:75%;height:190%;
+    background:radial-gradient(closest-side, rgba(5,188,211,.20), rgba(5,188,211,0));
+  }
+  .offer > *{position:relative;z-index:2;}
+  .offer h3{color:#fff;font-size:14pt;margin-bottom:4mm;}
+  .offer .ticks li{padding-bottom:3.2mm;}
+  .offer .ticks li{color:rgba(255,255,255,.82);}
+  .offer .ticks li strong{color:#fff;}
+  .offer .ticks li::before{background:var(--cyan);}
+
+  .nocommit{
+    margin-top:5mm;
+    padding:5mm 6mm;
+    border-radius:14px;
+    background:rgba(5,188,211,.10);
+    border:1px solid rgba(5,188,211,.42);
+  }
+  .nocommit h4{
+    font-family:'Montserrat',sans-serif;
+    font-size:12pt;
+    font-weight:700;
+    letter-spacing:-.015em;
+    color:var(--cyan);
+    margin-bottom:2.5mm;
+  }
+  .nocommit p{
+    font-size:9.5pt;
+    line-height:1.55;
+    color:rgba(255,255,255,.86);
+    margin:0;
+    max-width:none;
+  }
+
+  .ask{
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:6mm 8mm;
+    margin-bottom:6mm;
+    background:var(--canvas);
+  }
+  .ask h3{margin-bottom:3mm;}
+  .ask p{font-size:10pt;color:var(--text-2);margin:0;}
+
+  .cta{
+    margin-top:auto;
+    padding-top:7mm;
+    border-top:1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+  }
+  .cta .name{font-size:12.5pt;font-weight:700;color:var(--ink);letter-spacing:-.01em;}
+  .cta .role{font-size:9.5pt;color:var(--muted);margin-bottom:2.5mm;}
+  .cta .mail{font-size:12.5pt;font-weight:600;color:var(--cyan-deep);text-decoration:none;}
+  .cta .mark-sm{width:13mm;height:13mm;opacity:.9;}
+
+  @page{size:A4;margin:0;}
+  @media print{
+    body{background:#fff;}
+    .page{margin:0;box-shadow:none;page-break-after:always;break-after:page;height:297mm;}
+    .page:last-child{page-break-after:auto;break-after:auto;}
+  }
+  @media screen{
+    .page{box-shadow:0 6px 34px rgba(89,110,124,.20);}
+    body{padding:8mm 0;}
+  }
+</style>
+</head>
+<body>
+
+<!-- reusable logo symbols -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="ringGrad" x1="3" y1="59" x2="115" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#05BCD3"/><stop offset="0.7" stop-color="#DBCDBC"/>
+    </linearGradient>
+    <symbol id="swMark" viewBox="0 0 118 118">
+      <circle cx="59" cy="59" r="57.5" fill="black" stroke="url(#ringGrad)" stroke-width="3"/>
+      <path d="M88.8802 84.3185C85.2448 82.6892 81.2109 82.5989 76.1879 84.0291C71.3958 85.3942 66.3694 87.9419 61.0485 90.6385C55.443 93.4789 49.6483 96.4147 43.611 98.213C39.7546 99.3605 36.1208 99.9343 32.651 99.9343C31.1697 99.9343 29.7202 99.8289 28.2958 99.6198C36.8321 106.077 47.4657 109.909 58.9964 109.909C74.2915 109.909 88.0098 103.168 97.3429 92.4986C94.9962 88.5324 92.1592 85.7873 88.8819 84.3185H88.8802Z" fill="white"/>
+      <path d="M23.3715 68.129C36.4589 71.7523 49.2767 63.8533 61.6745 56.2135C67.7436 52.4731 73.4747 48.9418 79.2074 46.7354C85.9963 44.1224 91.8428 43.8414 97.0801 45.8755C102.225 47.8745 106.515 52.065 109.908 58.3815C109.776 47.5952 106.288 37.6185 100.438 29.4434C99.4067 28.0031 98.1162 26.7653 96.6265 25.8084C93.0379 23.5049 89.3506 22.1349 85.6029 21.72C74.1408 20.4487 64.3207 28.1855 54.8237 35.668C47.1678 41.6985 39.8667 47.4513 32.3246 47.4513C30.8266 47.4513 29.3202 47.2255 27.7987 46.7287C22.5832 45.0274 18.3937 40.3736 15.3055 32.8694C10.9202 40.1695 8.31581 48.6558 8.08984 57.7325C12.6359 63.0838 17.7727 66.58 23.3715 68.1307V68.129Z" fill="white"/>
+      <path d="M95.018 51.1784C91.1064 49.6594 86.7327 49.9355 81.2511 52.0449C76.0105 54.0606 70.497 57.4598 64.6605 61.0563C54.1475 67.5352 42.4828 74.7216 30.0801 74.7233C27.3702 74.7233 24.6269 74.3803 21.8517 73.6125C17.0998 72.2977 12.6643 69.8587 8.60035 66.3374C9.83393 74.8956 13.1949 82.7662 18.1359 89.3939C20.5796 91.1754 23.1606 92.4752 25.8655 93.2765C36.8355 96.5318 47.8356 90.958 58.4759 85.5665C64.0479 82.7427 69.3103 80.0763 74.6279 78.5607C80.9247 76.7658 86.3495 76.9515 91.2085 79.1295C95.013 80.8341 98.3053 83.7147 101.045 87.7244C104.594 82.542 107.208 76.6721 108.646 70.3555C105.459 59.9054 100.88 53.4567 95.0197 51.18L95.018 51.1784Z" fill="white"/>
+    </symbol>
+    <symbol id="swWord" viewBox="0 0 245 37">
+      <path d="M18.1871 8.40314C15.4658 8.40314 14.3364 9.37814 14.3364 10.6245C14.3364 14.7457 30.317 13.821 30.317 24.8275C30.317 32.2556 24.1391 36.3717 15.4133 36.3717C8.38959 36.3717 2.77902 34.0397 0 29.9739L7.0815 23.0332C8.66801 25.7974 11.841 27.9636 15.7495 27.9636C18.5233 27.9636 20.0573 27.1494 20.0573 25.5763C20.0573 20.8068 4.13438 22.214 4.13438 11.3181C4.13438 4.17644 10.3123 0 18.9225 0C25.4945 0 30.7636 2.54808 32.8071 6.34256L25.3841 12.4137C24.1916 10.2476 21.7016 8.40314 18.1871 8.40314Z" fill="currentColor"/>
+      <path d="M92.7635 0.814242L75.3697 35.5626H63.5812L62.1103 12.4138L52.7068 35.5626H41.3753L36.0957 0.814242H46.408L49.0137 23.8525L57.9706 0.814242H70.5524L71.913 23.7972L82.3934 0.814242H92.7635Z" fill="currentColor"/>
+      <path d="M121.552 0.814242L120.133 8.8907H105.345L104.436 14.1477H116.96L115.542 22.1689H103.018L102.109 27.6973H116.897L115.479 35.5576H91.3398L97.4127 0.814242H121.552Z" fill="currentColor"/>
+      <path d="M136.004 0.814242L131.412 27.1595H147.903L146.432 35.5626H120.596L126.653 0.814242H136.004Z" fill="currentColor"/>
+      <path d="M165.811 0.814242L161.22 27.1595H177.71L176.239 35.5626H150.403L156.46 0.814242H165.811Z" fill="currentColor"/>
+      <path d="M194.437 24.1792L192.456 35.5626H183.105L185.086 24.1792L175.735 0.814242H185.369L191.038 15.4494L201.466 0.814242H211.72L194.437 24.1792Z" fill="currentColor"/>
+      <path d="M224.859 37C215.418 37 207.57 31.1198 207.57 20.827C207.57 9.58928 216.569 1.76411 227.711 1.76411C237.152 1.76411 245 7.64429 245 17.9371C245 29.592 236.001 37 224.853 37H224.853ZM226.892 10.4286C221.733 10.4286 217.394 14.1577 217.394 20.2993C217.394 24.5511 220.031 28.3355 225.683 28.3355C230.79 28.3355 235.176 24.6064 235.176 18.4096C235.176 14.1577 232.487 10.4286 226.886 10.4286H226.892Z" fill="currentColor"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ============ COVER ============ -->
+<section class="page cover">
+  <div class="cover-top">
+    <svg class="mark"><use href="#swMark"/></svg>
+    <svg class="wordmark" viewBox="0 0 245 37"><use href="#swWord"/></svg>
+  </div>
+
+  <div>
+    <div class="grad-rule"></div>
+    <span class="eyebrow">For trip operators</span>
+    <h1>Run your whole trip from one place.</h1>
+    <p class="lede">You're a surf guide, not an administrator. Swellyo takes the paperwork, the spreadsheets and the payment chasing off your plate - and gives your travellers an experience that makes them book you again.</p>
+  </div>
+
+  <div class="cover-foot">
+    <span>Design partner programme</span>
+    <span>2026</span>
+  </div>
+</section>
+
+<!-- ============ PROBLEM ============ -->
+<section class="page">
+  <div class="page-head">
+    <span class="eyebrow">The part nobody talks about</span>
+    <h2>Sound familiar?</h2>
+  </div>
+
+  <ul class="pain-list">
+    <li>A WhatsApp group of fifteen people asking the same five questions on repeat.</li>
+    <li>A spreadsheet where you track who paid the deposit - and who you still have to chase.</li>
+    <li>A folder of passport photos, half of them blurry, none of them named properly.</li>
+    <li>Insurance you've asked for three times and still don't have from two people.</li>
+    <li>Flight details arriving as screenshots, one at a time, over four weeks.</li>
+    <li>And the night before departure, you're still not certain who has a bad shoulder.</li>
+  </ul>
+
+  <div class="arithmetic">
+    <div class="stat">15 travellers &times; 4 documents = <b>60 files</b></div>
+    <p>Collected by hand, one message at a time, on every single trip you run - before a single wave gets surfed.</p>
+  </div>
+
+  <p class="closer">None of this is why you started running surf trips. <em>So stop doing it.</em></p>
+
+  <div class="spacer"></div>
+  <div class="folio"><span>Swellyo for Operators</span><span>01</span></div>
+</section>
+
+<!-- ============ WHAT CHANGES ============ -->
+<section class="page">
+  <div class="page-head">
+    <span class="eyebrow">What changes</span>
+    <h2>Three things you stop worrying about.</h2>
+  </div>
+
+  <div class="pillar">
+    <div class="num">01</div>
+    <div>
+      <h3>The chasing stops.</h3>
+      <p>You decide what each trip needs - passport, waiver, insurance, visa, flights, medical form - and when it's due. Swellyo collects it and reminds people automatically. You open your phone and see <strong>14 of 15 passports in</strong>, exactly who's missing, and a one-tap nudge to send them.</p>
+      <span class="kicker">No more "did you send me your passport?" at 11pm.</span>
+    </div>
+  </div>
+
+  <div class="pillar">
+    <div class="num">02</div>
+    <div>
+      <h3>Every payment in one view.</h3>
+      <p>Deposits taken, balances outstanding, who's paid in full, who's on instalments - in shekels and dollars, on one screen. Travellers pay inside Swellyo, so the number is right without you reconciling anything. Israeli operators keep their own payment processor and their own rates.</p>
+      <span class="kicker">The spreadsheet stops being the source of truth.</span>
+    </div>
+  </div>
+
+  <div class="pillar">
+    <div class="num">03</div>
+    <div>
+      <h3>You land knowing your group.</h3>
+      <p>Allergies, dietary needs, injuries and medication. Surf levels, board types, ages, nationalities. The whole picture of who's coming, before you get on the plane - so you pick the right breaks, brief the right people, and nothing catches you out on day one.</p>
+      <span class="kicker">Better guiding, and one less safety risk to carry.</span>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+  <div class="folio"><span>Swellyo for Operators</span><span>02</span></div>
+</section>
+
+<!-- ============ TRAVELLERS + SALES ============ -->
+<section class="page">
+  <div class="page-head">
+    <span class="eyebrow">The other half of the value</span>
+    <h2>Your travellers get an app, not a group chat.</h2>
+  </div>
+
+  <div class="split">
+    <div>
+      <h3>What they see</h3>
+      <ul class="ticks">
+        <li><strong>Everything in one place</strong>What's included, the plan, the crew, your staff.</li>
+        <li><strong>A clear task list</strong>What they owe you and by when - so they stop asking you.</li>
+        <li><strong>Their documents, saved</strong>Upload once. Next trip with you, it's already there.</li>
+        <li><strong>The group, before departure</strong>Chat, gear lists and your updates from day one.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Why that matters to you</h3>
+      <ul class="ticks">
+        <li><strong>You look like the professional you are</strong>Next to an operator running a WhatsApp group, it isn't close.</li>
+        <li><strong>Fewer questions in your inbox</strong>The answers live where they're already looking.</li>
+        <li><strong>The trip starts early</strong>Their experience begins the day they book, not the day they land.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="pull">And it should help you sell more spots.</div>
+
+  <div class="split" style="margin-bottom:7mm;">
+    <div>
+      <ul class="ticks">
+        <li><strong>Less friction, fewer drop-offs</strong>A traveller who has to message you for bank details is a traveller who can still change their mind. In Swellyo they pay the deposit and the spot is theirs.</li>
+        <li><strong>Rebooking is one tap</strong>Your past travellers are already in Swellyo, profile complete, ready to join the next one.</li>
+      </ul>
+    </div>
+    <div>
+      <ul class="ticks">
+        <li><strong>A group that's already talking shows up</strong>People who've met the crew before departure are people who are committed to going.</li>
+        <li><strong>Reach beyond your own audience</strong>Optionally list a trip to Swellyo's surfer community and get seen by travellers who don't follow you yet. Your call, trip by trip.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="chips">
+    <span class="chip">Passports &amp; visas</span>
+    <span class="chip">Digital waivers</span>
+    <span class="chip">Medical &amp; dietary</span>
+    <span class="chip">Insurance &amp; flights</span>
+    <span class="chip">Deposits &amp; balances</span>
+    <span class="chip">Deadlines &amp; reminders</span>
+    <span class="chip">Group chat</span>
+    <span class="chip">Trip updates</span>
+    <span class="chip">Gear lists</span>
+    <span class="chip">Staff profiles</span>
+    <span class="chip">Roster exports</span>
+  </div>
+
+  <div class="spacer"></div>
+  <div class="folio"><span>Swellyo for Operators</span><span>03</span></div>
+</section>
+
+<!-- ============ OFFER ============ -->
+<section class="page">
+  <div class="page-head">
+    <span class="eyebrow">The invitation</span>
+    <h2>We're building this with a handful of operators - not for them.</h2>
+  </div>
+
+  <p class="lede" style="margin-bottom:6mm;">We'd rather build the right thing with a few operators who run real trips than guess at it alone. If that sounds interesting, here's what being a design partner actually means.</p>
+
+  <div class="offer">
+    <h3>What you get</h3>
+    <ul class="ticks">
+      <li><strong>You shape it</strong>How pricing works, when payment is due, what the dashboard shows - we build what you tell us you need, not what we assumed.</li>
+      <li><strong>50% off our fees for a full year</strong>Half price for twelve months from your first trip, however many trips you run in it.</li>
+      <li><strong>We set it up with you</strong>Your first trip gets built in Swellyo on a call with us. You don't do the migration.</li>
+      <li><strong>A direct line</strong>You talk to the people writing the software, not a support queue.</li>
+    </ul>
+
+    <div class="nocommit">
+      <h4>You are not committing to anything.</h4>
+      <p>There is no binding contract, no minimum term and no notice period. Tell us you want to stop at any point, for any reason, and that is the end of it. Your data leaves with you.</p>
+    </div>
+  </div>
+
+  <div class="ask">
+    <h3>What we need from you</h3>
+    <p>One real trip to run inside Swellyo - and honest feedback, including the parts you hate. That's the whole deal.</p>
+  </div>
+
+  <div class="cta">
+    <div>
+      <div class="name">Eyal Gross</div>
+      <div class="role">Founder, Swellyo</div>
+      <a class="mail" href="mailto:eyal@swellyo.com">eyal@swellyo.com</a>
+    </div>
+    <svg class="mark-sm"><use href="#swMark"/></svg>
+  </div>
+
+  <div class="folio"><span>Swellyo for Operators</span><span>04</span></div>
+</section>
+
+</body>
+</html>
