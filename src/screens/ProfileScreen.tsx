@@ -1099,6 +1099,25 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
   const swipeTranslateX = useSharedValue(noTransition ? 0 : SWIPE_SCREEN_WIDTH);
   const swipeOpacity = useSharedValue(noTransition ? 1 : 0);
 
+  // Header title/arrow entrance fade — identical to The Lineup / Trips
+  // (MainHeader): the block gently fades opacity 0→1 over 550ms on focus and
+  // resets to 0 on BLUR (while off-screen, so it's never snapped to 0 while
+  // visible). Keep duration/easing in sync with MainHeader.
+  const headerIntro = useSharedValue(0);
+  const headerIsFocused = useIsFocused();
+  useEffect(() => {
+    if (headerIsFocused) {
+      headerIntro.value = withTiming(1, {
+        duration: 550,
+        easing: Easing.inOut(Easing.ease),
+      });
+    } else {
+      // Invisible reset while the screen is hidden.
+      headerIntro.value = 0;
+    }
+  }, [headerIsFocused, headerIntro]);
+  const headerIntroStyle = useAnimatedStyle(() => ({ opacity: headerIntro.value }));
+
   // ─── Incoming join request (host viewing a requester's profile) ─────────
   const [incomingRequest, setIncomingRequest] = useState<IncomingJoinRequest | null>(null);
   const [requestActionState, setRequestActionState] = useState<JoinRequestActionState>('idle');
@@ -1926,20 +1945,24 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       >
         <View style={styles.profileHeaderRow}>
           {/* Left: back chevron (own-profile root's onBack returns to the
-              previous tab). */}
-          <TouchableOpacity
-            style={styles.profileHeaderLeftBtn}
-            onPress={handleBackPress}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
-            <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
-          </TouchableOpacity>
+              previous tab). Fades in on focus like the Lineup/Trips title. */}
+          <Reanimated.View style={headerIntroStyle}>
+            <TouchableOpacity
+              style={styles.profileHeaderLeftBtn}
+              onPress={handleBackPress}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+            >
+              <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
+            </TouchableOpacity>
+          </Reanimated.View>
 
-          <RNText style={styles.profileHeaderTitle} numberOfLines={1}>
-            {firstName}
-          </RNText>
+          <Reanimated.View style={[styles.profileHeaderTitleWrap, headerIntroStyle]}>
+            <RNText style={styles.profileHeaderTitle} numberOfLines={1}>
+              {firstName}
+            </RNText>
+          </Reanimated.View>
 
           <View style={styles.profileHeaderRight}>
             {/* Bell = the logged-in user's notifications (never the viewed user). */}
@@ -1958,15 +1981,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             ) : null}
           </View>
         </View>
-
-        {/* Signature teal→sand gradient hairline (matches MainHeader). */}
-        <LinearGradient
-          colors={['#05BCD3', '#DBCDBC']}
-          locations={[0, 0.7]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.profileHeaderHairline}
-        />
       </View>
     );
   };
@@ -2001,7 +2015,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                   activeOpacity={0.7}
                   onPress={() => { setShowProfileMenu(false); onEdit(); }}
                 >
-                  <Ionicons name="create-outline" size={20} color="#222B30" />
+                  <EditButtonIcon />
                   <RNText style={styles.profileMenuItemText}>Edit</RNText>
                 </TouchableOpacity>
               )}
@@ -2643,6 +2657,10 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             },
           ]}
           showsVerticalScrollIndicator={false}
+          // Kill the rubber-band overscroll so the content can't be pulled
+          // down past the pinned black header (header stays put at the top).
+          bounces={false}
+          overScrollMode="never"
         >
         {/* Cover Image */}
         <View style={styles.coverContainer}>
@@ -2654,6 +2672,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.4)']}
               locations={[0.29059, 0.99702]}
               style={styles.coverGradient}
+            />
+            {/* Top fade from the black header (#212121) into the cover so the
+                pinned header blends into the image instead of a hard edge. */}
+            <LinearGradient
+              colors={['rgba(33,33,33,0.85)', 'rgba(33,33,33,0)']}
+              locations={[0, 1]}
+              style={styles.coverTopFade}
             />
             <View style={styles.coverOverlay} />
           </ProfileCoverBackground>
@@ -2745,21 +2770,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
 
           {/* Content Container - Surf Skill video, Cards grid, Lifestyle, Destinations */}
           <View style={[styles.contentContainer, { width: contentWidth }]}>
-          {/* Surf Skill Card with Video — moved ABOVE the cards grid per Figma */}
-          <SurfSkillCard
-            key={`surf-skill-${profileData.user_id || 'default'}`}
-            boardType={profileData.surfboard_type || 'shortboard'}
-            surfLevel={profileData.surf_level || 1}
-            surfLevelDescription={profileData.surf_level_description || null}
-            surfLevelCategory={profileData.surf_level_category || 'beginner'}
-            surfLevelProgress={surfLevelInfo.progress}
-            customVideoUrl={profileData.profile_video_url}
-            posterUrl={profileData.profile_video_thumbnail_url}
-            // Video upload moved to the Edit Profile screen — omit the
-            // onUploadVideo prop so the inline upload button is hidden.
-            isViewingOwnProfile={isViewingOwnProfile}
-          />
-
           {/* Cards Grid — left column stacks Travel Experience (top) + Home
               Break (bottom); right column is a tall Surf Style card with a
               bigger surfboard. Matches the Figma "double box" layout. */}
@@ -2925,6 +2935,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               </View>
             </View>
           </View>
+
+          {/* Surf Skill Card with Video — moved BELOW the cards grid
+              (Travel Experience / My Quiver / Local Break) per request */}
+          <SurfSkillCard
+            key={`surf-skill-${profileData.user_id || 'default'}`}
+            boardType={profileData.surfboard_type || 'shortboard'}
+            surfLevel={profileData.surf_level || 1}
+            surfLevelDescription={profileData.surf_level_description || null}
+            surfLevelCategory={profileData.surf_level_category || 'beginner'}
+            surfLevelProgress={surfLevelInfo.progress}
+            customVideoUrl={profileData.profile_video_url}
+            posterUrl={profileData.profile_video_thumbnail_url}
+            // Video upload moved to the Edit Profile screen — omit the
+            // onUploadVideo prop so the inline upload button is hidden.
+            isViewingOwnProfile={isViewingOwnProfile}
+          />
 
           {/* Lifestyle Section - Inside profileInfoSection, before destinations */}
           {lifestyleKeywords.length > 0 && (
@@ -3320,6 +3346,14 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
   },
+  // Fade from the black header down into the cover image (top of cover).
+  coverTopFade: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 72,
+  },
   // Standard black app header (#212121 bar) — see renderProfileHeader().
   profileHeaderContainer: {
     backgroundColor: '#212121',
@@ -3344,8 +3378,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 4,
   },
-  profileHeaderTitle: {
+  profileHeaderTitleWrap: {
     flex: 1,
+  },
+  profileHeaderTitle: {
     fontFamily: ff('Montserrat', '700'),
     fontSize: fs(22), // match the "Trips" header title size
     lineHeight: 28,
@@ -3365,13 +3401,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  profileHeaderHairline: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 4,
   },
   backButton: {
     position: 'absolute',

@@ -281,15 +281,33 @@ serve(async (req) => {
         : publicS3Url(processedKey)
 
       if (!isDmVideo) {
+        // The MediaConvert job (swellyo-video-processor) also emits a single
+        // upright JPEG of the first frame next to the compressed MP4, named
+        // `<basename>_thumb.0000000.jpg` (the MP4 is `<basename>_compressed.mp4`).
+        // Persist it as the Surf Skill poster so the profile shows the user's own
+        // frame instead of the bundled default. Both outputs finish together, so
+        // by the time the compressed MP4 exists the thumbnail does too — but we
+        // only write the column when the object is actually present, never a
+        // dangling URL.
+        const thumbKey = processedKey.replace(/_compressed\.mp4$/, '_thumb.0000000.jpg')
+        const thumbExists = thumbKey !== processedKey && (await s3ObjectExists(thumbKey))
+
+        const updatePayload: Record<string, string> = { profile_video_url: downloadUrl }
+        if (thumbExists) {
+          updatePayload.profile_video_thumbnail_url = publicS3Url(thumbKey)
+        } else {
+          console.warn(`[process-profile-video-s3] Thumbnail not found for ${processedKey} (checked ${thumbKey})`)
+        }
+
         const { error: updateError } = await supabaseAdmin
           .from('surfers')
-          .update({ profile_video_url: downloadUrl })
+          .update(updatePayload)
           .eq('user_id', userId)
 
         if (updateError) {
           console.error('[process-profile-video-s3] DB update failed:', updateError)
         } else {
-          console.log(`[process-profile-video-s3] DB updated with public URL for user ${userId}`)
+          console.log(`[process-profile-video-s3] DB updated for user ${userId} (thumbnail: ${thumbExists ? 'yes' : 'no'})`)
         }
       } else {
         console.log(`[process-profile-video-s3] DM video processed — skipping surfers update for ${processedKey}`)
