@@ -2673,13 +2673,6 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               locations={[0.29059, 0.99702]}
               style={styles.coverGradient}
             />
-            {/* Top fade from the black header (#212121) into the cover so the
-                pinned header blends into the image instead of a hard edge. */}
-            <LinearGradient
-              colors={['rgba(33,33,33,0.85)', 'rgba(33,33,33,0)']}
-              locations={[0, 1]}
-              style={styles.coverTopFade}
-            />
             <View style={styles.coverOverlay} />
           </ProfileCoverBackground>
         </View>
@@ -3345,14 +3338,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
-  },
-  // Fade from the black header down into the cover image (top of cover).
-  coverTopFade: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 72,
   },
   // Standard black app header (#212121 bar) — see renderProfileHeader().
   profileHeaderContainer: {

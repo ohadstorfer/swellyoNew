@@ -83,6 +83,18 @@ const PlayIcon = () => (
   </Svg>
 );
 
+const BarPlayIcon = () => (
+  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+    <Path d="M8 5v14l11-7z" fill="#FFFFFF" />
+  </Svg>
+);
+
+const BarPauseIcon = () => (
+  <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+    <Path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="#FFFFFF" />
+  </Svg>
+);
+
 // Live scrubbing (the frame follows the finger) is iOS-only for now. ExoPlayer
 // on this SDK can only do EXACT seeks — each decodes from the previous
 // keyframe, so seeking while dragging queues up and freezes the preview. The
@@ -483,6 +495,15 @@ const NativeVideoPlayer: React.FC<{
               entering={FadeIn.duration(200)}
               style={[styles.controlsBar, { bottom: insets.bottom + 20 }]}
             >
+              {/* Scrubbing pauses playback on iOS — keep showing "pause" mid-drag
+                  so the glyph doesn't flicker while the finger owns the track. */}
+              <Pressable
+                onPress={togglePlay}
+                hitSlop={{ top: 10, bottom: 10, left: 12, right: 4 }}
+                style={({ pressed }) => [styles.playPauseButton, pressed && styles.playPauseButtonPressed]}
+              >
+                {isPlaying || (isScrubbingUi && wasPlayingRef.current) ? <BarPauseIcon /> : <BarPlayIcon />}
+              </Pressable>
               <Text style={styles.timeText}>{formatClock(timeLabel)}</Text>
               <GestureDetector gesture={scrubGesture}>
                 <View
@@ -616,6 +637,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     textShadowColor: 'rgba(0, 0, 0, 0.6)',
     textShadowRadius: 4,
+  },
+  playPauseButton: {
+    width: 22,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  playPauseButtonPressed: {
+    opacity: 0.6,
+    transform: [{ scale: 0.9 }],
   },
   trackHitArea: {
     flex: 1,

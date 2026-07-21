@@ -105,9 +105,10 @@ function PdfPreview({
   return (
     // borderRadius on this native view is ignored on Android and CRASHES on
     // iOS — never round it directly; wrap it if you ever need rounding.
+    // No singlePage: multi-page files scroll vertically. The shell's
+    // pan-to-dismiss yields to the renderer's native scroll; the X still closes.
     <Renderer
       source={uri}
-      singlePage
       maxZoom={1}
       maxPageResolution={2048}
       style={styles.pdf}

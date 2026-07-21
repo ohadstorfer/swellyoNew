@@ -1507,32 +1507,45 @@ export async function removeParticipant(
   tripId: string,
   userId: string
 ): Promise<void> {
-  // Post "<Host> removed <Target>" banner BEFORE deletion. Host stays in the
-  // group so RLS lets the insert through.
-  try {
-    const conv = await messagingService.getConversationByTripId(tripId);
-    if (conv?.id) {
-      const adminId = (await supabase.auth.getUser()).data.user?.id ?? null;
-      if (adminId) {
-        const { data: surfers } = await supabase
-          .from('surfers')
-          .select('user_id, name')
-          .in('user_id', [adminId, userId]);
-        const byId = new Map<string, string>();
-        (surfers || []).forEach((s: any) => {
-          if (s?.name) byId.set(s.user_id, String(s.name).trim());
-        });
-        const adminName = byId.get(adminId) || 'User';
-        const targetName = byId.get(userId) || 'User';
-        await messagingService.postSystemMessage(
-          conv.id,
-          `${adminName} removed ${targetName}`
-        );
-      }
+  // Only the participant delete is awaited — it's what makes the member row
+  // disappear. The banner, join-request cleanup, chat removal, and push all
+  // tolerate failure with a warn (as before), so they run in the background
+  // instead of holding the UI for ~8 extra round trips.
+
+  // Shared lookup: the banner (pre-delete) and chat removal (post-delete)
+  // both need the trip's conversation.
+  const convPromise = messagingService.getConversationByTripId(tripId).catch(convErr => {
+    console.warn('[groupTripsService] removeParticipant conversation lookup failed:', convErr);
+    return null;
+  });
+
+  // Post "<Host> removed <Target>" banner — kicked off BEFORE deletion, as
+  // before. The insert is by the host, who stays in the group, so RLS lets it
+  // through regardless of how it interleaves with the delete.
+  void (async () => {
+    try {
+      const conv = await convPromise;
+      if (!conv?.id) return;
+      const adminId = (await supabase.auth.getSession()).data.session?.user?.id ?? null;
+      if (!adminId) return;
+      const { data: surfers } = await supabase
+        .from('surfers')
+        .select('user_id, name')
+        .in('user_id', [adminId, userId]);
+      const byId = new Map<string, string>();
+      (surfers || []).forEach((s: any) => {
+        if (s?.name) byId.set(s.user_id, String(s.name).trim());
+      });
+      const adminName = byId.get(adminId) || 'User';
+      const targetName = byId.get(userId) || 'User';
+      await messagingService.postSystemMessage(
+        conv.id,
+        `${adminName} removed ${targetName}`
+      );
+    } catch (bannerError) {
+      console.warn('[groupTripsService] removeParticipant banner failed:', bannerError);
     }
-  } catch (bannerError) {
-    console.warn('[groupTripsService] removeParticipant banner failed:', bannerError);
-  }
+  })();
 
   const { error } = await supabase
     .from('group_trip_participants')
@@ -1545,36 +1558,41 @@ export async function removeParticipant(
     throw new Error(error.message);
   }
 
+  // Post-success cleanup — fire-and-forget from here down.
+
   // Drop the matching join_request row so the removed user can submit a fresh
   // request later. Without this, the unique(trip_id, requester_id) constraint
   // blocks the re-request and the CTA's `status !== 'approved'` gate also
   // hides the button. Host has RLS delete rights on join_requests for their trip.
-  try {
-    await supabase
-      .from('group_trip_join_requests')
-      .delete()
-      .eq('trip_id', tripId)
-      .eq('requester_id', userId);
-  } catch (joinReqErr) {
-    console.warn('[groupTripsService] removeParticipant join_request delete failed:', joinReqErr);
-  }
-
-  try {
-    const conv = await messagingService.getConversationByTripId(tripId);
-    if (conv?.id) {
-      await messagingService.removeConversationMember(conv.id, userId);
-    }
-  } catch (chatError) {
-    console.warn('[groupTripsService] removeParticipant chat removal failed:', chatError);
-  }
-
-  try {
-    await supabase.functions.invoke('send-trip-removed-notification', {
-      body: { trip_id: tripId, removed_user_id: userId },
+  void supabase
+    .from('group_trip_join_requests')
+    .delete()
+    .eq('trip_id', tripId)
+    .eq('requester_id', userId)
+    .then(({ error: joinReqErr }) => {
+      if (joinReqErr) {
+        console.warn('[groupTripsService] removeParticipant join_request delete failed:', joinReqErr);
+      }
     });
-  } catch (notifError) {
-    console.warn('[groupTripsService] removeParticipant notification failed:', notifError);
-  }
+
+  void (async () => {
+    try {
+      const conv = await convPromise;
+      if (conv?.id) {
+        await messagingService.removeConversationMember(conv.id, userId);
+      }
+    } catch (chatError) {
+      console.warn('[groupTripsService] removeParticipant chat removal failed:', chatError);
+    }
+  })();
+
+  supabase.functions
+    .invoke('send-trip-removed-notification', {
+      body: { trip_id: tripId, removed_user_id: userId },
+    })
+    .catch(notifError => {
+      console.warn('[groupTripsService] removeParticipant notification failed:', notifError);
+    });
 }
 
 // ---------------------------------------------------------------------------

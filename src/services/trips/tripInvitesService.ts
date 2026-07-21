@@ -91,6 +91,9 @@ export async function listInviteCandidates(
   const { data: surfers, error: sErr } = await supabase
     .from('surfers')
     .select(CANDIDATE_PROFILE_FIELDS)
+    // Demo accounts outnumber real surfers in the table — filtering here (not
+    // client-side) also keeps them from eating the 200-row fetch budget.
+    .eq('is_demo_user', false)
     .limit(200);
   if (sErr) throw sErr;
 

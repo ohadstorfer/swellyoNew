@@ -17,6 +17,7 @@ import {
   Pressable,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -128,6 +129,8 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
 
   const [sheetMember, setSheetMember] = useState<EnrichedParticipant | null>(null);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
+  // Rows with an in-flight removal — dimmed + spinner until the refetch drops them.
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
   const refetchCore = () =>
     queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
@@ -185,11 +188,18 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            setRemovingIds(prev => new Set(prev).add(m.user_id));
             try {
               await removeParticipant(tripId, m.user_id);
               await refetchCore();
             } catch (e: any) {
               Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
+            } finally {
+              setRemovingIds(prev => {
+                const next = new Set(prev);
+                next.delete(m.user_id);
+                return next;
+              });
             }
           },
         },
@@ -308,14 +318,20 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
               {participants.map((p, i) => {
                 const thumb = p.profile_image_url;
                 const isOwnRow = p.user_id === currentUserId;
+                const isRemoving = removingIds.has(p.user_id);
                 return (
                   <Pressable
                     key={p.user_id}
                     onPress={isOwnRow ? undefined : () => setSheetMember(p)}
-                    disabled={isOwnRow}
-                    style={[styles.row, i < participants.length - 1 && styles.rowDivider]}
+                    disabled={isOwnRow || isRemoving}
+                    style={[
+                      styles.row,
+                      i < participants.length - 1 && styles.rowDivider,
+                      isRemoving && styles.rowRemoving,
+                    ]}
                     accessibilityRole={isOwnRow ? undefined : 'button'}
                     accessibilityLabel={p.name ? `Open options for ${p.name}` : undefined}
+                    accessibilityState={isRemoving ? { busy: true } : undefined}
                   >
                     <View style={styles.avatarWrap}>
                       {thumb ? (
@@ -353,7 +369,9 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
                       </Text>
                     </View>
 
-                    {!isOwnRow ? (
+                    {isRemoving ? (
+                      <ActivityIndicator size="small" color={T.count} />
+                    ) : !isOwnRow ? (
                       <Ionicons name="chevron-forward" size={20} color="#C4C4C4" />
                     ) : null}
                   </Pressable>
@@ -467,6 +485,7 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
   rowDivider: { borderBottomWidth: 1, borderBottomColor: T.cardBorder },
+  rowRemoving: { opacity: 0.4 },
 
   avatarWrap: { width: 56, height: 56 },
   avatar: { width: 56, height: 56, borderRadius: 40 },
