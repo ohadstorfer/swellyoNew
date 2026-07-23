@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Trips — Master Spec</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f7f7f5;
+    --text: #1c1c1a;
+    --muted: #6b6b66;
+    --line: #e3e3de;
+    --accent: #05BCD3;
+    --warn: #b8532b;
+    --code-bg: #f0f0ec;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 120px; }
+
+  h1, h2, h3, h4 { line-height: 1.25; font-weight: 650; letter-spacing: -0.015em; }
+  h1 { font-size: 30px; margin: 0 0 28px; }
+  h2 {
+    font-size: 22px;
+    margin: 52px 0 16px;
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+  }
+  h3 { font-size: 17px; margin: 32px 0 10px; }
+  h4 { font-size: 15px; margin: 24px 0 8px; color: var(--muted); }
+
+  p { margin: 0 0 14px; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px solid rgba(5,188,211,.35); }
+  a:hover { border-bottom-color: var(--accent); }
+
+  strong { font-weight: 640; }
+
+  ul, ol { margin: 0 0 16px; padding-left: 22px; }
+  li { margin: 5px 0; }
+  ul.sub { margin: 4px 0 4px; }
+
+  code {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 1.5px 5px;
+    font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  blockquote {
+    margin: 16px 0;
+    padding: 12px 18px;
+    background: var(--panel);
+    border-left: 3px solid var(--line);
+    border-radius: 0 6px 6px 0;
+    color: #3a3a36;
+  }
+  blockquote p { margin: 0 0 8px; }
+  blockquote p:last-child { margin: 0; }
+
+  hr { border: 0; border-top: 1px solid var(--line); margin: 40px 0; }
+
+  .tw { overflow-x: auto; margin: 0 0 20px; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--panel); font-weight: 620; }
+  tbody tr:nth-child(even) td { background: #fbfbfa; }
+
+  /* pull the ⚠️ / ✅ sections out visually */
+  h2:where(:has(+ *)) { scroll-margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1 id="operator-trips-master-spec-living-doc">Operator Trips — Master Spec (living doc)</h1>
+<p><strong>Status:</strong> planning / ideation. No code yet. Eyal's rule for this phase:</p>
+<blockquote><p>"First planning and systemic decisions, DB ordering etc. Then a step-by-step action plan. Today I mainly want to plan, play with everything, take decisions, do research — and only after everything is ideationally closed (not detail-level) start touching development."</p></blockquote>
+<p><strong>Purpose of this file:</strong> the single bigger-picture reference. When we start building any individual feature, this doc is what tells us where that feature sits and what it must not break.</p>
+<p><strong>Sources:</strong> Eyal's WhatsApp brief (2026-07-21/22) + the planning board image + existing docs:</p>
+<ul>
+<li><code>docs/operator-trips-architecture-recommendation.md</code> — DB/arch recommendation (⚠️ see Decision 0)</li>
+<li><code>docs/operator-conversation-guide.md</code> — what to tell/ask Israeli operators (money, KYC, fees)</li>
+<li><code>docs/trip-vocabulary-spec.md</code> — Crew / Captain / Operator naming</li>
+<li><code>docs/payments-questions-gateways.md</code>, <code>docs/payments-questions-accountant.md</code></li>
+</ul>
+<hr>
+<h2 id="0-the-one-liner">0. The one-liner</h2>
+<p>Turn the existing "Operator" trip type into a real product for <strong>professional trip organizers who charge money</strong> — so they can plan, publish, sell, and operate a paid surf trip end to end inside Swellyo, and so their travelers get a guided onboarding + document wallet + task system.</p>
+<p>Four surfaces:</p>
+<div class="tw"><table><thead><tr><th>#</th><th>Surface</th><th>Who</th><th>Platform</th></tr></thead><tbody><tr><td>1</td><td><strong>Trip creation</strong> (extended)</td><td>Operator</td><td>Mobile</td></tr><tr><td>2</td><td><strong>Traveler onboarding + in-trip experience</strong> (extended)</td><td>Traveler</td><td>Mobile</td></tr><tr><td>3</td><td><strong>Simple trip management</strong> (edit info + comms)</td><td>Operator</td><td><strong>Mobile only</strong></td></tr><tr><td>4</td><td><strong>Dashboard</strong> (snapshot, per-traveler files, exports)</td><td>Operator</td><td><strong>Mobile + Desktop</strong></td></tr></tbody></table></div>
+<hr>
+<h2 id="decision-0-the-architecture-contradiction-blocks-everything">⚠️ Decision 0 — the architecture contradiction (BLOCKS EVERYTHING)</h2>
+<p>This must be resolved before any schema work.</p>
+<p><strong>What's in the repo today:</strong> "Operator" is <code>hosting_style = 'C'</code> — a <strong>flag on the live <code>group_trips</code> table</strong>. Flow C already exists in <code>CreateTripFlowA.tsx</code>, has fixed pricing, and has its own <code>price_inclusions</code> JSONB column. <code>tripVocabulary.ts</code> maps <code>C → 'Operator'</code>.</p>
+<p><strong>What <code>operator-trips-architecture-recommendation.md</code> recommends:</strong> <em>Option C</em> — a <strong>fully separate</strong> <code>operator_trips</code> + <code>operator_trip_bookings</code> + payment-ledger + documents + tasks model, explicitly rejecting "flag on <code>group_trips</code>" (called Option A) as an antipattern because it forces <code>is_trip_host()</code> and six dependent tables to grow payment/document/deadline branches.</p>
+<p><strong>Reality check:</strong> <code>grep -rln "operator_trips" src/ supabase/</code> → <strong>no matches.</strong> The recommendation was never implemented. We shipped the thing the doc argues against.</p>
+<p><strong>So the real question is not "which option" — it's:</strong></p>
+<ul>
+<li><strong>(a)</strong> Keep <code>hosting_style='C'</code> as the trip shell, and hang all the NEW heavy stuff (bookings, payments, documents, tasks) off <strong>new separate tables</strong> keyed by <code>group_trip_id</code>. A hybrid: no migration on the live table, no duplicated trip shell, but <code>is_trip_host()</code> and the participants state machine stay shared.</li>
+<li><strong>(b)</strong> Do the full split now — new <code>operator_trips</code>, migrate/abandon existing Flow C trips, duplicate the trip shell. Maximum isolation, real migration cost, and Flow C trips already exist in prod.</li>
+</ul>
+<p><strong>My read:</strong> (a) is almost certainly right <em>now</em>. The arch doc's core argument is about <strong>divergent row shapes on <code>group_trip_participants</code></strong> and <strong>payment/document lifecycles</strong> — and (a) keeps all of that in new tables anyway. The doc's Option A strawman was "put payments and documents <em>inside</em> the existing tables", which (a) does not do. The trip <strong>shell</strong> (dates, destination, hero image, price) genuinely is the same shape across A/B/C — that part was never the risk.</p>
+<p>The one thing (a) must answer: does <code>operator_trip_bookings</code> <strong>replace</strong> or <strong>sit alongside</strong> <code>group_trip_participants</code> for Flow C trips? Sitting alongside means two sources of truth for "who is on this trip" — that's the actual trap. Proposal: participants stays the roster, bookings is a <strong>1:1 side-table</strong> on top of it holding money/document/task state.</p>
+<p>→ <strong>NEEDS A DECISION FROM EYAL + OHAD BEFORE ANY SQL.</strong></p>
+<hr>
+<h2 id="1-trip-creation-operator-same-as-now">1. Trip creation (operator) — "same as now +"</h2>
+<p>Operator does the current creation flow, plus:</p>
+<h3 id="1-1-set-onboarding-requirements-decided-concept">1.1 Set onboarding requirements — DECIDED (concept)</h3>
+<p>Operator chooses <strong>what travelers must provide</strong>, and for each one whether it's <strong>mandatory</strong> or <strong>skippable-until-a-date</strong>.</p>
+<p>Candidate items (Ohad's list — "things we need to collect from travelers that we don't collect today"):</p>
+<div class="tw"><table><thead><tr><th>Item</th><th>Likely bucket</th><th>Notes</th></tr></thead><tbody><tr><td>Passport upload</td><td>Onboarding (mandatory)</td><td>PII</td></tr><tr><td>Waiver signature</td><td>Onboarding (mandatory)</td><td>legal — see Open Q</td></tr><tr><td>Medical status</td><td>Onboarding (mandatory)</td><td>allergies, dietary prefs, injuries, regularly-taken prescribed medicine</td></tr><tr><td>Payment</td><td>Onboarding — "before someone <em>joins</em>"</td><td>timing set by operator</td></tr><tr><td>Insurance (screenshot/file)</td><td>More likely Open Task</td><td>often bought later</td></tr><tr><td>Visa (if applicable)</td><td>More likely Open Task</td><td></td></tr><tr><td>Flight tickets (if applicable)</td><td>More likely Open Task</td><td></td></tr></tbody></table></div>
+<p><strong>DECIDED — the skip rule:</strong> onboarding shows both <code>must</code> and <code>skippable</code> items, with a literal <strong>Skip</strong> button on the skippable ones. <em>Anything skipped automatically becomes an Open Task.</em> (Ohad proposed, Eyal: "very likely", Ohad: "yes.")</p>
+<p><strong>NOT DECIDED:</strong> the exact must/skippable split per item. Eyal: <em>"we'll figure out along the way what exactly is part of onboarding and what is open tasks — but treat them as one for now."</em> This is a design-partner question, not an engineering one.</p>
+<h3 id="1-2-open-tasks-deadlines-decided-concept">1.2 Open tasks + deadlines — DECIDED (concept)</h3>
+<p>At creation (and <strong>also outside the flow, added later</strong> — Eyal expects this), the operator defines tasks travelers must complete by a deadline. Example: upload visa by DD/MM.</p>
+<p><strong>We (the system) do the chasing:</strong></p>
+<ul>
+<li>remind the traveler as the deadline approaches / passes</li>
+<li>notify the operator when there's something they need to know</li>
+</ul>
+<p>→ Reuse the existing notifications push queue (<code>docs/superpowers/HANDOFF-notifications.md</code>). Do <strong>not</strong> build a second notification system.</p>
+<h3 id="1-3-payment-requirement-timing-not-decided">1.3 Payment requirement timing — NOT DECIDED</h3>
+<p>Lives either in onboarding or in open tasks. Eyal: <em>"need to talk to the design partners to see what they'd want — at what stage, deposit (mikdama) or full amount."</em> Board implies: probably onboarding, <strong>before someone "joins" the trip</strong>.</p>
+<p>Ties directly into <code>docs/operator-conversation-guide.md</code> — the deposit/balance split exists precisely because operators need cash before the trip to pay suppliers.</p>
+<h3 id="1-4-staff-highlighting-parked-deliberately">1.4 Staff highlighting — PARKED (deliberately)</h3>
+<p>Ohad asked: normal user the admin adds to the group and gets shown as staff, or a different staff profile type?</p>
+<p>Eyal's answer — <strong>start basic</strong>:</p>
+<ul>
+<li>everyone keeps a <strong>normal Swellyo profile</strong></li>
+<li>a staff member can join the group, get admin, whatever — nothing special</li>
+<li>the operator, <strong>during trip creation</strong>, just fills in a <strong>display section for staff</strong> — photo, a few words, a highlight — <em>like what exists today for Captain</em></li>
+<li>"but let's wait on this part, let it mature a bit"</li>
+</ul>
+<p><strong>Ohad's related idea, also parked:</strong> if we're building a custom profile anyway, the higher priority might be an <strong>operator/organizer profile page</strong> — their past trips, photos, etc. → not rejected, just not now. Worth revisiting when we do the marketing/trust story.</p>
+<h3 id="1-5-notifications-setup-nice-to-have">1.5 Notifications setup — "nice to have"</h3>
+<p>Operator sets notifications on things, for themselves + for customers. Explicitly marked nice-to-have on the board.</p>
+<hr>
+<h2 id="2-traveler-onboarding-normal-onboarding">2. Traveler onboarding — "normal onboarding +"</h2>
+<p>After the operator publishes, people can start signing up.</p>
+<p><strong>Mandatory block:</strong> passport upload · waiver signing · medical status (allergies, dietary prefs, injuries, regularly-taken prescribed medicine).</p>
+<p><strong>Skippable-until-date block:</strong> insurance screenshot/file · visa (if applicable) · flight tickets (if applicable). Skipping → the item lands in Open Tasks.</p>
+<p><strong>Payment:</strong> somewhere in onboarding, timing per operator (see 1.3).</p>
+<hr>
+<h2 id="3-after-onboarding-the-traveler-s-in-trip-experience">3. After onboarding — the traveler's in-trip experience</h2>
+<p>"All that users see today, plus:"</p>
+<h3 id="in-overview">In <strong>Overview</strong></h3>
+<ul>
+<li><strong>Staff highlighting</strong> — see the staff, not only the captain</li>
+<li><strong>"What's included"</strong> — improved, more precise breakdown (today: <code>src/services/trips/priceInclusions.ts</code>, one JSONB column, already extensible)</li>
+</ul>
+<h3 id="in-plan-the-biggest-most-substantial-change">In <strong>Plan</strong> — the biggest, most substantial change</h3>
+<ul>
+<li><strong>Open tasks</strong> with the notification system — passport, insurance, visa, due payment, etc.</li>
+<li><strong>Travel wallet</strong> — view everything already uploaded: insurance, passport, visa, flight tickets, and a <strong>"my medical card"</strong> the traveler can edit</li>
+<li><strong>Helpful links</strong> section (nice-to-have)</li>
+</ul>
+<h3 id="one-step-later-monetization">One step later (monetization)</h3>
+<p>If certain areas are empty, we surface <strong>suggestions</strong>, and take a cut:</p>
+<ul>
+<li>"close your insurance with our agent"</li>
+<li>"go to Google Flights through us"</li>
+</ul>
+<h3 id="full-list-of-traveler-facing-value-board-right-column">Full list of traveler-facing value (board, right column)</h3>
+<p>chat · gear · admin updates · view profiles · notifications system · pay · accessible personal info to view (maybe) · edit some personal info · helpful links · open tasks</p>
+<hr>
+<h2 id="4-simple-trip-management-operator-mobile-only">4. Simple trip management (operator) — <strong>mobile only</strong></h2>
+<p>Two parts:</p>
+<h3 id="4-1-edit-trip-info-decided-with-a-real-policy-change">4.1 Edit trip info — DECIDED, with a real policy change</h3>
+<p>A dedicated, <strong>simpler, more straightforward</strong> editing screen for operators.</p>
+<p><strong>Scope, clarified explicitly by Eyal:</strong> this is editing the <strong>trip Overview only</strong> — i.e. <em>everything you fill in during the trip creation flow</em>. Photos, dates, levels, boards, etc.</p>
+<blockquote><p>Ohad: "does the edit window also cover things we edit today via Plan, like gear items?" Eyal: <strong>"No. Plan is plan.</strong> I'm talking about editing only the trip's overview."</p></blockquote>
+<p><strong>Entry point (Eyal's exact picture):</strong> operator is in the trip → Overview → taps the <strong>3 dots</strong> → <strong>Edit trip</strong> → screen where they can edit the details.</p>
+<p><strong>⚠️ Policy change:</strong> Ohad flagged that most of these fields are currently <strong>defined as non-editable</strong> — deliberately, because people already joined the trip based on those details. (Confirmed in code: <code>CreateTripFlowA.tsx</code> renders <code>'Locked'</code> placeholders and blocks sheets when <code>editMode</code>.)</p>
+<p>Eyal's ruling:</p>
+<blockquote><p>"Correct, but <strong>operators is different</strong>. These are businesses, our partners… we can trust them, at least at the start, when there's a more limited number of them."</p></blockquote>
+<p>Ohad: "but I support [it]".</p>
+<p>→ <strong>DECIDED: operators get edit rights that peer hosts don't.</strong> Explicitly a <em>trust-at-small-scale</em> decision — flag it for revisit once operator count grows. → <strong>OPEN:</strong> do already-joined travelers get notified when a material field changes (dates, price, destination)? Not discussed. Should be.</p>
+<h3 id="4-2-communication-with-customers-existing-unchanged">4.2 Communication with customers — existing, unchanged</h3>
+<p>The regular, already-built stuff: chat · admin updates · private DMs · gear lists.</p>
+<hr>
+<h2 id="5-dashboard-mobile-desktop">5. Dashboard — <strong>mobile + desktop</strong></h2>
+<blockquote><p>Management (4.1 + 4.2) is mobile only. The <strong>dashboard is mobile AND desktop.</strong></p></blockquote>
+<p><strong>Entry model — explicitly App Store Connect:</strong> you enter and see a list of "apps" (trips) to choose from, and from there a <strong>space per app (trip)</strong>. Plus "create new".</p>
+<h3 id="5-1-trip-snapshot">5.1 Trip snapshot</h3>
+<p>"Start with something cute, keep upgrading it." Current thinking:</p>
+<p><strong>1. Money</strong></p>
+<ul>
+<li>total number of people who paid in full</li>
+<li>total amount paid (₪ / $)</li>
+<li>open payments (still owed)</li>
+<li>total people who paid only a deposit (mikdama)</li>
+<li>total paid in installments (tashlumim)</li>
+</ul>
+<p><strong>2. Open-tasks snapshot</strong> — per document type: "14/15 uploaded passports", same for visas, insurance, flights. + <strong>View all</strong>.</p>
+<p><strong>3. Medical flags</strong> — anything not smooth gets flagged small for the operator: allergies, food prefs, injuries. e.g. "3 reported injuries" → <strong>View all</strong> action.</p>
+<p><strong>4. Surf stuff</strong> (general awareness) — how many beginners / intermediate / advanced, how many shortboarders etc., age ranges, nationalities.</p>
+<blockquote><p><strong>Note, board, load-bearing:</strong> <em>every one of these (money, passports, visas… all of them) gets its own dedicated page</em>, where you can see everything in full detail and <strong>export</strong> some of it.</p></blockquote>
+<h3 id="5-2-viewing-an-individual-traveler">5.2 Viewing an individual traveler</h3>
+<p><strong>1. Their normal surfer/traveler profile</strong> — as everyone sees it: surf level, travel experience, name, photo, age, nationality, home break, board type, places they've been, lifestyle prefs.</p>
+<p><strong>2. Personal info</strong> — the full file:</p>
+<div class="tw"><table><thead><tr><th>Field</th><th>Operator capabilities</th></tr></thead><tbody><tr><td>Waiver signed</td><td>yes / no</td></tr><tr><td>Passport</td><td>view · export · delete + reclaim</td></tr><tr><td>Insurance</td><td>view · export · delete + reclaim</td></tr><tr><td>Flight info</td><td>view · export · delete + reclaim</td></tr><tr><td>Visa</td><td>view · export · delete + reclaim</td></tr><tr><td><strong>Medical status</strong></td><td><strong>view only</strong> — allergies, injuries, dietary prefs, regular medication</td></tr></tbody></table></div>
+<p><strong>"Delete + reclaim"</strong> = the operator rejects a bad upload and asks for a new one. Examples given: wrong insurance, blurry passport, wrong visa.</p>
+<p><strong>3. Actions from a traveler's profile</strong></p>
+<ul>
+<li>remove from trip</li>
+<li><strong>send a message — mobile only</strong></li>
+<li>delete + reclaim a document</li>
+<li>send a reminder for something — <em>nice to have</em></li>
+</ul>
+<hr>
+<h2 id="6-open-questions-decisions-still-missing">6. Open questions / decisions still missing</h2>
+<p>Grouped by who can answer them.</p>
+<h3 id="6-1-blocking-needs-eyal-ohad">6.1 Blocking, needs Eyal + Ohad</h3>
+<ol>
+<li><strong>Decision 0</strong> — the <code>operator_trips</code> vs <code>hosting_style='C'</code> architecture split. Nothing else can start.</li>
+<li><strong>Bookings vs participants</strong> — is there one roster or two? (see Decision 0)</li>
+<li><strong>Desktop dashboard viability.</strong> Our own memory says *mobile is the primary live product, web is basically unused*. A desktop dashboard means reviving and maintaining the web build as a real surface. Confirm we're committing to that, or ship dashboard mobile-first and treat desktop as phase 2.</li>
+<li><strong>Trip-edit notifications</strong> — do joined travelers get told when dates/price/destination change?</li>
+</ol>
+<h3 id="6-2-needs-design-partners-operators">6.2 Needs design partners (operators)</h3>
+<ol start="5">
+<li><strong>Payment stage</strong> — onboarding or open task? Before or after "joining"?</li>
+<li><strong>Deposit vs full amount</strong> — and what the split looks like.</li>
+<li><strong>The must/skippable split</strong> per document type.</li>
+<li><strong>Cancellation &amp; refund policy</strong> — free window, fees, who eats the processing cost.</li>
+<li><strong>Do they need money before the trip</strong> to pay suppliers? (<code>operator-conversation-guide.md</code> calls this "the important one" — ask EVERY operator.) This directly conflicts with hold-until-after-trip.</li>
+<li><strong>Staff model</strong> — display-only section vs. real staff roles. Parked pending operator input.</li>
+</ol>
+<h3 id="6-3-money-legal-commercial-still-x">6.3 Money / legal / commercial — still <code>[X]</code></h3>
+<ol start="11">
+<li><strong>Swellyo commission %</strong> — undecided, appears as <code>[X]%</code> in the operator guide.</li>
+<li><strong>Payment gateway</strong> — Tranzila is the lead, not final.</li>
+<li><strong>Who pays the card fee</strong> — traveler (common) or operator absorbs it.</li>
+<li><strong>Payout timing</strong> — "~X days after the trip ends".</li>
+<li><strong>Operator KYC / onboarding</strong> — bank account, ID, business registration. Mentioned in the operator guide but <strong>completely absent from the feature brief</strong>. Someone has to build the operator-side signup. Not scoped anywhere yet.</li>
+</ol>
+<h3 id="6-4-not-discussed-at-all-i-m-raising-these">6.4 Not discussed at all — I'm raising these</h3>
+<ol start="16">
+<li><strong>PII / privacy law.</strong> We're about to store passports, visas and <strong>medical data</strong> for Israeli and international travelers. That's special-category data under GDPR and sensitive under Israeli privacy law. Needed: private bucket + signed URLs only (the arch doc already proposes <code>operator-trip-docs</code>), retention policy, deletion-after-trip, an access audit log, and probably a DPA with each operator. <strong>This is the highest-risk unscoped item in the doc.</strong></li>
+<li><strong>Waiver mechanics.</strong> Is it a PDF the operator uploads per trip? Is a tap-to-sign legally binding? Do we store a signed copy, IP, timestamp? Nothing specified.</li>
+<li><strong>Export format &amp; channel</strong> — CSV? PDF? Emailed? Downloaded? Does "export" of a passport scan leave our controlled storage (see #16)? Medical is view-only in the profile — is it also export-forbidden in the aggregate "view all" pages? The board is ambiguous.</li>
+<li><strong>"Delete + reclaim" semantics</strong> — does it notify the traveler, reopen the task, reset the deadline? Can the operator write a reason?</li>
+<li><strong>Capacity as real inventory</strong> — the arch doc argues a spot must be <em>secured</em> at deposit-paid, atomically, unlike today's soft <code>max_participants</code>. Not mentioned in the brief at all. Overselling a paid trip is a much worse failure than overfilling a peer trip.</li>
+<li><strong>Refund on removal</strong> — operator can "remove from trip". What happens to money already paid?</li>
+<li><strong>Who besides the operator sees the dashboard</strong> — staff members? Is dashboard access a role?</li>
+<li><strong>Currency</strong> — group trips already do frozen-FX ₪/$ (<code>project_group_trip_multi_currency</code>). Operator payments are ₪ with tashlumim. Confirm they use the same model.</li>
+<li><strong>Helpful links</strong> — operator-authored per trip, or a Swellyo-curated list per destination?</li>
+</ol>
+<hr>
+<h2 id="7-existing-infra-we-should-reuse-do-not-rebuild">7. Existing infra we should reuse (do not rebuild)</h2>
+<div class="tw"><table><thead><tr><th>Need</th><th>Already exists</th></tr></thead><tbody><tr><td>Notifications + push queue</td><td><code>docs/superpowers/HANDOFF-notifications.md</code> — LIVE on prod</td></tr><tr><td>Chat / group conversation</td><td><code>messagingService.createGroupConversation(..., { trip_id })</code> — soft-keyed by metadata, no FK. The one genuinely safe shared surface.</td></tr><tr><td>Admin updates</td><td><code>group_trip_admin_updates</code> + <code>TripUpdatesScreen.tsx</code></td></tr><tr><td>Gear</td><td><code>ManageGearScreen</code> / <code>YourGearScreen</code> / <code>PackingAndGearScreen</code></td></tr><tr><td>"What's included"</td><td><code>src/services/trips/priceInclusions.ts</code> — JSONB, grows without migration</td></tr><tr><td>Trip type naming</td><td><code>src/services/trips/tripVocabulary.ts</code> (<code>C → Operator</code>)</td></tr><tr><td>Trips caching</td><td>react-query v5 (<code>project_trips_react_query</code>)</td></tr><tr><td>Bottom sheets</td><td><code>BottomSheetShell</code> — never hand-roll a Modal</td></tr><tr><td>Feed</td><td><code>explore_feed</code> / <code>my_trips_feed</code> RPCs — any new operator display column must be added to these</td></tr></tbody></table></div>
+<hr>
+<h2 id="8-suggested-build-order-proposal-not-decided">8. Suggested build order (proposal, not decided)</h2>
+<ol start="0">
+<li><strong>Resolve Decision 0.</strong> Write the schema. Nothing before this.</li>
+<li><strong>Documents + tasks, no money.</strong> Onboarding requirements → uploads → open tasks → reminders → traveler travel-wallet → operator per-traveler file view. This is the whole product minus payments, and it's independently useful. It also forces us to solve #16 (PII) early, which is the right order.</li>
+<li><strong>Operator trip editing</strong> (4.1) — small, isolated, unblocks operator self-service.</li>
+<li><strong>Dashboard, mobile, read-only.</strong> Snapshot + per-item detail pages + exports.</li>
+<li><strong>Payments.</strong> Gateway, ledger, deposits, capacity-as-inventory, refunds, operator KYC. Biggest risk, most external dependencies, most undecided — last, not first.</li>
+<li><strong>Desktop dashboard</strong>, staff model, operator profile, monetized suggestions.</li>
+</ol>
+<p>Rationale: everything before step 4 is buildable with decisions we can make ourselves; step 4 is gated on design partners, an accountant, and a gateway.</p>
+</div>
+</body>
+</html>

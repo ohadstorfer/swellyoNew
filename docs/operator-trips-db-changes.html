@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Trips — Database Changes</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:6px}
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:16px 0 34px}
+  .rule b{color:var(--cyan-dark)}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:16px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead code{font:600 14px ui-monospace,Menlo,monospace;color:var(--cyan-dark)}
+  .chead span{font-size:13px;color:var(--muted)}
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-new{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+
+  .tscroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  td{padding:7px 16px;border-top:1px solid var(--line);vertical-align:top}
+  td:first-child{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap;font-weight:600}
+  td:nth-child(2){color:var(--muted);font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+  td:nth-child(3){color:#3a3a36}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  ul.small{list-style:none}
+  ul.small li{padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+  ul.small li:last-child{border-bottom:0}
+  ul.small code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+  ul.small span{color:var(--muted)}
+
+  ol.open{list-style:none;counter-reset:q}
+  ol.open li{counter-increment:q;padding:11px 0 11px 34px;border-bottom:1px solid var(--line);
+    font-size:14px;position:relative}
+  ol.open li:last-child{border-bottom:0}
+  ol.open li::before{content:counter(q);position:absolute;left:0;top:11px;width:22px;height:22px;
+    border-radius:99px;background:var(--open-bg);color:var(--open);font-size:12px;font-weight:680;
+    display:flex;align-items:center;justify-content:center}
+  ol.open b{font-weight:640}
+  ol.open span{color:var(--muted)}
+
+  .foot{margin-top:34px;font-size:13px;color:var(--muted);background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+  .foot code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12px ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Operator Trips — Database Changes</h1>
+  <p class="sub">Everything the operator product adds or changes in the database. Updated 23 July 2026.</p>
+
+  <div class="rule">
+    <b>Rule 1:</b> an operator trip <b>is</b> a <code>group_trips</code> row with
+    <code>hosting_style = 'C'</code>. No separate operator tables. We add a few columns and new
+    child tables. Trips A and B don't change at all.<br>
+    <b>Rule 2 (decided 23 Jul):</b> "done" state is <b>never stored</b>. It is always read from
+    the evidence: the document row, the agreement row, the medical form, the money ledger.
+    There is no per-traveler state table.
+  </div>
+
+  <h2>Existing tables that change</h2>
+
+  <div class="card">
+    <div class="chead"><code>group_trips</code><span>no new columns yet — decided 23 Jul</span></div>
+    <div class="tscroll"><table>
+      <tr><td>visibility</td><td>text</td><td><span class="tag t-new">DECIDED</span> Reuse the column that already exists (today everything is 'public'). New value <b>'link_only'</b>: operator trips are private-link by default, listing in explore is opt-in. No new column.</td></tr>
+      <tr><td>deposit_amount</td><td>numeric</td><td>NOT added now. Comes with the payments work: one amount in USD, showing in ₪/$ via the existing <b>budget_currency</b> + frozen FX — no deposit_currency column. (payment timing and method will be decided later on)</td></tr>
+    </table></div>
+    <div class="note">Also: a new DB check so capacity can never be set below the number of people already booked (today nothing stops that).</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_participants</code><span>one new column, later</span></div>
+    <div class="tscroll"><table>
+      <tr><td>price_snapshot</td><td>numeric</td><td><span class="tag t-new">DECIDED</span> Column here (this table already holds per-person state). The price this traveler booked at — a later price edit never changes what they owe. Ships with the payments migration. (payment timing and method will be decided later on)</td></tr>
+    </table></div>
+  </div>
+
+  <h2>New tables</h2>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_requirements</code><span class="tag t-new">NEW</span><span>what each trip asks travelers to do — one row per item</span></div>
+    <div class="tscroll"><table>
+      <tr><td>id / trip_id</td><td>uuid</td><td>Belongs to one trip.</td></tr>
+      <tr><td>kind</td><td>text</td><td>passport · waiver · medical · insurance · visa · flights · custom</td></tr>
+      <tr><td>req_type</td><td>text</td><td>upload · acknowledge · pay</td></tr>
+      <tr><td>timing</td><td>text</td><td>must_have (no skip) · skippable (skip until a date)</td></tr>
+      <tr><td>title, help_text</td><td>text</td><td>What the traveler sees.</td></tr>
+      <tr><td>deadline_days_before</td><td>int</td><td>"30 days before departure". Real date is computed, never stored — moving the trip keeps deadlines correct.</td></tr>
+      <tr><td>sort_order, is_active</td><td>int, bool</td><td>Order; removing an item just turns it off (history kept).</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><span class="tag t-new">DECIDED 23 JUL</span><span><b>No state table.</b> Where each traveler stands is always computed:</span></div>
+    <div class="tscroll"><table>
+      <tr><td>upload items</td><td>—</td><td>No document row = not done. Row without approval = waiting. Approved row = done. Reject deletes the row.</td></tr>
+      <tr><td>waiver / "I agree"</td><td>—</td><td>Agreement row exists (for the current version) = done.</td></tr>
+      <tr><td>medical</td><td>—</td><td>Form's completed_at is set = done.</td></tr>
+      <tr><td>pay</td><td>—</td><td>The ledger adds up = done. (payment timing and method will be decided later on)</td></tr>
+      <tr><td>overdue / skip</td><td>—</td><td>Overdue = not done + deadline passed (computed). Skip writes nothing.</td></tr>
+    </table></div>
+    <div class="note">One SQL function does these joins and hands the app a clean list. Nothing can ever disagree with the evidence, because there is no second copy.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_documents</code><span class="tag t-new">NEW</span><span>uploaded files: passport, insurance, visa, flights</span></div>
+    <div class="tscroll"><table>
+      <tr><td>id, trip_id, user_id, requirement_id</td><td>uuid</td><td>One live document per traveler per requirement (unique index — no double counting). No doc_type column — the requirement already knows its kind.</td></tr>
+      <tr><td>storage_path, mime_type, byte_size</td><td>—</td><td>The file. Lives in a new <b>private</b> storage bucket, never a public one.</td></tr>
+      <tr><td>approved_at, approved_by</td><td>—</td><td>Empty = waiting for review. Set = approved. Reject = the row is deleted and the item re-opens.</td></tr>
+      <tr><td>full_name, nationality, expiry_date</td><td>—</td><td>Typed passport fields. These survive after the file is deleted.</td></tr>
+      <tr><td>file_deleted_at</td><td>timestamptz</td><td>Set when the 30-days-after-trip purge removes the file. The row stays.</td></tr>
+    </table></div>
+    <div class="note">This row IS the requirement's state for uploads — see "No state table" above.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_document_reviews</code><span class="tag t-new">NEW</span><span>audit log of approve / reject actions</span></div>
+    <div class="tscroll"><table>
+      <tr><td>trip_id, user_id, requirement_id</td><td>uuid</td><td>Who and what it was about.</td></tr>
+      <tr><td>action, reason, actor_id, created_at</td><td>—</td><td>approved or rejected, optional reason, which host, when. Never stores a file or a path.</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_waiver_versions</code><span class="tag t-new">NEW</span><span>the waiver text/PDF, versioned</span></div>
+    <div class="tscroll"><table>
+      <tr><td>trip_id, version</td><td>—</td><td>Version 1, 2, 3… Editing always makes a new row, never changes an old one.</td></tr>
+      <tr><td>body_text / file_path</td><td>text</td><td>Pasted text or a PDF in the private bucket.</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_acknowledgements</code><span class="tag t-new">NEW</span><span>who agreed to what — the waiver and any custom "I agree" item</span></div>
+    <div class="tscroll"><table>
+      <tr><td>requirement_id, trip_id, user_id</td><td>uuid</td><td>One row per traveler per acknowledge item. Rows can never be edited or deleted.</td></tr>
+      <tr><td>agreed_name, agreed_at</td><td>—</td><td>Name shown on screen + server time. This row IS the proof and the "done" state.</td></tr>
+      <tr><td>waiver_version_id, agreed_version</td><td>—</td><td>Only for the waiver: exactly which version they agreed to. Empty for custom items.</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_medical_forms</code><span class="tag t-new">NEW</span><span>per-trip medical form — rows, never files</span></div>
+    <div class="tscroll"><table>
+      <tr><td>trip_id, user_id</td><td>uuid</td><td>One row per traveler per trip. Never copied to the profile or between trips.</td></tr>
+      <tr><td>allergies, dietary, injuries, medications</td><td>text</td><td>Four free-text fields, 1000 chars max each.</td></tr>
+      <tr><td>*_none</td><td>bool ×4</td><td>"I have none" — so a blank field is not confused with "no answer yet".</td></tr>
+      <tr><td>completed_at</td><td>timestamptz</td><td>Set on first real answer — this is the "done" state for the medical requirement.</td></tr>
+    </table></div>
+    <div class="note">Operator can read, never write, never export. No delete for anyone — retention is an open question below.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_payment_events</code><span class="tag t-new">NEW</span><span class="tag t-open">SKETCH</span><span>append-only money ledger</span></div>
+    <div class="tscroll"><table>
+      <tr><td>trip_id, user_id</td><td>uuid</td><td>Deposits, payments, refunds. Insert only — rows are never updated or deleted.</td></tr>
+      <tr><td>…</td><td>—</td><td>Exact columns not designed yet (payment timing and method will be decided later on).</td></tr>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><code>group_trip_edit_log</code><span class="tag t-new">NEW</span><span>recommended — every edit an operator makes</span></div>
+    <div class="tscroll"><table>
+      <tr><td>trip_id, operator_id</td><td>uuid</td><td>Who edited which trip.</td></tr>
+      <tr><td>changed_fields, old / new, created_at</td><td>jsonb, —</td><td>What changed. Cheap now; it's what lets us re-check the "trust the operators" unlock later.</td></tr>
+    </table></div>
+  </div>
+
+  <h2>Not tables, but part of the change</h2>
+  <ul class="small">
+    <li><code>group-trip-documents</code> <span>— new <b>private</b> storage bucket. Files deleted within 30 days after the trip ends; a daily job does it.</span></li>
+    <li><code>is_trip_participant()</code> <span>— one new helper function for access rules. The existing <code>is_trip_host()</code> is only called, never modified.</span></li>
+    <li><span>New notification types (requirement added, rejected, overdue…) added to the existing enum — reuses the live push queue.</span></li>
+    <li><span>Two small read views: requirements with real due dates, and medical counts for the dashboard.</span></li>
+    <li><span>Feed RPCs (<code>explore_feed</code> etc.) must return any new display column, or the app never sees it.</span></li>
+  </ul>
+
+  <h2>Still to decide — these DO affect the schema</h2>
+  <ol class="open">
+    <li><b>Everything payment.</b> <span>The deposit column and the whole ledger table are sketches. Nothing is created until this is settled. (payment timing and method will be decided later on)</span></li>
+    <li><b>Medical retention.</b> <span>The 30-day rule covers files, not rows. If medical rows also get deleted, that adds a purge job and maybe a column.</span></li>
+    <li><b>Read / download logging.</b> <span>If we log who opened documents or medical data, that's one or two extra log tables.</span></li>
+    <li><b>Hard C-only guard.</b> <span>Optionally a trigger so these tables can only get rows on <code>hosting_style='C'</code> trips. Not needed for v1.</span></li>
+  </ol>
+
+  <h2>Decided 23 July</h2>
+  <ul class="small">
+    <li><span>❶ <b>No state table.</b> "Done" is always derived from the evidence tables — <code>group_trip_requirement_states</code> was cut from the plan.</span></li>
+    <li><span>❷ <b>Visibility reuses the existing column</b> — new <code>'link_only'</code> value, no second column.</span></li>
+    <li><span>❸ <b>Nothing is added to the DB yet.</b> Deposit column waits for the payments decision; when it comes it's one USD amount reusing <code>budget_currency</code> + frozen FX.</span></li>
+    <li><span>❹ <b>price_snapshot</b> = column on <code>group_trip_participants</code>, shipped with the payments migration.</span></li>
+    <li><span>❺ Names: <code>group_trip_medical_forms</code> (plural, like every child table), <code>group_trip_acknowledgements</code> (generic, waiver included), no <code>doc_type</code> on documents, all user FKs point at <code>auth.users</code>.</span></li>
+  </ul>
+
+  <p class="foot" style="margin-top:18px">
+    The other open questions (traveler notifications on edits, waiver re-agree, reminder cadence,
+    approval of the waiver, what the dashboard shows after purge) change <b>behavior</b>, not tables.
+  </p>
+
+  <p class="foot">
+    Full SQL, access rules and flows live in <code>docs/specs/operator-trips/</code>.
+    Migrations are applied by hand in the Supabase SQL editor.
+  </p>
+</div>
+</body>
+</html>

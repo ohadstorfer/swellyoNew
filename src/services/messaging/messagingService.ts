@@ -394,11 +394,12 @@ class MessagingService {
         return { conversations: [], hasMore: false }; // Return empty array, auth guard will redirect
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        console.log('[messagingService] No user in getConversations - auth guard will handle redirect');
-        return { conversations: [], hasMore: false }; // Return empty array, auth guard will redirect
-      }
+      // Use the user from the local session — getUser() here was a redundant
+      // network round-trip with no timeout, and a lost response left the chat
+      // tab's loading skeleton up forever on fresh installs (same class of bug
+      // as the 2026-07-23 blank-profile hang). Auth validity is the auth
+      // guard's job.
+      const user = session.user;
       markStage('auth');
 
       // Get ALL conversation IDs the user is a member of. We can't paginate on

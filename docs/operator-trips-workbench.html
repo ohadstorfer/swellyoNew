@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Trips — Workbench</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --park:#7a6a3f; --park-bg:#f7f2e4;
+    --nice:#5a5a90; --nice-bg:#eeeef7;
+    --exist:#6b6b66; --exist-bg:#f0f0ec;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:6px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+  .sub code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  /* progress */
+  .prog{display:flex;align-items:center;gap:12px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:22px}
+  .bar{flex:1;height:6px;background:var(--line);border-radius:99px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--cyan);border-radius:99px}
+  .prog b{font-size:13px;font-weight:640;white-space:nowrap}
+  .prog span{font-size:12.5px;color:var(--muted);white-space:nowrap}
+
+  .legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px}
+  .legend i{font-style:normal;font-size:11.5px;padding:3px 9px;border-radius:99px;
+    border:1px solid var(--line);background:var(--panel)}
+
+  /* table */
+  .tw{border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th{background:var(--panel);text-align:left;padding:9px 14px;font-size:11.5px;
+    font-weight:640;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);
+    border-bottom:1px solid var(--line)}
+  td{padding:0;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:0}
+  tr.grp td{background:var(--panel2);font-weight:640;font-size:12.5px;
+    padding:9px 14px;letter-spacing:.01em}
+  tr.grp span{font-weight:500;color:var(--muted)}
+
+  button.row{all:unset;display:grid;grid-template-columns:1fr 1.5fr auto auto;
+    gap:12px;align-items:center;width:100%;padding:11px 14px;cursor:pointer;
+    box-sizing:border-box}
+  button.row:hover{background:var(--cyan-tint)}
+  button.row:focus-visible{outline:2px solid var(--cyan);outline-offset:-2px}
+  .nm{font-weight:580}
+  .ds{color:var(--muted);font-size:13.5px}
+  .st{font-size:11.5px;font-weight:640;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .s-ok{color:var(--ok);background:var(--ok-bg)}
+  .s-open{color:var(--open);background:var(--open-bg)}
+  .s-park{color:var(--park);background:var(--park-bg)}
+  .s-nice{color:var(--nice);background:var(--nice-bg)}
+  .s-exist{color:var(--exist);background:var(--exist-bg)}
+  .chk{font-size:13px;width:16px;text-align:center;color:var(--cyan)}
+  .chk.no{color:var(--line)}
+
+  /* overlay */
+  .back{position:fixed;inset:0;background:rgba(20,20,18,.42);backdrop-filter:blur(2px);
+    opacity:0;pointer-events:none;transition:opacity .16s ease;z-index:40}
+  .back.on{opacity:1;pointer-events:auto}
+  .sheet{position:fixed;top:0;right:0;bottom:0;width:min(660px,100%);background:#fff;
+    z-index:50;transform:translateX(100%);transition:transform .2s cubic-bezier(.32,.72,0,1);
+    display:flex;flex-direction:column;box-shadow:-8px 0 40px rgba(0,0,0,.12)}
+  .sheet.on{transform:none}
+  .shead{padding:18px 22px 14px;border-bottom:1px solid var(--line);flex:none}
+  .crumb{font-size:11.5px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.07em;font-weight:600;margin-bottom:6px}
+  .shead h2{font-size:20px;font-weight:670;letter-spacing:-.015em;margin-bottom:8px}
+  .stags{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .sbody{padding:20px 22px 40px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch}
+  .sfoot{border-top:1px solid var(--line);padding:10px 22px;display:flex;gap:8px;
+    align-items:center;justify-content:space-between;flex:none;background:var(--panel)}
+  .sfoot button{all:unset;font-size:13px;font-weight:600;color:var(--cyan-dark);
+    padding:6px 12px;border-radius:7px;cursor:pointer}
+  .sfoot button:hover{background:var(--cyan-tint)}
+  .sfoot button[disabled]{color:var(--line);cursor:default;background:none}
+  .x{all:unset;position:absolute;top:16px;right:18px;font-size:20px;line-height:1;
+    color:var(--muted);cursor:pointer;padding:4px 8px;border-radius:6px}
+  .x:hover{background:var(--panel2);color:var(--text)}
+
+  .sec{margin-bottom:26px}
+  .sec>h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.08em;
+    font-weight:670;color:var(--muted);margin-bottom:10px;
+    padding-bottom:6px;border-bottom:1px solid var(--line)}
+  .lead{font-size:14.5px;color:#3a3a36;margin-bottom:22px}
+
+  .item{padding:11px 0;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .item h4{font-size:14px;font-weight:620;margin-bottom:4px}
+  .item p{font-size:13.5px;color:var(--muted);line-height:1.55}
+  .item p+p{margin-top:6px}
+  .item a{color:var(--cyan-dark)}
+  .item .own{display:inline-block;margin-top:6px;font-size:11.5px;font-weight:620;
+    color:var(--cyan-dark);background:var(--cyan-tint);padding:2px 9px;border-radius:99px}
+  .item.o{border-left:3px solid var(--open);padding-left:12px;
+    background:var(--open-bg);border-radius:0 8px 8px 0;margin-bottom:8px;
+    border-bottom:0;padding-top:11px;padding-bottom:11px}
+  .item.d{border-left:3px solid var(--ok);padding-left:12px;margin-bottom:8px;
+    border-bottom:0}
+
+  .empty{font-size:13.5px;color:var(--muted);background:var(--panel);
+    border:1px dashed var(--line);border-radius:9px;padding:16px;text-align:center}
+
+  .src{font-size:12.5px;color:var(--muted);margin-top:8px}
+  .src a{color:var(--cyan-dark)}
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  @media(max-width:760px){
+    button.row{grid-template-columns:1fr auto auto;gap:8px}
+    .ds{display:none}
+    .sheet{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Operator Trips — Workbench</h1>
+  <p class="sub">Every feature is a row. Press one to open its detail, decisions and open questions.
+    Source of truth for locked decisions is <code>SPEC.md</code>.</p>
+
+  <div class="prog">
+    <b id="pcount"></b>
+    <div class="bar"><i id="pbar"></i></div>
+    <span>features worked through</span>
+  </div>
+
+  <div class="legend">
+    <i>✓ = grilled</i><i class="s-ok st">Decided</i><i class="s-open st">Open</i>
+    <i class="s-park st">Parked</i><i class="s-nice st">Nice-to-have</i><i class="s-exist st">Exists</i>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Feature</th><th>What it is</th><th>Status</th><th></th></tr></thead>
+    <tbody id="tb"></tbody>
+  </table></div>
+</div>
+
+<div class="back" id="back"></div>
+<aside class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle">
+  <div class="shead">
+    <button class="x" id="closeBtn" aria-label="Close">×</button>
+    <div class="crumb" id="shGrp"></div>
+    <h2 id="shTitle"></h2>
+    <div class="stags" id="shTags"></div>
+  </div>
+  <div class="sbody" id="shBody"></div>
+  <div class="sfoot">
+    <button id="prevBtn">← Previous</button>
+    <button id="nextBtn">Next →</button>
+  </div>
+</aside>
+
+<script type="application/json" id="data">
+{
+  "groups": [
+    { "id":"create", "name":"1 · Creating a trip", "meta":"operator · mobile" },
+    { "id":"onb",    "name":"2 · Traveler onboarding", "meta":"traveler · mobile" },
+    { "id":"intrip", "name":"3 · Traveler in-trip", "meta":"traveler · mobile" },
+    { "id":"manage", "name":"4 · Trip management", "meta":"operator · mobile only" },
+    { "id":"dash",   "name":"5 · Dashboard", "meta":"operator · mobile + desktop (read-only)" },
+    { "id":"gates",  "name":"Gates", "meta":"not features — nothing ships without them" }
+  ],
+  "features": [
+
+    { "id":"onb-req", "spec":"requirements-model.md", "g":"create", "n":"Onboarding requirements", "grilled":true, "st":"ok",
+      "d":"Operator picks what travelers must provide, and whether each item is required or skippable",
+      "lead":"There is ONE list: requirements. The operator picks which ones apply to this trip. Each is either must-have during onboarding, or skippable until a date. There is no separate operator-authored task concept — the traveler's \"Open tasks\" panel in Plan is simply the view of requirements they still owe. Grilled with Ohad across three rounds on 22 July 2026.",
+      "decided":[
+        {"t":"One list only — requirements. No authored tasks",
+         "p":["The operator never writes \"tasks\". They pick from a default list, deselect what does not apply, and add custom ones. Open tasks is a view, not a thing anyone authors.",
+              "This drops operator_trip_tasks from SPEC.md §6. Eyal's spec lists \"set onboarding requirements\" and \"set open tasks + deadlines\" as two separate operator actions with two tables — but it never gives a single example of an authored task, and every example it does give (passport, insurance, visa, payment due) is a requirement.",
+              "Needs Eyal's sign-off, since it removes a table from his schema."]},
+        {"t":"Three requirement types: upload, acknowledge, pay",
+         "p":["Send a file, confirm you read or did something, or settle money owed. The waiver is an acknowledge; payment due is a pay."]},
+        {"t":"A pay requirement reads from the ledger. It never stores a state (payment timing and method will be decided later on)",
+         "p":["Decided 22 July after review. Payment already has an append-only event ledger, and SPEC.md is explicit that payment status is computed from it and never written directly.",
+              "If a pay requirement kept its own done flag, two places would know whether someone paid, and they would disagree the first time a webhook arrived late. The requirement shows a state; the ledger owns it."]},
+        {"t":"Two timings: must-have, or skippable until a date",
+         "p":["Must-have means there is no Skip button — do it now. Skippable means there is a Skip button and a deadline.",
+              "This changed on 22 July. Must-have used to mean \"blocks joining\". Once the deposit is what secures a spot, joining stops waiting on documents, so must-have is about urgency, not access. It also makes adding a must-have requirement retroactively meaningful — it is simply an obligation with no skip."]},
+        {"t":"Deadlines are relative to departure, displayed as real dates",
+         "p":["\"30 days before departure\", shown to everyone as the actual date. Duplicating a trip or moving its dates keeps every deadline correct — absolute dates silently break the moment an operator copies last season's trip."]},
+        {"t":"Done means approved by the operator, not merely submitted",
+         "p":["The dashboard counts approved. Otherwise \"14/15 passports\" can be fourteen blurry photos nobody has looked at.",
+              "New scope: SPEC.md has no approved state at all — documents there carry only uploaded_at and a deleted/reclaimed state. This adds review workload the spec never budgeted for."]},
+        {"t":"The deposit secures the spot (payment timing and method will be decided later on)",
+         "p":["Settled 22 July, matching SPEC.md. Paying the deposit is what puts you on the trip — not sending documents, and not being approved.",
+              "This removes the race problem. Paying is quick and document work is slow, so nobody spends a week uploading things and then loses their place."]},
+        {"t":"Approval never gates anything",
+         "p":["It is quality control on people who are already on the trip. A traveler's place never depends on how fast the operator checks their phone."]},
+        {"t":"Visa is decided per trip, not per traveler",
+         "p":["The operator says whether a visa is needed for this trip at all. If it is, it behaves like any other skippable item with a deadline.",
+              "Why: a per-traveler rule needs a visa dataset of nationality × destination that is always out of date, and getting it wrong means someone does not travel. The operator already knows their own trip."]},
+        {"t":"Our default list plus operator custom items",
+         "p":["Operator starts from passport, waiver, medical, insurance, visa, flights — deselects what does not apply, and can add their own.",
+              "Accepted cost: custom items cannot be counted and exported the way known types are, so the dashboard needs a plan for them."]},
+        {"t":"Medical info lives on the trip, filled fresh each time",
+         "p":["Not stored on the Swellyo profile. The traveler retypes it per trip.",
+              "Why: the data only exists where it is actually needed, and it is current rather than years old. It also keeps medical data out of Swellyo for everyone not on a paid trip.",
+              "Consequence: the board's phrase \"my medical card\" means the card for this trip, not a permanent one."]},
+        {"t":"Requirements can be added after publish",
+         "p":["Adding one creates the obligation for everyone already joined, plus a notification. Consistent with the decision to trust operators with editing."]},
+        {"t":"Nothing holds a spot before the deposit",
+         "p":["First to pay gets it, which is how any booking works. Because payment comes before the slow document work, nobody can finish a pile of uploads and then lose the last place."]},
+        {"t":"Payment method and amounts stay open",
+         "p":["Settled: the deposit secures the spot. Not settled: how big the deposit is, whether a balance follows, and which rail collects it. See the Payment timing row.",
+              "Consequence to hold on to: the deposit must sit EARLY in the flow. If it ends up as the last step of onboarding, travelers do all their document work with nothing holding their place and the race problem comes straight back."]},
+        {"t":"Retention: delete the file 30 days after the trip ends",
+         "p":["Accepted 22 July. We keep full name, nationality and expiry date on the booking. The image itself is deleted.",
+              "A repeat traveler gets their fields pre-filled and only retakes the photo. Because we hold the expiry date, we can warn at signup that a passport expires before departure — something no spreadsheet does.",
+              "Same rule applies to someone who leaves or is removed: their documents follow the normal 30-day clock, not a special one."]},
+        {"t":"Export gives the operator the actual file",
+         "p":["Chosen 22 July over a summary sheet. Operators genuinely have to send a passport to a hotel or a visa agent, and pretending otherwise pushes them back to WhatsApp.",
+              "Accepted consequence, stated plainly: our copy is deleted after 30 days, their copy lives on their laptop forever. Retention protects Swellyo's storage, not the traveler's data."]}
+      ],
+      "open":[
+        {"t":"The upload disclosure has to mention export","o":"Eyal & Ohad",
+         "p":["SPEC.md already requires showing travelers the retention policy before they upload. Now that export hands over the real file, that text has to say the operator can download and keep a copy. Saying only \"we delete after 30 days\" would be misleading."]},
+        {"t":"The operator agreement needs a data-protection clause","o":"Eyal",
+         "p":["Once an operator downloads a passport, they hold it independently of us. That makes them a separate controller for that copy, with their own duties. Worth a clause in whatever they sign, alongside the refund liability terms."]},
+        {"t":"Eyal must sign off on dropping operator_trip_tasks","o":"Eyal",
+         "p":["The one-list model contradicts §4.2 and §6 of his spec. Everything else here builds on it, so this is the first thing to settle."]},
+        {"t":"Can a deadline be tightened after the fact?","o":"Eyal & Ohad",
+         "p":["Adding requirements later is agreed. Not agreed: whether an operator can pull a date earlier, or add a requirement whose deadline has already passed."]},
+        {"t":"Do custom items get a type too?","o":"Eyal & Ohad",
+         "p":["Presumably the operator picks upload, acknowledge or pay for their own items as well. Unresolved: how an unknown item appears on a dashboard built around known types."]},
+        {"t":"Does a moved trip move its deadlines?","o":"Eyal & Ohad",
+         "p":["Deadlines are relative to departure, so pushing the trip back pushes every deadline back. Usually right. But if a deadline had already passed and the trip moves later, does that requirement quietly re-open?"]}
+      ],
+      "research":[
+        {"t":"Document retention — recommendation (22 July 2026)",
+         "p":["There is no fixed legal retention period. GDPR and the ICO are principle-based: justify the period by the purpose. Industry norm for booking data is trip end plus 2–3 years to cover claims. The ICO adds a sharper point — you often do not need a full passport scan at all, since nationality, residence, dates and trip purpose cover most needs.",
+              "The risk is not theoretical. 2026 saw breaches at Booking.com, Amtrak, Carnival, KLM and Air France. Booking.com does offer saved traveler documents, and standard security advice is to delete stored passport data after your trip.",
+              "Recommendation: delete the file, keep the fields. Not mainly for liability — because reuse is operationally wrong. A passport scanned in March can expire before a November trip, so a reused scan shows the operator a green tick for something nobody checked. That is worse than friction; it manufactures false confidence and fails at an airport.",
+              "Shape: operator views and confirms the scan on upload → we keep full name, nationality and expiry date on the booking → we delete the image 30 days after the trip ends → a returning traveler gets their fields pre-filled and only retakes the photo. Because we hold the expiry date we can warn at signup that a passport expires before the trip, which no spreadsheet does.",
+              "Trade-off check: security clearly wins, simplicity wins (one rule, one scheduled job, easy to explain), UX costs about 60 seconds per repeat trip. There is a sales angle too — today passports arrive over WhatsApp and live in a camera roll forever, so \"we delete it 30 days after the trip\" is something the operator can tell their customers."],
+         "s":[
+           {"l":"ICO — you may not need a full passport scan","u":"https://simplevisa.com/passport-data-compliance-for-travel-companies-in/"},
+           {"l":"2026 travel breaches exposing traveler data","u":"https://www.aol.com/news/booking-com-data-breach-exposes-223052240.html"},
+           {"l":"ICO — storage limitation principle","u":"https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/data-protection-principles/a-guide-to-the-data-protection-principles/storage-limitation/"},
+           {"l":"GDPR retention for travel agents & tour operators","u":"https://jameshallam.co.uk/gdpr-challenges-travel-agents-tour-operators/"}
+         ]}
+      ]},
+
+    { "id":"skip-task", "spec":"requirements-model.md", "g":"create", "n":"Skippable until a date", "grilled":true, "st":"ok",
+      "d":"The second of the two requirement timings",
+      "lead":"Not a separate feature — one of the two ways a requirement can behave. Must-have items are part of onboarding; skippable ones carry a deadline relative to departure and stay outstanding until done.",
+      "decided":[
+        {"t":"A visible Skip button","p":["Ohad's picture: onboarding shows both must-have and skippable items, with a literal Skip button on the skippable ones. Eyal agreed."]},
+        {"t":"Skipping does not create a new object","p":["It simply stays unmet and appears in the traveler's outstanding list. There is no conversion step and no second table."]}],
+      "open":[{"t":"Which items are skippable by default","o":"Design partners","p":["Eyal deferred this: \"we'll figure out along the way what exactly is part of onboarding and what is open tasks.\" Insurance, visa and flights are the likely candidates."]}]},
+
+    { "id":"tasks", "spec":"requirements-model.md", "g":"create", "n":"Open tasks (view only)", "grilled":true, "st":"ok",
+      "d":"The traveler's view of requirements they still owe — not a thing anyone authors",
+      "lead":"Grilled 22 July and reduced from a feature to a view. The operator does not write tasks. This panel lists the requirements a given traveler has not completed, in deadline order.",
+      "decided":[
+        {"t":"Nobody authors tasks","p":["Ohad: the operator creates requirements, not tasks. He has a default list, can deselect, and can add custom ones."]},
+        {"t":"operator_trip_tasks comes out of the schema","p":["SPEC.md §6 defines it as \"per-trip task definitions + per-traveler completion state + deadlines\". Under this model the definitions live on the requirement and the completion state lives on the booking.",
+              "Needs Eyal's sign-off — it removes a table from his spec."]}],
+      "open":[{"t":"Does anything else belong in this panel?","p":["If an operator wants to chase something that is not a requirement — \"tell us your arrival time\" — they now have no mechanism except chat. Watch whether design partners ask for it."]}]},
+
+    { "id":"chase", "spec":"requirements-model.md", "g":"create", "n":"Auto chasing", "grilled":true, "st":"ok",
+      "d":"We remind travelers near and past a deadline, and alert the operator",
+      "lead":"The system does the nagging. Eyal: we remind the users and update the operator if they need to know something. This is the thing operators are actually paying for.",
+      "decided":[
+        {"t":"Reuse the existing push queue","p":["The notifications queue is already live on prod. Do not build a second notification system."]},
+        {"t":"At the deadline: nothing automatic","p":["The item goes red and the operator is told. No removal, no penalty, no lockout.",
+              "Why: any harsher consequence means refunding someone, and the refund and chargeback liability question is an unresolved blocker in SPEC.md."]}],
+      "open":[{"t":"Cadence and quiet hours","o":"Eyal & Ohad","p":["How many reminders, how far ahead, and how it interacts with the existing graded quiet-hours logic."]},
+              {"t":"Does the operator get told once or repeatedly?","p":["An overdue item that stays overdue for three weeks should probably not notify daily."]}]},
+
+    { "id":"pay-timing", "g":"create", "n":"Payment timing", "grilled":false, "st":"open",
+      "d":"Deposit secures the spot (payment timing and method will be decided later on)",
+      "lead":"Partly settled 22 July. The deposit is what secures a spot, matching SPEC.md. Payment timing and method will be decided later on.",
+      "decided":[
+        {"t":"The deposit secures the spot","p":["Not documents, not approval. This resolves the three-way conflict between SPEC.md, the onboarding model and the no-holding rule."]},
+        {"t":"The deposit must sit early in the flow","p":["A consequence, not a preference. Nothing holds a spot before payment, so if the deposit were the last step of onboarding, travelers would do all their slow document work with their place still up for grabs."]}],
+      "open":[
+        {"t":"How big is the deposit, and does a balance follow?","o":"Design partners","p":["SPEC.md flags the underlying tension: operators often need cash upfront to pay suppliers, which fights against holding funds until after the trip."]},
+        {"t":"Which rail collects it","o":"Design partners","p":["Stripe for international, the operator's own gateway for Israel. Depends on who the first real operator is."]},
+        {"t":"Blocked by the pricing model","o":"Design partners","p":["You cannot decide a deposit amount before you know whether a trip has one price, room types, or options and add-ons."]}
+      ]},
+
+    { "id":"staff", "g":"create", "n":"Staff highlighting", "grilled":false, "st":"ok",
+      "d":"Display-only staff profiles — name, photo, role, bio",
+      "lead":"Locked in SPEC.md: display-only, no accounts, no permissions, no access. Staff exist so travelers can see who is guiding them.",
+      "decided":[{"t":"Display-only in v1","p":["Eyal's instinct over WhatsApp was the same: everyone keeps a normal profile, and the operator fills a display section like the one Captain has today. Giving guides real trip access is a v2 conversation."]}],
+      "open":[{"t":"Richer staff profiles","p":["Eyal: \"let's wait on this part, let it mature a bit.\""]}]},
+
+    { "id":"op-profile", "g":"create", "n":"Operator profile page", "grilled":false, "st":"park",
+      "d":"Org profile with past trips and photos",
+      "lead":"Ohad's idea: if we are building a custom profile anyway, an organizer profile showing their past trips and photos may matter more than a staff one. Not rejected, not scheduled.",
+      "decided":[], "open":[{"t":"Whether it belongs in v1 at all","p":["Likely revisited alongside the trust and marketing story rather than now."]}]},
+
+    { "id":"visibility", "spec":"extend-flow-c.md", "g":"create", "n":"Visibility toggle", "grilled":false, "st":"ok",
+      "d":"Per trip: private link-only, or listed in explore",
+      "lead":"Locked in SPEC.md. Operators distribute their own link to their own audience by default; listing is the growth lever they opt into trip by trip.",
+      "decided":[
+        {"t":"Per-trip toggle","p":["Listed operator trips need a badge and a price so users can tell them apart from peer trips."]},
+        {"t":"Retire hosting_style 'C' and move its one trip over","p":["Decided 22 July. The word Operator will mean exactly one thing.",
+              "Grounded in a live count: there is exactly ONE flow-C trip in the whole database, active, created in the last 90 days. One trip and one owner to talk to. The same change in a year is a migration."]}],
+      "open":[
+        {"t":"Who can open a private link?","o":"Eyal & Ohad","p":["Operators share links on Instagram and WhatsApp. Requiring an account just to see the price probably kills the sale, but nothing is decided."]},
+        {"t":"Cold start in explore","o":"Eyal & Ohad","p":["explore_feed sorts by participant count, highest first. A brand new paid trip has zero bookings, lands at the bottom, is never seen, and gets no bookings.",
+              "If listing is meant to be the growth lever, this has to be solved or listing adds nothing over the operator's own link."]}]},
+
+    { "id":"notif-setup", "g":"create", "n":"Notification setup", "grilled":false, "st":"nice",
+      "d":"Operator configures notifications for themselves and for customers",
+      "lead":"Marked nice-to-have on the board.", "decided":[], "open":[]},
+
+    { "id":"entry", "g":"onb", "n":"New traveler entry", "grilled":false, "st":"ok",
+      "d":"Full Swellyo onboarding first, then trip onboarding",
+      "lead":"Locked in SPEC.md, and flagged there as a risk in the same breath.",
+      "decided":[{"t":"One consistent funnel","p":["Everyone goes through normal Swellyo onboarding before the trip's own onboarding."]}],
+      "open":[{"t":"Drop-off risk","p":["SPEC.md calls this the likeliest place in the whole flow to lose an operator's paying customer — someone who booked a surf trip and is now being asked to build a social profile. Instrument it and be ready to reverse."]}]},
+
+    { "id":"passport", "spec":"requirements-model.md", "g":"onb", "n":"Passport upload", "grilled":false, "st":"ok",
+      "d":"Required item, blocks onboarding completion",
+      "lead":"Confirmed by Ohad on 22 July as a required part of trip onboarding.",
+      "decided":[{"t":"Required, not skippable","p":["Because it gates onboarding, the paid-but-no-passport case should not arise."]}],
+      "open":[{"t":"Retention and export","p":["See Onboarding requirements — the retention recommendation and the export hole apply here first."]}]},
+
+    { "id":"waiver", "spec":"waiver-medical.md", "g":"onb", "n":"Waiver signing", "grilled":false, "st":"ok",
+      "d":"Operator uploads it, traveler reads and taps I agree",
+      "lead":"Locked in SPEC.md.",
+      "decided":[{"t":"Tap to agree, with a record","p":["We record name, timestamp and waiver version. Judged legally reasonable for this use case and trivial to build; drawn signatures or DocuSign stay available later if an operator's insurer demands it."]}],
+      "open":[]},
+
+    { "id":"medical", "spec":"waiver-medical.md", "g":"onb", "n":"Medical status", "grilled":false, "st":"ok",
+      "d":"Allergies, dietary prefs, injuries, regular prescribed medicine",
+      "lead":"Required item. Grilled 22 July: stored on the trip, not the profile.",
+      "decided":[{"t":"Per trip, filled fresh each time","p":["Keeps medical data current, and keeps it out of Swellyo for anyone not on a paid trip."]},
+                 {"t":"View-only for the operator, no export","p":["Locked in SPEC.md's risk table."]}],
+      "open":[{"t":"Retyping burden for repeat travelers","p":["Accepted cost of the per-trip decision. Worth watching if operators run the same travelers repeatedly."]}]},
+
+    { "id":"insurance", "spec":"requirements-model.md", "g":"onb", "n":"Insurance upload", "grilled":false, "st":"ok",
+      "d":"Screenshot or file. Skippable with a deadline",
+      "lead":"Likely a skippable item that becomes an open task, since travelers often buy insurance later.",
+      "decided":[], "open":[{"t":"Required or skippable by default","o":"Design partners","p":["Part of the wider must/skippable split Eyal deferred."]}]},
+
+    { "id":"visa", "spec":"requirements-model.md", "g":"onb", "n":"Visa upload", "grilled":true, "st":"ok",
+      "d":"Operator decides per trip whether it applies at all",
+      "lead":"Grilled 22 July. The operator says whether a visa is needed for this trip. If it is, it is skippable with a deadline like any other item.",
+      "decided":[{"t":"Per trip, not per traveler","p":["No nationality × destination logic and no dataset to maintain. The operator knows their own destination and audience."]}],
+      "open":[{"t":"This decision expires when explore listing works","o":"Eyal & Ohad",
+        "p":["Accepted for now, 22 July. A per-trip flag holds while the operator sells to their own list and knows everyone's nationality.",
+             "But listing trips in explore is the growth lever — the whole point is selling to people the operator does not know. The first mixed-nationality trip breaks a single flag: it will ask Europeans for a visa they do not need, or fail to ask Israelis for one they do."]}]},
+
+    { "id":"flights", "spec":"requirements-model.md", "g":"onb", "n":"Flight tickets", "grilled":false, "st":"ok",
+      "d":"If applicable. Likely skippable with a deadline",
+      "lead":"Travelers usually book flights after committing to the trip.", "decided":[],
+      "open":[{"t":"Required or skippable by default","o":"Design partners","p":[]}]},
+
+    { "id":"pay-onb", "g":"onb", "n":"Pay", "grilled":false, "st":"open",
+      "d":"Early in the flow (payment timing and method will be decided later on)",
+      "lead":"The deposit is what secures the spot, and nothing holds a spot before it, so payment has to come before the slow document work. Payment timing and method will be decided later on. See the Payment timing row.",
+      "decided":[], "open":[]},
+
+    { "id":"ov-staff", "g":"intrip", "n":"Staff in Overview", "grilled":false, "st":"ok",
+      "d":"See the whole staff, not only the captain",
+      "lead":"Straight from the board.", "decided":[], "open":[]},
+
+    { "id":"included", "g":"intrip", "n":"What's included", "grilled":false, "st":"ok",
+      "d":"More precise breakdown of what the price covers",
+      "lead":"The existing priceInclusions.ts model is one JSONB column and already grows without a migration, so this is mostly a content and UI job.",
+      "decided":[], "open":[{"t":"What the improved breakdown actually contains","o":"Design partners","p":[]}]},
+
+    { "id":"plan-tasks", "g":"intrip", "n":"Open tasks in Plan", "grilled":false, "st":"ok",
+      "d":"The single biggest change on the traveler side",
+      "lead":"Passport, insurance, visa, payment due — with the notification system behind it.",
+      "decided":[], "open":[]},
+
+    { "id":"wallet", "g":"intrip", "n":"Travel wallet", "grilled":false, "st":"ok",
+      "d":"View everything already uploaded",
+      "lead":"Insurance, passport, visa, flight tickets, all in one place.",
+      "decided":[], "open":[{"t":"What the traveler sees after we delete a document","p":["If the retention recommendation is accepted, the wallet empties 30 days after the trip. The traveler should be told that upfront, not discover it."]}]},
+
+    { "id":"med-card", "spec":"waiver-medical.md", "g":"intrip", "n":"My medical card", "grilled":false, "st":"ok",
+      "d":"Traveler views and edits their own medical info",
+      "lead":"Per the 22 July decision this is the card for this trip, not a permanent profile record.",
+      "decided":[], "open":[]},
+
+    { "id":"links", "g":"intrip", "n":"Helpful links", "grilled":false, "st":"nice",
+      "d":"A links section on the trip",
+      "lead":"Nice-to-have on the board.", "decided":[],
+      "open":[{"t":"Who writes them","p":["Operator-authored per trip, or a Swellyo-curated list per destination?"]}]},
+
+    { "id":"suggest", "g":"intrip", "n":"Paid suggestions", "grilled":false, "st":"park",
+      "d":"Empty slot becomes an offer we take a cut of",
+      "lead":"Eyal: if certain areas are empty we suggest closing insurance with our agent, or going to Google Flights through us, and take a bit more margin. Explicitly one step later.",
+      "decided":[], "open":[{"t":"Whether this conflicts with the operator's own arrangements","p":["An operator may already have an insurance partner. Selling over them inside their own trip is a relationship risk nobody has raised yet."]}]},
+
+    { "id":"edit-trip", "spec":"operator-trip-edit.md", "g":"manage", "n":"Edit trip info", "grilled":false, "st":"ok",
+      "d":"3 dots → Edit trip. Overview only, not Plan",
+      "lead":"From the 21 July WhatsApp, and not present in SPEC.md. Eyal was explicit: \"Plan is plan. I'm talking about editing only the trip's overview\" — meaning everything filled during the creation flow: photos, dates, levels, boards.",
+      "decided":[{"t":"Scope is the creation-flow fields only","p":["Gear and other Plan content is out of scope for this screen."]},
+                 {"t":"Entry point is the 3-dot menu on Overview","p":[]}],
+      "open":[]},
+
+    { "id":"unlock", "spec":"operator-trip-edit.md", "g":"manage", "n":"Unlock locked fields", "grilled":false, "st":"ok",
+      "d":"Operators may edit fields peer hosts cannot",
+      "lead":"From the 21 July WhatsApp. Most of these fields are deliberately locked today because people joined based on them — confirmed in CreateTripFlowA.tsx, which shows 'Locked' placeholders in edit mode.",
+      "decided":[{"t":"Operators get edit rights peer hosts do not","p":["Eyal: \"operators is different. These are businesses, our partners… we can trust them, at least at the start, when there's a limited number of them.\" Ohad agreed.",
+                 "Explicitly a trust-at-small-scale decision. Flag for revisit once the operator count grows."]}],
+      "open":[]},
+
+    { "id":"notify-change", "spec":"operator-trip-edit.md", "g":"manage", "n":"Notify on change", "grilled":false, "st":"open",
+      "d":"Do joined travelers hear about date, price or destination changes?",
+      "lead":"Raised on 22 July, absent from every existing doc. If operators can edit fields people joined on the basis of, silence is not an option.",
+      "decided":[], "open":[{"t":"Which fields are material enough to notify","o":"Eyal & Ohad","p":["And whether a price change mid-trip is even allowed once someone has paid."]}]},
+
+    { "id":"comms", "g":"manage", "n":"Communication", "grilled":false, "st":"exist",
+      "d":"Chat, admin updates, private DMs, gear lists",
+      "lead":"Already built. SPEC.md adds two things on top: automated deadline reminders and a 1:1 operator↔traveler DM, because payment and medical questions do not belong in a group thread.",
+      "decided":[], "open":[]},
+
+    { "id":"trips-list", "g":"dash", "n":"Trips list", "grilled":false, "st":"ok",
+      "d":"App Store Connect model — pick a trip, get a space per trip",
+      "lead":"Eyal's own comparison: entering the dashboard is like App Store Connect, apps to choose from and a space per app.",
+      "decided":[], "open":[]},
+
+    { "id":"snap-money", "g":"dash", "n":"Snapshot · money", "grilled":false, "st":"ok",
+      "d":"Paid in full, totals in ₪ and $, outstanding, deposits, installments (payment timing and method will be decided later on)",
+      "lead":"From the board.",
+      "decided":[{"t":"Numbers are derived from an append-only ledger","p":["SPEC.md's one non-obvious design choice: webhooks append events and payment status is computed from them, never written directly. This is what makes these numbers trustworthy when a webhook arrives twice or late."]}],
+      "open":[{"t":"Israeli rail accuracy","p":["For Israeli operators the money moves through their own gateway, so these totals depend on their gateway reporting back to us."]}]},
+
+    { "id":"snap-docs", "spec":"approval-review.md", "g":"dash", "n":"Snapshot · documents", "grilled":false, "st":"ok",
+      "d":"Completion counts per type — 14/15 passports",
+      "lead":"Same for visas, insurance and flights, each with a view-all.",
+      "decided":[], "open":[{"t":"How custom items are counted","p":["The 22 July decision to allow operator-defined requirements means the dashboard will meet types it does not know."]}]},
+
+    { "id":"snap-med", "g":"dash", "n":"Snapshot · medical flags", "grilled":false, "st":"ok",
+      "d":"Anything not smooth flagged small — \"3 reported injuries\"",
+      "lead":"From the board. Allergies, food prefs, injuries, each with a view-all.",
+      "decided":[], "open":[]},
+
+    { "id":"snap-surf", "g":"dash", "n":"Snapshot · surf stats", "grilled":false, "st":"ok",
+      "d":"Levels, board types, age ranges, nationalities",
+      "lead":"General awareness for the operator rather than an action surface.",
+      "decided":[], "open":[]},
+
+    { "id":"detail-pages", "spec":"documents-storage.md", "g":"dash", "n":"Detail page per item", "grilled":false, "st":"ok",
+      "d":"Every snapshot tile gets its own full page, with export",
+      "lead":"Load-bearing note on the board: each of these gets a page for itself, with view and export for all.",
+      "decided":[{"t":"Export gives the real files","p":["Settled 22 July. Not a summary sheet. Operators have to send documents on to hotels and visa agents."]}],
+      "open":[{"t":"Does medical appear on the view-all pages?","p":["The board says every tile gets a page with view and export for all. SPEC.md says medical is view-only with no export. Those two rules meet on the medical view-all page and nobody has said which wins."]}]},
+
+    { "id":"approval-queue", "spec":"approval-review.md", "g":"dash", "n":"Approval queue", "grilled":true, "st":"ok",
+      "d":"A needs-review count so the operator knows work is waiting",
+      "lead":"New scope, decided 22 July. Because done means approved rather than submitted, someone has to actually look. 15 travelers times 4 documents is 60 approvals per trip, so the review load is real and needs a home.",
+      "decided":[
+        {"t":"A needs-review count on the dashboard, nothing automatic","p":["The work is visible and the operator owns it. No auto-approval, no timers, no escalation."]},
+        {"t":"Approve happens when they open and look at the document","p":["Accepted 22 July after review. One tap inside the viewer, not a separate queue to grind through.",
+              "Why: the original design was 60 deliberate approvals per trip with no consequence for skipping them. That decays. Operators would stop reviewing, approved counts would stay low, and the number added to make the dashboard trustworthy would become the one nobody trusts."]},
+        {"t":"Show both numbers: received and approved","p":["\"Received 15/15 · approved 3/15\" makes the gap visibly the operator's own backlog, rather than looking like a document problem."]},
+        {"t":"Bulk approve is in v1, not a maybe","p":["Sixty one-by-one taps is the difference between review happening and not."]},
+        {"t":"Travelers see \"waiting for the operator\"","p":["Honest about where the delay sits, and it puts the pressure in the right place instead of making the traveler feel they did something wrong."]},
+        {"t":"Rejected: notifying on every submission","p":["60 notifications a trip and they mute us. The count is the signal instead."]}],
+      "open":[
+        {"t":"Not in SPEC.md at all","o":"Eyal",
+         "p":["His document has no approved state and no review step. This is added scope he has not seen."]},
+        {"t":"What if the operator never reviews?","p":["Nothing automatic was the decision, so documents can sit unreviewed until departure. Less likely now that approving is one tap inside the viewer, but still possible."]}]},
+
+    { "id":"trav-profile", "g":"dash", "n":"Traveler · profile", "grilled":false, "st":"exist",
+      "d":"Their normal surfer profile, as everyone sees it",
+      "lead":"Surf level, travel experience, name, photo, age, nationality, home break, board type, places been, lifestyle prefs.",
+      "decided":[], "open":[]},
+
+    { "id":"trav-file", "spec":"documents-storage.md", "g":"dash", "n":"Traveler · file", "grilled":false, "st":"ok",
+      "d":"Waiver y/n, and each document: view, export, delete + reclaim",
+      "lead":"Passport, insurance, flights and visa each carry the same four capabilities.",
+      "decided":[{"t":"Export is a real file download","p":["Settled 22 July. The accepted consequence is that our 30-day deletion bounds Swellyo's storage only — the operator's downloaded copy is theirs and outlives it."]}],
+      "open":[{"t":"Should downloads be logged?","p":["Not decided. A record of who took what and when is cheap, and it is the only visibility we would have after the file leaves."]}]},
+
+    { "id":"trav-med", "spec":"waiver-medical.md", "g":"dash", "n":"Traveler · medical", "grilled":false, "st":"ok",
+      "d":"View only, no export",
+      "lead":"Locked in SPEC.md's risk table.", "decided":[], "open":[]},
+
+    { "id":"remove", "g":"dash", "n":"Remove from trip", "grilled":false, "st":"open",
+      "d":"Operator can remove a traveler",
+      "lead":"The action is agreed; the money is not.",
+      "decided":[], "open":[{"t":"What happens to money already paid","o":"Eyal & Ohad","p":["Ties directly into the refund and chargeback liability blocker in SPEC.md, which says not to finalise the money-holding design until it is settled."]}]},
+
+    { "id":"msg", "g":"dash", "n":"Message traveler", "grilled":false, "st":"ok",
+      "d":"From their profile. Mobile only",
+      "lead":"Consistent with the desktop decision: desktop is read and review only.",
+      "decided":[], "open":[]},
+
+    { "id":"reclaim", "spec":"approval-review.md", "g":"dash", "n":"Delete + reclaim", "grilled":true, "st":"ok",
+      "d":"Reject a bad upload and ask for a new one, in one action",
+      "lead":"SPEC.md is precise: it deletes the document and automatically re-opens the requirement for that traveler, with a notification. A delete plus a re-request, not just a delete. Examples: unreadable passport scan, wrong insurance, wrong visa.",
+      "decided":[
+        {"t":"Rejecting and delete + reclaim are the same action","p":["One button. There is no separate \"not approved but keep the file\" state."]},
+        {"t":"A reason is optional, with a Send a message button next to it","p":["Ohad's call: do not force a reason field, but put a direct message button on the rejection so the operator can explain in one tap.",
+              "This covers the guessing problem without adding friction to the common case."]}],
+      "open":[{"t":"Does the old file survive the reclaim?","p":["The retention recommendation says do not keep extra copies of sensitive documents. Confirm the rejected scan is actually deleted, not archived."]}]},
+
+    { "id":"reminder", "g":"dash", "n":"Send reminder", "grilled":false, "st":"nice",
+      "d":"Nudge one traveler about one thing",
+      "lead":"Nice-to-have on the board, and partly redundant if auto-chasing works well.",
+      "decided":[], "open":[]},
+
+    { "id":"g-pricing", "g":"gates", "n":"Pricing model", "grilled":false, "st":"open",
+      "d":"Flat price, room types, or options plus add-ons",
+      "lead":"SPEC.md's number one blocker. Real surf trips almost never have one flat price.",
+      "decided":[], "open":[{"t":"Blocks payment amounts, the booking table shape, and capacity semantics","o":"Design partners","p":["Nothing about money can be built until this is answered."]}]},
+
+    { "id":"g-refund", "g":"gates", "n":"Refund & chargeback liability", "grilled":false, "st":"open",
+      "d":"We charge the card, so disputes land on us",
+      "lead":"SPEC.md blocker. If an operator refuses to refund, we are stuck in the middle.",
+      "decided":[], "open":[{"t":"Candidate structure to validate","o":"Research + design partners + likely a lawyer","p":["Operator contractually liable for delivery and refunds, chargebacks debited from their connected account, refunds only on operator instruction, deposit explicitly non-refundable. Do not finalise the money-holding design until this is settled."]}]},
+
+    { "id":"g-storage", "spec":"documents-storage.md", "g":"gates", "n":"Document storage", "grilled":true, "st":"ok",
+      "d":"Supabase Storage with RLS — not S3, and never the existing image bucket",
+      "lead":"Where passport, insurance, visa and flight files actually live. Decided 22 July after checking what the repo does today. A private bucket is the floor, not the design — most of what matters is around it.",
+      "decided":[
+        {"t":"Supabase Storage with RLS, not S3","p":["The access rule is \"only the traveler and that trip's operator\". On Supabase Storage that is an RLS policy, the same shape as the ~60 policies already in this project. On S3 there is no notion of our users, so the check has to be hand-written inside an edge function that mints presigned URLs.",
+              "S3 was adopted to cut egress on images and video at volume. Documents have none of that pressure — roughly 15 travelers times 4 files per trip, each viewed a handful of times. Putting the most sensitive files in the one place where authorization is custom code instead of a policy is backwards."]},
+        {"t":"Never the existing swellyo-images bucket","p":["It is public-read. image-upload-s3/index.ts returns a plain publicUrl at https://swellyo-images.s3.us-east-1.amazonaws.com/<key> with no signature.",
+              "Reusing imageService.ts would be the natural shortcut and it would publish passports to the open internet. New bucket, no public read, ever."]},
+        {"t":"Signed URLs measured in seconds, not the 3600 default","p":["Every S3 edge function in the repo defaults to expiresIn: 3600. A signed URL is a bearer token — whoever holds the link has the file until it expires, logged in or not.",
+              "Mint one per view, valid for about a minute. Related known bug: DM videos are currently presigned with a 7-day expiry."]},
+        {"t":"Deletion runs on a lifecycle rule, and the wording is \"within 30 days\"","p":["Application-code deletion is not enough. Object versioning turns a delete into a delete marker, backups and PITR keep a copy inside the retention window, and any CDN in front caches beyond the origin.",
+              "Since travelers are now promised a deletion date, the promise has to be one we can actually keep."]},
+        {"t":"Documents never touch the image or video pipeline","p":["The Lambda and MediaConvert path writes derivatives to other prefixes on its own schedule. Anything that generates a thumbnail creates copies nobody planned for and nobody applied retention to."]},
+        {"t":"Medical is table rows, not storage","p":["Allergies, injuries and medication are an RLS problem, not a bucket problem. It is also the one thing with no export, so it should never become a file at all. Keep the two tracks separate."]}],
+      "open":[
+        {"t":"Scrub document URLs from Sentry and PostHog","o":"Eyal & Ohad",
+         "p":["Both are wired into this app. A signed document URL landing in an error breadcrumb or an analytics event is a working link to a passport for as long as it is valid. Short expiry is half the mitigation; not logging the URL is the other half."]},
+        {"t":"Check the backup window against the deletion promise","o":"Eyal & Ohad",
+         "p":["Whatever PITR or replication retention is configured sets the real floor on how fast a file can truly disappear."]}]},
+
+    { "id":"g-retention", "spec":"documents-storage.md", "g":"gates", "n":"Document retention", "grilled":true, "st":"ok",
+      "d":"Delete the file 30 days after the trip, keep the typed fields",
+      "lead":"Researched and settled 22 July. This was SPEC.md open question #4 and it is now closed. The full research write-up lives on the Onboarding requirements row.",
+      "decided":[
+        {"t":"Delete the image 30 days after the trip ends","p":["Name, nationality and expiry date stay on the booking. The scan does not.",
+              "The deciding argument was not liability, it was correctness: a passport scanned in March can expire before a November trip, so reusing it shows the operator a green tick for something nobody checked."]},
+        {"t":"Same clock for people who leave or are removed","p":["No special case. Their documents follow the normal 30 days."]},
+        {"t":"But export hands over the real file","p":["So the rule bounds what Swellyo stores, not what exists in the world. The traveler-facing text has to be honest about that."]}],
+      "open":[{"t":"Build note: private bucket, signed URLs","p":["Not a decision. SPEC.md's risk table already calls for a private bucket, access limited to the traveler and that trip's operator, and short-lived signed URLs."]}]},
+
+    { "id":"g-payments", "g":"gates", "n":"Payment rails", "grilled":false, "st":"open",
+      "d":"Stripe Connect for international, per-operator gateway for Israel (payment timing and method will be decided later on)",
+      "lead":"Locked in SPEC.md as both rails at launch, with an important correction: Stripe can do deposits but cannot do tashlumim, which need Israeli domestic acquiring.",
+      "decided":[{"t":"Two rails in v1","p":["An Israeli operator without tashlumim and Bit cannot sell the way they sell today."]}],
+      "open":[{"t":"The sales pitch contradicts this","o":"Eyal","p":["operator-conversation-guide.md tells operators they do not need their own gateway account and that Swellyo holds the money until after the trip. On the Israeli rail the operator connects their own gateway and we are not in the money flow. Both statements cannot be true for an Israeli operator."]},
+              {"t":"Commission","p":["~12% is the direction for the Stripe rail. On the Israeli rail the operator remits manually against totals we track."]}]},
+
+    { "id":"g-arch", "spec":"extend-flow-c.md", "g":"gates", "n":"Architecture", "grilled":true, "st":"ok",
+      "d":"Extend hosting_style 'C' — add columns and new tables. No separate operator_trips",
+      "lead":"Decided 22 July, and this OVERRIDES SPEC.md §5 and operator-trips-architecture-recommendation.md. There is no separate operator model. Flow C already IS the operator trip. We grow it: a few columns on group_trips, plus new tables keyed by group_trip_id for the heavy per-traveler data.",
+      "decided":[
+        {"t":"No separate operator_trips table","p":["A group_trips row with hosting_style 'C' is the operator trip. This reverses the earlier plan for a parallel operator_trips / operator_trip_bookings model.",
+              "Ohad: we already have group-trip operators (type C). Now we add columns and/or tables. Keep it simple, clean, effective."]},
+        {"t":"Few columns on group_trips, heavy data in new tables","p":["group_trips gains only operator-shell columns (deposit config, visibility). Requirements, per-traveler states, documents, medical, waiver and the payment ledger are new tables keyed by group_trip_id — new rows, not a wider group_trips."]},
+        {"t":"group_trip_participants stays the one roster","p":["Money and document state is a side-table on top of participants, never a second list of who is on the trip. This avoids the one real trap: two sources of truth for who is here."]},
+        {"t":"Do not touch is_trip_host()","p":["New tables get their OWN RLS helper functions. They may CALL is_trip_host() to check operator identity, but no payment or document logic ever goes INSIDE it. That function gates six live features — leaving it alone keeps the blast radius on peer trips at zero, which is most of what the separate-model doc was protecting."]},
+        {"t":"Chat needs nothing new","p":["createGroupConversation already keys conversations by trip_id in metadata, and a C trip is a group trip, so chat already works with no change at all."]},
+        {"t":"No operator_trip_tasks table","p":["Removed by the one-list requirements model. Requirement definitions live on the trip; per-traveler completion lives in a states table."]}],
+      "open":[
+        {"t":"Eyal confirms extend-C over the separate model","o":"Eyal",
+         "p":["This is the biggest structural call and it reverses his own SPEC.md §5. Everything downstream assumes it."]},
+        {"t":"Eyal confirms dropping operator_trip_tasks","o":"Eyal",
+         "p":["The one-list requirements model removes it."]},
+        {"t":"retire-flow-c.md is now mis-titled","o":"Ohad",
+         "p":["That spec was written to RETIRE flow C. Under this decision flow C is EXTENDED, not retired. Its file inventory is still correct and useful — it just needs reframing as what-to-extend, not what-to-delete."]}]},
+
+    { "id":"g-kyc", "g":"gates", "n":"Operator identity & KYC", "grilled":false, "st":"ok",
+      "d":"Manually flagged accounts, no self-serve signup in v1",
+      "lead":"Locked in SPEC.md: a normal Swellyo account with an is_operator flag we set by hand. Eyal onboards each operator personally.",
+      "decided":[{"t":"No signup infrastructure in v1","p":["The constraint at this stage is finding good operators, not scaling access to them."]}],
+      "open":[{"t":"Bank details and business registration","p":["The operator conversation guide asks for these for payouts and KYC. Where they are collected is not designed."]}]},
+
+    { "id":"g-desktop", "g":"gates", "n":"Desktop scope", "grilled":false, "st":"ok",
+      "d":"Read and review only — payments, info, exports",
+      "lead":"Locked in SPEC.md. All real management stays on mobile, which keeps the web surface tiny at a time when web is not a platform we maintain.",
+      "decided":[{"t":"Document review and exports earn the desktop view","p":["Those are the genuinely painful things to do on a phone."]}],
+      "open":[]}
+  ]
+}
+</script>
+<script>
+(function(){
+  var D = JSON.parse(document.getElementById('data').textContent);
+  var F = D.features, G = D.groups;
+  var ST = { ok:['Decided','s-ok'], open:['Open','s-open'], park:['Parked','s-park'],
+             nice:['Nice-to-have','s-nice'], exist:['Exists','s-exist'] };
+
+  var tb = document.getElementById('tb');
+  var order = [];
+
+  G.forEach(function(g){
+    var tr = document.createElement('tr');
+    tr.className = 'grp';
+    tr.innerHTML = '<td colspan="4">' + esc(g.name) + ' <span>— ' + esc(g.meta) + '</span></td>';
+    tb.appendChild(tr);
+
+    F.filter(function(f){ return f.g === g.id; }).forEach(function(f){
+      var idx = order.length; order.push(f);
+      var r = document.createElement('tr');
+      var td = document.createElement('td'); td.colSpan = 4;
+      var b = document.createElement('button');
+      b.className = 'row'; b.type = 'button';
+      b.innerHTML =
+        '<span class="nm">' + esc(f.n) + '</span>' +
+        '<span class="ds">' + esc(f.d) + '</span>' +
+        '<span class="st ' + ST[f.st][1] + '">' + ST[f.st][0] + '</span>' +
+        '<span class="chk' + (f.grilled ? '' : ' no') + '">' + (f.grilled ? '✓' : '·') + '</span>';
+      b.addEventListener('click', function(){ open(idx); });
+      td.appendChild(b); r.appendChild(td); tb.appendChild(r);
+    });
+  });
+
+  var done = F.filter(function(f){ return f.grilled; }).length;
+  document.getElementById('pcount').textContent = done + ' / ' + F.length;
+  document.getElementById('pbar').style.width = (done / F.length * 100) + '%';
+
+  var back = document.getElementById('back'), sheet = document.getElementById('sheet');
+  var cur = -1, lastFocus = null;
+
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; }); }
+
+  function items(list, cls){
+    return list.map(function(i){
+      var p = (i.p || []).map(function(x){ return '<p>' + esc(x) + '</p>'; }).join('');
+      var own = i.o ? '<span class="own">' + esc(i.o) + '</span>' : '';
+      return '<div class="item ' + cls + '"><h4>' + esc(i.t) + '</h4>' + p + own + '</div>';
+    }).join('');
+  }
+
+  function open(i){
+    cur = i; var f = order[i];
+    lastFocus = document.activeElement;
+    var g = G.filter(function(x){ return x.id === f.g; })[0];
+
+    document.getElementById('shGrp').textContent = g.name + ' · ' + g.meta;
+    document.getElementById('shTitle').textContent = f.n;
+    document.getElementById('shTags').innerHTML =
+      '<span class="st ' + ST[f.st][1] + '">' + ST[f.st][0] + '</span>' +
+      '<span class="st ' + (f.grilled ? 's-ok' : 's-exist') + '">' +
+      (f.grilled ? '✓ Grilled' : 'Not grilled yet') + '</span>';
+
+    var h = '<p class="lead">' + esc(f.lead) + '</p>';
+
+    h += '<div class="sec"><h3>Decided</h3>' +
+      ((f.decided && f.decided.length) ? items(f.decided, 'd')
+        : '<div class="empty">Nothing locked yet.</div>') + '</div>';
+
+    h += '<div class="sec"><h3>Open questions</h3>' +
+      ((f.open && f.open.length) ? items(f.open, 'o')
+        : '<div class="empty">None recorded.</div>') + '</div>';
+
+    if (f.research && f.research.length) {
+      h += '<div class="sec"><h3>Research</h3>' + f.research.map(function(r){
+        var p = (r.p || []).map(function(x){ return '<p>' + esc(x) + '</p>'; }).join('');
+        var s = (r.s || []).length
+          ? '<div class="src">Sources: ' + r.s.map(function(x){
+              return '<a href="' + esc(x.u) + '" target="_blank" rel="noopener">' + esc(x.l) + '</a>';
+            }).join(' · ') + '</div>'
+          : '';
+        return '<div class="item"><h4>' + esc(r.t) + '</h4>' + p + s + '</div>';
+      }).join('') + '</div>';
+    }
+
+    h += '<div class="sec"><h3>Spec</h3>' + (f.spec
+      ? '<div class="item"><h4><a href="specs/operator-trips/' + esc(f.spec) + '">' +
+        esc(f.spec) + '</a></h4><p>Written 22 July 2026. Anything unresolved inside is marked ' +
+        'OPEN rather than answered.</p></div>'
+      : '<div class="empty">Nothing yet. Blocked on something in the open list above.</div>') +
+      '</div>';
+    h += '<div class="sec"><h3>Plan</h3><div class="empty">Nothing yet. This is where the ' +
+         'implementation plan and the files it touches will live.</div></div>';
+
+    document.getElementById('shBody').innerHTML = h;
+    document.getElementById('shBody').scrollTop = 0;
+    document.getElementById('prevBtn').disabled = (i === 0);
+    document.getElementById('nextBtn').disabled = (i === order.length - 1);
+
+    back.classList.add('on'); sheet.classList.add('on');
+    document.body.style.overflow = 'hidden';
+    if (location.hash.slice(1) !== f.id) history.replaceState(null, '', '#' + f.id);
+    document.getElementById('closeBtn').focus();
+  }
+
+  function close(){
+    back.classList.remove('on'); sheet.classList.remove('on');
+    document.body.style.overflow = '';
+    history.replaceState(null, '', location.pathname);
+    if (lastFocus) lastFocus.focus();
+    cur = -1;
+  }
+
+  back.addEventListener('click', close);
+  document.getElementById('closeBtn').addEventListener('click', close);
+  document.getElementById('prevBtn').addEventListener('click', function(){ if (cur > 0) open(cur - 1); });
+  document.getElementById('nextBtn').addEventListener('click', function(){
+    if (cur < order.length - 1) open(cur + 1); });
+  document.addEventListener('keydown', function(e){
+    if (cur < 0) return;
+    if (e.key === 'Escape') close();
+    if (e.key === 'ArrowLeft' && cur > 0) open(cur - 1);
+    if (e.key === 'ArrowRight' && cur < order.length - 1) open(cur + 1);
+  });
+
+  var hash = location.hash.slice(1);
+  if (hash) {
+    for (var k = 0; k < order.length; k++) if (order[k].id === hash) { open(k); break; }
+  }
+})();
+</script>
+</body>
+</html>

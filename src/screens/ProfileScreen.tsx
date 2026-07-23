@@ -1455,10 +1455,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       if (!userId) {
         // Own profile — delegate to UserProfileContext so the fetch is shared
         // across screens (conversations header, profile) and deduplicated.
+        // getSession() reads local storage — unlike getUser() it never makes a
+        // network round-trip, so it can't hang on flaky connections and leave
+        // authChecking stuck (blank-profile bug, 2026-07-23). Auth validity is
+        // the auth guard's job, not this screen's.
         setAuthChecking(true);
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError || !user) {
-          console.error('[ProfileScreen] Error getting user:', userError);
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        const user = session?.user;
+        if (sessionError || !user) {
+          console.error('[ProfileScreen] Error getting session:', sessionError);
           setAuthChecking(false);
           setLoading(false);
           return;
@@ -2055,8 +2060,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     );
   };
 
-  // Render nothing during load to prevent "No profile data found" flash
-  if (loading || authChecking) {
+  // Render nothing during load to prevent "No profile data found" flash.
+  // BUT: if profileData is already available (e.g. synced from the
+  // UserProfileContext cache), render the full profile even while a
+  // load/auth check is still in flight — otherwise a hung await leaves the
+  // user staring at a header with a blank body forever (2026-07-23 bug).
+  if ((loading || authChecking) && !profileData) {
     return (
       <Reanimated.View
         style={[
