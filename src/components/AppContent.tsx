@@ -1730,6 +1730,16 @@ export const AppContent: React.FC = () => {
     }
   }, [shouldShowConversations]);
 
+  // Resume a profile-video upload a previous session started but didn't finish
+  // (e.g. the user killed the app mid-upload — exactly what they do when the
+  // first session feels stuck). No-op when nothing is pending. Fire-and-forget.
+  useEffect(() => {
+    if (!shouldShowConversations) return;
+    import('../services/media/pendingProfileVideoUpload')
+      .then(({ resumePendingProfileVideoUpload }) => resumePendingProfileVideoUpload())
+      .catch(err => console.warn('[AppContent] Profile-video resume failed (non-blocking):', err));
+  }, [shouldShowConversations]);
+
   // Keep the user's device timezone synced (powers per-user quiet hours for notifications).
   useEffect(() => {
     const uid = (user as any)?.id;

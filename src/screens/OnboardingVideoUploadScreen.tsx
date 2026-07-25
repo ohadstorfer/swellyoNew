@@ -19,7 +19,7 @@ import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
 import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
 import { validateVideoComplete } from '../utils/videoValidation';
-import { uploadProfileVideoS3 } from '../services/storage/storageService';
+import { startProfileVideoUpload } from '../services/media/pendingProfileVideoUpload';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 
 const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
@@ -85,6 +85,9 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   const isDesktop = useIsDesktopWeb();
   const [userVideoUri, setUserVideoUri] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | undefined>(undefined);
+  // Picker asset hints so the pre-upload transcode decision is right without
+  // probing the file (see startProfileVideoUpload / videoTranscode.shouldTranscode).
+  const [videoHints, setVideoHints] = useState<{ width?: number; height?: number; fileSize?: number } | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
 
@@ -363,6 +366,11 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         }
         setUserVideoUri(videoAsset.uri);
         setMimeType(assetMimeType);
+        setVideoHints({
+          width: videoAsset.width,
+          height: videoAsset.height,
+          fileSize: (videoAsset as any).fileSize,
+        });
       }
     } catch (err) {
       console.warn('expo-image-picker not available:', err);
@@ -395,6 +403,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
           }
           setUserVideoUri(uri);
           setMimeType(fileMimeType);
+          setVideoHints({ fileSize: file.size });
         } catch (err) {
           console.error('Error validating video:', err);
           setError('Failed to validate video. Please try again.');
@@ -423,7 +432,10 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
 
   const handleNext = () => {
     if (hasUserVideo && userVideoUri) {
-      uploadProfileVideoS3(userVideoUri, userId, mimeType)
+      // Shrink → durable copy → resumable upload. Fire-and-forget: the user
+      // never waits, but the upload survives an app-kill and won't saturate
+      // the first session (see startProfileVideoUpload, 2026-07-25).
+      startProfileVideoUpload(userVideoUri, userId, { mimeType, hints: videoHints })
         .catch(err => console.error('Background S3 video upload error:', err));
     }
     onNext();

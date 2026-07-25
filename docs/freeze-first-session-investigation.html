@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>First-Session Freeze — All Possibilities</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e7e9ee; --dim:#9aa2b1;
+    --line:#2a2f3a; --accent:#6ea8fe; --pink:#ff7b9c;
+    --hi:#ff6b6b; --med:#ffb454; --low:#8bd450; --info:#7aa2f7;
+    --tagbg:#242a36;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f7f9; --panel:#ffffff; --panel2:#f0f2f5; --ink:#1c2029; --dim:#5a6270;
+      --line:#e2e5ea; --accent:#2f6fed; --pink:#d6336c; --tagbg:#eceff3; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:32px 20px 80px}
+  header h1{font-size:26px;margin:0 0 6px;letter-spacing:-.02em}
+  header p.sub{color:var(--dim);margin:0 0 4px}
+  .meta{color:var(--dim);font-size:13px;margin-top:8px}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 26px}
+  .badge{font-size:11px;font-weight:700;letter-spacing:.03em;padding:3px 8px;border-radius:999px;text-transform:uppercase}
+  .b-hi{background:rgba(255,107,107,.16);color:var(--hi);border:1px solid rgba(255,107,107,.35)}
+  .b-med{background:rgba(255,180,84,.16);color:var(--med);border:1px solid rgba(255,180,84,.35)}
+  .b-low{background:rgba(139,212,80,.14);color:var(--low);border:1px solid rgba(139,212,80,.35)}
+  .b-info{background:rgba(122,162,247,.16);color:var(--info);border:1px solid rgba(122,162,247,.35)}
+  .tldr{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:26px}
+  .tldr h2{margin:0 0 10px;font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  .tldr ol{margin:0;padding-left:20px}
+  .tldr li{margin:6px 0}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:14px 0 0}
+  .fact{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px}
+  .fact b{display:block;color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px}
+  section.cat{margin:30px 0}
+  section.cat > h2{font-size:19px;margin:0 0 4px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  section.cat > .catnote{color:var(--dim);font-size:13.5px;margin:0 0 14px}
+  .item{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:0;margin:12px 0;overflow:hidden}
+  .item > summary{list-style:none;cursor:pointer;padding:14px 16px;display:flex;gap:10px;align-items:flex-start}
+  .item > summary::-webkit-details-marker{display:none}
+  .item summary .caret{color:var(--dim);transition:transform .15s;margin-top:2px}
+  .item[open] summary .caret{transform:rotate(90deg)}
+  .item summary .title{flex:1;font-weight:650;font-size:15px}
+  .item summary .badges{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .body{padding:2px 16px 16px 42px}
+  .body p{margin:8px 0}
+  .lbl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin-top:12px}
+  .mech{margin:4px 0}
+  code{background:var(--tagbg);padding:1px 6px;border-radius:5px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .ev{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--dim)}
+  .sym{display:inline-block;font-size:11px;background:var(--tagbg);border:1px solid var(--line);
+    color:var(--ink);padding:2px 7px;border-radius:6px;margin:3px 4px 0 0}
+  .fix-yes{color:var(--low);font-weight:650}
+  .fix-no{color:var(--hi);font-weight:650}
+  .fix-part{color:var(--med);font-weight:650}
+  .cov{border-left:3px solid var(--line);padding:4px 0 4px 12px;margin:10px 0;font-size:13.5px}
+  .cov.yes{border-color:var(--low)} .cov.no{border-color:var(--hi)} .cov.part{border-color:var(--med)}
+  .rank{font-family:ui-monospace,monospace;font-size:12px;color:var(--dim);background:var(--tagbg);border-radius:6px;padding:1px 7px;margin-left:auto}
+  .cleared{background:var(--panel2);border:1px dashed var(--line);border-radius:10px;padding:12px 16px;margin:8px 0}
+  .cleared .t{font-weight:650;margin-bottom:2px}
+  hr.div{border:none;border-top:1px solid var(--line);margin:36px 0}
+  .steps li{margin:8px 0}
+  .foot{color:var(--dim);font-size:12.5px;margin-top:30px;border-top:1px solid var(--line);padding-top:14px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>First-Session Freeze — Every Possibility</h1>
+  <p class="sub">Fresh users, right after finishing onboarding: blank profile, then laggy / buggy / stuck pages (Trips&nbsp;Explore worst). Smooth <em>during</em> onboarding. Restart fixes it completely.</p>
+  <div class="meta">Read-only analysis · code unchanged · every bullet backed by a <span class="ev">file:line</span> verified in this repo. Confidence is my honest estimate, not proof.</div>
+</header>
+
+<div class="legend">
+  <span class="badge b-hi">High likelihood</span>
+  <span class="badge b-med">Plausible</span>
+  <span class="badge b-low">Minor / contributor</span>
+  <span class="badge b-info">Blind spot / meta</span>
+  &nbsp;·&nbsp; <span class="ev">CONFIRMED = traced in code · HYPOTHESIS = one link unverified</span>
+</div>
+
+<div class="tldr">
+  <h2>The shape of the evidence</h2>
+  <div class="facts">
+    <div class="fact"><b>When</b> Starts right AFTER onboarding completes. Smooth before.</div>
+    <div class="fact"><b>Where</b> Blank Profile; Trips Explore "almost doesn't respond."</div>
+    <div class="fact"><b>Recovery</b> Kill + reopen = fixed. Never self-heals.</div>
+    <div class="fact"><b>Network</b> Happens even in the US (good signal).</div>
+    <div class="fact"><b>Errors</b> 0 thrown. 127 taps / 5 min in one replay.</div>
+    <div class="fact"><b>Scope</b> First session only. Session #2 fine.</div>
+  </div>
+  <p style="margin-top:14px;margin-bottom:0;color:var(--dim);font-size:13.5px">
+    "Restart fixes it" + "starts at onboarding end" + "0 errors" together point at
+    <strong style="color:var(--ink)">in-memory / in-flight runtime state created by the act of finishing onboarding</strong>
+    — cleared only by process death. Two mechanisms fit best: <strong style="color:var(--ink)">bandwidth saturation</strong>
+    from the just-started background video upload, and <strong style="color:var(--ink)">memory/main-thread pressure</strong>
+    from work that piled up across the long onboarding. They are not mutually exclusive and probably stack.
+  </p>
+</div>
+
+<!-- ============ CATEGORY 1 ============ -->
+<section class="cat">
+  <h2>1 · Bandwidth saturation <span class="rank">leading theory</span></h2>
+  <p class="catnote">Finishing onboarding kicks off heavy background transfers with no throttling. They compete with the very network-hungry Explore screen for the uplink/downlink. Explains network-<em>independence</em> because it's <em>self-inflicted</em> congestion, and explains restart-fixes-it (killing the process kills the transfers).</p>
+
+  <details class="item" open>
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Profile video upload — raw, uncompressed, up to ~250&nbsp;MB, fire-and-forget during landing</span>
+      <span class="badges"><span class="badge b-hi">High</span><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">On the onboarding video step, tapping <em>Next</em> starts the S3 upload <strong>without awaiting it</strong> and immediately advances — the user walks into the main app while the upload runs. The picked video is sent <strong>as-is, no compression</strong>. The processing poll is explicitly "sized for 250&nbsp;MB videos," so the payload can be enormous. A large upload saturates the cellular uplink, and a saturated uplink cripples every download (images, feed) on Explore.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">OnboardingVideoUploadScreen.tsx:423-429 (<code>handleNext</code> → <code>uploadProfileVideoS3(...).catch()</code> then <code>onNext()</code>, not awaited)<br>
+      storageService.ts:449-540 (upload path — native streams file via <code>expo-file-system</code> uploadAsync; no transcode step before PUT)<br>
+      storageService.ts:564-565 (<code>maxAttempts=28</code>, <code>delayMs=15000</code>, comment: "sized for 250&nbsp;MB videos")</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">laggy pages</span><span class="sym">stuck Trips Explore</span><span class="sym">restart fixes it</span><span class="sym">network-independent</span><span class="sym">first session only</span><span class="sym">smooth then degrades</span>
+      <div class="cov no"><span class="fix-no">NOT covered by the uncommitted fixes.</span> This path uses raw <code>fetch</code> + native file upload, not the Supabase client — the new 25s timeout never touches it. This is the biggest gap.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">The app <em>downloads</em> the profile video right after upload — possibly the same file, at the same time</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">CONFIRMED path</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">On session restore / landing, <code>useAuthGuard</code> fires <code>preloadProfileVideo(userId,'high')</code> — a high-priority background <em>download</em> of the user's own surf video. For a fresh user this races the still-running <em>upload</em> of that same video: the app can be pushing the raw file up and pulling a copy down simultaneously, doubling the self-inflicted congestion.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">useAuthGuard.ts:197-198 (<code>preloadProfileVideo(authUser.id,'high')</code>)<br>
+      AppContent.tsx:1456-1457 (<code>preloadVideo(defaultVideoUrl,'high')</code>)<br>
+      videoPreloadService.ts:390-391 (native path downloads the file)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">laggy pages</span><span class="sym">stuck Trips Explore</span><span class="sym">restart fixes it</span><span class="sym">network-independent</span><span class="sym">first session only</span>
+      <div class="cov no"><span class="fix-no">NOT covered.</span> Independent of the Supabase timeout work.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Hero-image prefetch downloads full 2048px originals the UI never shows — on every swipe, cold cache</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">The deck prefetched the <em>raw</em> <code>hero_image_url</code> (the full-size original, up to 2048px @ q0.85) while each card actually renders a 1280px width-variant — a different URL. So the warm-up never helped and every swipe pulled a large original that's never displayed. On a fresh user's cold cache this is pure wasted bandwidth competing with the video transfer, and each decoded original also lands in an uncapped image memory cache (see §2).</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">deckPrefetch.ts:5-15 (returns untransformed <code>hero_image_url</code>)<br>
+      TripsScreen.tsx (card renders <code>&lt;Thumb widthPx={1280}&gt;</code> → <code>toWidthThumbUrl</code>, a different URL)<br>
+      storageService.ts:253-258 (<code>uploadTripImage</code> caps originals at 2048px @ 0.85)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">stuck Trips Explore</span><span class="sym">laggy pages</span><span class="sym">first session only</span>
+      <div class="cov yes"><span class="fix-yes">FIXED (uncommitted).</span> <code>warmHeroThumbs</code> now warms the exact rendered URL. Caveat: the field replay's network waterfall did <em>not</em> show duplicate fetches — either images aren't captured there, or prefetch wasn't firing; worth confirming what that waterfall actually contains before over-crediting this.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Video-processing poll: a 7-minute background fetch loop (28 × 15s) right after landing</span>
+      <span class="badges"><span class="badge b-low">Minor</span><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">After the upload PUT succeeds, <code>pollForProcessedVideo</code> hits the edge function every 15s for up to ~7 minutes waiting for MediaConvert. Low bandwidth cost per hit, but it's one more background network task alive during the exact window users report lag, and it keeps the session "busy" long after the user thinks onboarding is done.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">storageService.ts:558-588 (<code>maxAttempts=28</code>, <code>delayMs=15000</code>, <code>fetch</code> per attempt)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">first session only</span><span class="sym">smooth then degrades</span>
+      <div class="cov no"><span class="fix-no">NOT covered</span> (raw fetch). Minor on its own.</div>
+    </div>
+  </details>
+</section>
+
+<!-- ============ CATEGORY 2 ============ -->
+<section class="cat">
+  <h2>2 · Memory pressure → Hermes GC → progressive JS slowdown</h2>
+  <p class="catnote">"Restart fixes it" is the classic signature of a heap that grows across session #1 and is reclaimed only by process death. As memory climbs, Hermes GC pauses lengthen — the JS thread gets steadily slower ("laggy," "almost doesn't respond") without ever crashing. One prior Sentry event was an OS RAM kill (WatchdogTermination) on an iPad.</p>
+
+  <details class="item" open>
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Three session-replay recorders running at once, unmasked, screenshotting every second — across the whole long onboarding</span>
+      <span class="badges"><span class="badge b-hi">High</span><span class="badge b-info">CONFIRMED (shipped)</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">The shipped build runs <strong>two</strong> PostHog clients (both with <code>enableSessionReplay</code>) <strong>plus</strong> Sentry's mobile replay (<code>replaysOnErrorSampleRate:1</code> buffers continuously). All masking is off, so frames are full-fidelity and compress poorly. Each pipeline captures + encodes a full-screen bitmap ~every second, with main-thread phases. Onboarding is long (video record, forms, chat) — that's minutes of triple capture buffering before the user even reaches Explore.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">analyticsService.ts:63-79 (PostHog client #1, replay on, masking off)<br>
+      App.tsx:144-168 (PostHogProvider = client #2, same config) · App.tsx:56 (<code>Sentry.mobileReplayIntegration()</code>) · App.tsx:41-42 (<code>replaysOnErrorSampleRate:1</code>)<br>
+      ios/Pods/PostHog/PostHog/Replay/* (per-second <code>window.toImage()</code> on main thread, encode)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">laggy pages</span><span class="sym">stuck Trips Explore</span><span class="sym">restart fixes it</span><span class="sym">network-independent</span><span class="sym">watchdog RAM kill</span><span class="sym">first session only</span>
+      <div class="cov part"><span class="fix-part">PARTLY FIXED (uncommitted).</span> Consolidated to ONE PostHog client and removed Sentry replay — 3 recorders → 1. Big reduction, but replay is still on and still unmasked, so it's not zero. Not yet live.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">expo-image memory cache is uncapped — decoded 1280–2048px bitmaps accumulate</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">CONFIRMED default</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">iOS expo-image uses <code>SDImageCache.shared</code> with default <em>unlimited</em> max memory cost. The Explore deck decodes large hero bitmaps (~11–22&nbsp;MB each decoded), and the prefetch bug (§1) fed it full originals. Onboarding images add more. Nothing caps or clears it during the session, so decoded-bitmap memory climbs with every card scrolled — feeding the GC pressure above. Purged only on an OS memory warning.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">TripsScreen.tsx (<code>cachePolicy="memory-disk"</code> on hero <code>&lt;Thumb&gt;</code>) · expo-image default <code>SDImageCache.shared</code> (no cap set anywhere in app config)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">laggy pages</span><span class="sym">stuck Trips Explore</span><span class="sym">restart fixes it</span><span class="sym">watchdog RAM kill</span>
+      <div class="cov part"><span class="fix-part">Indirectly helped</span> by the prefetch fix (stops feeding it 2048px originals). No explicit cap added — a <code>maxMemoryCost</code> cap would be a clean follow-up.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Video bytes held in JS memory during upload (web / non-file-URI paths)</span>
+      <span class="badges"><span class="badge b-low">Minor on native</span><span class="badge b-info">HYPOTHESIS</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">On native the upload streams from the file URI via <code>uploadAsync</code> (good — no big JS buffer). But the non-file-URI branches build a <code>Blob</code>/from base64 in memory (<code>uriToBlob</code>, <code>dataURLtoBlob</code>). If any real-device path hits those (some <code>ph://</code>/content cases), a multi-hundred-MB blob would be a large transient. Unverified which branch real iOS devices take.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">storageService.ts:489-528 (native <code>uploadAsync</code> streams; else <code>uriToBlob</code>/<code>dataURLtoBlob</code> → in-memory Blob)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">watchdog RAM kill</span><span class="sym">first session only</span>
+      <div class="cov no"><span class="fix-no">NOT covered.</span> Unverified link: which branch fires on device.</div>
+    </div>
+  </details>
+</section>
+
+<!-- ============ CATEGORY 3 ============ -->
+<section class="cat">
+  <h2>3 · JS-thread wedge / starvation (permanent until restart)</h2>
+  <p class="catnote">The "taps do nothing, 0 errors" signature can also come from a JS thread that stops being serviced. Native scroll keeps working (janky), JS-dependent taps die. These mechanisms must START at onboarding-completion and PERSIST — a one-shot hang that resolves wouldn't match.</p>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Un-timed Supabase requests hang forever (RN fetch has no default timeout)</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">React Native's <code>fetch</code> defaults <code>timeout=0</code> (no OS timeout), and supabase-js adds none — a request on a stalled connection can wait indefinitely, stranding anything awaiting it. auth-js 2.110.7 routes every call through a shared <em>init</em> promise and a single-flight <em>refresh</em> promise, so one stuck request can stall unrelated calls app-wide (the old "lock" claim was for ≤2.80.0 / builds ≤44 — disabled by default in 45/46).</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">react-native/Libraries/Network/XMLHttpRequest.js:152 (<code>timeout=0</code>) → RCTNetworking.mm:326<br>
+      @supabase/auth-js 2.110.7 GoTrueClient.js:2365,2626 (<code>await this.initializePromise</code>) · refreshingDeferred single-flight</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">blank profile</span><span class="sym">laggy pages</span><span class="sym">stuck Trips Explore</span><span class="sym">first session only (no cache to fall back on)</span>
+      <div class="cov yes"><span class="fix-yes">FIXED (uncommitted).</span> Global 25s fetch timeout (300s for storage) + fail-open boot guards + <code>getSession</code> in ProfileScreen. Note: this bounds Supabase traffic but does NOT explain a fully-pegged thread by itself — a hung promise doesn't burn CPU.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Onboarding→main transition remount storm (historical; needs re-confirmation on device)</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">HYPOTHESIS</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">App.tsx documents a past bug where a tree-shape swap at a readiness flag unmounted + fully remounted every provider + AppContent, re-running DB init / session restore / conversation loads / welcome video — pegging JS for tens of seconds. The current tree is documented as stabilized (mounted once, constants only). But the transition <em>to the main app</em> at onboarding-completion is exactly when the symptom starts — worth confirming on device that no provider/navigator re-keys or heavy re-mount happens at that step change.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">App.tsx:114-135 (comment describing the fixed remount storm; tree now static) · OnboardingContext step advance → AppContent main-app branch</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">smooth then degrades</span><span class="sym">laggy pages</span><span class="sym">first session only</span>
+      <div class="cov part"><span class="fix-part">Believed fixed already</span> (pre-existing). Not re-verified for the onboarding-complete step specifically — flagged for the JS-thread reader that failed to complete.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Re-render storm in an always-mounted provider (context value rebuilt each render / setState ping-pong)</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">UNVERIFIED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">A steady re-render loop in OnboardingContext / UserProfileContext / MessagingProvider / TutorialContext (a context value with no <code>useMemo</code>, or an effect that setStates every render, or A→B→A state) would peg JS permanently and look exactly like this — and would only manifest once the main app (many consumers) is mounted. This dimension's agent crashed before finishing; NOT yet traced. Genuinely open.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">(to verify) src/context/*.tsx — context value memoization, effect deps, setState-in-render patterns</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">laggy pages</span><span class="sym">stuck Trips Explore</span><span class="sym">dead taps</span><span class="sym">restart fixes it</span><span class="sym">network-independent</span><span class="sym">first session only</span>
+      <div class="cov no"><span class="fix-no">Unknown coverage.</span> Highest-value remaining code audit — a re-render storm fits every symptom including network-independence and dead taps.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title"><code>onAuthStateChange</code> cascade after fresh sign-in re-runs heavy loaders / flips gates</span>
+      <span class="badges"><span class="badge b-low">Minor</span><span class="badge b-info">PARTLY known</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">A fresh sign-in fires <code>INITIAL_SESSION</code> / <code>SIGNED_IN</code> / <code>TOKEN_REFRESHED</code> in quick succession. We already found one instance where the ProfileScreen <code>SIGNED_IN</code> handler re-ran <code>loadProfileData</code> and blanked an already-rendered screen. Other listeners may re-trigger loaders similarly right at landing. Bursty, not necessarily permanent — but amplifies everything else in the first seconds.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">ProfileScreen.tsx ~1406-1414 (SIGNED_IN → loadProfileData) · (enumerate all <code>onAuthStateChange</code> app-wide)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">blank profile</span><span class="sym">smooth then degrades</span>
+      <div class="cov part"><span class="fix-part">Partly addressed</span> (ProfileScreen gate now falls through when cached). Full listener census pending.</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">A pushed screen (TripDetail) silently swallowed / a JS-driven animation stuck running</span>
+      <span class="badges"><span class="badge b-low">Considered</span><span class="badge b-info">mostly CLEARED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">Two "dead taps" sub-theories were examined and largely cleared: (a) a pushed TripDetail would render an OPAQUE dark skeleton over the deck — the user kept swiping the deck, so no push committed → the tap never reached JS (consistent with a starved thread, not a navigation bug). (b) The skeleton/shimmer + profile spinner all use <code>useNativeDriver:true</code>, so they animate on the native thread and do NOT peg JS while data hangs. One JS-driven loop exists (ConversationsScreen arrow, <code>useNativeDriver:false</code>) but that's not the Trips path.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">TripDetailScreen.tsx:1275-1282 (opaque loading branch) · Shimmer.tsx:31-53 (<code>useNativeDriver:true</code>) · ProfileScreen.tsx:1361-1382 (spinner/pulse native-driven) · ConversationsScreen.tsx:415-426 (JS-driven, off-path)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">dead taps (as a symptom of the real wedge, not a cause)</span>
+      <div class="cov yes"><span class="fix-yes">Not a cause.</span> Useful as confirmation that dead taps = starved JS thread, pointing back at §2/§3.</div>
+    </div>
+  </details>
+</section>
+
+<!-- ============ CATEGORY 4 ============ -->
+<section class="cat">
+  <h2>4 · Blank profile — the specific first symptom</h2>
+  <p class="catnote">This one we traced end-to-end and it is the best-understood part.</p>
+
+  <details class="item" open>
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Fresh user has no cached profile → a hung fetch leaves the loading gate up forever</span>
+      <span class="badges"><span class="badge b-hi">High</span><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech"><code>loadProfileData</code> sets <code>authChecking=true</code> and the render gate <code>if ((loading || authChecking) && !profileData)</code> shows header-only + blank body. A returning user has cached <code>profileData</code> so the gate falls through; a <strong>brand-new user has nothing cached</strong>, so if the profile fetch (or the auth call) hangs on a stalled/ saturated connection, the gate stays up permanently — the blank profile with just the name in the header, exactly as screenshotted.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">ProfileScreen.tsx:1451-1523 (<code>loadProfileData</code>) · ProfileScreen.tsx:2070 (render gate) · UserProfileContext.tsx:71-96 (shared fetch, nothing to fall back on for a fresh user)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">blank profile</span><span class="sym">first session only</span><span class="sym">restart fixes it</span>
+      <div class="cov yes"><span class="fix-yes">FIXED (uncommitted).</span> <code>getSession</code> instead of network <code>getUser</code>; gate falls through when <code>profileData</code> exists; global timeout bounds the fetch. Note: bandwidth saturation (§1) can still make the fetch slow enough to blank on a fresh user even with the timeout — so §1 remains the upstream driver.</div>
+    </div>
+  </details>
+</section>
+
+<!-- ============ CATEGORY 5 ============ -->
+<section class="cat">
+  <h2>5 · Why Trips Explore specifically</h2>
+  <p class="catnote">Both reports name the Explore deck. It's the heaviest screen at the worst moment.</p>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">Hard virtualization + native-driven deck = "slow and stuck" the instant JS is starved</span>
+      <span class="badges"><span class="badge b-med">Plausible</span><span class="badge b-info">CONFIRMED behavior</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">The deck mounts only ~2–3 cards (<code>initialNumToRender=2</code>, <code>maxToRenderPerBatch=3</code>, <code>windowSize=3</code>, <code>removeClippedSubviews</code>) and drives the card transforms natively (<code>useNativeDriver:true</code>). When JS is starved (by §1/§2), native scroll keeps moving but new cards can't mount and <code>snapToInterval</code> snaps back over empty slots — producing exactly "swipes work but slow and stuck," while taps (which need JS) do nothing. So Explore doesn't <em>cause</em> the freeze; it's the screen that most vividly <em>shows</em> a starved thread, and its cold-cache image loads also <em>feed</em> the congestion/memory.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">TripsScreen.tsx:733-736 (virtualization config) · TripsScreen.tsx:647-650 (native-driven scrollX) · TripsScreen.tsx:1306-1311 (synchronous tap → push)</p>
+      <div class="lbl">Explains</div>
+      <span class="sym">stuck Trips Explore</span><span class="sym">laggy pages</span>
+      <div class="cov part"><span class="fix-part">Amplifier, not root.</span> Prefetch fix reduces its network/memory footprint; the root drivers are §1/§2.</div>
+    </div>
+  </details>
+</section>
+
+<!-- ============ CATEGORY 6 ============ -->
+<section class="cat">
+  <h2>6 · Why we've been blind (meta)</h2>
+  <p class="catnote">Every one of these failure modes is invisible to our current telemetry — which is itself a finding, and part of why this dragged on.</p>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">The <code>js_thread_stall</code> alarm never sent a single event (dead wire)</span>
+      <span class="badges"><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">The watchdog reported via <code>posthogService.trackEvent</code>, whose <code>initializePostHog()</code> is never called anywhere → silent no-op in every build. So "no <code>js_thread_stall</code> in PostHog" meant "the wire was cut," not "no freezes." Also: it's a JS <code>setInterval</code>, so during a <em>total</em> wedge it can't fire at all, and an app killed while frozen never reports.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">AppContent.tsx:1846-1894 (watchdog) · posthogService.ts (<code>initializePostHog</code> never invoked) · analyticsService.ts (the real client)</p>
+      <div class="cov part"><span class="fix-part">FIXED (uncommitted)</span> — rewired to <code>analyticsService.track</code>. Still JS-based, so add a native app-hang detector (§ next steps).</div>
+    </div>
+  </details>
+
+  <details class="item">
+    <summary>
+      <span class="caret">▶</span>
+      <span class="title">0 errors + native-side replay = nothing self-reports</span>
+      <span class="badges"><span class="badge b-info">CONFIRMED</span></span>
+    </summary>
+    <div class="body">
+      <p class="mech">The failure throws nothing (a hang / GC-stall isn't an exception), so Sentry/PostHog "Errors: 0" is expected, not reassuring. And PostHog replay + touch dots are captured <em>natively</em>, so a recording that "kept going and showed his taps" does NOT prove the JS thread was alive — a correction to an earlier assumption in this investigation.</p>
+      <div class="lbl">Evidence</div>
+      <p class="ev">App.tsx:146 (<code>captureScreens:false</code> → JS touch capture off; replay is native) · replay panel "Errors: 0 / 127 clicks"</p>
+      <div class="cov no">Inherent to the failure mode. Fixed only by adding the right instrument (native hang tracking).</div>
+    </div>
+  </details>
+</section>
+
+<hr class="div">
+
+<!-- ============ CLEARED ============ -->
+<section class="cat">
+  <h2>Examined and largely cleared</h2>
+  <div class="cleared"><div class="t">Auth-lock deadlock in shipped builds</div>The internal auth-js "lock" is <code>null</code> by default in 2.110.7 (builds 45/46) — verified in installed source. Real only for ≤2.80.0. The init/refresh promises (§3) are the surviving app-wide choke points.</div>
+  <div class="cleared"><div class="t">Unbounded retry loops / compounding timers on the fresh-user path</div>All production <code>setInterval</code>s are bounded: video poll (28×), presence heartbeat (fixed 60s, backoff capped at 10), preload check-loops clear on ready/timeout. No backoff-free retry found. (ProfileScreen video poll caps at 210 attempts and only runs on manual upload.)</div>
+  <div class="cleared"><div class="t">Skeleton / spinner animations pegging JS</div>Shimmer, profile upload spinner, pulse all use <code>useNativeDriver:true</code> → native thread. They do not peg JS while data hangs.</div>
+  <div class="cleared"><div class="t">InteractionManager leak</div>Nothing on the tap→push path holds an interaction handle; no JS-driven animation on the fresh-user Trips tree that could leak one.</div>
+  <div class="cleared"><div class="t">Server-side / persisted-state cause</div>Ruled out by "restart with the same account fixes it" — session #2 uses identical token/data and works.</div>
+</section>
+
+<hr class="div">
+
+<!-- ============ NEXT STEPS ============ -->
+<section class="cat">
+  <h2>Recommended next diagnostics (no code changes assumed)</h2>
+  <ol class="steps">
+    <li><strong>Confirm the upload in the field replay.</strong> In that PostHog session's Network waterfall, look for a long-running <code>PUT</code> to an <code>amazonaws</code>/S3 URL overlapping the laggy window — and note whether it's still in flight when he kills the app. This directly tests the §1 leading theory.</li>
+    <li><strong>Ask the two users one question:</strong> did they record/keep a surf video during onboarding (vs skip)? The theory predicts the lag correlates with <em>having uploaded a video</em>.</li>
+    <li><strong>Finish the two agent audits that crashed:</strong> the <em>provider re-render storm</em> census (§3, genuinely open and fits every symptom) and the <em>memory-buffer</em> sizing (§2). These are the two highest-value unfinished reads.</li>
+    <li><strong>Ship the uncommitted batch and watch the repaired telemetry.</strong> It won't fix §1 (the video upload) but it fixes blank-profile and cuts 3 recorders → 1, and the now-live <code>js_thread_stall</code> + <code>[supabase-timeout]</code> events will diagnose whatever survives.</li>
+    <li><strong>Add a native app-hang detector</strong> (Sentry <code>enableAppHangTracking</code> / ANR) — the only instrument that reports a <em>total</em> JS wedge, which the JS-timer watchdog structurally cannot.</li>
+    <li><strong>If §1 confirms:</strong> the fix direction is (a) compress the video before upload using the existing <code>swellyo-video-export</code> module (already built for chat media), and/or (b) defer the upload until the app is idle / gate it behind a "your video is uploading" state, and/or (c) make it resumable so killing the app doesn't silently lose the video (matches the historically-null <code>profile_video_thumbnail_url</code>).</li>
+  </ol>
+</section>
+
+<div class="foot">
+  Generated 2026-07-25 · read-only analysis, no code modified in producing this document.
+  Confidence levels are engineering judgment on the evidence available, not certainty.
+  Two agent audits (provider re-render census; memory sizing) failed mid-run due to an API outage and are marked OPEN above.
+</div>
+
+</div>
+</body>
+</html>

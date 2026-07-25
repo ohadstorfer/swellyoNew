@@ -19,10 +19,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { GalleryPermissionOverlay } from '../GalleryPermissionOverlay';
 import { getSurfLevelVideos } from '../../services/media/surfLevelVideos';
 import { validateVideoComplete } from '../../utils/videoValidation';
-import {
-  uploadProfileVideoS3,
-  uploadProfileVideoThumbnail,
-} from '../../services/storage/storageService';
+import { uploadProfileVideoThumbnail } from '../../services/storage/storageService';
+import { startProfileVideoUpload } from '../../services/media/pendingProfileVideoUpload';
 import { profileVideoUploadTracker } from '../../services/storage/profileVideoUploadTracker';
 import { supabaseDatabaseService } from '../../services/database/supabaseDatabaseService';
 import { captureVideoThumbnail } from '../../utils/videoThumbnail';
@@ -86,6 +84,8 @@ export const ProfileEditSurfVideoScreen: React.FC<Props> = ({
 
   const [userVideoUri, setUserVideoUri] = useState<string | null>(initialUserVideoUri ?? null);
   const [mimeType, setMimeType] = useState<string | undefined>(undefined);
+  // Picker hints for the pre-upload transcode decision (see startProfileVideoUpload).
+  const [videoHints, setVideoHints] = useState<{ width?: number; height?: number; fileSize?: number } | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
 
@@ -215,6 +215,11 @@ export const ProfileEditSurfVideoScreen: React.FC<Props> = ({
         }
         setUserVideoUri(videoAsset.uri);
         setMimeType(assetMimeType);
+        setVideoHints({
+          width: videoAsset.width,
+          height: videoAsset.height,
+          fileSize: (videoAsset as any).fileSize,
+        });
         setError(null);
       }
     } catch (err) {
@@ -244,6 +249,7 @@ export const ProfileEditSurfVideoScreen: React.FC<Props> = ({
           }
           setUserVideoUri(uri);
           setMimeType(fileMimeType);
+          setVideoHints({ fileSize: file.size });
         } catch (err) {
           console.error('Error validating video:', err);
           setError('Failed to validate video. Please try again.');
@@ -280,8 +286,9 @@ export const ProfileEditSurfVideoScreen: React.FC<Props> = ({
 
       if (isFreshLocalUri && userId && userVideoUri) {
         // Kick off the S3 video upload immediately (fire-and-forget) — this
-        // is what the user is actually waiting on.
-        uploadProfileVideoS3(userVideoUri, userId, mimeType).catch(err =>
+        // is what the user is actually waiting on. Shrinks + makes it resumable
+        // (see startProfileVideoUpload, 2026-07-25).
+        startProfileVideoUpload(userVideoUri, userId, { mimeType, hints: videoHints }).catch(err =>
           console.error('[SurfVideoEdit] background upload failed:', err),
         );
 
