@@ -266,7 +266,14 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       let dbOnboardingComplete = false;
       if (isSupabaseConfigured()) {
         try {
-          const { surfer } = await supabaseDatabaseService.getCurrentUserData();
+          // This makes an un-timed network call on the boot path — never let
+          // it strand boot. After 10s, continue with local data (fail open).
+          const { surfer } = await Promise.race([
+            supabaseDatabaseService.getCurrentUserData(),
+            new Promise<{ user: null; surfer: null }>((resolve) =>
+              setTimeout(() => resolve({ user: null, surfer: null }), 10_000),
+            ),
+          ]);
           if (surfer?.finished_onboarding) {
             dbOnboardingComplete = true;
             console.log('User has finished onboarding (from database)');

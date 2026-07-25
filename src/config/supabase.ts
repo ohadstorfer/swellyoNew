@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { supabaseFetchWithTimeout } from '../utils/supabaseFetchWithTimeout';
 
 // Get Supabase credentials from environment variables
 // Trim whitespace to handle any formatting issues
@@ -56,6 +57,8 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
         flowType: 'pkce', // Recommended for mobile apps
       },
       global: {
+        // Time-limited fetch — see supabaseFetchWithTimeout for why.
+        fetch: supabaseFetchWithTimeout,
         headers: {
           'x-client-info': `swellyo@1.0.0`,
         },

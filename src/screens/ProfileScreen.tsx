@@ -1455,9 +1455,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
       if (!userId) {
         // Own profile — delegate to UserProfileContext so the fetch is shared
         // across screens (conversations header, profile) and deduplicated.
-        // getSession() reads local storage — unlike getUser() it never makes a
-        // network round-trip, so it can't hang on flaky connections and leave
-        // authChecking stuck (blank-profile bug, 2026-07-23). Auth validity is
+        // getSession() is usually a local read (no network), unlike getUser().
+        // It CAN still hit the network when the token is near expiry, but the
+        // global fetch timeout bounds that, and the render gate below falls
+        // through when profileData is already cached — so a slow call can't
+        // blank the screen (blank-profile bug, 2026-07-23). Auth validity is
         // the auth guard's job, not this screen's.
         setAuthChecking(true);
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();

@@ -52,7 +52,6 @@ import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { logEvent } from '../services/analytics/eventLogger';
-import { trackEvent } from '../services/analytics/posthogService';
 import Constants from 'expo-constants';
 
 const APP_OPENED_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
@@ -433,7 +432,22 @@ export const AppContent: React.FC = () => {
       const validateSession = async () => {
         try {
           const { supabase } = await import('../config/supabase');
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+          // getSession() can hit the network (token refresh) and stall.
+          // Never let it strand the user on the boot spinner: after 10s,
+          // fail open and let them in. The auth guard still logs out a
+          // genuinely dead session later.
+          const raced = await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<'timeout'>((resolve) =>
+              setTimeout(() => resolve('timeout'), 10_000),
+            ),
+          ]);
+          if (raced === 'timeout') {
+            console.warn('[AppContent] getSession timed out — failing open');
+            setHasValidatedSession(true);
+            return;
+          }
+          const { data: { session }, error: sessionError } = raced;
 
           if (sessionError || !session) {
             console.log('[AppContent] User in context but no valid session - triggering logout');
@@ -1867,7 +1881,10 @@ export const AppContent: React.FC = () => {
         route = navigationRef.getCurrentRoute()?.name ?? '';
         rootStackDepth = navigationRef.isReady() ? (navigationRef.getRootState()?.routes.length ?? 0) : 0;
       } catch { /* noop */ }
-      trackEvent('js_thread_stall', {
+      // NOTE: must go through analyticsService — the old posthogService.trackEvent
+      // was a silent no-op (its initializePostHog() was never called anywhere),
+      // so this alarm never reported a single event in builds 45/46.
+      analyticsService.track('js_thread_stall', {
         blocked_ms: Math.round(lag),
         realtime_channels: channels,
         channel_states: channelStates,

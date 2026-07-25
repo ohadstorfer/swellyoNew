@@ -10,6 +10,25 @@ let _isSwitchingAccount = false;
 export function setIsSwitchingAccount(value: boolean) { _isSwitchingAccount = value; }
 
 /**
+ * A failure that says nothing about whether the session is valid — the request
+ * never reached the auth server (offline, DNS, or our 25s fetch timeout from
+ * supabaseFetchWithTimeout). Logging someone out for these punishes a weak
+ * network: before the timeout existed these calls just hung silently, so
+ * treating them as "unauthenticated" would be a NEW way to lose a session.
+ * Only a real answer from the server (invalid/expired token) may log out.
+ */
+const isTransientNetworkFailure = (e: unknown): boolean => {
+  const msg = (e as { message?: string } | null | undefined)?.message?.toLowerCase() ?? '';
+  return (
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('network request failed') ||
+    msg.includes('abort') ||
+    msg.includes('failed to fetch')
+  );
+};
+
+/**
  * Centralized authentication guard hook
  *
  * Monitors authentication state and automatically redirects unauthenticated users
@@ -195,7 +214,12 @@ export function useAuthGuard() {
       
       if (userError || !authUser) {
         console.log('[useAuthGuard] Failed to verify user:', userError?.message || 'No user');
-        
+
+        if (isTransientNetworkFailure(userError)) {
+          console.log('[useAuthGuard] Network/timeout failure — keeping session, will re-check later');
+          return;
+        }
+
         // If user exists in context but can't be verified, they're unauthenticated
         if (user !== null) {
           console.log('[useAuthGuard] User in context but cannot be verified - redirecting');
@@ -208,6 +232,10 @@ export function useAuthGuard() {
       console.log('[useAuthGuard] User is authenticated:', authUser.id);
     } catch (error) {
       console.error('[useAuthGuard] Error checking auth state:', error);
+      if (isTransientNetworkFailure(error)) {
+        console.log('[useAuthGuard] Network/timeout failure — keeping session, will re-check later');
+        return;
+      }
       // On error, if user exists in context, redirect to be safe
       if (user !== null) {
         console.log('[useAuthGuard] Error during auth check, redirecting to be safe');

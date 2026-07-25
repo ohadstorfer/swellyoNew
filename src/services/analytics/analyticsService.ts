@@ -27,6 +27,45 @@ class AnalyticsService {
   private swellyListCreatedTime: number | null = null;
 
   /**
+   * The SINGLE shared PostHog client for the whole app. BOTH the event-tracking
+   * paths in this service AND the React tree (`<PostHogProvider client={...}>`
+   * in App.tsx, which is what `usePostHog()` returns) use this exact instance —
+   * so there is ONE SDK and ONE session-replay recorder, not two.
+   *
+   * Session-replay config lives HERE and nowhere else (single source of truth).
+   * Constructed lazily but SYNCHRONOUSLY on first call: App.tsx reads it during
+   * the first render so the instance already exists when PostHogProvider mounts,
+   * which keeps the provider tree stable (no conditional mount → no remount).
+   * Returns null only when there is no API key (or on web, replay is disabled).
+   */
+  getClient(): PostHog | null {
+    if (!POSTHOG_API_KEY) return null;
+    if (!this.posthogInstance) {
+      this.posthogInstance = new PostHog(POSTHOG_API_KEY, {
+        host: POSTHOG_HOST,
+        // Native-only: PostHog session replay has no RN-web implementation.
+        enableSessionReplay: Platform.OS !== 'web',
+        // NOTE: all masking is intentionally OFF so replays are fully visible
+        // (text, images, sandboxed views) — a product choice to watch onboarding.
+        // Trade-off: bigger frames + any on-screen PII is recorded. If privacy or
+        // replay memory cost becomes a concern, flip maskAllTextInputs back on.
+        sessionReplayConfig: {
+          maskAllTextInputs: false,
+          maskAllImages: false,
+          maskAllSandboxedViews: false,
+          captureLog: false,
+          throttleDelayMs: 1000,
+        },
+        captureAppLifecycleEvents: true,
+        captureDeepLinks: true,
+        flushAt: 20, // Flush after 20 events
+        flushInterval: 30000, // Or flush every 30 seconds
+      });
+    }
+    return this.posthogInstance;
+  }
+
+  /**
    * Initialize PostHog
    */
   async initialize(userId?: string, userProperties?: Record<string, any>) {
@@ -42,46 +81,31 @@ class AnalyticsService {
     this.isInitializing = true;
 
     try {
-      // Check opt-out preference
-      const optOutValue = await AsyncStorage.getItem(ANALYTICS_OPT_OUT_KEY);
+      // The single client is created synchronously here (or already was, by
+      // App.tsx's first render). Opt-out no longer skips construction — the
+      // provider needs a stable instance — instead we disable capture via
+      // optOut() so an opted-out user records nothing.
+      const client = this.getClient();
+
       // Key stores whether analytics is enabled (true = opted in, false = opted out)
       // Default is opted in (true) when no value is stored
+      const optOutValue = await AsyncStorage.getItem(ANALYTICS_OPT_OUT_KEY);
       if (optOutValue !== null && JSON.parse(optOutValue) === false) {
         this.isOptedOut = true;
         this.isInitializing = false;
-        console.log('[Analytics] 🚫 User opted out of analytics — skipping PostHog init');
+        client?.optOut();
+        console.log('[Analytics] 🚫 User opted out of analytics — capture disabled');
         return;
       }
 
-      console.log('[Analytics] 🚀 Starting PostHog initialization...', {
+      console.log('[Analytics] 🚀 PostHog initializing...', {
         hasApiKey: !!POSTHOG_API_KEY,
         host: POSTHOG_HOST,
         timestamp: new Date().toISOString(),
       });
-      
-      // Create PostHog instance using constructor (v4.19.0 API)
-      this.posthogInstance = new PostHog(POSTHOG_API_KEY, {
-        host: POSTHOG_HOST,
-        enableSessionReplay: true,
-        // This instance initializes replay first at boot (App.tsx:97, before the
-        // PostHogProvider mounts), so it — not App.tsx — sets the native masking.
-        // Keep this in sync with App.tsx's sessionReplayConfig: all masking off
-        // so replays are fully visible (text, images, sandboxed views).
-        sessionReplayConfig: {
-          maskAllTextInputs: false,
-          maskAllImages: false,
-          maskAllSandboxedViews: false,
-          captureLog: false,
-          throttleDelayMs: 1000,
-        },
-        captureAppLifecycleEvents: true, // Fixed: should be captureAppLifecycleEvents, not captureApplicationLifecycleEvents
-        captureDeepLinks: true,
-        flushAt: 20, // Flush after 20 events
-        flushInterval: 30000, // Or flush every 30 seconds
-      });
 
       if (userId) {
-        this.posthogInstance.identify(userId, userProperties);
+        client?.identify(userId, userProperties);
         if (__DEV__) console.log('[Analytics] 👤 User identified:', userId, userProperties);
       }
 
@@ -91,7 +115,7 @@ class AnalyticsService {
         queuedEvents: this.eventQueue.length,
         timestamp: new Date().toISOString(),
       });
-      
+
       // Flush queued events
       this.flushEventQueue();
     } catch (error) {
@@ -233,6 +257,10 @@ class AnalyticsService {
   async setOptOut(optedOut: boolean) {
     this.isOptedOut = optedOut;
     await AsyncStorage.setItem(ANALYTICS_OPT_OUT_KEY, JSON.stringify(!optedOut));
+    // Actually stop/resume capture on the client (incl. session replay) — a flag
+    // alone would keep the recorder running after a runtime opt-out.
+    if (optedOut) this.posthogInstance?.optOut();
+    else this.posthogInstance?.optIn();
     console.log(`[Analytics] ${optedOut ? '🚫 Opted out' : '✅ Opted back in'}`);
 
     // Sync to Supabase so preference survives reinstalls and follows user across devices

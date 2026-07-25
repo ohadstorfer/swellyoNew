@@ -57,6 +57,7 @@ import { Images } from '../../assets/images';
 import { MainHeader } from '../../components/MainHeader';
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
 import { getStorageThumbUrl } from '../../services/media/imageService';
+import { toWidthThumbUrl } from '../../services/media/thumbnails';
 import Thumb from '../../components/Thumb';
 import { neighbourHeroUrls, neighbourAvatarUrls } from './deckPrefetch';
 import { isNearEnd, isAppend } from './exploreDeckPagination';
@@ -192,6 +193,23 @@ const STATUS_BADGE: Record<
 // warmed URL is the one <Thumb> actually requests.
 const AVATAR_THUMB_PX = 96;
 
+/** Width the deck/list cards render their hero at — must match <Thumb widthPx>. */
+const HERO_THUMB_PX = 1280;
+
+/**
+ * Prefetch the exact hero URL the card renders. Warming the RAW hero_image_url
+ * (what this did before) fetched the full-size original — up to 2048px — under a
+ * URL the UI never requests: the download was pure waste on every swipe, and each
+ * decoded original sat in expo-image's uncapped memory cache. Mirrors
+ * warmAvatarThumbs: warm what you will actually show.
+ */
+const warmHeroThumbs = (heroUrls: string[]) => {
+  heroUrls.forEach(u => {
+    const t = toWidthThumbUrl(u, HERO_THUMB_PX) ?? u;
+    CachedImage.prefetch(t);
+  });
+};
+
 /** Prefetch the exact URLs <Thumb size={AVATAR_THUMB_PX}> will render. */
 const warmAvatarThumbs = (avatarUrls: string[]) => {
   avatarUrls.forEach(u => {
@@ -224,7 +242,7 @@ const TripCard: React.FC<{
         {trip.hero_image_url ? (
           <Thumb
             uri={trip.hero_image_url}
-            widthPx={1280}
+            widthPx={HERO_THUMB_PX}
             style={styles.cardImageBg}
             contentFit="cover"
             cachePolicy="memory-disk"
@@ -435,7 +453,7 @@ const ExploreTripCard: React.FC<{
       {trip.hero_image_url ? (
         <Thumb
           uri={trip.hero_image_url}
-          widthPx={1280}
+          widthPx={HERO_THUMB_PX}
           placeholder={heroThumb ? { uri: heroThumb } : undefined}
           placeholderContentFit="cover"
           style={styles.cardImageBg}
@@ -632,7 +650,7 @@ const TripDeck: React.FC<{
       if (i == null) continue;
       for (let k = i; k <= i + 2; k++) {
         const t = liveTrips[k];
-        if (t) { livePrefetch(t.id); if (t.hero_image_url) CachedImage.prefetch(t.hero_image_url); }
+        if (t) { livePrefetch(t.id); if (t.hero_image_url) warmHeroThumbs([t.hero_image_url]); }
       }
       warmAvatarThumbs(neighbourAvatarUrls(liveTrips, liveMeta, i));
     }
@@ -653,7 +671,7 @@ const TripDeck: React.FC<{
   // Warm the first card + right neighbours as soon as the deck mounts/changes —
   // heroes AND avatar thumbs, so the whole card appears at once.
   useEffect(() => {
-    neighbourHeroUrls(trips, 0).forEach(u => { CachedImage.prefetch(u); });
+    warmHeroThumbs(neighbourHeroUrls(trips, 0));
     warmAvatarThumbs(neighbourAvatarUrls(trips, meta, 0));
   }, [trips, meta]);
 
@@ -765,7 +783,7 @@ const TripDeck: React.FC<{
         )}
         onMomentumScrollEnd={e => {
           const idx = Math.round(e.nativeEvent.contentOffset.x / DECK_ITEM_W);
-          neighbourHeroUrls(trips, idx).forEach(u => { CachedImage.prefetch(u); });
+          warmHeroThumbs(neighbourHeroUrls(trips, idx));
           warmAvatarThumbs(neighbourAvatarUrls(trips, meta, idx));
           if (isNearEnd(idx, trips.length)) onEndReachedNearby?.();
         }}

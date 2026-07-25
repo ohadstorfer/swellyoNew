@@ -1042,6 +1042,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           handleInboxChange(ids);
         }, 400);
       });
+    }).catch((e) => {
+      // With the global fetch timeout (2026-07-23) a hung getUser now rejects
+      // instead of hanging forever — swallow it or it's an unhandled rejection.
+      // Consequence: inbox subscribe silently skipped this session.
+      console.warn('[MessagingProvider] getUser failed; inbox subscribe skipped:', e?.message);
     });
 
     return () => {
@@ -1077,6 +1082,11 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           );
         }
       }
+    }).catch((e) => {
+      // With the global fetch timeout (2026-07-23) a hung getUser now rejects
+      // instead of hanging forever — swallow it or it's an unhandled rejection.
+      // Consequence: presence tracking + new-conversation subscribe skipped.
+      console.warn('[MessagingProvider] getUser failed; presence/new-conv subscribe skipped:', e?.message);
     });
 
     // Load conversations

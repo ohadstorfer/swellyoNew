@@ -37,9 +37,10 @@ Sentry.init({
   // Enable Logs
   enableLogs: true,
 
-  // Record a replay only when an error happens — no blanket session recording (cost/data).
-  replaysSessionSampleRate: 0,
-  replaysOnErrorSampleRate: 1,
+  // Session replay is handled by PostHog only (one recorder). Sentry's mobile
+  // replay is intentionally NOT enabled — running both meant two full-screen
+  // screenshot+encode pipelines per second, a memory/main-thread cost with no
+  // added value since PostHog already records the session. (Removed 2026-07-24.)
 
   // Known-harmless noise — never actionable. Drop before it counts against quota.
   // Add app-specific noise here only once real Sentry data shows a clear, harmless pattern.
@@ -52,8 +53,7 @@ Sentry.init({
     ...(isExpoGo ? [/Cannot find native module/] : []),
   ],
 
-  // mobileReplayIntegration is a native module — skip in Expo Go and on web (no-op there).
-  integrations: isExpoGo || Platform.OS === 'web' ? [] : [Sentry.mobileReplayIntegration()],
+  // No Sentry replay integration — PostHog is the single session-replay recorder.
 
   // uncomment the line below to enable Spotlight (https://spotlightjs.com)
   // spotlight: __DEV__,
@@ -64,8 +64,7 @@ const MaybeKeyboardProvider = isExpoGo
   ? ({ children }: { children: React.ReactNode }) => <>{children}</>
   : require('react-native-keyboard-controller').KeyboardProvider;
 
-const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY || '';
-const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST || 'https://app.posthog.com';
+// PostHog config now lives with the single client in analyticsService.
 const isMVPMode = process.env.EXPO_PUBLIC_MVP_MODE === 'true';
 
 // Force LTR layout — app is English-only
@@ -121,6 +120,14 @@ export default Sentry.wrap(function App() {
   // loads). PostHog autocapture is already off (captureScreens/native tracking
   // false), so it never needed the gate — mount it unconditionally and keep the
   // tree stable. isMVPMode is a constant, so its branch never swaps at runtime.
+  // The ONE shared PostHog client (event tracking + this provider + usePostHog
+  // all use this exact instance). Created synchronously here on first render, so
+  // the provider mounts with a stable client — no second SDK, no second replay
+  // recorder. Null only when there's no API key: then skip the provider entirely.
+  // Both branches depend on constants (API key presence), so the tree never swaps
+  // at runtime — no remount storm (see the note below on why that matters).
+  const posthogClient = analyticsService.getClient();
+
   const appTree = (
     <OnboardingProvider>
       <UserProfileProvider>
@@ -141,38 +148,20 @@ export default Sentry.wrap(function App() {
     <NavigationContainer independent={true} ref={navigationRef}>
       <PostHogErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <PostHogProvider
-            apiKey={POSTHOG_API_KEY}
-            autocapture={{ captureScreens: false }}
-            options={{
-              host: POSTHOG_HOST,
-              enableSessionReplay: Platform.OS !== 'web',
-              sessionReplayConfig: {
-                // PostHog masks everything on RN by default (all text + images),
-                // which makes replays unreadable grey boxes. We disable all masking
-                // so replays are fully visible — text, images, and sandboxed views.
-                // NOTE: this config must stay in sync with the analyticsService
-                // PostHog instance (src/services/analytics/analyticsService.ts),
-                // which initializes replay first at boot and would otherwise win
-                // with default (fully-masked) settings.
-                maskAllTextInputs: false,
-                maskAllImages: false,
-                maskAllSandboxedViews: false,
-                captureLog: false,
-                throttleDelayMs: 1000,
-              },
-              captureAppLifecycleEvents: true,
-              captureDeepLinks: true,
-              enableNativeNavigationTracking: false, // Disable navigation tracking to prevent useNavigationState errors
-              debug: __DEV__, // Enable debug mode in development
-            }}
-          >
-            {isMVPMode ? (
-              <PostHogSurveyProvider>{appTree}</PostHogSurveyProvider>
-            ) : (
-              appTree
-            )}
-          </PostHogProvider>
+          {posthogClient ? (
+            <PostHogProvider
+              client={posthogClient}
+              autocapture={{ captureScreens: false }}
+            >
+              {isMVPMode ? (
+                <PostHogSurveyProvider>{appTree}</PostHogSurveyProvider>
+              ) : (
+                appTree
+              )}
+            </PostHogProvider>
+          ) : (
+            appTree
+          )}
         </QueryClientProvider>
       </PostHogErrorBoundary>
     </NavigationContainer>
