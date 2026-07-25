@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Trips — Rename applied + Eyal's notes</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+
+  .banner{background:var(--ok-bg);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin-bottom:32px}
+  .banner b{color:var(--ok)}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+
+  p{margin-bottom:12px}
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  .names{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .names code{font-size:13px;padding:4px 10px;background:var(--cyan-tint);
+    color:var(--cyan-dark);border-radius:6px}
+
+  .item{border-left:3px solid var(--line);padding:2px 0 2px 14px;margin-bottom:18px}
+  .item.warn{border-left-color:var(--open);background:var(--open-bg);
+    border-radius:0 8px 8px 0;padding:12px 14px}
+  .item h3{font-size:15px;font-weight:640;margin-bottom:6px}
+  .item p:last-child{margin-bottom:0}
+
+  .heb{direction:rtl;text-align:right;font-size:15px;background:var(--panel);
+    border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:8px}
+  .tr{font-style:italic;color:var(--muted);margin-bottom:8px}
+
+  table{border-collapse:collapse;width:100%;font-size:13.5px;margin-bottom:14px}
+  th{text-align:left;background:var(--panel);padding:8px 12px;font-size:11.5px;
+    text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:640;
+    border-bottom:1px solid var(--line)}
+  td{padding:7px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  td:first-child{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+
+  .foot{margin-top:30px;font-size:13.5px;color:var(--muted);background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Rename applied + Eyal's notes</h1>
+  <p class="sub">24 July 2026</p>
+
+  <div class="banner">
+    <b>Done and live.</b> The renames are applied to the production database, re-tested
+    end-to-end, and carried through the six specs and the schema page.
+  </div>
+
+  <h2>The renames</h2>
+  <div class="names">
+    <code>organized_trip_requirements</code>
+    <code>organized_trip_travelers_documents</code>
+    <code>organized_trip_operator_documents</code>
+    <code>organized_trip_medical_forms</code>
+  </div>
+  <p>Plus both views and the counts function. All tables were empty and no client code touches
+  them yet, so this was a pure rename — no data moved.</p>
+
+  <h2>Two things I changed from your list</h2>
+
+  <div class="item">
+    <h3><code>skip-at-onboarding</code> → <code>skip_at_onboarding</code></h3>
+    <p>Hyphens in a column name force <code>"quoted identifiers"</code> in every single query,
+    forever. Same name, underscores.</p>
+  </div>
+
+  <div class="item">
+    <h3>The view had to be rebuilt, not renamed</h3>
+    <p>A view expands <code>select r.*</code> into a fixed column list when it is created, so
+    renaming the table's column left the view still exposing <code>timing</code>. The first
+    attempt failed on exactly that — and usefully proved that each migration file runs as one
+    transaction, because the whole thing rolled back cleanly. Rebuilt the view and it passed.</p>
+  </div>
+
+  <p>I re-ran the full end-to-end test after renaming: identical results, all ten assertions
+  still pass, nothing persisted.</p>
+
+  <h2>Eyal's notes, translated</h2>
+
+  <div class="item">
+    <h3>On <code>req_type</code></h3>
+    <div class="heb">מדיקל יהיה אקנולדג׳? אולי צריך להיות fill</div>
+    <p class="tr">"Will medical be an acknowledge? Maybe it should be <code>fill</code>."</p>
+    <p>He is right that it is a poor fit. <code>acknowledge</code> means "I read this and agree"
+    — that is the waiver. Medical is a form you type answers into. Adding a fourth type
+    <code>fill</code> is a one-line constraint change and would stop medical borrowing a type
+    that does not describe it. <b>I would do it.</b></p>
+  </div>
+
+  <div class="item">
+    <h3>On <code>title</code></h3>
+    <div class="heb">מה זה?</div>
+    <p class="tr">"What is this?"</p>
+    <p>It is the label the traveler reads on the row — "Passport", "Sign waiver", "Travel
+    insurance". It exists because of custom requirements: for the six built-in kinds we could
+    hardcode the label, but when an operator adds their own item they have to type its name
+    somewhere. <code>help_text</code> is the optional line underneath.</p>
+  </div>
+
+  <div class="item">
+    <h3>On the passport fields</h3>
+    <div class="heb">לא הבנתי מה זה</div>
+    <p class="tr">"I didn't understand what this is."</p>
+    <p>When the 30-day purge deletes a passport photo, we keep three typed values off it: name
+    as printed, nationality, expiry date. Two reasons. A repeat traveler does not retype them
+    next trip — they just retake the photo. And we can warn someone whose passport expires
+    before their trip. The photo is gone; three text fields survive.</p>
+  </div>
+
+  <div class="item warn">
+    <h3>On the acknowledgements table — needs your decision</h3>
+    <div class="heb">אמרנו שמוחקים את כל זה</div>
+    <p class="tr">"We said we're deleting all of this."</p>
+    <p><b>I did not drop it, and I want to flag why before we do.</b> That table is the only
+    record that a specific person agreed to a specific waiver version, with their name and a
+    timestamp. It is the entire legal output of the waiver feature — delete it and someone signs
+    a waiver and nothing anywhere remembers it.</p>
+    <p>If the intent is to fold it into <code>organized_trip_travelers_documents</code> (one row
+    per traveler per requirement, whether it is a file, an agreement, or a filled form), that is
+    a clean design and it pairs naturally with his <code>fill</code> idea — but it needs
+    <code>storage_path</code> to become nullable and three columns added. Tell me which and I
+    will do it in one migration.</p>
+  </div>
+
+  <div class="item">
+    <h3>On payment events</h3>
+    <div class="heb">אין טעם ליצור עדיין, נחשוב על זה שוב לקראת יצירה</div>
+    <p class="tr">"No point creating it yet, we'll think about it again closer to building."</p>
+    <p>Already the case — nothing payment-related was created.</p>
+  </div>
+
+  <h2>Open, in one place</h2>
+  <table>
+    <thead><tr><th>Question</th><th>Who</th></tr></thead>
+    <tbody>
+      <tr><td>Add a 4th req_type <code>fill</code> for medical?</td><td>Eyal + Ohad</td></tr>
+      <tr><td>Drop acknowledgements — and where does the waiver signature live then?</td><td>Eyal + Ohad</td></tr>
+      <tr><td>Rename the storage bucket for consistency?</td><td>Ohad</td></tr>
+      <tr><td>Which requirements are must_have vs skippable by default</td><td>design partners</td></tr>
+      <tr><td>Everything payment</td><td>later</td></tr>
+    </tbody>
+  </table>
+
+  <p class="foot">
+    One loose end: the storage bucket is still <code>group-trip-documents</code> while the tables
+    are <code>organized_trip_*</code>. It is empty, so renaming is cheap, but bucket naming was
+    not in your list so I left it. It can go in the same pass as the acknowledgements decision.
+  </p>
+</div>
+</body>
+</html>

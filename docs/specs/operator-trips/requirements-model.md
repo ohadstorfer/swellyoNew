@@ -1,18 +1,25 @@
 # Operator Trips — Requirements Model
 
+> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
+> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
+> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
+> yet because it is the only record of who signed which waiver version. The storage bucket is
+> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+
+
 **Data model: extends `hosting_style='C'` group trips. Overrides SPEC.md §5.**
 
-**Status:** implementation spec, written 2026-07-22, re-keyed 2026-07-22 to the extend-group-trips architecture, state-derivation decision applied 2026-07-23.
+**Status:** implementation spec, written 2026-07-22, re-keyed 2026-07-22 to the extend-group-trips architecture, state-derivation decision applied 2026-07-23. Table decisions of 2026-07-23 applied: waiver versions generalized into `organized_trip_operator_documents`; `group_trip_document_reviews` removed — the reject reason lives on the `organized_trip_travelers_documents` row.
 **Sources:** `SPEC.md` (root); `docs/operator-trips-workbench.html` features `onb-req`, `skip-task`, `tasks`, `chase`, `visa`, `passport`, `insurance`, `flights` (newer than SPEC.md and wins); `docs/superpowers/HANDOFF-notifications.md`.
 **Scope:** the requirements model only. Payments, document storage, and the approval UI are separate specs.
 
 ## 0. Architecture
 
-An operator trip is **not** a separate table. It is a `group_trips` row with `hosting_style = 'C'`, which already exists and already means "operator". We extend it: a few operator-only columns on `group_trips`, plus new `group_trip_*` child tables. "Operator" = the host of a `hosting_style='C'` trip. The roster is the existing `group_trip_participants` table. There is no booking concept.
+An operator trip is **not** a separate table. It is a `group_trips` row with `hosting_style = 'C'`, which already exists and already means "operator". We extend it: a few operator-only columns on `group_trips`, plus new `organized_trip_*` child tables. "Operator" = the host of a `hosting_style='C'` trip. The roster is the existing `group_trip_participants` table. There is no booking concept.
 
 ## 1. Summary
 
-An operator trip has one list of **requirements**: things a traveler must do. Each requirement has a type (upload, acknowledge, or pay) and a timing (must-have, or skippable until a date). "Open tasks" is not a table — it is the traveler's view of the requirements they have not finished yet.
+An operator trip has one list of **requirements**: things a traveler must do. Each requirement has a type (upload, acknowledge, or pay) and a `skip_at_onboarding` value (must-have, or skippable until a date). "Open tasks" is not a table — it is the traveler's view of the requirements they have not finished yet.
 
 ## 2. Decisions this is built on
 
@@ -20,12 +27,12 @@ These are settled. Do not re-open them while building.
 
 - **One list only.** There are requirements. There are no operator-authored "tasks". `operator_trip_tasks` from SPEC.md §6 is **dropped** and never created.
 - **Three types:** `upload`, `acknowledge`, `pay`. The waiver is an `acknowledge`. Payment due is a `pay`.
-- **Two timings:** `must_have` (no Skip button) or `skippable` (Skip button + a deadline).
+- **Two `skip_at_onboarding` values:** `must_have` (no Skip button) or `skippable` (Skip button + a deadline).
 - **Deadlines are relative to departure.** We store "30 days before departure". We show the real date. Copying a trip or moving its dates keeps deadlines correct.
 - **Default list + custom items.** The operator starts from passport, waiver, medical, insurance, visa, flights. They can deselect any of them and add their own. Custom items also pick a type.
 - **Visa is per trip, not per traveler.** No nationality dataset.
 - **Requirements can be added after publish.** Everyone already joined gets the obligation and a notification.
-- **Done = approved by the operator.** States shown to the traveler: `not_started`, `submitted`, `approved`, `overdue`. A rejected upload goes back to `not_started` with the reject reason attached.
+- **Done = approved by the operator.** States shown to the traveler: `not_started`, `submitted`, `approved`, `rejected`, `overdue`. A rejected upload shows red with the operator's note; re-uploading replaces the row and makes it `submitted` again.
 - **The deposit secures the spot.** Not documents, not approval. Requirements never block joining. (Payment timing and method will be decided later on.)
 - **A `pay` requirement reads its state from the payment ledger.** It never stores its own done flag. (Payment timing and method will be decided later on.)
 - **State is never stored. It is always derived** from the evidence tables (documents, acknowledgements, medical form, ledger). Decided 2026-07-23.
@@ -40,10 +47,10 @@ These are settled. Do not re-open them while building.
 |---|---|
 | `group_trips` | `id`, `host_id`, `hosting_style` (`'C'` = operator), `start_date` (departure). **Operator-shell columns (deposit config, etc.) are deferred** — nothing is added to `group_trips` until payment timing and method are decided (payment timing and method will be decided later on). When they come, it is a single `deposit_amount` in canonical USD, reusing the existing `budget_currency` + frozen `budget_fx_rate` — no `deposit_currency`. Decided 2026-07-23. |
 | `group_trip_participants` | The roster: `trip_id`, `user_id`, `role` (`host`/`member`). Travelers are the `member` rows; the operator is a `host` row. |
-| `group_trip_documents` | The uploaded file for an `upload` requirement (built by the documents spec). **The row is the state:** no row = not started, row = submitted, `approved_at` set = approved. |
-| `group_trip_document_reviews` | Audit log of approve/reject actions (built by the approval spec). A `rejected` row newer than any current document supplies the reject reason. |
-| `group_trip_acknowledgements` | One row per (requirement, traveler) agree action — the waiver and custom "I agree" items (built by the waiver/medical spec; generalizes `group_trip_waiver_agreements`). Carries `agreed_name`, `agreed_at`, and for the waiver `waiver_version_id` + `agreed_version`. Row = done. |
-| `group_trip_medical_forms` | The traveler's medical form (built by the waiver/medical spec; renamed from `group_trip_medical`). `completed_at` set = done. |
+| `organized_trip_travelers_documents` | The uploaded file for an `upload` requirement (built by the documents spec). **The row is the state:** no row = not started, row = submitted, `approved_at` set = approved, `rejected_at` set = rejected — with the operator's note in `approbation_note`. Reject deletes the file but keeps the row; re-upload replaces the row. |
+| `organized_trip_operator_documents` | Operator-published materials — versioned, append-only (built by the waiver/medical spec). `kind = 'waiver'` first; itineraries and info packs later. A new upload is always a new row. |
+| `group_trip_acknowledgements` | One row per (requirement, traveler) agree action — the waiver and custom "I agree" items (built by the waiver/medical spec; generalizes `group_trip_waiver_agreements`). Carries `agreed_name`, `agreed_at`, and for the waiver `operator_document_id` (→ `organized_trip_operator_documents`) + `agreed_version`. Row = done. |
+| `organized_trip_medical_forms` | The traveler's medical form (built by the waiver/medical spec; renamed from `group_trip_medical`). `completed_at` set = done. |
 | `group_trip_payment_events` | The append-only ledger a `pay` requirement reads (built by the payments spec; payment timing and method will be decided later on). |
 | `is_trip_host(p_trip_id)` | Live `SECURITY DEFINER` helper. **Never modify it — it gates six live tables.** New helpers may call it. |
 
@@ -91,13 +98,13 @@ grant  execute on function public.is_trip_participant(uuid) to authenticated;
 -- Ohad; not required for v1.
 
 -- ── 2. The requirement definition. One row per requirement per trip.
-create table if not exists public.group_trip_requirements (
+create table if not exists public.organized_trip_requirements (
   id                    uuid primary key default gen_random_uuid(),
   trip_id               uuid not null references public.group_trips(id) on delete cascade,
   kind                  text not null check (kind in
                           ('passport','waiver','medical','insurance','visa','flights','custom')),
   req_type              text not null check (req_type in ('upload','acknowledge','pay')),
-  timing                text not null check (timing in ('must_have','skippable')),
+  skip_at_onboarding    text not null check (skip_at_onboarding in ('must_have','skippable')),
   title                 text not null,                 -- shown to the traveler
   help_text             text,                          -- optional one-liner
   deadline_days_before  integer check (deadline_days_before >= 0),
@@ -107,34 +114,34 @@ create table if not exists public.group_trip_requirements (
   updated_at            timestamptz not null default now(),
 
   -- must-have has no deadline. skippable must have one.
-  constraint group_trip_req_deadline_rule check (
-    (timing = 'skippable' and deadline_days_before is not null) or
-    (timing = 'must_have'  and deadline_days_before is null)
+  constraint organized_trip_req_deadline_rule check (
+    (skip_at_onboarding = 'skippable' and deadline_days_before is not null) or
+    (skip_at_onboarding = 'must_have'  and deadline_days_before is null)
   )
 );
 
 -- A known kind can only appear once per trip. Custom items can repeat.
-create unique index if not exists uq_group_trip_req_kind_per_trip
-  on public.group_trip_requirements (trip_id, kind) where kind <> 'custom';
-create index if not exists idx_group_trip_req_trip
-  on public.group_trip_requirements (trip_id, sort_order) where is_active;
+create unique index if not exists uq_organized_trip_req_kind_per_trip
+  on public.organized_trip_requirements (trip_id, kind) where kind <> 'custom';
+create index if not exists idx_organized_trip_req_trip
+  on public.organized_trip_requirements (trip_id, sort_order) where is_active;
 
 -- ── 3. There is NO per-traveler state table. State is always derived at read
 --      time from the evidence tables (see §3.4):
---        upload      → group_trip_documents (the row is the state)
+--        upload      → organized_trip_travelers_documents (the row is the state)
 --        acknowledge → group_trip_acknowledgements (row = done)
---        medical     → group_trip_medical_forms (completed_at set = done)
+--        medical     → organized_trip_medical_forms (completed_at set = done)
 --        pay         → the payment ledger, via operator_requirement_pay_state()
 --      Decided 2026-07-23. Nothing to migrate, nothing to keep in sync.
 
 -- ── 4. RLS. Reads are direct. All writes go through the RPCs in §3.4.
-alter table public.group_trip_requirements enable row level security;
+alter table public.organized_trip_requirements enable row level security;
 
-revoke all on public.group_trip_requirements from anon, authenticated;
-grant  select on public.group_trip_requirements to authenticated;
+revoke all on public.organized_trip_requirements from anon, authenticated;
+grant  select on public.organized_trip_requirements to authenticated;
 
-drop policy if exists group_trip_req_select on public.group_trip_requirements;
-create policy group_trip_req_select on public.group_trip_requirements
+drop policy if exists organized_trip_req_select on public.organized_trip_requirements;
+create policy organized_trip_req_select on public.organized_trip_requirements
   for select using (
     public.is_trip_host(trip_id) or public.is_trip_participant(trip_id)
   );
@@ -148,7 +155,7 @@ A relative deadline is stored as `deadline_days_before`. It becomes a real date 
 -- supabase/migrations/20260722000200_operator_requirements_reads.sql
 
 -- ── 1. Resolved view: adds the real due date.
-create or replace view public.group_trip_requirements_resolved as
+create or replace view public.organized_trip_requirements_resolved as
 select
   r.*,
   t.start_date as departure_date,
@@ -156,11 +163,11 @@ select
     when r.deadline_days_before is null or t.start_date is null then null
     else (t.start_date - make_interval(days => r.deadline_days_before))::date
   end as due_date
-from public.group_trip_requirements r
+from public.organized_trip_requirements r
 join public.group_trips t on t.id = r.trip_id;
 
-alter view public.group_trip_requirements_resolved set (security_invoker = on);
-grant select on public.group_trip_requirements_resolved to authenticated;
+alter view public.organized_trip_requirements_resolved set (security_invoker = on);
+grant select on public.organized_trip_requirements_resolved to authenticated;
 
 -- ── 2. Pay state. v1 stub — the payments spec replaces the body with a read of
 --      group_trip_payment_events. The signature never changes.
@@ -183,13 +190,13 @@ grant  execute on function public.operator_requirement_pay_state(uuid, uuid, uui
 --      conditions belong to the sibling specs that own those tables.
 create or replace function public.operator_trip_my_requirements(p_trip_id uuid)
 returns table (
-  requirement_id uuid, kind text, req_type text, timing text, title text,
+  requirement_id uuid, kind text, req_type text, skip_at_onboarding text, title text,
   help_text text, due_date date, effective_state text, submitted_at timestamptz,
   reject_reason text, document_id uuid
 ) language sql stable security definer
 set search_path = public, extensions, pg_temp as $$
   select
-    r.id, r.kind, r.req_type, r.timing, r.title, r.help_text, r.due_date,
+    r.id, r.kind, r.req_type, r.skip_at_onboarding, r.title, r.help_text, r.due_date,
     case
       -- pay: always the ledger (payment timing and method will be decided later on)
       when r.req_type = 'pay'
@@ -204,40 +211,32 @@ set search_path = public, extensions, pg_temp as $$
         case when a.id is not null then 'approved'
              when r.due_date is not null and r.due_date < current_date then 'overdue'
              else 'not_started' end
-      -- upload: the document row is the evidence
+      -- upload: the document row is the evidence, including reject.
+      -- Reject keeps the row (file deleted, note kept); re-upload replaces the row.
       when d.id is not null and d.approved_at is not null then 'approved'
+      when d.id is not null and d.rejected_at is not null then 'rejected'
       when d.id is not null then 'submitted'
       when r.due_date is not null and r.due_date < current_date then 'overdue'
       else 'not_started'
     end as effective_state,
     coalesce(d.created_at, a.agreed_at, m.completed_at) as submitted_at,
-    rej.reason as reject_reason,   -- only set when there is no newer document
+    d.approbation_note as reject_reason,   -- only meaningful when rejected_at is set
     d.id as document_id
-  from public.group_trip_requirements_resolved r
-  left join public.group_trip_documents d
+  from public.organized_trip_requirements_resolved r
+  left join public.organized_trip_travelers_documents d
     on d.requirement_id = r.id and d.user_id = auth.uid()
-  -- for the waiver, the row must also match the CURRENT waiver version
-  -- (join condition owned by the waiver/medical spec)
+  -- for the waiver, the row must also match the CURRENT waiver document
+  -- (kind='waiver' in organized_trip_operator_documents; join condition owned by the
+  -- waiver/medical spec)
   left join public.group_trip_acknowledgements a
     on a.requirement_id = r.id and a.user_id = auth.uid()
-  left join public.group_trip_medical_forms m
+  left join public.organized_trip_medical_forms m
     on m.trip_id = r.trip_id and m.user_id = auth.uid()
-  -- rejected = no current document + a newer 'rejected' audit row.
-  -- The effective state stays not_started; the reason rides along.
-  left join lateral (
-    select rv.reason
-    from public.group_trip_document_reviews rv
-    where rv.requirement_id = r.id and rv.user_id = auth.uid()
-      and rv.decision = 'rejected'
-      and rv.created_at > coalesce(d.created_at, '-infinity'::timestamptz)
-    order by rv.created_at desc
-    limit 1
-  ) rej on true
   where r.trip_id = p_trip_id
     and r.is_active
     and public.is_trip_participant(p_trip_id)
   order by
-    case when r.timing = 'must_have' then 0 else 1 end,
+    case when r.skip_at_onboarding = 'must_have' then 0 else 1 end,
     r.due_date nulls first,
     r.sort_order;
 $$;
@@ -249,9 +248,9 @@ Write RPCs to add in the same migration. All are `SECURITY DEFINER`, all check t
 
 | RPC | Who | What it does |
 |---|---|---|
-| *(no submit RPC)* | traveler | An upload is submitted by writing the `group_trip_documents` row itself (documents spec). There is no separate submit RPC — the document row is the state. |
+| *(no submit RPC)* | traveler | An upload is submitted by writing the `organized_trip_travelers_documents` row itself (documents spec). There is no separate submit RPC — the document row is the state. |
 | `operator_requirement_acknowledge(p_requirement_id, p_full_name)` | traveler | Inserts the `group_trip_acknowledgements` row (`trip_id` from the requirement, `user_id = auth.uid()`; for the waiver, against the current waiver version). Only for `acknowledge`. |
-| *(no review RPC here)* | operator | Approve/reject are the RPCs in approval-review.md. They operate on `group_trip_documents`: approve sets `approved_at`; reject deletes the row and writes the `group_trip_document_reviews` audit entry, so the item re-opens as `not_started` with the reason attached. |
+| *(no review RPC here)* | operator | Approve/reject are the RPCs in approval-review.md. They operate on `organized_trip_travelers_documents`: approve sets `approved_at`; reject deletes the **file** but keeps the row, setting `rejected_at` + `approbation_note`, so the item shows as `rejected` with the note. Re-uploading replaces the row. |
 | `operator_trip_requirement_matrix(p_trip_id)` | operator | One row per (`member` × active requirement) with the same derived `effective_state`, for the dashboard and the per-traveler page. Derives states exactly like `operator_trip_my_requirements`. |
 
 Skipping writes nothing. There is no `skipped` state and no skip timestamp. A skipped item is simply a requirement with no evidence row and a due date in the future.
@@ -268,7 +267,7 @@ A new step in the operator wizard (`hosting_style='C'`), placed after the trip b
    - *When:* "Must have — during onboarding" or "Can skip until…".
    - *Deadline* (only when skippable): a number of days before departure. The sheet always shows the resolved real date under it, e.g. "30 days before departure — 12 Oct 2026".
 4. **Add a custom item:** title, optional help text, type (upload / acknowledge / pay), then the same When control.
-5. The step writes nothing until the trip is published. Draft state lives in the wizard state object, same pattern as `CreateTripFlowA.tsx` (`WIZARD_STATE_VERSION` + AsyncStorage draft). On publish, insert one `group_trip_requirements` row per selected item.
+5. The step writes nothing until the trip is published. Draft state lives in the wizard state object, same pattern as `CreateTripFlowA.tsx` (`WIZARD_STATE_VERSION` + AsyncStorage draft). On publish, insert one `organized_trip_requirements` row per selected item.
 
 Defaults for which items are must-have vs skippable: **OPEN — needs the design partners.** Until they answer, ship all six as skippable with a deadline the operator sets, except passport and waiver, which the workbench already marks as required parts of onboarding.
 
@@ -303,7 +302,7 @@ Row copy by state:
 | `overdue` | Same, in red, "was due 12 Oct". |
 | `submitted` | "Waiting for the operator." No action. |
 | `approved` | Moves out of the Open panel into the trip wallet / medical card. |
-| `not_started` + `reject_reason` | Rejected: red, the operator's reason if they gave one, and the action button again. |
+| `rejected` | Red, the operator's note (`approbation_note`) if they wrote one, and the action button again. |
 
 ## 6. State machine for one requirement, per traveler
 
@@ -323,7 +322,7 @@ Row copy by state:
 
 Rules:
 
-- **No state above is stored as a status column.** `submitted` and `approved` live on the document row (`approved_at` null vs set); `rejected` is the absence of a document row plus the newer audit entry in `group_trip_document_reviews` (it reads back as `not_started` with the reject reason attached); acknowledge and medical items are done the moment their evidence row exists.
+- **No state above is stored as a status column.** `submitted` and `approved` live on the document row (`approved_at` null vs set); `rejected` also lives on the document row (`rejected_at` set, file already deleted, reason in `approbation_note`) — the traveler's re-upload replaces the row and clears it; acknowledge and medical items are done the moment their evidence row exists.
 - `overdue` is **derived**, never stored. It is `not_started` plus a due date in the past.
 - `pay` requirements never enter this machine. Their state is computed from the ledger every time it is read. (Payment timing and method will be decided later on.)
 - Approval is quality control only. Nothing in the trip depends on it.
@@ -351,7 +350,7 @@ Because an operator trip **is** a `group_trips` row, the operator trip id goes s
 
 | Type | To | Priority | Fired by |
 |---|---|---|---|
-| `operator_requirement_added` | every `member` | 1 | trigger on insert into `group_trip_requirements` |
+| `operator_requirement_added` | every `member` | 1 | trigger on insert into `organized_trip_requirements` |
 | `operator_requirement_rejected` | that traveler | 0 | the reject RPC in approval-review.md |
 | `operator_requirement_overdue` | that traveler | 0 | daily scan |
 | `operator_requirement_overdue_operator` | the operator | 1 | daily scan |
@@ -399,6 +398,6 @@ Nothing here has an answer yet. Do not guess.
 5. **Reminder cadence and quiet hours.** How many reminders, how far ahead, once or repeatedly to the operator. — needs Eyal & Ohad.
 6. **Approval queue is new scope not in SPEC.md.** — needs Eyal.
 7. **What happens if the operator never reviews?** Decided: nothing automatic. Not decided: whether that is acceptable at departure. — unowned.
-8. **Does the rejected file survive a reclaim?** Retention says do not keep extra copies. — unowned, belongs to the documents spec.
+8. ~~Does the rejected file survive a reclaim?~~ **Resolved 2026-07-23:** no — the file is deleted immediately on reject; the row and the note survive.
 9. **Does anything else belong in the Open panel?** An operator wanting to chase "tell us your arrival time" has only chat today. — watch the design partners.
 10. **Per-trip visa flag expires once explore listing works.** A mixed-nationality trip breaks a single flag. Accepted for now. — needs Eyal & Ohad, later.

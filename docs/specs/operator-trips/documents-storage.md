@@ -1,9 +1,16 @@
 # Operator Trips — Document storage and retention
 
+> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
+> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
+> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
+> yet because it is the only record of who signed which waiver version. The storage bucket is
+> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+
+
 **Data model: extends `hosting_style='C'` group trips. Overrides SPEC.md §5.**
 An operator trip is a `group_trips` row with `hosting_style='C'`. There is no separate operator data model. Documents extend the existing group-trips cluster the same way `group_trip_gear_claims` does — a child table anchored on `trip_id` + `user_id`, guarded by the existing `is_trip_host()` function.
 
-**Status:** Implementation spec. Written 2026-07-22, reconciled with approval-review.md 2026-07-23.
+**Status:** Implementation spec. Written 2026-07-22, reconciled with approval-review.md 2026-07-23; operator-documents path + reject-keeps-row applied 2026-07-23 (final table set).
 **Sources:** `SPEC.md` §7, and workbench features `g-storage`, `g-retention`, `onb-req`, `trav-file`, `detail-pages` in `docs/operator-trips-workbench.html`.
 **Scope:** passport, insurance, visa, flight tickets. Files only.
 
@@ -61,17 +68,19 @@ One bucket: **`group-trip-documents`**. Private.
 Metadata row (sketch; full shape belongs to the operator-trips schema spec):
 
 ```
-group_trip_documents
+organized_trip_travelers_documents
   id              uuid pk        -- also the filename
   trip_id         uuid not null references group_trips(id)
   user_id         uuid not null references auth.users(id)
-  requirement_id  uuid not null references group_trip_requirements(id)
+  requirement_id  uuid not null references organized_trip_requirements(id)
                                  -- one live document per (trip_id, user_id, requirement_id),
                                  -- unique index — matches approval-review.md
   storage_path    text not null  -- exactly the key above
   mime_type       text not null
   byte_size       int  not null
   uploaded_at     timestamptz not null default now()
+  rejected_at     timestamptz    -- set on reject; the FILE is deleted right away, the row stays
+  approbation_note text          -- the operator's note, written on reject (optionally on approve)
   -- typed fields that survive the file (passport only; nullable otherwise):
   full_name       text           -- full name as printed
   nationality     text
@@ -79,11 +88,23 @@ group_trip_documents
   file_deleted_at timestamptz    -- set by the purge job once the object is gone
 ```
 
-There is no `doc_type` column — the requirement the row points at already knows its kind. There is no review-state column either: the canonical review fields are `approved_at` / `approved_by`, added by `approval-review.md`, and a reject deletes the row entirely (the audit table `group_trip_document_reviews` keeps who / when / why).
+There is no `doc_type` column — the requirement the row points at already knows its kind. The canonical review fields are `approved_at` / `approved_by` / `rejected_at` / `approbation_note`, added by `approval-review.md`. There is no separate audit table (decided 2026-07-23): a reject deletes the **storage object** immediately and keeps the row, carrying `rejected_at` and the note. The traveler's re-upload replaces the row (new file, review fields cleared).
 
-**This row is also the single source of truth for the upload requirement's state — there is no separate state table (decided 2026-07-23). See `requirements-model.md`.** No row = open, row with `approved_at` null = submitted, `approved_at` set = approved.
+**This row is also the single source of truth for the upload requirement's state — there is no separate state table (decided 2026-07-23). See `requirements-model.md`.** No row = open, row with `approved_at` and `rejected_at` null = submitted, `approved_at` set = approved, `rejected_at` set = rejected (needs a new upload).
 
 The typed fields (full name as printed, nationality, expiry date) stay on this row. That is deliberate: the purge job removes only the storage object and sets `file_deleted_at` — the row itself is kept, so the fields survive the file. A repeat traveler gets them pre-filled and only retakes the photo.
+
+### Operator-published files share the bucket, under their own prefix
+
+`organized_trip_operator_documents` (the waiver first; itineraries and info packs later — see `waiver-medical.md`) stores its files in the **same private bucket** under a different key scheme:
+
+```
+<trip_id>/operator/<document_id>.<ext>
+```
+
+Access is the mirror image of traveler documents: **any participant or host of the trip can read** (travelers must be able to open the waiver), and **only a host can write**. In the access predicate: when `(storage.foldername(name))[2] = 'operator'`, read requires `is_trip_participant(trip_id)` or `is_trip_host(trip_id)`, and insert requires `is_trip_host(trip_id)`. Same immutability rule — a new version is a new object, never an overwrite.
+
+These are the operator's own materials, not personal traveler data — **the purge job and the orphan sweep skip the `operator/` prefix entirely.**
 
 ---
 
@@ -166,18 +187,18 @@ There is deliberately no policy for `anon`. An unauthenticated caller matches no
 ### 4.4 Metadata table
 
 ```sql
-alter table public.group_trip_documents enable row level security;
+alter table public.organized_trip_travelers_documents enable row level security;
 
 create policy "group doc rows: traveler or host reads"
-on public.group_trip_documents for select to authenticated
+on public.organized_trip_travelers_documents for select to authenticated
 using (auth.uid() = user_id or public.is_trip_host(trip_id));
 
 create policy "group doc rows: traveler inserts own"
-on public.group_trip_documents for insert to authenticated
+on public.organized_trip_travelers_documents for insert to authenticated
 with check (auth.uid() = user_id);
 ```
 
-These mirror the `group_trip_gear_claims` policies line-for-line. Operator review (setting `approved_at` / `approved_by`, and the reject that deletes the row) goes through the RPCs in `approval-review.md`, not here.
+These mirror the `group_trip_gear_claims` policies line-for-line. Operator review (setting `approved_at` / `approved_by`, and the reject that deletes the file and marks the row) goes through the RPCs in `approval-review.md`, not here.
 
 ### 4.5 Verify after applying
 
@@ -208,8 +229,8 @@ Client → Storage → row. No edge function. No service role.
      .upload(key, body, { contentType, upsert: false, cacheControl: '0' });
    ```
    RLS decides whether this is allowed. A caller writing into someone else's folder fails at the database — there is no code path to get wrong. `cacheControl: '0'` matters, see §8.
-6. On success, client inserts the row in `group_trip_documents` with `storage_path = key` and the `requirement_id` of the requirement the traveler tapped in step 1.
-7. For a passport, the client also collects the typed fields and writes them onto the same `group_trip_documents` row (`full_name`, `nationality`, `expiry_date`). **These are what survive deletion.**
+6. On success, client inserts the row in `organized_trip_travelers_documents` with `storage_path = key` and the `requirement_id` of the requirement the traveler tapped in step 1.
+7. For a passport, the client also collects the typed fields and writes them onto the same `organized_trip_travelers_documents` row (`full_name`, `nationality`, `expiry_date`). **These are what survive deletion.**
 8. If step 6 fails after step 5 succeeded, the client deletes the object it just wrote. If that cleanup also fails, the orphan sweep in §8.1 catches it.
 
 **Deliberately absent:** no thumbnail generation, no `generate-thumbnails` call, no Lambda, no MediaConvert, no compression that creates a second copy. That pipeline writes derivatives to other prefixes on its own schedule, producing untracked copies that no retention rule covers.
@@ -268,7 +289,7 @@ New edge function `purge-group-documents`, service role, run daily by `pg_cron` 
 1. Select due documents, batched so one bad day cannot time out:
    ```sql
    select d.id, d.storage_path
-   from group_trip_documents d
+   from organized_trip_travelers_documents d
    join group_trips t on t.id = d.trip_id
    where d.file_deleted_at is null
      and t.end_date < (now() - interval '30 days')
@@ -370,7 +391,7 @@ Each line is a build gate.
 
 **Create**
 
-- `supabase/migrations/<ts>_group_trip_documents_bucket.sql` — §4.1-§4.4. Applied by hand in the SQL editor.
+- `supabase/migrations/<ts>_organized_trip_travelers_documents_bucket.sql` — §4.1-§4.4. Applied by hand in the SQL editor.
 - `supabase/migrations/<ts>_schedule_purge_group_documents.sql` — §8.1 cron.
 - `supabase/functions/purge-group-documents/index.ts` — purge + orphan sweep. Service role, requires `x-internal-secret` like the other admin functions. Deploy via CLI (`--use-api`); diff the live version first if one exists.
 - `src/services/operator/documentsService.ts` — upload, mint-signed-url, delete, list. The **only** module that knows the bucket name.

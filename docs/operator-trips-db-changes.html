@@ -69,7 +69,8 @@
 <body>
 <div class="wrap">
   <h1>Operator Trips — Database Changes</h1>
-  <p class="sub">Everything the operator product adds or changes in the database. Updated 23 July 2026.</p>
+  <p class="sub">Everything the operator product adds or changes in the database. Updated 24 July 2026.</p>
+  <div class="rule" style="background:#e8f5ee"><b>Applied to production on 24 July.</b> Every table, view, function, policy and the private storage bucket below are live, tested end-to-end, and empty. Nothing payment-related was created. Nothing was added to <code>group_trips</code>.</div>
 
   <div class="rule">
     <b>Rule 1:</b> an operator trip <b>is</b> a <code>group_trips</code> row with
@@ -101,12 +102,12 @@
   <h2>New tables</h2>
 
   <div class="card">
-    <div class="chead"><code>group_trip_requirements</code><span class="tag t-new">NEW</span><span>what each trip asks travelers to do — one row per item</span></div>
+    <div class="chead"><code>organized_trip_requirements</code><span class="tag t-new">NEW</span><span>what each trip asks travelers to do — one row per item</span></div>
     <div class="tscroll"><table>
       <tr><td>id / trip_id</td><td>uuid</td><td>Belongs to one trip.</td></tr>
       <tr><td>kind</td><td>text</td><td>passport · waiver · medical · insurance · visa · flights · custom</td></tr>
       <tr><td>req_type</td><td>text</td><td>upload · acknowledge · pay</td></tr>
-      <tr><td>timing</td><td>text</td><td>must_have (no skip) · skippable (skip until a date)</td></tr>
+      <tr><td>skip_at_onboarding</td><td>text</td><td>must_have (no skip) · skippable (skip until a date). <span class="tag t-open">OPEN</span> which items default to which — not decided.</td></tr>
       <tr><td>title, help_text</td><td>text</td><td>What the traveler sees.</td></tr>
       <tr><td>deadline_days_before</td><td>int</td><td>"30 days before departure". Real date is computed, never stored — moving the trip keeps deadlines correct.</td></tr>
       <tr><td>sort_order, is_active</td><td>int, bool</td><td>Order; removing an item just turns it off (history kept).</td></tr>
@@ -116,7 +117,7 @@
   <div class="card">
     <div class="chead"><span class="tag t-new">DECIDED 23 JUL</span><span><b>No state table.</b> Where each traveler stands is always computed:</span></div>
     <div class="tscroll"><table>
-      <tr><td>upload items</td><td>—</td><td>No document row = not done. Row without approval = waiting. Approved row = done. Reject deletes the row.</td></tr>
+      <tr><td>upload items</td><td>—</td><td>No document row = not done. Row without approval = waiting. Approved row = done. Rejected row = not done again, with the operator's note on it.</td></tr>
       <tr><td>waiver / "I agree"</td><td>—</td><td>Agreement row exists (for the current version) = done.</td></tr>
       <tr><td>medical</td><td>—</td><td>Form's completed_at is set = done.</td></tr>
       <tr><td>pay</td><td>—</td><td>The ledger adds up = done. (payment timing and method will be decided later on)</td></tr>
@@ -126,11 +127,12 @@
   </div>
 
   <div class="card">
-    <div class="chead"><code>group_trip_documents</code><span class="tag t-new">NEW</span><span>uploaded files: passport, insurance, visa, flights</span></div>
+    <div class="chead"><code>organized_trip_travelers_documents</code><span class="tag t-new">NEW</span><span>uploaded files: passport, insurance, visa, flights</span></div>
     <div class="tscroll"><table>
       <tr><td>id, trip_id, user_id, requirement_id</td><td>uuid</td><td>One live document per traveler per requirement (unique index — no double counting). No doc_type column — the requirement already knows its kind.</td></tr>
       <tr><td>storage_path, mime_type, byte_size</td><td>—</td><td>The file. Lives in a new <b>private</b> storage bucket, never a public one.</td></tr>
-      <tr><td>approved_at, approved_by</td><td>—</td><td>Empty = waiting for review. Set = approved. Reject = the row is deleted and the item re-opens.</td></tr>
+      <tr><td>approved_at, approved_by</td><td>—</td><td>Empty = waiting for review. Set = approved.</td></tr>
+      <tr><td>rejected_at, approbation_note</td><td>—</td><td>Reject = the file is deleted right away, the row stays with the operator's note. The traveler's re-upload replaces the row. The note is also where an approval comment can live.</td></tr>
       <tr><td>full_name, nationality, expiry_date</td><td>—</td><td>Typed passport fields. These survive after the file is deleted.</td></tr>
       <tr><td>file_deleted_at</td><td>timestamptz</td><td>Set when the 30-days-after-trip purge removes the file. The row stays.</td></tr>
     </table></div>
@@ -138,32 +140,30 @@
   </div>
 
   <div class="card">
-    <div class="chead"><code>group_trip_document_reviews</code><span class="tag t-new">NEW</span><span>audit log of approve / reject actions</span></div>
+    <div class="chead"><code>organized_trip_operator_documents</code><span class="tag t-new">NEW</span><span>what the operator publishes — today the waiver, later itineraries, info packs, invoices</span></div>
     <div class="tscroll"><table>
-      <tr><td>trip_id, user_id, requirement_id</td><td>uuid</td><td>Who and what it was about.</td></tr>
-      <tr><td>action, reason, actor_id, created_at</td><td>—</td><td>approved or rejected, optional reason, which host, when. Never stores a file or a path.</td></tr>
+      <tr><td>id, trip_id, created_by</td><td>uuid</td><td>Belongs to one trip; which host uploaded it.</td></tr>
+      <tr><td>kind</td><td>text</td><td>'waiver' for now. New kinds later without a new table.</td></tr>
+      <tr><td>version</td><td>int</td><td>Per kind: 1, 2, 3… A new upload is always a new row — old rows are never edited or deleted, so an agreement always points at the exact text the traveler saw.</td></tr>
+      <tr><td>body_text / storage_path</td><td>text</td><td>Pasted text or a PDF in the private bucket.</td></tr>
+      <tr><td>published_at</td><td>timestamptz</td><td>When it went live.</td></tr>
     </table></div>
+    <div class="note">These are the operator's own materials, not personal traveler data — the 30-day purge does not touch them.</div>
   </div>
 
   <div class="card">
-    <div class="chead"><code>group_trip_waiver_versions</code><span class="tag t-new">NEW</span><span>the waiver text/PDF, versioned</span></div>
-    <div class="tscroll"><table>
-      <tr><td>trip_id, version</td><td>—</td><td>Version 1, 2, 3… Editing always makes a new row, never changes an old one.</td></tr>
-      <tr><td>body_text / file_path</td><td>text</td><td>Pasted text or a PDF in the private bucket.</td></tr>
-    </table></div>
-  </div>
-
-  <div class="card">
-    <div class="chead"><code>group_trip_acknowledgements</code><span class="tag t-new">NEW</span><span>who agreed to what — the waiver and any custom "I agree" item</span></div>
+    <div class="chead"><code>group_trip_acknowledgements</code><span class="tag t-new">KEPT</span><span>who agreed to what — the waiver's legal record</span></div>
     <div class="tscroll"><table>
       <tr><td>requirement_id, trip_id, user_id</td><td>uuid</td><td>One row per traveler per acknowledge item. Rows can never be edited or deleted.</td></tr>
       <tr><td>agreed_name, agreed_at</td><td>—</td><td>Name shown on screen + server time. This row IS the proof and the "done" state.</td></tr>
-      <tr><td>waiver_version_id, agreed_version</td><td>—</td><td>Only for the waiver: exactly which version they agreed to. Empty for custom items.</td></tr>
+      <tr><td>operator_document_id, agreed_version</td><td>—</td><td>Only for the waiver: points at the exact row in <code>organized_trip_operator_documents</code> they agreed to. Empty for custom items.</td></tr>
+      <tr><td>ip_address, user_agent, consent_electronic</td><td>—</td><td><span class="tag t-new">ADDED 24 JUL</span> Legal audit trail. IP + device captured server-side at agree time; consent to sign electronically recorded. See <code>waiver-legal-record.md</code>.</td></tr>
     </table></div>
+    <div class="note">Kept, not deleted (24 Jul): a waiver's whole purpose is provable evidence later — the "I agree" gate proves nothing after the fact. <code>organized_trip_operator_documents</code> also gained <code>document_hash</code> (tamper-evidence of the exact text signed). Retention + jurisdiction still need a lawyer.</div>
   </div>
 
   <div class="card">
-    <div class="chead"><code>group_trip_medical_forms</code><span class="tag t-new">NEW</span><span>per-trip medical form — rows, never files</span></div>
+    <div class="chead"><code>organized_trip_medical_forms</code><span class="tag t-new">NEW</span><span>per-trip medical form — rows, never files</span></div>
     <div class="tscroll"><table>
       <tr><td>trip_id, user_id</td><td>uuid</td><td>One row per traveler per trip. Never copied to the profile or between trips.</td></tr>
       <tr><td>allergies, dietary, injuries, medications</td><td>text</td><td>Four free-text fields, 1000 chars max each.</td></tr>
@@ -181,14 +181,6 @@
     </table></div>
   </div>
 
-  <div class="card">
-    <div class="chead"><code>group_trip_edit_log</code><span class="tag t-new">NEW</span><span>recommended — every edit an operator makes</span></div>
-    <div class="tscroll"><table>
-      <tr><td>trip_id, operator_id</td><td>uuid</td><td>Who edited which trip.</td></tr>
-      <tr><td>changed_fields, old / new, created_at</td><td>jsonb, —</td><td>What changed. Cheap now; it's what lets us re-check the "trust the operators" unlock later.</td></tr>
-    </table></div>
-  </div>
-
   <h2>Not tables, but part of the change</h2>
   <ul class="small">
     <li><code>group-trip-documents</code> <span>— new <b>private</b> storage bucket. Files deleted within 30 days after the trip ends; a daily job does it.</span></li>
@@ -203,6 +195,8 @@
     <li><b>Everything payment.</b> <span>The deposit column and the whole ledger table are sketches. Nothing is created until this is settled. (payment timing and method will be decided later on)</span></li>
     <li><b>Medical retention.</b> <span>The 30-day rule covers files, not rows. If medical rows also get deleted, that adds a purge job and maybe a column.</span></li>
     <li><b>Read / download logging.</b> <span>If we log who opened documents or medical data, that's one or two extra log tables.</span></li>
+    <li><b>Eyal: should medical be its own type?</b> <span>Today medical is an <code>acknowledge</code>. It is not really an agreement — it is a form you fill in. Adding a 4th <code>req_type</code> called <b>fill</b> would be one check-constraint change.</span></li>
+    <li><b>Waiver retention + jurisdiction</b> <span>— how many years we keep the waiver record (2–7?), and whether US ESIGN/UETA or EU eIDAS governs given Israeli operators + international travelers. Needs a lawyer. (Table kept + audit columns added 24 Jul.)</span></li>
     <li><b>Hard C-only guard.</b> <span>Optionally a trigger so these tables can only get rows on <code>hosting_style='C'</code> trips. Not needed for v1.</span></li>
   </ol>
 
@@ -212,7 +206,9 @@
     <li><span>❷ <b>Visibility reuses the existing column</b> — new <code>'link_only'</code> value, no second column.</span></li>
     <li><span>❸ <b>Nothing is added to the DB yet.</b> Deposit column waits for the payments decision; when it comes it's one USD amount reusing <code>budget_currency</code> + frozen FX.</span></li>
     <li><span>❹ <b>price_snapshot</b> = column on <code>group_trip_participants</code>, shipped with the payments migration.</span></li>
-    <li><span>❺ Names: <code>group_trip_medical_forms</code> (plural, like every child table), <code>group_trip_acknowledgements</code> (generic, waiver included), no <code>doc_type</code> on documents, all user FKs point at <code>auth.users</code>.</span></li>
+    <li><span>❺ Names: <code>organized_trip_medical_forms</code> (plural, like every child table), <code>group_trip_acknowledgements</code> (generic, waiver included), no <code>doc_type</code> on documents, all user FKs point at <code>auth.users</code>.</span></li>
+    <li><span>❻ <b>No separate review-audit table.</b> The approve/reject note lives on the document row (<code>approbation_note</code>). Reject deletes the file, keeps the row.</span></li>
+    <li><span>❼ <b>Operator uploads get their own table</b> — <code>organized_trip_operator_documents</code>, versioned. The waiver is its first kind; the old <code>group_trip_waiver_versions</code> is gone. The edit-log table was cut too.</span></li>
   </ul>
 
   <p class="foot" style="margin-top:18px">

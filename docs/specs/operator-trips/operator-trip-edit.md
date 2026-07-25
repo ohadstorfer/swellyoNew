@@ -1,5 +1,12 @@
 # Operator trip editing
 
+> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
+> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
+> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
+> yet because it is the only record of who signed which waiver version. The storage bucket is
+> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+
+
 **Status:** Draft v1, 2026-07-22.
 **Data model:** extends `hosting_style='C'` group trips. An operator trip IS a `group_trips` row. Overrides SPEC.md §5.
 **Parent:** `SPEC.md` §4.2 "Simple trip management".
@@ -70,7 +77,9 @@ Operators get both. Eyal: *"operators is different. These are businesses, our pa
 
 > ⚠️ **This is trust-at-small-scale, not a permission model.** It works because we can name every operator. It stops working the moment operators sign up without Eyal in the loop. Before the operator count grows past a handful, revisit this section and decide what needs a guard rail: a change log, an approval step, or a hard lock like peer hosts have.
 
-Cheap thing that makes the revisit possible: log every edit now. See §8.
+Honest note: the edit log that would have made the revisit easy was cut on 2026-07-23 (see §8).
+So today there is **no record of operator edits at all**. If the operator count grows, bringing
+the edit log back is the first thing to do.
 
 ---
 
@@ -261,7 +270,7 @@ Rules:
 
 - `src/screens/operator/OperatorTripEditScreen.tsx` — the screen.
 - `src/services/operator/operatorTripsService.ts` — `updateOperatorTrip(tripId, patch)`, `setOperatorTripDestination(tripId, geo)`, and the booked-count read the capacity floor needs. (This file is already anticipated in SPEC.md §10.)
-- SQL, applied **by hand in the Supabase SQL editor** (never `supabase db push`): the capacity check from §7.3 on `group_trips`, plus — recommended — a `group_trip_edit_log` (trip_id, operator_id, changed_fields JSONB, old/new, timestamp). The log is cheap now and it is the only thing that makes the §2 "The trust decision" trust revisit possible later. It also gives §6 its "what changed" payload for free.
+- SQL, applied **by hand in the Supabase SQL editor** (never `supabase db push`): the capacity check from §7.3 on `group_trips`. (A `group_trip_edit_log` was recommended here, but it was cut from the plan on 2026-07-23 — Ohad's call. If the §2 trust revisit or §6's "what changed" payload ever need it, it comes back as a new decision.)
 
 ### Changed
 
@@ -296,6 +305,6 @@ Already extracted — reuse as-is: everything in `src/components/trips/sheets/`,
 | 1 | 🔴 **Are joined travelers notified when a material field changes?** Which fields count, and which of options A–D in §6. | Eyal & Ohad | Ship gate for the unlock. Editing without an answer means silent changes to a paid trip. |
 | 2 | 🔴 Is a price change allowed at all once someone has paid? | Eyal & Ohad | §7.4, and the refund conversation (SPEC.md #3). |
 | 3 | 🟡 Does a moved trip re-open a deadline that had already passed? | Eyal & Ohad | §7.2. Already OPEN in the workbench `onb-req`. |
-| 4 | 🟡 When does the §2 "The trust decision" trust unlock get a guard rail, and what shape? | Eyal | Not a v1 blocker. Becomes one as operator count grows. |
+| 4 | 🟡 When does the §2 "The trust decision" trust unlock get a guard rail, and what shape? (note: the edit log that would feed this was cut 2026-07-23) | Eyal | Not a v1 blocker. Becomes one as operator count grows. |
 | 5 | 🟡 Does the operator need a "changed since you joined" marker on Overview, so a traveler can see what moved? | Eyal & Ohad | Depends on how #1 lands. |
 | 6 | 🟡 The price block's shape depends on the pricing model (SPEC.md #1 — flat / room types / add-ons). | Design-partner operators | The Price section of the screen. Build it swappable. |

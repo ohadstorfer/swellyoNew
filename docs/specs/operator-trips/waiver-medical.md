@@ -1,9 +1,16 @@
 # Waiver signing & medical form — implementation spec
 
+> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
+> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
+> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
+> yet because it is the only record of who signed which waiver version. The storage bucket is
+> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+
+
 **Part of:** Operator Trips. **Sources:** `SPEC.md` §2, §4.1, §4.3, §7; `docs/operator-trips-workbench.html` features `waiver`, `medical`, `med-card`, `trav-med`, `onb-req`.
 **Data model: extends `hosting_style='C'` group trips. Overrides SPEC.md §5.** An operator trip is a `group_trips` row with `hosting_style='C'`. There is no separate operator model. Waiver and medical are new **child tables** in the existing group-trip cluster, keyed the same way every other child table is: `trip_id references group_trips(id)` + `user_id references auth.users(id)`. There is no booking table and no `booking_id`.
 **Sibling spec:** `requirements-model.md` — the waiver is an `acknowledge` requirement. Medical is also a requirement item.
-**Status:** ready to build, except where marked OPEN. Renames + acknowledgements generalization applied 2026-07-23.
+**Status:** ready to build, except where marked OPEN. Renames + acknowledgements generalization applied 2026-07-23. Waiver versions generalized into `organized_trip_operator_documents`, 2026-07-23.
 
 ## 1. Summary
 
@@ -19,53 +26,58 @@ Medical is **table rows**, not file storage. It is an RLS problem. It must never
 
 ### 2.1 Data model
 
-The waiver version could live as a field on the `group_trips` row, but that cannot hold history. An agreement must point at the exact text the traveler saw. Edit the text in place and every past agreement silently refers to text nobody agreed to. So the waiver splits across two child tables in the group-trip cluster: versions, plus the shared acknowledgements table.
+The waiver text could live as a field on the `group_trips` row, but that cannot hold history. An agreement must point at the exact text the traveler saw. Edit the text in place and every past agreement silently refers to text nobody agreed to. So the waiver splits across two child tables in the group-trip cluster: operator documents (versioned, append-only), plus the shared acknowledgements table.
+
+The versions table is generic on purpose (decided 2026-07-23): `organized_trip_operator_documents` holds any operator-published material — the waiver now, itineraries and info packs later. Each material is a `kind`; the waiver is simply the rows with `kind = 'waiver'`. The immutability argument is unchanged — it just applies to every kind, not only the waiver.
 
 ```sql
--- Waiver versions. Append-only. Editing text always makes a new row.
-create table if not exists public.group_trip_waiver_versions (
+-- Operator-published materials. Versioned, append-only.
+-- A new upload is always a new row. Rows are never edited or deleted.
+create table if not exists public.organized_trip_operator_documents (
   id           uuid primary key default gen_random_uuid(),
   trip_id      uuid not null references public.group_trips(id) on delete cascade,
-  version      integer not null,
-  body_text    text,
-  file_path    text,                       -- private bucket path, PDF only
-  published_at timestamptz not null default now(),
   created_by   uuid not null references auth.users(id),
-  unique (trip_id, version),
-  constraint waiver_has_content check (body_text is not null or file_path is not null)
+  kind         text not null check (kind in ('waiver')),
+                                            -- itineraries / info packs later: widen the check
+  version      integer not null,            -- per kind
+  body_text    text,
+  storage_path text,                        -- private bucket, path <trip_id>/operator/<id>.<ext>
+  published_at timestamptz not null default now(),
+  unique (trip_id, kind, version),
+  constraint op_doc_has_content check (body_text is not null or storage_path is not null)
 );
 
 -- Acknowledgements. Immutable. One row per user per acknowledge-type requirement.
 create table if not exists public.group_trip_acknowledgements (
-  id                uuid primary key default gen_random_uuid(),
-  trip_id           uuid not null references public.group_trips(id) on delete cascade,
-  requirement_id    uuid not null references public.group_trip_requirements(id),
-  waiver_version_id uuid references public.group_trip_waiver_versions(id) on delete restrict,
+  id                   uuid primary key default gen_random_uuid(),
+  trip_id              uuid not null references public.group_trips(id) on delete cascade,
+  requirement_id       uuid not null references public.organized_trip_requirements(id),
+  operator_document_id uuid references public.organized_trip_operator_documents(id) on delete restrict,
                                             -- null for custom non-waiver acknowledges
-  user_id           uuid not null references auth.users(id) on delete cascade,
-  agreed_name       text not null,          -- the name as shown to the traveler at agree time
-  agreed_version    integer,                -- denormalised copy; null when waiver_version_id is null
-  agreed_at         timestamptz not null default now()
+  user_id              uuid not null references auth.users(id) on delete cascade,
+  agreed_name          text not null,       -- the name as shown to the traveler at agree time
+  agreed_version       integer,             -- denormalised copy; null when operator_document_id is null
+  agreed_at            timestamptz not null default now()
 );
--- Uniqueness: one row per user per waiver version, one row per user per custom requirement.
-create unique index if not exists uq_group_trip_ack_waiver
-  on public.group_trip_acknowledgements(waiver_version_id, user_id)
-  where waiver_version_id is not null;
+-- Uniqueness: one row per user per document version, one row per user per custom requirement.
+create unique index if not exists uq_group_trip_ack_op_doc
+  on public.group_trip_acknowledgements(operator_document_id, user_id)
+  where operator_document_id is not null;
 create unique index if not exists uq_group_trip_ack_requirement
   on public.group_trip_acknowledgements(requirement_id, user_id)
-  where waiver_version_id is null;
+  where operator_document_id is null;
 create index if not exists idx_group_trip_ack_trip on public.group_trip_acknowledgements(trip_id);
 ```
 
-This one table is the single record of every acknowledge-type requirement — the waiver is just an acknowledgement that also points at a waiver version (decided 2026-07-23; the ack_* fields that used to be sketched on the states table are gone with that table).
+This one table is the single record of every acknowledge-type requirement — the waiver is just an acknowledgement that also points at an operator document (decided 2026-07-23; the ack_* fields that used to be sketched on the states table are gone with that table).
 
-`on delete restrict` on `waiver_version_id` is deliberate. A version that somebody agreed to can never be deleted.
+`on delete restrict` on `operator_document_id` is deliberate. A document version that somebody agreed to can never be deleted. There are no UPDATE or DELETE policies on `organized_trip_operator_documents` at all — that is what keeps every version immutable.
 
 ### 2.2 Operator upload flow
 
 1. In trip creation or trip edit, the operator opens "Waiver".
-2. They paste text or pick a PDF. Both allowed. A PDF goes to the private documents bucket, same rules as any other operator-trip file.
-3. On save we insert a row with `version = max(version) + 1` for that trip. Version 1 on first save. Existing rows are never updated — there is no edit-in-place.
+2. They paste text or pick a PDF. Both allowed. A PDF goes to the private documents bucket under the `<trip_id>/operator/...` path (see `documents-storage.md`), same rules as any other operator-trip file.
+3. On save we insert a `organized_trip_operator_documents` row with `kind = 'waiver'` and `version = max(version) + 1` for that `(trip, kind)`. Version 1 on first save. Existing rows are never updated — there is no edit-in-place.
 4. The waiver requirement only appears to travelers once version 1 exists.
 
 ### 2.3 Traveler agree flow
@@ -82,7 +94,7 @@ This one table is the single record of every acknowledge-type requirement — th
 | `user_id` | the signing user |
 | `agreed_name` | the profile name displayed on screen at the moment of agreement |
 | `agreed_at` | server `now()`, not device time |
-| `waiver_version_id` + `agreed_version` | the exact version shown |
+| `operator_document_id` + `agreed_version` | the exact version shown |
 
 Nothing else. No IP address, no device fingerprint, no geolocation — that is a separate decision with its own privacy cost and nobody has asked for it.
 
@@ -103,7 +115,7 @@ The operator-facing policy on top of that is not decided:
 ### 3.1 Data model
 
 ```sql
-create table if not exists public.group_trip_medical_forms (
+create table if not exists public.organized_trip_medical_forms (
   id               uuid primary key default gen_random_uuid(),
   trip_id          uuid not null references public.group_trips(id) on delete cascade,
   user_id          uuid not null references auth.users(id) on delete cascade,
@@ -122,7 +134,7 @@ create table if not exists public.group_trip_medical_forms (
     coalesce(length(medications), 0) <= 1000
   )
 );
-create index if not exists idx_group_trip_medical_forms_trip on public.group_trip_medical_forms(trip_id);
+create index if not exists idx_organized_trip_medical_forms_trip on public.organized_trip_medical_forms(trip_id);
 ```
 
 One row per `(trip_id, user_id)`, the same anchor as `group_trip_participants`. The paired `*_none` booleans matter. "I have no allergies" and "I have not answered yet" are different facts, and an operator reading a blank field needs to know which. A field is **answered** when the text is non-empty **or** `*_none` is true.
@@ -150,41 +162,41 @@ Two SECURITY DEFINER helpers. The operator check reuses the existing `is_trip_ho
 Policies:
 
 ```sql
-alter table public.group_trip_medical_forms enable row level security;
-revoke all on table public.group_trip_medical_forms from anon, public;
+alter table public.organized_trip_medical_forms enable row level security;
+revoke all on table public.organized_trip_medical_forms from anon, public;
 -- deliberately no DELETE grant, for anyone
-grant select, insert, update on table public.group_trip_medical_forms to authenticated;
+grant select, insert, update on table public.organized_trip_medical_forms to authenticated;
 
-create policy medical_traveler_select on public.group_trip_medical_forms
+create policy medical_traveler_select on public.organized_trip_medical_forms
   for select to authenticated using (user_id = auth.uid());
 
-create policy medical_traveler_insert on public.group_trip_medical_forms
+create policy medical_traveler_insert on public.organized_trip_medical_forms
   for insert to authenticated
   with check (user_id = auth.uid() and public.is_trip_participant(trip_id));
 
-create policy medical_traveler_update on public.group_trip_medical_forms
+create policy medical_traveler_update on public.organized_trip_medical_forms
   for update to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
 -- Operator: read only. There is no operator insert, update or delete policy.
-create policy medical_operator_select on public.group_trip_medical_forms
+create policy medical_operator_select on public.organized_trip_medical_forms
   for select to authenticated using (public.is_trip_host(trip_id));
 
--- Waiver versions + acknowledgements. No UPDATE/DELETE policy on acknowledgements:
+-- Operator documents + acknowledgements. No UPDATE/DELETE policy on either table:
 -- that is what makes them immutable.
-alter table public.group_trip_waiver_versions    enable row level security;
+alter table public.organized_trip_operator_documents enable row level security;
 alter table public.group_trip_acknowledgements   enable row level security;
-revoke all on table public.group_trip_waiver_versions,
+revoke all on table public.organized_trip_operator_documents,
                     public.group_trip_acknowledgements from anon, public;
-grant select, insert on table public.group_trip_waiver_versions    to authenticated;
+grant select, insert on table public.organized_trip_operator_documents to authenticated;
 grant select, insert on table public.group_trip_acknowledgements   to authenticated;
 
-create policy waiver_ver_read on public.group_trip_waiver_versions
+create policy op_doc_read on public.organized_trip_operator_documents
   for select to authenticated
   using (public.is_trip_host(trip_id) or public.is_trip_participant(trip_id));
 
-create policy waiver_ver_write on public.group_trip_waiver_versions
+create policy op_doc_write on public.organized_trip_operator_documents
   for insert to authenticated with check (public.is_trip_host(trip_id));
 
 create policy ack_read on public.group_trip_acknowledgements
@@ -196,17 +208,17 @@ create policy ack_write on public.group_trip_acknowledgements
   with check (user_id = auth.uid() and public.is_trip_participant(trip_id));
 
 -- updated_at
-create or replace function public.touch_group_trip_medical_forms()
+create or replace function public.touch_organized_trip_medical_forms()
 returns trigger language plpgsql security definer
 set search_path = public, extensions, pg_temp
 as $$ begin new.updated_at := now(); return new; end $$;
 
-drop trigger if exists trg_touch_group_trip_medical_forms on public.group_trip_medical_forms;
-create trigger trg_touch_group_trip_medical_forms before update on public.group_trip_medical_forms
-  for each row execute function public.touch_group_trip_medical_forms();
+drop trigger if exists trg_touch_organized_trip_medical_forms on public.organized_trip_medical_forms;
+create trigger trg_touch_organized_trip_medical_forms before update on public.organized_trip_medical_forms
+  for each row execute function public.touch_organized_trip_medical_forms();
 
 -- Dashboard flag counts. security_invoker so RLS still applies.
-create or replace view public.group_trip_medical_flags
+create or replace view public.organized_trip_medical_flags
 with (security_invoker = true) as
 select trip_id,
        count(*) filter (where coalesce(length(trim(injuries)), 0)    > 0) as injuries_reported,
@@ -214,7 +226,7 @@ select trip_id,
        count(*) filter (where coalesce(length(trim(dietary)), 0)     > 0) as dietary_reported,
        count(*) filter (where coalesce(length(trim(medications)), 0) > 0) as medications_reported,
        count(*) filter (where completed_at is not null)                   as forms_completed
-from public.group_trip_medical_forms
+from public.organized_trip_medical_forms
 group by trip_id;
 ```
 
@@ -246,7 +258,7 @@ Direct consequence for UI wording: the board's phrase "my medical card" means **
 
 ## 6. What the operator sees
 
-**Dashboard snapshot tile — medical flags.** Counts only, from `group_trip_medical_flags`. "3 reported injuries", "2 allergies", "5 dietary notes". No names and no medical detail on the summary screen. Each count has a view-all.
+**Dashboard snapshot tile — medical flags.** Counts only, from `organized_trip_medical_flags`. "3 reported injuries", "2 allergies", "5 dietary notes". No names and no medical detail on the summary screen. Each count has a view-all.
 
 **Per-traveler medical view.** Read-only. The four fields as plain text, with "None reported" where `*_none` is true and "Not answered yet" where neither is set. Plus "Last updated 3 Aug".
 

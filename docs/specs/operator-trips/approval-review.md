@@ -1,10 +1,18 @@
 # Operator approval and review
 
+> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
+> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
+> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
+> yet because it is the only record of who signed which waiver version. The storage bucket is
+> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+
+
 **Status:** Draft v1, written 2026-07-22.
 **Data model:** extends `hosting_style='C'` group trips. Overrides SPEC.md §5.
 **Scope:** how an operator reviews traveler documents, and what "done" means.
 **Related:** `SPEC.md` (§4.3, §7), `docs/operator-trips-workbench.html` (rows `approval-queue`, `reclaim`, `snap-docs`, `onb-req`, `trav-file`), `docs/specs/operator-trips/documents-storage.md` (where files live — **not** designed here).
-**2026-07-23:** the derive-from-rows model in this spec is now the canonical requirement-state model — `group_trip_requirement_states` was dropped from `requirements-model.md`. Document state = document row (+ `approved_at`). Nothing else changed.
+**2026-07-23:** the derive-from-rows model in this spec is now the canonical requirement-state model — `group_trip_requirement_states` (never created) was dropped from `requirements-model.md`. Document state = document row (+ `approved_at`). Nothing else changed.
+**2026-07-23 (final):** reviews table folded into `approbation_note` on the document row. `group_trip_document_reviews` is gone. Reject now deletes the **file** and keeps the **row** (`rejected_at` + `approbation_note`).
 
 An operator trip is **not** a separate data model. It IS a `group_trips` row with `hosting_style='C'`. We extend that row's world — new `group_trip_*` tables, all keyed by `trip_id references group_trips(id)`. There is no booking table. A traveler is a `group_trip_participants` row, same as any group trip.
 
@@ -34,24 +42,26 @@ The dashboard still shows a **needs-review count**, so the work is visible and o
 
 ## 3. Document states
 
-Three states, and one of them is the absence of a row.
+Four states, and one of them is the absence of a row.
 
 | State | Meaning | How it is stored |
 |---|---|---|
 | **Not submitted** | The requirement is open for this traveler | no document row |
-| **Submitted** | Uploaded, nobody has looked | row exists, `approved_at is null` |
+| **Submitted** | Uploaded, nobody has looked | row exists, `approved_at is null`, `rejected_at is null` |
 | **Approved** | The operator opened it and approved | row exists, `approved_at` set |
+| **Rejected** | The operator rejected it; the file is already deleted | row exists, `rejected_at` set (+ `approbation_note`), file gone |
 
 A document row is anchored on `(trip_id, user_id, requirement_id)` — the group trip, the traveler, and the requirement. No booking id.
 
 Transitions:
 - **Not submitted → Submitted** — the traveler uploads.
 - **Submitted → Approved** — the operator taps Approve, in the viewer or via bulk approve.
-- **Submitted → Not submitted** — the operator rejects. Row deleted, requirement re-opens, traveler notified.
-- **Approved → Not submitted** — the same reject action. Allowed after approval, so a bad bulk approve is recoverable.
-- **Any → gone** — retention deletes the file 30 days after the trip ends. See `documents-storage.md`.
+- **Submitted → Rejected** — the operator rejects. The storage file is deleted right away; the row stays with `rejected_at` and `approbation_note`. The requirement re-opens **because the row is in the rejected state**, not because the row is gone.
+- **Approved → Rejected** — the same reject action. Allowed after approval, so a bad bulk approve is recoverable.
+- **Rejected → Submitted** — the traveler re-uploads. The upload **replaces the row**: new file, and `rejected_at` / `approbation_note` / `approved_at` are cleared.
+- **Any → file gone** — retention deletes the file 30 days after the trip ends. The row stays. See `documents-storage.md`.
 
-There is **no** "rejected" state and **no** "not approved but keep the file" state. Reject and delete + reclaim are the same single action (§6).
+There is **no** "rejected but keep the file" state — a rejected file is deleted immediately. Reject and delete + reclaim are still the same single action (§6); it deletes the file, never the row.
 
 Approval applies to **upload** requirements only. A **pay** requirement reads from the payment ledger and never stores a state. Whether an **acknowledge** requirement (the waiver) needs approval is **OPEN — needs Eyal & Ohad** (there is nothing to look at, so probably not, but nobody has said so).
 
@@ -93,7 +103,7 @@ Per requirement, in Plan → open tasks and in the travel wallet:
 
 `SPEC.md` §4.3 already defines delete + reclaim: the operator deletes the document and the system re-opens it as a task for that traveler, with a notification. This spec makes it **the same button as reject**. There is only one button.
 
-The action, in order: (1) delete the document row, and the file — see `documents-storage.md`; (2) the requirement goes back to open for that traveler automatically, because open = no row; (3) write an audit row (no file, no path) recording who rejected, when, and the optional reason; (4) notify the traveler.
+The action, in order: (1) delete the **storage object** — the bytes are gone immediately, see `documents-storage.md`; (2) set `rejected_at` and `approbation_note` (the optional reason) on the row — the requirement re-opens for that traveler because the row is now in the rejected state; (3) notify the traveler. No audit insert, no row delete. The traveler's re-upload replaces the row and clears both fields.
 
 The sheet (`BottomSheetShell`, `avoidKeyboard`):
 - Title `Ask for a new passport?`, body `This deletes the file and asks <name> to upload it again.` Primary button `Delete and ask again`, destructive styling.
@@ -104,7 +114,7 @@ Why optional: forcing a reason adds friction to the common case (a blurry scan, 
 
 ## 7. Counts, and where they must not double count
 
-Per requirement, per trip: **received** = travelers with a document row; **approved** = travelers whose row has `approved_at`; **expected** = current participants with `role = 'member'` (co-hosts and staff are `role = 'host'` rows and are not counted).
+Per requirement, per trip: **received** = travelers with a document row where `rejected_at is null` (a rejected row does not count as received — the traveler owes a new file); **approved** = travelers whose row has `approved_at`; **expected** = current participants with `role = 'member'` (co-hosts and staff are `role = 'host'` rows and are not counted).
 
 Rules that must hold, or the dashboard lies:
 1. **Count per (trip, traveler, requirement), never per document row.** A traveler who is rejected and re-uploads must not count twice. Enforced by a unique index, not by application code.
@@ -115,31 +125,21 @@ Rules that must hold, or the dashboard lies:
 
 ### SQL — run by hand in the Supabase SQL editor
 
-Migrations here are applied by hand, never with `supabase db push`. Run block A, then B as a **separate** run (`alter type … add value` cannot be used by code in the same transaction), then C. Table and column names are reconciled with `documents-storage.md` (2026-07-23): `group_trip_documents` carries `requirement_id`, `approved_at`, `approved_by`; there is no `doc_type` / `review_status` / `reclaimed_at`. All tables live in the group-trip world and key on `trip_id references group_trips(id)`.
+Migrations here are applied by hand, never with `supabase db push`. Run block A, then B as a **separate** run (`alter type … add value` cannot be used by code in the same transaction), then C. Table and column names are reconciled with `documents-storage.md` (2026-07-23): `organized_trip_travelers_documents` carries `requirement_id`, `approved_at`, `approved_by`, `rejected_at`, `approbation_note`; there is no `doc_type` / `review_status` / `reclaimed_at`, and no separate audit table. All tables live in the group-trip world and key on `trip_id references group_trips(id)`.
 
-**Block A — review state, uniqueness, audit**
+**Block A — review state and uniqueness**
 ```sql
-alter table public.group_trip_documents
+alter table public.organized_trip_travelers_documents
   add column if not exists approved_at timestamptz,
-  add column if not exists approved_by uuid references auth.users(id) on delete set null;
+  add column if not exists approved_by uuid references auth.users(id) on delete set null,
+  add column if not exists rejected_at timestamptz,
+  add column if not exists approbation_note text;  -- operator's note: written on reject, optional on approve
 -- Rule 1: one live doc per (trip, traveler, requirement) — stops double counting.
-create unique index if not exists uq_gtd_trip_user_requirement
-  on public.group_trip_documents (trip_id, user_id, requirement_id);
-create index if not exists idx_gtd_pending_review
-  on public.group_trip_documents (trip_id) where approved_at is null;
--- Audit of review decisions. NO file, NO storage path — never a second copy.
-create table if not exists public.group_trip_document_reviews (
-  id uuid primary key default gen_random_uuid(),
-  trip_id uuid not null references public.group_trips(id) on delete cascade,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  requirement_id uuid not null,
-  action text not null check (action in ('approved','rejected')),
-  reason text,
-  actor_id uuid references auth.users(id) on delete set null,
-  created_at timestamptz not null default now()
-);
-create index if not exists idx_gtdr_trip on public.group_trip_document_reviews (trip_id, created_at desc);
-alter table public.group_trip_document_reviews enable row level security;
+create unique index if not exists uq_otd_trip_user_requirement
+  on public.organized_trip_travelers_documents (trip_id, user_id, requirement_id);
+-- Needs-review = submitted: not yet approved, not rejected.
+create index if not exists idx_otd_pending_review
+  on public.organized_trip_travelers_documents (trip_id) where approved_at is null and rejected_at is null;
 ```
 
 **Block B — notification types (separate run)**
@@ -151,38 +151,42 @@ alter type public.notification_type add value if not exists 'operator_document_a
 **Block C — RPCs.** The operator check CALLS the existing `public.is_trip_host(trip_id)` — never modify that function; it gates six live tables.
 ```sql
 -- Approve one or many. Same function for the single tap and for bulk.
-create or replace function public.operator_approve_documents(p_document_ids uuid[])
+-- Approving clears any earlier reject and can carry an optional note.
+create or replace function public.operator_approve_documents(p_document_ids uuid[], p_note text default null)
 returns integer language plpgsql security definer
 set search_path = public, extensions, pg_temp as $$
 declare v_count integer;
 begin
-  update public.group_trip_documents d
-     set approved_at = now(), approved_by = auth.uid()
+  update public.organized_trip_travelers_documents d
+     set approved_at = now(), approved_by = auth.uid(),
+         rejected_at = null,
+         approbation_note = nullif(p_note, '')
    where d.id = any(p_document_ids) and d.approved_at is null
      and public.is_trip_host(d.trip_id);
   get diagnostics v_count = row_count;  -- what the client shows as "12 approved"
-  insert into public.group_trip_document_reviews
-    (trip_id, user_id, requirement_id, action, actor_id)
-  select d.trip_id, d.user_id, d.requirement_id, 'approved', auth.uid()
-    from public.group_trip_documents d
-   where d.id = any(p_document_ids) and d.approved_by = auth.uid();
   return v_count;
 end $$;
 
--- Reject == delete + reclaim. One action.
+-- Reject == delete the FILE, keep the ROW. One action.
+-- The storage object is deleted in the same client flow that calls this RPC:
+-- the operator's own JWT passes the storage DELETE policy (documents-storage.md §4.3),
+-- so the caller removes the object right before/after this call. The row keeps
+-- only metadata — rejected_at, approbation_note, and the typed fields. No copy survives.
 create or replace function public.operator_reject_document(p_document_id uuid, p_reason text default null)
 returns void language plpgsql security definer
 set search_path = public, extensions, pg_temp as $$
 declare d record;
 begin
-  select * into d from public.group_trip_documents where id = p_document_id;
+  select * into d from public.organized_trip_travelers_documents where id = p_document_id;
   if d is null then raise exception 'document not found'; end if;
   if not public.is_trip_host(d.trip_id) then raise exception 'not your trip'; end if;
-  insert into public.group_trip_document_reviews
-    (trip_id, user_id, requirement_id, action, reason, actor_id)
-  values (d.trip_id, d.user_id, d.requirement_id, 'rejected', nullif(p_reason,''), auth.uid());
-  -- The requirement re-opens simply by the row going away.
-  delete from public.group_trip_documents where id = p_document_id;
+  -- The requirement re-opens because the row is now in the rejected state.
+  update public.organized_trip_travelers_documents
+     set rejected_at = now(),
+         approbation_note = nullif(p_reason,''),
+         approved_at = null,
+         approved_by = null
+   where id = p_document_id;
   -- An operator trip IS a group_trips row, so trip_id is a real FK here (§8).
   insert into public.notifications
     (recipient_id, trip_id, type, audience, actor_id, entity_type, entity_id, data)
@@ -192,7 +196,7 @@ begin
 end $$;
 
 -- Dashboard counts, per (trip, traveler, requirement).
-create or replace function public.group_trip_document_counts(p_trip_id uuid)
+create or replace function public.organized_trip_document_counts(p_trip_id uuid)
 returns table (requirement_id uuid, expected int, received int, approved int)
 language plpgsql stable security definer
 set search_path = public, extensions, pg_temp as $$
@@ -207,13 +211,13 @@ begin
     select p.user_id from public.group_trip_participants p
      where p.trip_id = p_trip_id and p.role = 'member'
   ), reqs as (
-    select r.id from public.group_trip_requirements r
+    select r.id from public.organized_trip_requirements r
      where r.trip_id = p_trip_id and r.kind = 'upload'
   )
   select r.id, (select count(*) from active)::int, count(d.id)::int,
          count(d.id) filter (where d.approved_at is not null)::int
     from reqs r
-    left join public.group_trip_documents d
+    left join public.organized_trip_travelers_documents d
            on d.requirement_id = r.id and d.user_id in (select user_id from active)
    group by r.id;
 end $$;
@@ -221,10 +225,10 @@ end $$;
 -- SECDEF functions here are revoked by default; new client RPCs need an explicit grant or they 403.
 revoke execute on function public.operator_approve_documents(uuid[]) from public, anon;
 revoke execute on function public.operator_reject_document(uuid, text) from public, anon;
-revoke execute on function public.group_trip_document_counts(uuid) from public, anon;
+revoke execute on function public.organized_trip_document_counts(uuid) from public, anon;
 grant execute on function public.operator_approve_documents(uuid[]) to authenticated;
 grant execute on function public.operator_reject_document(uuid, text) to authenticated;
-grant execute on function public.group_trip_document_counts(uuid) to authenticated;
+grant execute on function public.organized_trip_document_counts(uuid) to authenticated;
 ```
 
 ## 8. Notifications
@@ -252,7 +256,7 @@ Build notes:
 
 ## 9. Edge cases
 
-**Operator rejects, the traveler re-uploads the same bad file.** Nothing detects this, and nothing should try. The second reject works like the first. But `group_trip_document_reviews` makes it visible: show `Asked again 2×` on the traveler's file page so the operator escalates to a message instead of a third reject.
+**Operator rejects, the traveler re-uploads the same bad file.** Nothing detects this, and nothing should try. The second reject works like the first. With no audit table there is no reject history — repeated rejects look identical, and we only know the latest one (its `rejected_at` + `approbation_note` on the row). Escalation is the "Send a message" button on the reject sheet.
 
 **Bulk approve on a traveler with one bad document.** Two safety nets, both needed. (1) Selection is explicit — thumbnails are shown and the operator deselects the bad one. (2) Reject is allowed **after** approval (§3), so a mistaken bulk approve is fully recoverable and the traveler simply gets asked again.
 

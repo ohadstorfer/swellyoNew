@@ -1,5 +1,12 @@
 # Extend flow C into the operator product
 
+> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
+> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
+> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
+> yet because it is the only record of who signed which waiver version. The storage bucket is
+> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+
+
 **Data model:** extends `hosting_style = 'C'` group trips. Overrides SPEC.md §5.
 
 **Status:** spec only. No code changed.
@@ -248,22 +255,27 @@ derives from the evidence tables below: documents (upload), acknowledgements (ac
 medical form `completed_at` (medical), payment ledger (pay). Decided 2026-07-23. This mirrors the
 one-list requirements model (workbench `g-arch` — which is why `operator_trip_tasks` was dropped).
 
-- **`group_trip_requirements`** — the operator's required items/answers for a trip (definitions
+- **`organized_trip_requirements`** — the operator's required items/answers for a trip (definitions
   only). See **requirements-model.md**.
-- **`group_trip_documents`** — files the operator issues or collects (itineraries, invoices).
-  Keyed by `trip_id`, optionally `user_id` for per-participant docs. Plus
-  **`group_trip_document_reviews`** as the review audit trail. See **documents-storage.md**.
-- **`group_trip_waiver_versions`** — append-only waiver texts/PDFs, one row per version. See
-  **waiver-medical.md**.
+- **`organized_trip_travelers_documents`** — files travelers upload (passports, forms). `trip_id + user_id`.
+  Carries `rejected_at` + `approbation_note` — a reject deletes the file but keeps the row, so
+  the note on it says why. There is no separate review audit table
+  (`group_trip_document_reviews` was cut 2026-07-23 — the note column covers it). See
+  **documents-storage.md**.
+- **`organized_trip_operator_documents`** — materials the operator publishes, `kind = 'waiver'`
+  first. Versioned and append-only — one row per version, never edited in place. Replaces
+  `group_trip_waiver_versions`. See **waiver-medical.md**.
 - **`group_trip_acknowledgements`** — immutable "I agree" records, serving the waiver AND custom
-  acknowledge requirements. `trip_id + user_id`. See **waiver-medical.md**.
-- **`group_trip_medical_forms`** — per-participant medical data. `trip_id + user_id`, tight RLS
+  acknowledge requirements. `trip_id + user_id`, pointing at the exact version agreed to via
+  `operator_document_id`. See **waiver-medical.md**.
+- **`organized_trip_medical_forms`** — per-participant medical data. `trip_id + user_id`, tight RLS
   (participant + host only). See **waiver-medical.md**.
 - **`group_trip_payment_events`** — append-only ledger of deposits/payments/refunds. `trip_id +
   user_id`, insert-only, never updated in place. Sketch only — payment timing and method will be
   decided later on. See **approval-review.md**.
-- **`group_trip_edit_log`** — recommended: append-only record of operator edits. See
-  **operator-trip-edit.md** §8.
+
+That is the full set. `group_trip_edit_log` was also considered and cut 2026-07-23 — see
+**operator-trip-edit.md** §8.
 
 ### 5.3 RLS
 
