@@ -41,6 +41,23 @@ export function useAuthGuard() {
   const lastAuthCheckRef = useRef<number>(0);
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // `currentStep` is READ by the auth check but must never be a DEPENDENCY of it.
+  //
+  // WHY (2026-07-27): with currentStep in checkAuthState's deps, the callback got a
+  // new identity on every onboarding step, which re-ran the effect below, which calls
+  // checkAuthState() — so walking onboarding fired ~10 overlapping, uncancelled
+  // getSession()+getUser() round trips. The demo path never showed this because every
+  // caller here is gated on !isDemoUser. auth-js funnels concurrent callers through one
+  // shared init promise and a single-flight refresh, so piling them up is exactly the
+  // wrong thing to do.
+  //
+  // A ref keeps the value FRESH (a plain dep removal would leave a stale closure at the
+  // two read sites) while leaving the callback's identity stable.
+  const currentStepRef = useRef(currentStep);
+  useEffect(() => {
+    currentStepRef.current = currentStep;
+  });
+
   /**
    * Check if we're in an OAuth callback flow.
    * Detects OAuth return by checking URL parameters only (no storage flags needed
@@ -164,7 +181,8 @@ export function useAuthGuard() {
           await handleUnauthenticated();
         } else {
           // User is null and no session - ensure we're on WelcomeScreen
-          if (currentStep !== STEP_WELCOME) {
+          // (currentStepRef, not currentStep — see the ref's note above.)
+          if (currentStepRef.current !== STEP_WELCOME) {
             console.log('[useAuthGuard] User is null and no session - ensuring WelcomeScreen');
             setCurrentStep(STEP_WELCOME);
           }
@@ -242,7 +260,11 @@ export function useAuthGuard() {
         await handleUnauthenticated();
       }
     }
-  }, [user, isDemoUser, isRestoringSession, isOAuthCallback, handleUnauthenticated, setUser, currentStep, setCurrentStep]);
+    // currentStep deliberately NOT a dep — read via currentStepRef. Every other dep
+    // here is stable (isOAuthCallback and handleUnauthenticated are useCallback'd over
+    // stable values, setUser/setCurrentStep are useState setters), so checkAuthState now
+    // keeps ONE identity for the whole session instead of one per onboarding step.
+  }, [user, isDemoUser, isRestoringSession, isOAuthCallback, handleUnauthenticated, setUser, setCurrentStep]);
 
   /**
    * Listen to auth state changes from Supabase
@@ -362,7 +384,9 @@ export function useAuthGuard() {
     if (user === null && !isDemoUser) {
       // Ensure we're on WelcomeScreen - set currentStep if not already STEP_WELCOME
       // This prevents redirect loops while ensuring navigation happens
-      if (currentStep !== STEP_WELCOME) {
+      // (currentStepRef, not currentStep — keeping it out of the deps below is the
+      // whole point: this effect must fire on AUTH changes, not on step changes.)
+      if (currentStepRef.current !== STEP_WELCOME) {
         console.log('[useAuthGuard] User is null, ensuring navigation to WelcomeScreen');
         setCurrentStep(STEP_WELCOME);
       }
@@ -373,7 +397,7 @@ export function useAuthGuard() {
     if (user !== null && !isDemoUser) {
       checkAuthState();
     }
-  }, [user, isDemoUser, isRestoringSession, checkAuthState, currentStep, setCurrentStep]);
+  }, [user, isDemoUser, isRestoringSession, checkAuthState, setCurrentStep]);
 
   /**
    * Handle app foregrounding (mobile) or focus (web)

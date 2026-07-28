@@ -31,6 +31,24 @@ import { analyticsService } from '../analytics/analyticsService';
 
 const PENDING_KEY = 'swellyo_pending_profile_video_upload';
 
+/**
+ * True while THIS process is uploading a profile video.
+ *
+ * WHY (2026-07-27 incident): the pending record is written before the upload
+ * starts and cleared only on success, so it is present for the whole upload.
+ * `resumePendingProfileVideoUpload()` runs when the main app mounts — which,
+ * after onboarding, happens while the first upload is often still going (a
+ * 22.7MB clip took 115s). It read the live record as an abandoned one and
+ * started a SECOND concurrent upload of the same file: double the user's
+ * mobile data, two S3 objects, two MediaConvert jobs racing to write the same
+ * row, and two 7-minute `pollForProcessedVideo` loops.
+ *
+ * Process-scoped on purpose. A record left behind by a killed app belongs to a
+ * dead process, so this flag is false at next launch and resume still works —
+ * which is the case the resume feature exists for.
+ */
+let uploadInFlight = false;
+
 /** After this many failed launches, give up so we don't retry a doomed file forever. */
 export const MAX_UPLOAD_ATTEMPTS = 3;
 
@@ -170,6 +188,15 @@ export async function startProfileVideoUpload(
     return;
   }
 
+  // Claim the in-flight slot for this process. See uploadInFlight above: the
+  // pending record exists from step 3 until success, so without this claim the
+  // resume path treats a still-running upload as an abandoned one.
+  if (uploadInFlight) {
+    console.log('[pendingProfileVideo] an upload is already in flight — ignoring duplicate start');
+    return;
+  }
+  uploadInFlight = true;
+  try {
   const startedAt = Date.now();
   let uploadUri = pickedUri;
   let transcoded = false;
@@ -242,6 +269,9 @@ export async function startProfileVideoUpload(
     // If we never persisted one (durability failed), there's nothing to resume —
     // same as today.
   }
+  } finally {
+    uploadInFlight = false;
+  }
 }
 
 /**
@@ -251,6 +281,13 @@ export async function startProfileVideoUpload(
  */
 export async function resumePendingProfileVideoUpload(): Promise<void> {
   if (Platform.OS === 'web') return;
+
+  // A live upload in this process owns the record — resuming it would duplicate
+  // the upload, not recover it. See uploadInFlight.
+  if (uploadInFlight) {
+    console.log('[pendingProfileVideo] upload already in flight — skipping resume');
+    return;
+  }
 
   const rec = await getPendingUpload();
   if (!rec) return;
@@ -281,6 +318,10 @@ export async function resumePendingProfileVideoUpload(): Promise<void> {
   analyticsService.track('profile_video_upload_resumed', { attempt });
   console.log(`[pendingProfileVideo] resuming upload (attempt ${attempt}) for user ${rec.userId}`);
 
+  // Claim the slot too, so a second resume call (remount, re-login) can't stack
+  // another copy of the same upload on top of this one.
+  uploadInFlight = true;
+  try {
   // The file is already transcoded from the original start, so no re-shrink.
   const result = await uploadProfileVideoS3(rec.localUri, rec.userId, rec.mimeType ?? 'video/mp4');
 
@@ -296,5 +337,8 @@ export async function resumePendingProfileVideoUpload(): Promise<void> {
       attempt,
       will_retry: attempt < MAX_UPLOAD_ATTEMPTS,
     });
+  }
+  } finally {
+    uploadInFlight = false;
   }
 }

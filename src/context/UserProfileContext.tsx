@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import {
   supabaseDatabaseService,
@@ -165,7 +165,16 @@ export const UserProfileProvider: React.FC<{ children: React.ReactNode }> = ({ c
     });
   }, []);
 
-  const value: UserProfileContextValue = { profile, isLoading, refresh, updateProfile };
+  // Memoized: this provider consumes useOnboarding() (line 26), so it re-renders
+  // on EVERY OnboardingContext change. A plain object here forwarded each of
+  // those to all 11 useUserProfile consumers (incl. ExploreTripCard per deck
+  // row) even when profile/isLoading hadn't changed — the second stage of the
+  // 2026-07-27 render-storm freeze. The functions are already useCallback'd, so
+  // this reference only changes when something real changed.
+  const value: UserProfileContextValue = useMemo(
+    () => ({ profile, isLoading, refresh, updateProfile }),
+    [profile, isLoading, refresh, updateProfile],
+  );
 
   return <UserProfileContext.Provider value={value}>{children}</UserProfileContext.Provider>;
 };

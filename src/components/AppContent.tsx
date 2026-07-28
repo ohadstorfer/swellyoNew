@@ -58,6 +58,7 @@ const APP_OPENED_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
 const APP_OPENED_STORAGE_KEY_PREFIX = 'last_app_open_logged_'; // suffix is the user id so different users on the same device don't block each other
 import { useAuthGuard } from '../hooks/useAuthGuard';
 import { friendlyErrorMessage } from '../utils/friendlyError';
+
 import { isFirstVideoReadyForBoardType } from '../services/media/videoPreloadService';
 import { STEP_WELCOME, STEP_ONBOARDING_WELCOME } from '../constants/onboardingSteps';
 import { ageGateService } from '../services/ageGate/ageGateService';
@@ -1852,21 +1853,161 @@ export const AppContent: React.FC = () => {
   // 28s) that are really just you switching apps. We track AppState and skip the
   // warning whenever the app was anything but 'active' across the interval — so a
   // report means a genuine on-screen freeze, not a suspended timer.
+  // Mirror of the values the stall report needs. The watchdog effect below runs
+  // once ([] deps) so it can't close over live state — and we WANT the values as
+  // of the last commit anyway ("what was actually on screen when it froze").
+  //
+  // Why onboarding_step + rendered_branch: `isComplete` (from the DB) and
+  // `currentStep` (from the AsyncStorage cache) are restored independently with
+  // no reconciliation, so a stale cached step makes a stall LOOK like it happened
+  // in onboarding when the main app was really on screen. Sending both, plus the
+  // branch that actually rendered, makes the mislabel visible instead of silent.
+  // `route` alone can't do this — it's a navigationRef value that can be stale
+  // from a previous mount.
+  const stallContextRef = useRef({ step: -1, isComplete: false, branch: '', conversations: 0 });
+  useEffect(() => {
+    stallContextRef.current = {
+      step: currentStep,
+      isComplete,
+      branch: shouldShowConversations ? 'main_app' : 'onboarding',
+      conversations: messagingConversations?.length ?? 0,
+    };
+  });
+
   useEffect(() => {
     let last = Date.now();
     let leftActive = false;
     let lastReportAt = 0;
     let reportsThisSession = 0;
+    let lastStateChangeAt = Date.now();
+    // --- Freeze probes ------------------------------------------------------
+    // Two orthogonal readings, both from JS, no Xcode needed.
+    //
+    // 1. Hermes GC. Hermes collects ON the JS thread, so a forced or frequent
+    //    collection IS a JS stall. Times come back as SECONDS (doubles) → ms.
+    //      gc cpu rising by roughly the stall length → memory pressure IS the stall.
+    //      gc cpu flat while the tick is late        → the JS thread isn't doing
+    //                                                  the work; look outside it.
+    //
+    // 2. A fixed synthetic workload. Constant JS work, so a rising cost means the
+    //    JS thread itself got slower (GC / interpreter / CPU starvation). A flat
+    //    cost next to a late tick means JS is healthy and the lateness comes from
+    //    contention elsewhere — which would move the whole hunt to the native side.
+    const runBench = () => {
+      const t0 = Date.now();
+      let acc = 0;
+      for (let i = 0; i < 200000; i++) acc += i % 7;
+      // `acc` is read so the loop can't be optimised away.
+      return acc >= 0 ? Date.now() - t0 : -1;
+    };
+    const readHermes = () => {
+      try {
+        const s = (global as any).HermesInternal?.getInstrumentedStats?.();
+        if (!s) return null;
+        return {
+          gcs: s.js_numGCs ?? 0,
+          gcCpuMs: Math.round((s.js_gcCPUTime ?? 0) * 1000),
+          gcWallMs: Math.round((s.js_gcTime ?? 0) * 1000),
+          heapMb: Math.round(((s.js_heapSize ?? 0) / 1048576) * 10) / 10,
+          liveMb: Math.round(((s.js_allocatedBytes ?? 0) / 1048576) * 10) / 10,
+          // Memory held by native objects the JS heap only points at (video
+          // buffers, decoded images). The JS heap staying small while this
+          // climbs is the signature of a native-side hog.
+          extMb: Math.round(((s.js_externalBytes ?? 0) / 1048576) * 10) / 10,
+          // Cumulative bytes ever allocated. The DELTA between two ticks is the
+          // allocation RATE, which is what a "GC +423" tick is really telling us —
+          // 423 young-gen collections is a proxy for volume, this is the volume.
+          totalAllocMb: Math.round((s.js_totalAllocatedBytes ?? 0) / 1048576),
+        };
+      } catch { return null; }
+    };
+    let prevHermes = readHermes();
+    let ticks = 0;
+    // 3. iOS memory warnings. This is the probe that decides the whole hunt.
+    //
+    //    The Hermes heap was seen dropping 120MB → 28MB across a degraded run.
+    //    Hermes does not shrink a heap by 75% on its own — RN calls into it when
+    //    iOS raises memory pressure. So that drop is indirect evidence the process
+    //    was being squeezed, and under squeeze iOS runs the memory compressor,
+    //    which steals CPU from every thread. That would explain BOTH symptoms at
+    //    once: a fixed JS loop running ~4x slower all the time (compressor stealing
+    //    slices) AND occasional multi-second full freezes (compaction / swap-in).
+    //
+    //    It is also the only mechanism that survives all six purple/orange
+    //    experiments, because it is cumulative and threshold-based rather than a
+    //    single leaked object — which is exactly why 26 agents auditing JavaScript
+    //    found nothing.
+    //
+    //    Read it like this:
+    //      warnings climb on purple, stay 0 on orange  → memory pressure IS the
+    //        cause. Stop auditing JS; go cut peak native memory.
+    //      both arms 0 while purple still degrades     → memory pressure is dead,
+    //        and so is the last standing theory. The cause is elsewhere entirely.
+    let memWarnings = 0;
+    const memSub = AppState.addEventListener('memoryWarning', () => {
+      memWarnings += 1;
+      if (__DEV__) {
+        const c = stallContextRef.current;
+        console.log(`🔴 MEMORY WARNING #${memWarnings} @ [${c.branch}/step ${c.step}]`);
+      }
+    });
+    if (__DEV__) {
+      const probe = (global as any).HermesInternal?.getInstrumentedStats?.();
+      console.log(
+        probe
+          ? `🧠 HERMES baseline: bench ${runBench()}ms | heap ${prevHermes?.heapMb}MB live ${prevHermes?.liveMb}MB | keys: ${Object.keys(probe).join(',')}`
+          : `🧠 HERMES: getInstrumentedStats unavailable — GC probe off, bench still on (${runBench()}ms)`,
+      );
+    }
     const sub = AppState.addEventListener('change', (s) => {
+      lastStateChangeAt = Date.now();
       if (s !== 'active') leftActive = true;
+      // Dev only: a stall report is only trustworthy if no background/active pair
+      // brackets it. Printing transitions makes that checkable by eye in Metro.
+      if (__DEV__) console.log(`[AppState] → ${s} @ ${new Date().toISOString()}`);
     });
     const id = setInterval(() => {
       const now = Date.now();
       const lag = now - last - 2000;
       last = now;
+      // Sample on EVERY tick, stall or not. The deltas only mean something
+      // against the previous tick, and the healthy ticks ARE the baseline we
+      // compare a stalling run against.
+      const hs = readHermes();
+      const dGcs = hs && prevHermes ? hs.gcs - prevHermes.gcs : 0;
+      const dGcCpu = hs && prevHermes ? hs.gcCpuMs - prevHermes.gcCpuMs : 0;
+      const dGcWall = hs && prevHermes ? hs.gcWallMs - prevHermes.gcWallMs : 0;
+      // Computed BEFORE prevHermes is advanced below, like the three deltas above.
+      const dAlloc = hs && prevHermes ? hs.totalAllocMb - prevHermes.totalAllocMb : 0;
+      if (hs) prevHermes = hs;
+      const gcTag = hs
+        ? `GC +${dGcs} (${dGcWall}ms wall / ${dGcCpu}ms cpu) alloc ${dAlloc}MB heap ${hs.heapMb}MB live ${hs.liveMb}MB ext ${hs.extMb}MB memWarn ${memWarnings}`
+        : `GC n/a memWarn ${memWarnings}`;
+      ticks += 1;
+      if (lag <= 1000) {
+        // Every tick, tagged with the screen that is on. The point is to watch
+        // `bench` climb and read off WHICH step it climbs on — the bench is a
+        // fixed workload, so a rising number is the JS thread losing CPU to
+        // something that is not JavaScript.
+        if (__DEV__ && AppState.currentState === 'active') {
+          const c = stallContextRef.current;
+          console.log(`🧠 HERMES [${c.branch}/step ${c.step}] bench ${runBench()}ms | ${gcTag}`);
+        }
+        leftActive = AppState.currentState !== 'active';
+        return;
+      }
+      // Judge one macrotask later, NOT inline. When iOS resumes a suspended
+      // process, the queued AppState 'change' event and this overdue timer
+      // callback drain in the same pass and their order is not guaranteed. Judging
+      // inline can see leftActive === false and currentState === 'active' for a
+      // window the app actually spent backgrounded, and report a multi-minute
+      // "freeze" that never happened — which is worse than no telemetry, because
+      // it sends us hunting a JS block no code in this app could produce.
+      // Deferring lets the already-queued AppState callback run first.
+      setTimeout(() => {
       const wasBackgrounded = leftActive || AppState.currentState !== 'active';
       leftActive = AppState.currentState !== 'active';
-      if (lag <= 1000 || wasBackgrounded) return;
+      if (wasBackgrounded) return;
       let channels = 0;
       let channelStates = '';
       try {
@@ -1876,8 +2017,11 @@ export const AppContent: React.FC = () => {
         for (const c of chans) tally[c.state] = (tally[c.state] ?? 0) + 1;
         channelStates = Object.entries(tally).map(([state, n]) => `${state}:${n}`).join(' ');
       } catch { /* noop */ }
+      // Measured right after the stall, so it reports the state of the JS thread
+      // in the window the freeze is actually happening in.
+      const benchAfterStall = __DEV__ ? runBench() : -1;
       if (__DEV__) {
-        console.log(`⚠️ PERF: JS thread blocked ${Math.round(lag)}ms (realtime channels: ${channels})`);
+        console.log(`⚠️ PERF: JS thread blocked ${Math.round(lag)}ms (realtime channels: ${channels}) | ${gcTag} | bench ${benchAfterStall}ms`);
       }
       // Rate-limited so a long degradation doesn't flood PostHog: at most one
       // report per 30s and 10 per session. The stall itself delays this timer,
@@ -1894,15 +2038,44 @@ export const AppContent: React.FC = () => {
       // NOTE: must go through analyticsService — the old posthogService.trackEvent
       // was a silent no-op (its initializePostHog() was never called anywhere),
       // so this alarm never reported a single event in builds 45/46.
+      const ctx = stallContextRef.current;
       analyticsService.track('js_thread_stall', {
         blocked_ms: Math.round(lag),
         realtime_channels: channels,
         channel_states: channelStates,
         route,
         root_stack_depth: rootStackDepth,
+        // Where the stall really happened (see stallContextRef above).
+        onboarding_step: ctx.step,
+        onboarding_complete: ctx.isComplete,
+        rendered_branch: ctx.branch,
+        // The direct field test of freeze mechanism #1: if stalls scale with
+        // cached-conversation count, the cache-sweep storm is confirmed at scale.
+        conversations_count: ctx.conversations,
+        // Suspend-vs-block evidence. A genuine JS block happens with the app
+        // solidly foregrounded and no recent state change; a value close to
+        // blocked_ms means a background/resume bracketed the window and the
+        // number is suspect no matter what the guard above concluded.
+        app_state: AppState.currentState,
+        ms_since_app_state_change: now - lastStateChangeAt,
+        // Freeze probes — see runBench/readHermes above. gc_cpu_ms_delta close to
+        // blocked_ms means Hermes GC was the stall; near zero means it was not.
+        gc_count_delta: dGcs,
+        gc_cpu_ms_delta: dGcCpu,
+        gc_wall_ms_delta: dGcWall,
+        heap_mb: hs?.heapMb ?? -1,
+        live_mb: hs?.liveMb ?? -1,
+        bench_ms: benchAfterStall,
+        // Non-zero here means iOS was squeezing the process when it froze.
+        memory_warnings: memWarnings,
+        // MB allocated during the blocked window. A big number with GC time near
+        // zero means the thread was running JS flat out, not collecting garbage —
+        // that is what the 2026-07-28 push-token request storm looked like.
+        alloc_mb_delta: dAlloc,
       });
+      }, 0);
     }, 2000);
-    return () => { sub.remove(); clearInterval(id); };
+    return () => { sub.remove(); memSub.remove(); clearInterval(id); };
   }, []);
 
   // Dev-only realtime channel tracker — logs ONLY when the channel set changes,

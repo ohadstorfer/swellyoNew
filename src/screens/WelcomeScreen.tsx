@@ -504,7 +504,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     };
 
     checkAuthState();
-  }, [setUser, onGetStarted, updateFormData]);
+    // checkOnboardingStatus was historically omitted here because it used to be
+    // recreated on every provider render — listing it would have re-run this
+    // whole auth check per render. It's useCallback'd (stable) since 2026-07-27,
+    // so listing it is now free and keeps the closure honest.
+  }, [setUser, onGetStarted, updateFormData, checkOnboardingStatus]);
 
   const handleGoogleSignIn = async (ageVerified = false) => {
     if (!ageVerified) {

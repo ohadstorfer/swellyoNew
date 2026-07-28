@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingData } from '../screens/OnboardingStep1Screen';
 import { User, databaseService } from '../services/database/databaseService';
@@ -198,7 +198,14 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Register for push notifications as soon as the user enters step 1.
   // We need the token before they finish onboarding so abandonment reminders
-  // have somewhere to deliver. Service is idempotent — safe to call again later.
+  // have somewhere to deliver.
+  //
+  // This is the call the orange "Skip Demo" path never makes (it never sets
+  // currentStep to 1), which is why the 2026-07-28 push-token loop only ever
+  // reproduced on the real onboarding flow — see pushNotificationService.
+  // "Idempotent" used to be a claim in this comment and NOT true in the code;
+  // registerForPushNotifications now really does early-return once it holds a
+  // token, so calling it from all three sites is safe.
   useEffect(() => {
     if (currentStep === 1 && user && !earlyPushRegisteredRef.current) {
       earlyPushRegisteredRef.current = true;
@@ -403,7 +410,9 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   // Method to save current step data to Supabase (called explicitly on "Next" button)
-  const saveStepToSupabase = async (stepData: Partial<OnboardingData>) => {
+  // useCallback keeps the reference stable between saves so the memoized context
+  // value below only changes when actual state changes (see the value memo).
+  const saveStepToSupabase = useCallback(async (stepData: Partial<OnboardingData>) => {
     try {
       // Merge step data with existing formData
       const dataToSave = { ...formData, ...stepData };
@@ -426,17 +435,18 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.warn('Failed to save step data to Supabase:', supabaseError);
       // Don't throw - allow user to continue even if Supabase save fails
     }
-  };
+  }, [formData, isDemoUser]);
 
-  const updateFormData = (newData: Partial<OnboardingData>) => {
+  // Functional setState → no closure over formData → stable forever.
+  const updateFormData = useCallback((newData: Partial<OnboardingData>) => {
     if (__DEV__) console.log('Updating form data with:', newData);
     setFormData(prev => {
       const updated = { ...prev, ...newData };
       return updated;
     });
-  };
+  }, []);
 
-  const markOnboardingComplete = async () => {
+  const markOnboardingComplete = useCallback(async () => {
     console.log('Marking onboarding as complete');
     setIsComplete(true);
     
@@ -449,14 +459,14 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Don't throw - local state is already updated
       }
     }
-  };
+  }, []);
 
   /**
    * Check if the current user has finished onboarding in the database
    * Returns true if finished, false otherwise
    * Uses lightweight query for better performance and reliability
    */
-  const checkOnboardingStatus = async (): Promise<boolean> => {
+  const checkOnboardingStatus = useCallback(async (): Promise<boolean> => {
     if (!isSupabaseConfigured()) {
       return false;
     }
@@ -490,9 +500,17 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       console.log('Error checking onboarding status:', error);
       return false;
     }
-  };
+  }, []);
 
-  const value: OnboardingContextType = {
+  // Memoized so a provider re-render that changed nothing hands consumers the
+  // SAME reference and React bails out of their re-render. This context has 22
+  // consumer files — AppContent (~140 hooks), MessagingProvider's render body,
+  // UserProfileProvider (which fans out to 11 more) — so an unmemoized value
+  // turned every provider re-render into an app-wide render storm (the
+  // 2026-07-27 post-onboarding freeze). Mirrors MessagingProvider's pattern.
+  // useState setters (setCurrentStep, setUser, setIsDemoUser) are stable and
+  // need no deps.
+  const value: OnboardingContextType = useMemo(() => ({
     currentStep,
     formData,
     user,
@@ -509,7 +527,21 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     isRestoringSession,
     isLoaded,
     completionCheckedForUserId,
-  };
+  }), [
+    currentStep,
+    formData,
+    user,
+    updateFormData,
+    resetOnboarding,
+    isComplete,
+    saveStepToSupabase,
+    markOnboardingComplete,
+    checkOnboardingStatus,
+    isDemoUser,
+    isRestoringSession,
+    isLoaded,
+    completionCheckedForUserId,
+  ]);
 
   return (
     <OnboardingContext.Provider value={value}>

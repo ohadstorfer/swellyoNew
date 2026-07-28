@@ -43,7 +43,8 @@ class PushNotificationService {
   private currentToken: string | null = null;
   private isRegistered: boolean = false;
   private tokenSubscription: Notifications.Subscription | null = null;
-  private notificationListener: Notifications.Subscription | null = null;
+  /** Re-entrancy guard for the push-token listener — see the note at its callback. */
+  private isExchangingToken: boolean = false;
   private responseListener: Notifications.Subscription | null = null;
   private getCurrentConversationId: (() => string | null) | null = null;
   private onNotificationTap: ((payload: NotificationTapPayload) => void) | null = null;
@@ -105,15 +106,39 @@ class PushNotificationService {
         });
       }
 
-      // Get Expo push token
       const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+
+      // Genuinely idempotent now. Three places call this — session restore
+      // (OnboardingContext), onboarding step 1, and reaching the main app — and
+      // every call used to redo the whole exchange: a native re-register plus a
+      // POST to Expo. That is what made the token-refresh loop reachable at all,
+      // and it is wasted work regardless.
+      // Once we hold a token there is nothing to redo: a token that changes later
+      // arrives through tokenSubscription below, which is what that listener is for.
+      // Guarded on currentToken (not isRegistered alone) so a first attempt that
+      // bailed early — permission not yet granted, offline — still retries.
+      if (this.isRegistered && this.currentToken && this.tokenSubscription) {
+        return this.currentToken;
+      }
+
+      // Get Expo push token
       const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
       const token = tokenData.data;
 
-      // Save to Supabase if token changed
+      // Save to Supabase if token changed. Only remember it as ours once the write
+      // actually landed — caching it after a silent failure (auth not ready yet,
+      // network blip) meant the idempotency guard above short-circuited every
+      // later call and the device spent the whole session with no token in the DB.
       if (token && token !== this.currentToken) {
-        await this.saveTokenToSupabase(token);
-        this.currentToken = token;
+        const saved = await this.saveTokenToSupabase(token);
+        if (saved) {
+          this.currentToken = token;
+        } else {
+          // Leave currentToken null so the guard above fails and the next call
+          // retries the write. Deliberately NOT an early return: the refresh
+          // listener below still gets installed, and isRegistered still flips.
+          console.warn('[PushNotificationService] Token not persisted — will retry on next call');
+        }
       }
 
       // Listen for token refresh.
@@ -122,15 +147,36 @@ class PushNotificationService {
       // (seen in prod: a 64-char hex stored over a valid Expo token). On
       // refresh, exchange it for a fresh Expo token and save that instead.
       if (!this.tokenSubscription) {
-        this.tokenSubscription = Notifications.addPushTokenListener(async () => {
+        this.tokenSubscription = Notifications.addPushTokenListener(async (devicePushToken) => {
+          // MUST pass devicePushToken through. Calling getExpoPushTokenAsync()
+          // WITHOUT it is an infinite loop that freezes the whole app:
+          //   getExpoPushTokenAsync()  (getExpoPushTokenAsync.js:46 — falls back to)
+          //   → getDevicePushTokenAsync()
+          //   → native registerForRemoteNotifications()
+          //   → APNs replies → PushTokenModule.swift didRegister() ALWAYS does
+          //     sendEvent('onDevicePushToken') as well as resolving the promise
+          //   → this listener fires again → back to the top, forever.
+          // Measured at ~1100 requests/second, which pins the JS thread, starves the
+          // realtime heartbeat, and makes every unrelated Supabase call time out.
+          // Passing the token we were just handed short-circuits that fallback, so
+          // no native re-register happens and nothing re-emits — while still doing
+          // the raw-APNs → Expo-token exchange this listener exists for.
+          if (this.isExchangingToken) return;
+          this.isExchangingToken = true;
           try {
-            const refreshed = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+            const refreshed = (
+              await Notifications.getExpoPushTokenAsync({ projectId, devicePushToken })
+            ).data;
             if (refreshed && refreshed !== this.currentToken) {
-              await this.saveTokenToSupabase(refreshed);
-              this.currentToken = refreshed;
+              // Same rule as the initial save: only cache it once it persisted.
+              if (await this.saveTokenToSupabase(refreshed)) {
+                this.currentToken = refreshed;
+              }
             }
           } catch (e) {
             console.warn('[PushNotificationService] Token refresh exchange failed:', e);
+          } finally {
+            this.isExchangingToken = false;
           }
         });
       }
@@ -144,18 +190,25 @@ class PushNotificationService {
     }
   }
 
-  private async saveTokenToSupabase(token: string): Promise<void> {
+  /**
+   * Returns TRUE only if the token is actually persisted. Callers must not cache
+   * the token as "saved" on a false — every failure path here is silent (no auth
+   * user yet, network error), so a void return let a failed write look like a
+   * success and the device then went the whole session with no push token in the
+   * DB and nothing retrying it.
+   */
+  private async saveTokenToSupabase(token: string): Promise<boolean> {
     // Only ExponentPushToken[...] values are sendable through the Expo push
     // API — refuse anything else (e.g. a raw APNs/FCM hex) at the door.
     if (!token.startsWith('ExponentPushToken[')) {
       console.warn('[PushNotificationService] Refusing to save non-Expo token format');
-      return;
+      return false;
     }
     try {
       const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       if (authError || !authUser) {
         console.warn('[PushNotificationService] No authenticated user');
-        return;
+        return false;
       }
 
       // A single device token can only legitimately belong to one surfer row at
@@ -179,11 +232,13 @@ class PushNotificationService {
 
       if (error) {
         console.error('[PushNotificationService] Error saving token:', error);
-      } else {
-        console.log('[PushNotificationService] Token saved to Supabase');
+        return false;
       }
+      console.log('[PushNotificationService] Token saved to Supabase');
+      return true;
     } catch (error) {
       console.error('[PushNotificationService] Error saving token:', error);
+      return false;
     }
   }
 
@@ -290,14 +345,19 @@ class PushNotificationService {
 
   async clearToken(): Promise<void> {
     try {
-      if (this.currentToken) {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (authUser) {
-          await supabase
-            .from('surfers')
-            .update({ expo_push_token: null })
-            .eq('user_id', authUser.id);
-        }
+      // Unconditional — do NOT gate this on this.currentToken. That field is
+      // per-process, so after a relaunch where registration didn't finish
+      // (offline, permission revoked) it is null while the row still holds a
+      // token from an earlier session. Gating meant logging out left that token
+      // live and the device kept receiving the previous account's push
+      // notifications, previews and all, until someone else signed in on it.
+      // One extra UPDATE is a cheap price for not leaking someone's messages.
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (authUser) {
+        await supabase
+          .from('surfers')
+          .update({ expo_push_token: null })
+          .eq('user_id', authUser.id);
       }
     } catch (error) {
       console.warn('[PushNotificationService] Error clearing token:', error);
@@ -305,6 +365,9 @@ class PushNotificationService {
 
     this.currentToken = null;
     this.isRegistered = false;
+    // Must reset too: logging out mid-exchange would otherwise leave this stuck
+    // true, and the next login's listener would refuse to ever exchange a token.
+    this.isExchangingToken = false;
     if (this.tokenSubscription) {
       this.tokenSubscription.remove();
       this.tokenSubscription = null;
