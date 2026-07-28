@@ -108,9 +108,10 @@ import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
 import { ChatSearchHeader } from '../components/chat/ChatSearchHeader';
 import { BubbleSpotlightDim, type SpotlightRect } from '../components/chat/BubbleSpotlightDim';
 import { SafeMessageBubble } from '../components/chat/SafeMessageBubble';
+import { SingleTickIcon } from '../components/icons/SingleTickIcon';
 
 // WhatsApp-style read receipts for own messages.
-// - 'pending'   → no tick (not yet server-confirmed: media uploading/failed, or a text row still on its temporary client id)
+// - 'pending'   → 1V gris (left the composer, server hasn't confirmed it yet: media uploading/failed, or a text row still on its temporary client id)
 // - 'delivered' → 2V gris (message in DB, not yet read by other user)
 // - 'read'      → 2V azul (other user's last_read_at >= message.created_at)
 type ReceiptState = 'pending' | 'delivered' | 'read';
@@ -118,8 +119,8 @@ type ReceiptState = 'pending' | 'delivered' | 'read';
 function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState {
   // Not yet confirmed by the server: media still uploading/failed, OR a text
   // row that still carries its temporary client id (id === client_id) because
-  // sendMessage hasn't reconciled it to the server row yet. Show no tick until
-  // it lands (ReadReceipt returns null for 'pending').
+  // sendMessage hasn't reconciled it to the server row yet. Shows the single
+  // tick until it lands, then flips to the double tick.
   if (
     msg.upload_state === 'uploading' ||
     msg.upload_state === 'failed' ||
@@ -135,20 +136,28 @@ function ReadReceipt({ state, enabled = true }: { state: ReceiptState; onDark?: 
   // Group chats pass enabled={isDirect} so the tick is hidden — read state across
   // multiple recipients isn't a single boolean.
   if (!enabled) return null;
-  // No tick until the server confirms the message (see getReceiptState). This
-  // covers a text still on its temporary client id and a failed-and-retrying
-  // text — both read as "not sent yet".
-  if (state === 'pending') return null;
   // Gray when delivered, white when the other user has read up to this message
   // (sits on the celeste own bubble).
   const color = state === 'read' ? '#FFFFFF' : '#C2C2C2';
+  // One Reanimated.View for all three states: the tick fades in once, on send,
+  // and afterwards only its glyph swaps. Keying/remounting per state would let
+  // the exiting copy sit in the row next to the entering one and jog the
+  // bubble's width mid-fade.
   return (
     <Reanimated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(140)}>
-      <Image
-        source={Images.doubleTick}
-        style={{ width: 16, height: 16, marginLeft: 4, tintColor: color }}
-        resizeMode="contain"
-      />
+      {state === 'pending' ? (
+        // Single tick while the server hasn't confirmed the row yet (see
+        // getReceiptState) — a text still on its temporary client id, media
+        // uploading, or a failed-and-retrying send. Same box as the double
+        // tick, so the swap doesn't move anything.
+        <SingleTickIcon size={16} color={color} style={{ marginLeft: 4 }} />
+      ) : (
+        <Image
+          source={Images.doubleTick}
+          style={{ width: 16, height: 16, marginLeft: 4, tintColor: color }}
+          resizeMode="contain"
+        />
+      )}
     </Reanimated.View>
   );
 }
