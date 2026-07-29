@@ -513,8 +513,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   subtitle: {
-    fontSize: 21,
-    lineHeight: 28,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
   },
   cardImageWrap: {
     width: '100%',
-    height: 108,
+    height: 83,
     position: 'relative',
     borderRadius: 8,
     overflow: 'hidden',

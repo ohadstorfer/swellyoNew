@@ -112,15 +112,16 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   titleAccent: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: '#05BCD3',
     textAlign: 'center',
-    lineHeight: 38,
+    lineHeight: 28.8, // 120% of 24px
+    letterSpacing: -1,
   },
   titleQuestion: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: '#333333',

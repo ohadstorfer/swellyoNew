@@ -193,8 +193,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   titleAccent: {
-    fontSize: 31,
-    lineHeight: 37,
+    fontSize: 24,
+    lineHeight: 28.8, // 120% of 24px
+    letterSpacing: -1,
     fontWeight: '700',
     color: '#05BCD3',
     textAlign: 'center',
@@ -205,8 +206,8 @@ const styles = StyleSheet.create({
     }),
   },
   subtitle: {
-    fontSize: 20,
-    lineHeight: 26,
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',

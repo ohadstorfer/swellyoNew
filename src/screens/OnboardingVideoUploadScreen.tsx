@@ -1,21 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
+  ScrollView,
   StyleSheet,
   TouchableOpacity,
   Platform,
   Alert,
   Linking,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Path } from 'react-native-svg';
 import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
-import { colors, spacing } from '../styles/theme';
-import { useIsDesktopWeb, responsiveWidth } from '../utils/responsive';
+import { ff, fs } from '../theme/fonts';
 import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
 import { validateVideoComplete } from '../utils/videoValidation';
@@ -64,6 +62,37 @@ const getCategorySubtitle = (category: string): string => {
   return categoryMap[category.toLowerCase()] || 'Just Starting';
 };
 
+// Untitled UI stroke icons from the Figma design (upload-cloud-01 / trash-03),
+// rebuilt as react-native-svg paths. Each sits centred in a 24x24 box, keeping
+// the leaf dimensions the design gives them.
+const UploadCloudIcon = () => (
+  <View style={styles.actionIconBox}>
+    <Svg width={21.5} height={19.5} viewBox="0 0 21.5 19.5" fill="none">
+      <Path
+        d="M2.75 13.9922C1.54401 13.185 0.75 11.8102 0.75 10.25C0.75 7.90643 2.54151 5.98129 4.82974 5.76937C5.29781 2.92213 7.77024 0.75 10.75 0.75C13.7298 0.75 16.2022 2.92213 16.6703 5.76937C18.9585 5.98129 20.75 7.90643 20.75 10.25C20.75 11.8102 19.956 13.185 18.75 13.9922M14.75 13.75L10.75 9.75L6.75 13.75M10.75 9.75V18.75"
+        stroke="#FFFFFF"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  </View>
+);
+
+const TrashIcon = () => (
+  <View style={styles.actionIconBox}>
+    <Svg width={19.5} height={19.5} viewBox="0 0 19.5 19.5" fill="none">
+      <Path
+        d="M6.75 0.75H12.75M0.75 3.75H18.75M16.75 3.75L16.0487 14.2693C15.9435 15.8475 15.8909 16.6367 15.55 17.235C15.2499 17.7618 14.7972 18.1853 14.2517 18.4497C13.632 18.75 12.8411 18.75 11.2593 18.75H8.24065C6.65891 18.75 5.86803 18.75 5.24834 18.4497C4.70276 18.1853 4.25009 17.7618 3.94998 17.235C3.60911 16.6367 3.5565 15.8475 3.45129 14.2693L2.75 3.75M7.75 8.25V13.25M11.75 8.25V13.25"
+        stroke="#FFFFFF"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  </View>
+);
+
 interface OnboardingVideoUploadScreenProps {
   onNext: () => void;
   onSkip: () => void;
@@ -81,8 +110,6 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   surfLevel,
   userId,
 }) => {
-  const insets = useSafeAreaInsets();
-  const isDesktop = useIsDesktopWeb();
   const [userVideoUri, setUserVideoUri] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState<string | undefined>(undefined);
   // Picker asset hints so the pre-upload transcode decision is right without
@@ -92,9 +119,6 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
 
   const hasUserVideo = userVideoUri !== null;
-
-  const progressBarWidth = isDesktop ? 300 : 237;
-  const buttonWidth = responsiveWidth(90, 280, 330, 0);
 
   const surfLevelInfo = getSurfLevelMapping(boardType, surfLevel);
 
@@ -430,6 +454,19 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     }
   };
 
+  // Trash button: drop the picked clip and fall back to the default surf-level
+  // preview. A no-op when the user hasn't picked anything yet.
+  const clearVideo = () => {
+    setError(null);
+    if (!userVideoUri) return;
+    if (Platform.OS === 'web' && userVideoUri.startsWith('blob:')) {
+      URL.revokeObjectURL(userVideoUri);
+    }
+    setUserVideoUri(null);
+    setMimeType(undefined);
+    setVideoHints(undefined);
+  };
+
   const handleNext = () => {
     if (hasUserVideo && userVideoUri) {
       // Shrink → durable copy → resumable upload. Fire-and-forget: the user
@@ -451,64 +488,86 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   return (
     <>
       {/* Main Content */}
-      <View style={styles.mainContent}>
-
-          {/* Title & Subtitle */}
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>Show Us Your Style</Text>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.mainContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Title & Subtitle */}
+        <View style={styles.headerBlock}>
+          <Text style={styles.title}>Show us your style</Text>
           <Text style={styles.subtitle}>
             Drop a clip of you surfing so others can see how you ride
           </Text>
         </View>
 
-          <View style={styles.previewContainer}>
-            <View style={styles.videoPreview} pointerEvents="box-none">
-              <View style={styles.surfSkillVideoWrapper}>
-                <VideoView
-                  player={previewPlayer}
-                  style={styles.videoThumbnail}
-                  contentFit="cover"
-                  nativeControls={false}
-                  allowsFullscreen={false}
-                  allowsPictureInPicture={false}
-                  {...(Platform.OS === 'web' && {
-                    controls: false,
-                    disablePictureInPicture: true,
-                    playsinline: true,
-                    'webkit-playsinline': true,
-                    playsInline: true,
-                  } as any)}
-                />
-                {/* Transparent overlay to prevent interactions */}
-                <View style={styles.surfSkillVideoOverlay} />
+        <View style={styles.videoCard} pointerEvents="box-none">
+          <VideoView
+            player={previewPlayer}
+            style={styles.videoThumbnail}
+            contentFit="cover"
+            nativeControls={false}
+            allowsFullscreen={false}
+            allowsPictureInPicture={false}
+            {...(Platform.OS === 'web' && {
+              controls: false,
+              disablePictureInPicture: true,
+              playsinline: true,
+              'webkit-playsinline': true,
+              playsInline: true,
+            } as any)}
+          />
+          {/* Transparent overlay to prevent interactions with the video itself */}
+          <View style={styles.videoTapBlocker} />
 
-                {/* Title - top left */}
-                <View style={styles.surfSkillTitleOverlay}>
-                  <Text style={styles.surfSkillTitleOverlayText}>Surf Skill</Text>
-                </View>
+          {/* "Surf Skill" — top left */}
+          <Text style={styles.cardTopLabel}>Surf Skill</Text>
 
-                {/* Level Name and Subtitle - bottom left */}
-                <View style={styles.surfSkillContentOverlay}>
-                  <View style={styles.surfSkillNameContainer}>
-                    <Text style={styles.surfSkillNameOverlay}>{displayName}</Text>
-                  </View>
-                  <Text style={styles.surfSkillSubtitleOverlay}>{subtitle}</Text>
-                </View>
-              </View>
-
-              {/* Change video button */}
-              <TouchableOpacity style={styles.changeVideoButton} onPress={pickVideo} activeOpacity={0.8}>
-                <Ionicons name="cloud-upload-outline" size={42} color="#FFF" />
-              </TouchableOpacity>
-            </View>
-
-            
+          {/* Level name + category — bottom left */}
+          <View style={styles.cardBottomBlock} pointerEvents="none">
+            <Text style={styles.cardLevelName}>{displayName}</Text>
+            <Text style={styles.cardLevelCategory}>{subtitle}</Text>
           </View>
+
+          {/* Upload / remove — bottom right */}
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              style={styles.cardActionButton}
+              onPress={pickVideo}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Upload your own surf video"
+              testID="video-upload-button"
+            >
+              <UploadCloudIcon />
+            </TouchableOpacity>
+            {/* Nothing to delete until the user replaces the default clip. */}
+            {hasUserVideo && (
+              <TouchableOpacity
+                style={styles.cardActionButton}
+                onPress={clearVideo}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Remove your surf video"
+                testID="video-remove-button"
+              >
+                <TrashIcon />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
 
         {error && (
           <Text style={styles.errorText}>{error}</Text>
         )}
-      </View>
+
+        <View style={styles.messageBlock}>
+          <Text style={styles.messageText}>
+            This helps us match you with the right people, trips, and surf experiences. No pressure,
+          </Text>
+          <Text style={styles.messageEmphasis}>Just be you!</Text>
+        </View>
+      </ScrollView>
       {Platform.OS !== 'web' && (
       <GalleryPermissionOverlay
         visible={showPermissionOverlay}
@@ -525,101 +584,51 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
 };
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     flex: 1,
-    backgroundColor: colors.backgroundGray || '#FAFAFA',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: Platform.OS !== 'web' ? spacing.md : 0,
-  },
-  contentDesktop: {
-    maxWidth: 800,
-    alignSelf: 'center',
-    paddingHorizontal: 0,
-    width: '100%',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-    paddingTop: Platform.OS === 'web' ? spacing.md : spacing.sm,
-    height: 44,
-  },
-  headerDesktop: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-  },
-  backButton: {
-    width: 60,
-    alignItems: 'flex-start',
-  },
-  stepText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    textAlign: 'center',
-    lineHeight: 15,
-  },
-  placeholder: {
-    width: 60,
-  },
-  progressContainer: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.md,
-    alignItems: 'center',
-  },
-  progressContainerDesktop: {
-    paddingBottom: spacing.sm,
-  },
-  progressBar: {
-    height: 4,
-    backgroundColor: '#BDBDBD',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#333333',
-    borderRadius: 8,
-  },
-  titleContainer: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xxl,
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
-    color: colors.textPrimary,
-    textAlign: 'center',
-    lineHeight: 30,
-  },
-  subtitle: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: '#7B7B7B',
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
   },
   mainContent: {
-    flex: 1,
-    paddingHorizontal: 27,
-    justifyContent: 'center',
+    flexGrow: 1,
     alignItems: 'center',
+    paddingTop: 40,
+    paddingBottom: 24,
   },
-  previewContainer: {
+
+  // ---- Header ----------------------------------------------------------
+  headerBlock: {
     width: '100%',
     alignItems: 'center',
+    gap: 12,
   },
-  videoPreview: {
+  title: {
+    fontFamily: ff('Montserrat', '700'),
+    ...(Platform.OS === 'web' && { fontWeight: '700' as const }),
+    fontSize: fs(24),
+    lineHeight: 28.8, // 120% of 24px
+    letterSpacing: -1,
+    color: '#05BCD3',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  subtitle: {
+    fontFamily: ff('Montserrat', '700'),
+    ...(Platform.OS === 'web' && { fontWeight: '700' as const }),
+    fontSize: fs(18),
+    lineHeight: 24,
+    color: '#333333',
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    includeFontPadding: false,
+  },
+
+  // ---- Video card ------------------------------------------------------
+  videoCard: {
     width: '100%',
-    height: 229,
+    height: 243,
+    marginTop: 48,
     borderRadius: 16,
     overflow: 'hidden',
+    backgroundColor: '#000000',
     position: 'relative',
   },
   videoThumbnail: {
@@ -633,113 +642,98 @@ const styles = StyleSheet.create({
       objectPosition: 'center center' as any,
     }),
   },
-  surfSkillVideoWrapper: {
-    width: '100%',
-    height: '100%',
-    position: 'relative',
-  },
-  surfSkillVideoOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  videoTapBlocker: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
-    zIndex: 1,
   },
-  surfSkillTitleOverlay: {
+  cardTopLabel: {
     position: 'absolute',
-    top: 16,
+    top: 20,
     left: 16,
-    zIndex: 20,
-    pointerEvents: 'none',
-  },
-  surfSkillTitleOverlayText: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: ff('Inter', '700'),
+    ...(Platform.OS === 'web' && { fontWeight: '700' as const }),
+    fontSize: fs(18),
     lineHeight: 22,
-    color: colors.white,
+    color: '#FFFFFF',
+    includeFontPadding: false,
   },
-  surfSkillContentOverlay: {
+  cardBottomBlock: {
     position: 'absolute',
-    bottom: 16,
     left: 16,
-    zIndex: 20,
-    pointerEvents: 'none',
+    bottom: 23,
     gap: 4,
   },
-  surfSkillNameContainer: {
-    marginBottom: 4,
-  },
-  surfSkillNameOverlay: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+  cardLevelName: {
+    fontFamily: ff('Inter', '700'),
+    ...(Platform.OS === 'web' && { fontWeight: '700' as const }),
+    fontSize: fs(16),
     lineHeight: 22,
-    color: colors.white,
+    color: '#FFFFFF',
+    includeFontPadding: false,
   },
-  surfSkillSubtitleOverlay: {
-    fontSize: 14,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 20,
-    color: colors.white,
+  cardLevelCategory: {
+    fontFamily: ff('Inter', '400'),
+    ...(Platform.OS === 'web' && { fontWeight: '400' as const }),
+    fontSize: fs(10),
+    lineHeight: 14,
+    color: '#DADADA',
+    includeFontPadding: false,
   },
-  changeVideoButton: {
+  cardActions: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginTop: -32,
-    marginLeft: -32,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 1.77,
-    borderColor: '#FFF',
+    right: 16,
+    bottom: 29,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  cardActionButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 40,
+    backgroundColor: '#333333',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: Platform.OS === 'android' ? 0 : 5,
-    zIndex: 30,
+  },
+  actionIconBox: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ---- Message ---------------------------------------------------------
+  messageBlock: {
+    width: '100%',
+    marginTop: 48,
+    alignItems: 'center',
   },
   messageText: {
-    fontSize: 14,
+    fontFamily: ff('Inter', '400'),
+    ...(Platform.OS === 'web' && { fontWeight: '400' as const }),
+    fontSize: fs(14),
+    lineHeight: 18,
     color: '#7B7B7B',
     textAlign: 'center',
-    marginTop: 20,
-    lineHeight: 20,
-    paddingHorizontal: spacing.md,
+    includeFontPadding: false,
   },
+  messageEmphasis: {
+    marginTop: 18,
+    fontFamily: ff('Inter', '700'),
+    ...(Platform.OS === 'web' && { fontWeight: '700' as const }),
+    fontSize: fs(18),
+    lineHeight: 22,
+    color: '#7B7B7B',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+
   errorText: {
-    fontSize: 13,
+    fontFamily: ff('Inter', '400'),
+    ...(Platform.OS === 'web' && { fontWeight: '400' as const }),
+    fontSize: fs(13),
     color: '#E53E3E',
     textAlign: 'center',
     marginTop: 12,
-  },
-  buttonContainer: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xl,
-    alignItems: 'center',
-    width: '100%',
-    flexShrink: 0,
-  },
-  gradientButton: {
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#212121',
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
-    color: '#FFF',
-    textAlign: 'center',
   },
 });

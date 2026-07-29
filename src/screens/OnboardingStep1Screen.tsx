@@ -342,6 +342,7 @@ const styles = StyleSheet.create({
     color: '#0788B0', // var(--Text-brand, #0788B0)
     textAlign: 'center',
     lineHeight: 28.8, // 120% of 24px
+    letterSpacing: -1,
   },
   subtitleContainer: {
     paddingHorizontal: spacing.lg,

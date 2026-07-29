@@ -34,7 +34,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   isLoading = false,
 }) => {
   const isDesktop = useIsDesktopWeb();
-  const { height: rawScreenHeight, width: screenWidth } = useScreenDimensions();
+  const { height: rawScreenHeight } = useScreenDimensions();
   const insets = useSafeAreaInsets();
   const screenHeight = Platform.OS === 'web' ? rawScreenHeight : rawScreenHeight - (insets.top + (Platform.OS === 'android' ? 0 : insets.bottom));
   
@@ -45,40 +45,6 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
   const progressBarWidth = isDesktop ? 300 : 237;
   const buttonContainerMaxWidth = isDesktop ? 400 : undefined;
   const buttonWidth = responsiveWidth(90, 280, 320, 0); // 90% width, min 280px, max 320px, same as Step 1
-  
-  // Calculate responsive title font size to fit in 2 lines
-  // Title text: "Select the video that best represents\nhow you surf."
-  const calculateTitleFontSize = () => {
-    const titleText = "Select the video that best represents\nhow you surf.";
-    const baseFontSize = 20;
-    const minFontSize = 16;
-    const lineHeight = 1.4; // lineHeight ratio
-    
-    // Calculate available width for title (accounting for padding)
-    const horizontalPadding = isDesktop ? 32 * 2 : 10 * 2; // padding on both sides
-    const availableWidth = screenWidth - horizontalPadding;
-    
-    // Estimate if text fits in 2 lines with base font size
-    // Rough estimation: average character width is ~0.6 * fontSize
-    const avgCharWidth = baseFontSize * 0.6;
-    const longestLine = Math.max(
-      "Select the video that best represents".length,
-      "how you surf.".length
-    );
-    const estimatedWidth = longestLine * avgCharWidth;
-    
-    // If estimated width exceeds available width, reduce font size
-    if (estimatedWidth > availableWidth) {
-      // Calculate font size that would fit
-      const calculatedSize = (availableWidth / longestLine) / 0.6;
-      // Use the smaller of calculated size or base size, but not less than min
-      return Math.max(minFontSize, Math.min(calculatedSize, baseFontSize));
-    }
-    
-    return baseFontSize;
-  };
-  
-  const titleFontSize = calculateTitleFontSize();
   
   // Main video height is measured from its container (onLayout) instead of computed
   // from the screen — the scaffold already excludes the header/Next chrome.
@@ -203,7 +169,7 @@ export const OnboardingStep2Screen: React.FC<OnboardingStep2ScreenProps> = ({
     <View style={styles.contentRoot}>
       {/* Title */}
       <View style={[styles.titleContainer, isDesktop && styles.titleContainerDesktop]}>
-        <Text style={[styles.title, { fontSize: titleFontSize, lineHeight: titleFontSize * 1.4 }]} numberOfLines={2}>
+        <Text style={styles.title} numberOfLines={2}>
           Select the video that best represents{'\n'}how you surf.
         </Text>
       </View>
@@ -323,7 +289,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xs || 4,
   },
   title: {
-    // fontSize and lineHeight are set dynamically via inline style
+    fontSize: 18,
+    lineHeight: 24,
     fontWeight: '700',
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
     color: colors.textPrimary || '#333333',
