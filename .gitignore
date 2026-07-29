@@ -9,6 +9,15 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Xcode per-user state — window layout, breakpoints, scheme order.
+# Machine-local noise: it re-dirties every time Xcode opens.
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+*.pbxuser
+*.mode1v3
+*.perspectivev3
+
 # Native
 .kotlin/
 *.orig.*
