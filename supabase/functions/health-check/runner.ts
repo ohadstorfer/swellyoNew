@@ -25,7 +25,7 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 export async function runCheck(check: Check, timeoutMs: number): Promise<CheckResult> {
   const start = Date.now();
   try {
-    await withTimeout(check.run(), timeoutMs);
+    await withTimeout(check.run(), check.timeoutMs ?? timeoutMs);
     return { name: check.name, ok: true, ms: Date.now() - start, critical: check.critical };
   } catch (e) {
     return {

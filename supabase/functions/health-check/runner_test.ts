@@ -2,7 +2,12 @@ import {
   assertEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
+// Side-effect import: must come before buildAllChecks, since aws.ts reads AWS_*
+// at module-load time. Nothing here does network I/O — we only inspect the
+// Check objects' config, never call run().
+import "./faultcheck_env.ts";
 import { buildReport, httpStatusFor, runCheck, runChecks, withTimeout } from "./runner.ts";
+import { buildAllChecks } from "./checks/index.ts";
 import type { Check, CheckResult } from "./types.ts";
 
 const passing: Check = { name: "supabase_db", critical: true, run: () => Promise.resolve() };
@@ -50,6 +55,34 @@ Deno.test("runCheck times out a hanging check", async () => {
   const r = await runCheck(hanging, 30);
   assertEquals(r.ok, false);
   assertStringIncludes(r.error ?? "", "timeout");
+});
+
+Deno.test("runCheck: a check's own timeoutMs overrides the default", async () => {
+  // Default would fire at 10ms; the check's own 400ms leash lets it finish.
+  const slowButAllowed: Check = {
+    name: "supabase_storage",
+    critical: false,
+    timeoutMs: 400,
+    run: () => new Promise((res) => setTimeout(res, 60)),
+  };
+  const r = await runCheck(slowButAllowed, 10);
+  assertEquals(r.ok, true);
+});
+
+Deno.test("runCheck: an overridden timeout still fires when exceeded", async () => {
+  const r = await runCheck({ ...hanging, timeoutMs: 30 }, 5000);
+  assertEquals(r.ok, false);
+  assertStringIncludes(r.error ?? "", "timeout after 30ms");
+});
+
+Deno.test("storageCheck carries the longer timeout, other checks do not", () => {
+  const checks = buildAllChecks();
+  const storage = checks.find((c) => c.name === "supabase_storage");
+  assertEquals(storage?.timeoutMs, 15000);
+  // Every other check must keep the runner default (undefined = no override).
+  for (const c of checks.filter((c) => c.name !== "supabase_storage")) {
+    assertEquals(c.timeoutMs, undefined, `${c.name} unexpectedly overrides the timeout`);
+  }
 });
 
 Deno.test("runChecks runs all checks and returns one result each", async () => {

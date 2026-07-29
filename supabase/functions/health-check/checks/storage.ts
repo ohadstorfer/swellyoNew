@@ -7,6 +7,19 @@ export function storageCheck(): Check {
   return {
     name: "supabase_storage",
     critical: false,
+    // This check makes 6 SEQUENTIAL round trips, so it is structurally the
+    // slowest one. On 2026-07-09 ~01:00 UTC its runtime step-changed from
+    // ~1.4s to ~4-6s and stayed there, with no code change on our side — the
+    // other 9 checks were unaffected, and storage measured from outside the
+    // edge runtime is still ~270ms/op. So the extra ~4s is on the edge
+    // runtime -> Supabase Storage path, not something we introduced.
+    //
+    // 8s left almost no headroom over a 4-6s baseline, so normal jitter tripped
+    // it 1-3x/day and emailed everyone. 15s restores the same ratio of headroom
+    // the check had before the regression. This is noise suppression, NOT a
+    // fix: if this ever needs raising again, find out which of the 6 ops is
+    // slow first (per-op timing) instead of raising it a third time.
+    timeoutMs: 15000,
     run: async () => {
       const supabase = createClient(
         Deno.env.get("SUPABASE_URL")!,

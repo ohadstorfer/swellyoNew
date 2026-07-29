@@ -15,6 +15,9 @@ export interface Check {
   name: CheckName;
   critical: boolean;
   run: () => Promise<void>;
+  /** Overrides the runner's default timeout. Only set it where a check is
+   *  legitimately slower than the rest — see storage.ts for the one case. */
+  timeoutMs?: number;
 }
 
 export interface CheckResult {
