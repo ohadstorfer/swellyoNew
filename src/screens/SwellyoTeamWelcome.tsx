@@ -8,22 +8,20 @@ import {
   ImageBackground,
   Platform,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../components/Text';
 import { Images } from '../assets/images';
+import { ff, fs } from '../theme/fonts';
 
 interface SwellyoTeamWelcomeProps {
   onBack?: () => void;
-  onDropInWithSwelly?: () => void;
 }
 
 export const SwellyoTeamWelcome: React.FC<SwellyoTeamWelcomeProps> = ({
   onBack,
-  onDropInWithSwelly,
 }) => {
-  const insets = useSafeAreaInsets();
   const welcomeMessage = `Hey! Welcome to Swellyo 🤙
 
 Stoked you're here. Swellyo began as a wild idea between friends who believed travel could be deeper — more connected to culture, nature, and each other.
@@ -51,18 +49,18 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
               <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             
-            {/* Two overlapping avatars */}
+            {/* Two 52px avatars — the left one sits ON TOP, ringed in the
+                header's own #212121, and overlaps the one behind it by 20px
+                (Figma 14351:55280). */}
             <View style={styles.avatarContainer}>
-              {/* First avatar - behind */}
-              <View style={[styles.avatar, styles.avatarBack]}>
+              <View style={[styles.avatar, styles.avatarFront]}>
                 <Image
                   source={Images.userAvatar1}
                   style={styles.avatarImage}
                   resizeMode="cover"
                 />
               </View>
-              {/* Second avatar - in front with negative margin for overlap */}
-              <View style={[styles.avatar, styles.avatarFront]}>
+              <View style={[styles.avatar, styles.avatarBack]}>
                 <Image
                   source={Images.userAvatar2}
                   style={styles.avatarImage}
@@ -117,23 +115,12 @@ Drop in with Swelly, start connecting and help us grow the Swellyo community.
               </View>
             </View>
             
-            {/* Spacer for button */}
+            {/* Keeps the last line clear of the floating Swelly avatar + its
+                "Tap to get started" hint, which the nav layer draws on top. */}
             <View style={styles.spacer} />
           </ScrollView>
         </ImageBackground>
       </View>
-
-      {/* Drop In With Swelly Button */}
-      <View style={[styles.buttonContainer, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-        <TouchableOpacity
-          style={styles.dropInButton}
-          onPress={onDropInWithSwelly}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.dropInButtonText}>Drop In With Swelly!</Text>
-        </TouchableOpacity>
-      </View>
-    
     </View>
     </SafeAreaView>
   );
@@ -175,22 +162,21 @@ const styles = StyleSheet.create({
   avatarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: -16, // Negative margin to overlap avatars
   },
   avatar: {
     width: 52,
     height: 52,
     borderRadius: 26,
     overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: '#212121',
+  },
+  avatarFront: {
+    borderWidth: 1.5,
+    borderColor: '#212121', // Surface/M 07 — the header's own background
+    marginRight: -20,
+    zIndex: 2,
   },
   avatarBack: {
     zIndex: 1,
-  },
-  avatarFront: {
-    marginLeft: -16, // Overlap with previous avatar
-    zIndex: 2,
   },
   avatarImage: {
     width: '100%',
@@ -201,11 +187,15 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     gap: 4,
   },
+  // Inter SemiBold, Size/md (14) / Size/xl (18) — ff() so native gets the real
+  // SemiBold cut instead of silently falling back to Regular.
   profileName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: ff('Inter', '600'),
+    fontSize: fs(14),
+    lineHeight: 18,
     color: '#FFFFFF',
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
+    ...(Platform.OS === 'web' && { fontWeight: '600' as const }),
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
   },
   profileStatus: {
     fontSize: 13,
@@ -274,32 +264,9 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     fontFamily: Platform.OS === 'web' ? 'var(--Family-Body, Inter), sans-serif' : 'Inter',
   },
+  // Clears the floating Swelly avatar (97pt) and its hint.
   spacer: {
-    height: 100, // Space for button
-  },
-  buttonContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    paddingTop: 16,
-    alignItems: 'center',
-  },
-  dropInButton: {
-    backgroundColor: '#333333',
-    borderLeftWidth: 4,
-    
-    borderRadius: 28,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    minWidth: 150,
-    width: 330,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dropInButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    fontFamily: Platform.OS === 'web' ? 'var(--Family-Headings, Montserrat), sans-serif' : 'Montserrat',
+    height: 160,
   },
 });
 

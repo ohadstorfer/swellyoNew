@@ -10,11 +10,10 @@ import {
   Image,
   Platform,
   useWindowDimensions,
-  ImageSourcePropType,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Images } from '../../assets/images';
+import SwellyFaceBubble from '../SwellyFaceBubble';
 import { ff } from '../../theme/fonts';
 
 export type SwellyTopicId = 'travel_advice' | 'like_minded_travellers' | 'travel_partners' | 'guidance';
@@ -183,11 +182,7 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose
           )}
 
           <View style={styles.content}>
-            <Image
-              source={Images.swellyWaving as ImageSourcePropType}
-              style={styles.avatarImage}
-              resizeMode="contain"
-            />
+            <SwellyFaceBubble style={styles.avatarBubble} />
 
             <Text style={styles.title}>{`Yo! What are we\nfocusing on today?`}</Text>
 
@@ -287,11 +282,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#7B7B7B',
   },
-  avatarImage: {
-    width: 128,
-    height: 128,
-    marginTop: 0,
-    marginBottom: 4,
+  // Figma 13977:37524 sits 24px above the title; the bubble's own size lives in
+  // SwellyFaceBubble.
+  avatarBubble: {
+    marginBottom: 16,
   },
   title: {
     fontSize: 18,

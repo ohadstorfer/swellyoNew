@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '400',
     color: '#333333',
     ...Platform.select({
       web: { fontFamily: 'Inter, sans-serif' },

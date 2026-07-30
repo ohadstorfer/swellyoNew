@@ -50,6 +50,8 @@ export const tripsKeys = {
   detailGear: (id: string) => ['trips', 'detail-gear', id] as const,
   detailRequests: (id: string) => ['trips', 'detail-requests', id] as const,
   detailGearRequests: (id: string) => ['trips', 'detail-gear-requests', id] as const,
+  /** Traveler document requirements (v1: passport). Operator trips only. */
+  detailDocuments: (id: string) => ['trips', 'detail-documents', id] as const,
 };
 
 export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };

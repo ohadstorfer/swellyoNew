@@ -107,7 +107,11 @@ import {
   AdminUpdatesCard,
   GroupGearCard,
   YourGearCard,
+  TripDocumentsCard,
+  type DocumentRow,
 } from '../../components/trips/plan/PlanSections';
+import { PassportUploadFlow } from '../../components/trips/PassportUploadFlow';
+import { DocumentViewer } from '../../components/trips/DocumentViewer';
 import { ff } from '../../theme/fonts';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
@@ -119,10 +123,12 @@ import {
   useTripGear,
   useTripRequests,
   useTripGearRequests,
+  useTripDocuments,
 } from '../../hooks/trips/useTripDetail';
 import { useTripRealtime } from '../../hooks/trips/useTripRealtime';
 import { TripDetailSkeleton } from '../../components/skeletons';
-import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { friendlyErrorMessage, showErrorAlert } from '../../utils/friendlyError';
+import { fetchMyDocument } from '../../services/trips/tripDocumentsService';
 import { isTripHost } from '../../utils/tripRole';
 
 interface TripDetailScreenProps {
@@ -379,6 +385,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const gearRequestsQuery = useTripGearRequests(tripId, isHostDerived);
   const gearRequests = gearRequestsQuery.data ?? [];
 
+  // ── Documents (v1: passport image only) ───────────────────────────────────
+  // Organized/operator trips only. A DB trigger refuses to create a passport
+  // requirement on a peer trip, so the query is gated rather than filtered.
+  const isOperatorTrip = trip?.hosting_style === 'C';
+  const documentsQuery = useTripDocuments(tripId, isOperatorTrip);
+  const documentRows: DocumentRow[] = useMemo(
+    () =>
+      (documentsQuery.data ?? [])
+        .filter(r => r.reqType === 'upload')
+        .map(r => ({
+          requirementId: r.requirementId,
+          title: r.title,
+          state: r.state as DocumentRow['state'],
+          note: r.note,
+        })),
+    [documentsQuery.data],
+  );
+  const passportReq = useMemo(
+    () => (documentsQuery.data ?? []).find(r => r.kind === 'passport') ?? null,
+    [documentsQuery.data],
+  );
+
   // Live refresh while the screen is open — other users' approvals, joins,
   // leaves, trip edits and admin updates invalidate the queries above.
   useTripRealtime(tripId);
@@ -418,6 +446,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [personalGearSheetOpen, setPersonalGearSheetOpen] = useState(false);
   const [addPersonalSheetOpen, setAddPersonalSheetOpen] = useState(false);
   const [processingGearRequestId, setProcessingGearRequestId] = useState<string | null>(null);
+
+  // Documents (v1: passport). The upload flow owns the picker + confirm steps;
+  // the viewer holds only a storage path, never a signed URL.
+  const [passportUploadOpen, setPassportUploadOpen] = useState(false);
+  const [viewingDocPath, setViewingDocPath] = useState<string | null>(null);
 
   // Admin updates — host-posted free-text lines, visible to all members.
   // adminUpdates now comes from react-query (declared above).
@@ -1166,6 +1199,41 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // -------------------------------------------------------------------------
   // Admin updates handlers
   // -------------------------------------------------------------------------
+  // ── Documents (v1: passport) ───────────────────────────────────────────────
+  // Tapping the row either opens the upload flow (nothing uploaded yet, or the
+  // operator rejected the last photo) or opens the traveler's own file.
+  const handlePressDocumentRow = useCallback(
+    async (row: DocumentRow) => {
+      if (row.state === 'not_started' || row.state === 'overdue' || row.state === 'rejected') {
+        setPassportUploadOpen(true);
+        return;
+      }
+      // 'submitted' or 'approved' — show them what they sent. The storage path
+      // is fetched on demand; it is not kept in the requirement row.
+      if (!currentUserId) return;
+      try {
+        const doc = await fetchMyDocument(tripId, row.requirementId, currentUserId);
+        if (doc?.storagePath && !doc.fileDeletedAt) {
+          setViewingDocPath(doc.storagePath);
+        } else {
+          // Past the 30-day purge the row survives but the file does not. Say so
+          // rather than opening an empty viewer.
+          Alert.alert('No longer available', 'This file has been deleted.');
+        }
+      } catch (e) {
+        console.error('[TripDetail] could not load document');
+        showErrorAlert('Something went wrong', e, 'Could not open this document.');
+      }
+    },
+    [currentUserId, tripId],
+  );
+
+  const handlePassportUploaded = useCallback(() => {
+    setPassportUploadOpen(false);
+    // The row's state is derived server-side, so refetch rather than guess.
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+  }, [queryClient, tripId]);
+
   const handleStartAddUpdate = () => {
     setEditingUpdateId(null);
     setUpdateTitleDraft('');
@@ -1694,6 +1762,20 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           )}
         </View>
 
+        {/* 4) Documents — organized/operator trips only (v1: passport image).
+            Placed after Packing & Gear so the Figma order above stays intact.
+            Renders nothing when the trip asks for no documents, which is every
+            peer trip. */}
+        {isOperatorTrip && documentRows.length > 0 && (
+          <View style={styles.planSection} onLayout={registerSection('documents')}>
+            <TripDocumentsCard
+              rows={documentRows}
+              mode="member"
+              onPressRow={handlePressDocumentRow}
+            />
+          </View>
+        )}
+
         {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
 
         {/* Gear suggestions (host) — review members' "suggest item" submissions.
@@ -1867,6 +1949,30 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onApprove={handleApproveGearRequest}
         onDecline={handleDeclineGearRequest}
       />
+      {/* Passport upload (v1) — disclosure, OS picker, confirm, upload. Only
+          mounted once a requirement actually exists, so peer trips never carry
+          it. */}
+      {isOperatorTrip && passportReq && currentUserId && (
+        <PassportUploadFlow
+          visible={passportUploadOpen}
+          onClose={() => setPassportUploadOpen(false)}
+          tripId={tripId}
+          requirementId={passportReq.requirementId}
+          userId={currentUserId}
+          onUploaded={handlePassportUploaded}
+          rejectionNote={passportReq.state === 'rejected' ? passportReq.note : null}
+        />
+      )}
+
+      {/* Document viewer — mints its own ~60s signed URL per open and never
+          disk-caches the image. Read-only here; the host review screen is the
+          one that passes approve/reject. */}
+      <DocumentViewer
+        visible={!!viewingDocPath}
+        storagePath={viewingDocPath}
+        onClose={() => setViewingDocPath(null)}
+      />
+
       {/* Admin update — host writes/edits an announcement. Driven by the same
           addingUpdate / editingUpdateId state the list uses. */}
       <AdminUpdateSheet

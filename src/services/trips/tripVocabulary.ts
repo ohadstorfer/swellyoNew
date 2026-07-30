@@ -32,8 +32,20 @@ export const TRIP_TYPE_COLOR: Record<HostingStyle, string> = {
 };
 
 /**
+ * Solid fill + on-fill colour for the Explore card trip-type tag
+ * (Figma 14348:28785 · 28794 · 28790). Flat colour, no gradient: Crew is plain
+ * white with dark text, Captain and Operator are saturated with white text.
+ */
+export const TRIP_TYPE_TAG: Record<HostingStyle, { bg: string; fg: string }> = {
+  A: { bg: '#FFFFFF', fg: '#333333' },
+  B: { bg: '#05BCD3', fg: '#FFFFFF' },
+  C: { bg: '#B72DF2', fg: '#FFFFFF' },
+};
+
+/**
  * Diagonal gradient per trip type so the tag reads as a glossy chip. Operator
  * is a metallic gold (bright highlight → deep gold) so it looks shiny, not flat.
+ * Still used by the trip Overview tag; Explore uses TRIP_TYPE_TAG.
  */
 export const TRIP_TYPE_GRADIENT: Record<HostingStyle, readonly [string, string, string]> = {
   A: ['#45DDEC', '#05BCD3', '#0399AB'],

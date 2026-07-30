@@ -727,6 +727,130 @@ export const YourGearCard: React.FC<{
 };
 
 // ===========================================================================
+// Documents (v1: passport only, image upload, no text extraction).
+//
+// Deliberately built out of the SAME pieces as YourGearCard — ygBlock header,
+// ygCard surface, ygRow rows, the 20px checkbox — so it reads as another Plan
+// section rather than a bolt-on. Only the right-hand status label is new.
+//
+// Only ever rendered on organized/operator trips (hosting_style 'C'). A DB
+// trigger refuses to create a passport requirement anywhere else, so on a peer
+// trip `rows` simply arrives empty and this renders nothing.
+//
+// Spec: docs/specs/operator-trips/passport-upload-v1.md
+export type DocumentRowState =
+  | 'not_started'
+  | 'submitted'
+  | 'approved'
+  | 'rejected'
+  | 'overdue';
+
+export type DocumentRow = {
+  requirementId: string;
+  title: string;
+  state: DocumentRowState;
+  /** The operator's note. On a rejection, this is the reason. */
+  note?: string | null;
+};
+
+// One place decides what each state looks like, so the traveler card and the
+// host card can never drift apart.
+const DOC_STATUS: Record<DocumentRowState, { label: string; tone: 'accent' | 'muted' | 'bad' | 'done' }> = {
+  not_started: { label: 'Add', tone: 'accent' },
+  overdue: { label: 'Add — late', tone: 'bad' },
+  submitted: { label: 'In review', tone: 'muted' },
+  approved: { label: 'Approved', tone: 'done' },
+  rejected: { label: 'Add a new photo', tone: 'bad' },
+};
+
+export const TripDocumentsCard: React.FC<{
+  rows: DocumentRow[];
+  /** 'member' = the traveler's own checklist. 'host' = the operator reviewing. */
+  mode: 'member' | 'host';
+  /** host mode only — how many uploads are waiting for a decision. */
+  pendingReviewCount?: number;
+  onPressRow: (row: DocumentRow) => void;
+  onReviewAll?: () => void;
+}> = ({ rows, mode, pendingReviewCount = 0, onPressRow, onReviewAll }) => {
+  // Nothing asked for = nothing to show. Keeps peer trips completely untouched.
+  if (rows.length === 0) return null;
+
+  const isHost = mode === 'host';
+
+  return (
+    <View style={styles.ygBlock}>
+      <View style={styles.ygHeader}>
+        <View style={styles.ygHeaderText}>
+          <Text style={styles.ygTitle}>Documents</Text>
+          <Text style={styles.ygSub}>
+            {isHost
+              ? 'What travelers need to send you'
+              : 'Your organiser needs these to book for you'}
+          </Text>
+        </View>
+        <View style={styles.ygHeaderRight}>
+          {isHost && onReviewAll ? (
+            <Pressable onPress={onReviewAll} hitSlop={8}>
+              <Text style={styles.ygViewAll}>
+                {pendingReviewCount > 0 ? `Review (${pendingReviewCount})` : 'View all'}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.ygCard}>
+        {rows.map((row, i) => {
+          const status = DOC_STATUS[row.state];
+          const isLast = i === rows.length - 1;
+          const showNote = row.state === 'rejected' && !!row.note;
+
+          return (
+            <Pressable
+              key={row.requirementId}
+              onPress={() => onPressRow(row)}
+              // A rejection needs two lines, so the fixed row height is dropped
+              // for that case only — every other row keeps the gear-row rhythm.
+              style={[styles.ygRow, showNote && styles.docRowTall, isLast && styles.ygRowLast]}
+            >
+              {isHost ? (
+                <TripIcon name="passport" size={20} color="#333333" strokeWidth={1.4} />
+              ) : (
+                <GearCheckbox checked={row.state === 'approved'} />
+              )}
+
+              <View style={styles.docRowText}>
+                <Text style={styles.ygItem} numberOfLines={1}>
+                  {row.title}
+                </Text>
+                {showNote ? (
+                  <Text style={styles.docNote} numberOfLines={2}>
+                    {row.note}
+                  </Text>
+                ) : null}
+              </View>
+
+              {isHost ? null : (
+                <Text
+                  style={[
+                    styles.docStatus,
+                    status.tone === 'accent' && styles.docStatusAccent,
+                    status.tone === 'bad' && styles.docStatusBad,
+                    status.tone === 'done' && styles.docStatusDone,
+                  ]}
+                >
+                  {status.label}
+                </Text>
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+};
+
+// ===========================================================================
 // Sticky Trip Chat button — floats over content with a faded #FAFAFA gradient
 // (mirrors the Connect button in ProfileScreen). Rendered OUTSIDE the scroll.
 // Reusable faded-gradient floating footer (Figma CTA frame 12557-3613): a 230px
@@ -1047,6 +1171,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cbBoxChecked: { backgroundColor: T.accent, borderColor: T.accent },
+
+  // Documents rows — same rhythm as ygRow; only a rejection needs two lines.
+  docRowTall: { height: undefined, minHeight: 54, paddingVertical: 10 },
+  docRowText: { flex: 1, gap: 2 },
+  docNote: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: '#C4361E' },
+  docStatus: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted },
+  docStatusAccent: { color: T.accent },
+  docStatusBad: { color: '#C4361E' },
+  docStatusDone: { color: T.done },
 
   // Sticky Trip Chat
   footerOverlay: {

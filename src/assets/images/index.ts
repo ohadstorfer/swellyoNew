@@ -6,6 +6,18 @@ export const Images = {
   swellyShaper: require('./swelly-shaper.png'),
   swellyWelcomeMessage: require('./swelly-welcome-message.png'),
   swellyPopout: require('./swelly-popout.png'),
+  // Figma "Sweely" component (14382:86489) — the pelican in the beanie inside
+  // the grey disc with the purple ring, flattened to one PNG because the beanie
+  // deliberately breaks out of the circle while the neck is masked by it.
+  // Used by the floating Ask-Swelly avatar and the Swelly chat header.
+  sweely: require('./swelly-sweely.png'),
+  // The same pelican with no disc behind it — for the glassy purple-ringed
+  // bubble variant (SwellyFaceBubble): the topic overlay and the
+  // "Start a new chat?" modal.
+  swellyFace: require('./swelly-face.png'),
+  // Line-art palm + surfboard for the "No trips yet?" empty state on the Trips
+  // tab (Figma 14348:29221) — exported flat because the drawing is raster.
+  noTripsIllustration: require('./no-trips-illustration.png'),
   deleteAccountSurfer: require('./delete-account-surfer.png'),
   defaultAvatar: require('./default-avatar.png'),
   doubleTick: require('./double-tick.png'),

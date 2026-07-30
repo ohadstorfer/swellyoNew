@@ -24,6 +24,10 @@ import {
   listDeclinedRequests,
   listGearRequests,
 } from '../../services/trips/groupTripsService';
+import {
+  fetchMyRequirements,
+  type TripRequirement,
+} from '../../services/trips/tripDocumentsService';
 import { tripsKeys, EMPTY_EXPLORE_FILTER_KEY } from './useTripQueries';
 import { isTripHost } from '../../utils/tripRole';
 import type { MyTripsData } from './useTripQueries';
@@ -144,6 +148,27 @@ export function useTripRequests(tripId: string, isHost: boolean) {
       ]);
       return { pending, declined };
     },
+    gcTime: TRIP_DETAIL_GC_MS,
+  });
+}
+
+/**
+ * The current user's document requirements on this trip (v1: passport only).
+ *
+ * `enabled` is gated on hosting_style 'C': only organized/operator trips ask for
+ * a passport, and a DB trigger refuses to create the requirement anywhere else.
+ * Gating here means peer trips never fire the request at all.
+ *
+ * Deliberately NOT cached long. The state is derived server-side from the
+ * document row, so a stale value would show "Add" next to a passport that was
+ * already uploaded.
+ */
+export function useTripDocuments(tripId: string, isOperatorTrip: boolean) {
+  return useQuery<TripRequirement[]>({
+    queryKey: tripsKeys.detailDocuments(tripId),
+    enabled: isOperatorTrip,
+    queryFn: () => fetchMyRequirements(tripId),
+    staleTime: 0,
     gcTime: TRIP_DETAIL_GC_MS,
   });
 }

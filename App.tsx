@@ -133,8 +133,15 @@ export default Sentry.wrap(function App() {
       <UserProfileProvider>
         <MessagingProvider>
           <TutorialProvider>
-            <AppContent />
+            {/* App-wide status-bar default. Rendered BEFORE <AppContent /> on
+                purpose: RN's StatusBar keeps a stack of mounted entries and the
+                last one pushed wins, so this must mount first to act as the base
+                that individual screens can override (e.g. OnboardingStatusBar
+                switches to dark icons on onboarding's near-white backgrounds).
+                With it after AppContent it always won, and per-screen overrides
+                were silently ignored. */}
             <StatusBar style="light" />
+            <AppContent />
           </TutorialProvider>
         </MessagingProvider>
       </UserProfileProvider>

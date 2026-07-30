@@ -7,3 +7,12 @@ verify_jwt = true
 
 [functions.swelly-trip-planning-copy]
 verify_jwt = true
+
+# Traveler passport fields. Always a logged-in caller.
+[functions.group-document-passport]
+verify_jwt = true
+
+# Cron only. The gateway must let it through unauthenticated; the function
+# gates itself on x-internal-secret / the service-role bearer.
+[functions.purge-group-documents]
+verify_jwt = false

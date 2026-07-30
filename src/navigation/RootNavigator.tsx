@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, Alert } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -39,6 +40,10 @@ import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { approveJoinRequest, declineJoinRequest } from '../services/trips/groupTripsService';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
 import { useMessageSearchOpen } from './searchOverlayState';
+import { setPendingTab, usePendingTab } from './pendingTabState';
+import { hideSwellyFabNow, showSwellyFab, swellyFabOpacity } from './swellyFabVisibility';
+import { useSwellyHintVisible } from './swellyHintState';
+import SwellyTapHint, { SWELLY_HINT_WIDTH, SWELLY_HINT_HEIGHT } from '../components/SwellyTapHint';
 import { navigationRef, pushRootCard } from './navigationRef';
 import { friendlyErrorMessage } from '../utils/friendlyError';
 
@@ -442,6 +447,16 @@ function HomeTabsExtras() {
   });
   const active = (KEY_FOR_ROUTE[activeRoute] ?? 'trips') as NavKey;
 
+  // The tab the user just tapped, which lands before `active` does. Used only to
+  // pull the floating Swelly avatar off screen the instant a switch starts.
+  const pendingTab = usePendingTab();
+  const shownTab = pendingTab ?? active;
+  // Nav state is authoritative again as soon as it moves — programmatic switches
+  // never emit tabPress, so a stale pending value must not outlive them.
+  useEffect(() => {
+    setPendingTab(null);
+  }, [active]);
+
   // Mirror the active tab into AppContent (legacy reads + Profile back button).
   useEffect(() => {
     onTabChange(active);
@@ -483,42 +498,111 @@ function HomeTabsExtras() {
   // Swelly floating avatar — Lineup tab only, hidden while an overlay is up
   // (including the full-screen message search).
   const messageSearchOpen = useMessageSearchOpen();
-  if (active !== 'lineup' || barSuppressed || messageSearchOpen || !lineupProps.onSwellyPress) return null;
+  // "Tap to get started" hint — only while the Lineup has no real conversations.
+  const swellyHint = useSwellyHintVisible();
+
+  // Opacity lives on the UI thread so leaving the tab can fade the avatar out
+  // without waiting for React. React still decides whether it's mounted at all,
+  // and re-asserts the shared value whenever that decision changes — the fast
+  // path only covers tab presses, so programmatic switches need this to fade it
+  // back in (and to leave it at 0 for a later mount).
+  const swellyVisible =
+    shownTab === 'lineup' && !barSuppressed && !messageSearchOpen && !!lineupProps.onSwellyPress;
+  useEffect(() => {
+    if (swellyVisible) showSwellyFab();
+    else hideSwellyFabNow();
+  }, [swellyVisible]);
+  const swellyFade = useAnimatedStyle(() => ({ opacity: swellyFabOpacity.value }));
+
+  if (!swellyVisible) return null;
+  // Android draws the system nav bar inside the layout, so the avatar has to
+  // clear it; iOS keeps the tuned 96 (home-indicator inset already baked in).
+  const fabBottom = Platform.OS === 'android' ? insets.bottom + 90 : SWELLY_FAB_BOTTOM;
   return (
-    <TouchableOpacity
-      testID="conversations-swelly-button"
-      onPress={() => lineupProps.onSwellyPress?.()}
-      activeOpacity={0.85}
-      style={[
-        swellyFloatingStyles.button,
-        Platform.OS === 'android' && { bottom: insets.bottom + 90 },
-      ]}
-    >
-      <Image
-        source={Images.swellyPopout}
-        style={swellyFloatingStyles.image}
-        resizeMode="contain"
-      />
-    </TouchableOpacity>
+    <>
+      {swellyHint && (
+        <Reanimated.View
+          pointerEvents="none"
+          style={[swellyFloatingStyles.hint, { bottom: fabBottom + SWELLY_HINT_GAP }, swellyFade]}
+        >
+          <SwellyTapHint />
+        </Reanimated.View>
+      )}
+      <Reanimated.View style={[swellyFloatingStyles.button, { bottom: fabBottom }, swellyFade]}>
+        <TouchableOpacity
+          testID="conversations-swelly-button"
+          onPress={() => lineupProps.onSwellyPress?.()}
+          activeOpacity={0.85}
+          style={swellyFloatingStyles.buttonInner}
+        >
+          <Image
+            source={Images.sweely}
+            style={swellyFloatingStyles.image}
+            resizeMode="contain"
+          />
+          <View style={swellyFloatingStyles.pill}>
+            <Text style={swellyFloatingStyles.pillText}>Ask Swelly</Text>
+          </View>
+        </TouchableOpacity>
+      </Reanimated.View>
+    </>
   );
 }
+
+// Figma: Home Screen › Swelly (14351:55284). 89×97 box — a 72×80 avatar that
+// overlaps the "Ask Swelly" pill by 5px.
+const SWELLY_FAB_RIGHT = 20;
+const SWELLY_FAB_BOTTOM = 96;
+const SWELLY_FAB_WIDTH = 89;
+// Vertical distance from the avatar box's bottom edge up to the hint's, so the
+// arrow keeps landing on the avatar wherever the avatar itself is anchored.
+const SWELLY_HINT_GAP = 45;
 
 const swellyFloatingStyles = StyleSheet.create({
   button: {
     position: 'absolute',
-    right: 12,
+    right: SWELLY_FAB_RIGHT,
     // Sits just above the native tab bar (~49pt bar + bottom safe area).
     // Tuned visually on device — adjust if it overlaps the bar.
-    bottom: 96,
-    width: 80,
-    height: 85,
-    alignItems: 'center',
-    justifyContent: 'center',
+    bottom: SWELLY_FAB_BOTTOM,
+    width: SWELLY_FAB_WIDTH,
+    height: 97,
     zIndex: 30,
   },
+  buttonInner: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+  },
   image: {
-    width: 80,
-    height: 85,
+    width: 72,
+    height: 80,
+    // Figma mb:-5 — the pill tucks under the avatar's chin.
+    marginBottom: -5,
+  },
+  pill: {
+    backgroundColor: '#B72DF2', // Colors/Accent/200
+    borderRadius: 44,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillText: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter-Regular',
+    fontSize: 10,
+    lineHeight: 14,
+    color: '#FFFFFF',
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
+  },
+  hint: {
+    position: 'absolute',
+    // Butts up against the avatar box's left edge — that's where the arrow tip
+    // lands in Figma.
+    right: SWELLY_FAB_RIGHT + SWELLY_FAB_WIDTH + 1,
+    width: SWELLY_HINT_WIDTH,
+    height: SWELLY_HINT_HEIGHT,
+    zIndex: 30,
   },
 });
 
@@ -645,20 +729,37 @@ const TabsNavigator = React.memo(function TabsNavigator({ barSuppressed }: { bar
         name="Lineup"
         component={LineupTabScreen}
         options={{ title: 'The Lineup', tabBarIcon: tabIcon('lineup', Images.nav.theLineupFilled, Images.nav.theLineup) }}
+        listeners={LINEUP_TAB_LISTENERS}
       />
       <Tab.Screen
         name="Trips"
         component={TripsTabScreen}
         options={{ title: 'Trips', tabBarIcon: tabIcon('trips', Images.nav.tripsFilled, Images.nav.trips) }}
+        listeners={TRIPS_TAB_LISTENERS}
       />
       <Tab.Screen
         name="Profile"
         component={ProfileTabScreen}
         options={{ title: 'Profile', tabBarIcon: tabIcon('profile', Images.nav.profileFilled, Images.nav.profile) }}
+        listeners={PROFILE_TAB_LISTENERS}
       />
     </Tab.Navigator>
   );
 });
+
+// On iOS `tabPress` originates in UITabBarController's `shouldSelect`, i.e.
+// before the tab is selected and before the cross-fade — the earliest signal
+// there is. Leaving with the Swelly avatar starts its fade right here, on the UI
+// thread, because the React commit that unmounts it is batched with the
+// navigation render and lands far too late (see swellyFabVisibility).
+// Module-level constants so TabsNavigator's memo holds.
+const LINEUP_TAB_LISTENERS = { tabPress: () => setPendingTab('lineup') };
+const TRIPS_TAB_LISTENERS = {
+  tabPress: () => { hideSwellyFabNow(); setPendingTab('trips'); },
+};
+const PROFILE_TAB_LISTENERS = {
+  tabPress: () => { hideSwellyFabNow(); setPendingTab('profile'); },
+};
 
 function HomeTabs() {
   // barSuppressed hides the entire native bar while a full-screen JS overlay

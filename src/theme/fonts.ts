@@ -30,6 +30,7 @@ import {
   Montserrat_700Bold,
   Montserrat_800ExtraBold_Italic,
 } from '@expo-google-fonts/montserrat';
+import { ArchitectsDaughter_400Regular } from '@expo-google-fonts/architects-daughter';
 
 /** Load all app font weights. Returns [loaded, error] like expo-font's useFonts. */
 export const useAppFonts = () =>
@@ -46,6 +47,10 @@ export const useAppFonts = () =>
     // only place that needs the ExtraBold Italic cut. Referenced directly by
     // family name (ff() only covers the 400–700 upright weights).
     'Montserrat-ExtraBoldItalic': Montserrat_800ExtraBold_Italic,
+    // Handwritten accent — the "Tap to get started" hint that points at the
+    // floating Swelly avatar on an empty Lineup. Referenced directly by family
+    // name (ff() only covers Inter/Montserrat).
+    'ArchitectsDaughter-Regular': ArchitectsDaughter_400Regular,
   });
 
 export type FontFamily = 'Inter' | 'Montserrat';

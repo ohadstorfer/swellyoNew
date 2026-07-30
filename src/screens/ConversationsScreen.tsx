@@ -9,7 +9,6 @@ import {
   Platform,
   Modal,
   Alert,
-  Animated,
   ActivityIndicator,
   AppState,
 } from 'react-native';
@@ -21,6 +20,8 @@ import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation, getMuteUntilFromMember, MessageSearchResult } from '../services/messaging/messagingService';
 import { MessageSearchOverlay } from '../components/MessageSearchOverlay';
 import { setMessageSearchOpen } from '../navigation/searchOverlayState';
+import { setSwellyHintVisible } from '../navigation/swellyHintState';
+import NoConversationsEmptyState from '../components/NoConversationsEmptyState';
 import { ff } from '../theme/fonts';
 import { blockingService } from '../services/blocking/blockingService';
 import { useMessaging } from '../context/MessagingProvider';
@@ -185,11 +186,7 @@ export default function ConversationsScreen({
   const isDevMode = process.env.EXPO_PUBLIC_DEV_MODE === 'true';
   // Show Swelly Copy card: when LOCAL_MODE, __DEV__, or EXPO_PUBLIC_DEV_MODE is true (so it works in dev builds and deployed dev)
   const showSwellyCopyCard = (process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' || __DEV__ || isDevMode) && !!onSwellyPressCopy;
-  
-  // Arrow animation for welcome instruction
-  const arrowAnim = useRef(new Animated.Value(0)).current;
-  
-  
+
   // Use MessagingProvider for conversations state
   const { conversations: rawConversations, loading, refreshConversations, setCurrentConversationId, hasMoreConversations, isLoadingMoreConversations, loadMoreConversations } = useMessaging();
 
@@ -409,33 +406,6 @@ export default function ConversationsScreen({
   }, [myProfile]);
 
 
-  // Arrow animation effect for welcome instruction
-  useEffect(() => {
-    // Create a smooth up and down animation with glow effect
-    // Note: useNativeDriver: false is required for shadow effects
-    const arrowAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(arrowAnim, {
-          toValue: 1,
-          duration: 1500,
-          useNativeDriver: false, // Required for shadow effects
-        }),
-        Animated.timing(arrowAnim, {
-          toValue: 0,
-          duration: 1500,
-          useNativeDriver: false, // Required for shadow effects
-        }),
-      ])
-    );
-    
-    arrowAnimation.start();
-    
-    return () => {
-      arrowAnimation.stop();
-    };
-  }, [arrowAnim]);
-
-
   // Conversations are now loaded by MessagingProvider
   // This function is kept for backward compatibility but just triggers refresh
   const loadConversations = async () => {
@@ -463,7 +433,7 @@ export default function ConversationsScreen({
         id: 'welcome-message-fake-id',
         conversation_id: 'welcome-conversation-fake-id',
         sender_id: 'swellyo-team',
-        body: 'Welcome',
+        body: 'Welcome 👋',
         attachments: [],
         is_system: false,
         edited: false,
@@ -819,18 +789,17 @@ export default function ConversationsScreen({
         activeOpacity={0.7}
       >
         <View style={styles.conversationContent}>
-          {/* Two overlapping avatars for Swellyo Team - matching Figma design */}
+          {/* Two overlapping avatars — Figma 14385:90424. The left one sits on
+              top, ringed in white, and overlaps the one behind it by 14px. */}
           <View style={styles.welcomeAvatarContainer}>
-            {/* First avatar - behind */}
-            <View style={[styles.welcomeAvatar, styles.welcomeAvatarBack]}>
+            <View style={[styles.welcomeAvatar, styles.welcomeAvatarFront]}>
               <Image
                 source={Images.userAvatar1}
                 style={styles.welcomeAvatarImage}
                 resizeMode="cover"
               />
             </View>
-            {/* Second avatar - in front with negative margin for overlap */}
-            <View style={[styles.welcomeAvatar, styles.welcomeAvatarFront]}>
+            <View style={styles.welcomeAvatar}>
               <Image
                 source={Images.userAvatar2}
                 style={styles.welcomeAvatarImage}
@@ -840,7 +809,7 @@ export default function ConversationsScreen({
           </View>
 
           {/* Text content */}
-          <View style={styles.textContainer}>
+          <View style={[styles.textContainer, styles.welcomeTextContainer]}>
             <Text style={[
               styles.conversationName,
               Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any
@@ -1178,15 +1147,25 @@ export default function ConversationsScreen({
     }
   }, []);
 
+  // Empty Lineup → the "No conversations yet" block in the list footer, plus
+  // the "Tap to get started" arrow in the nav layer pointing at the floating
+  // Swelly avatar. Strictly empty-only: the old copy was static footer text, so
+  // dev mode used to force it on for inspection, but the arrow now floats over
+  // the list and would land on top of real rows.
+  // The Swellyo Team welcome takes over the whole tab and has no rows for the
+  // arrow to land on, so it gets the hint too — that screen's only call to
+  // action is now the floating avatar.
+  const showEmptyState = !loading && conversations.length === 0 && filter === 'all';
+  useEffect(() => {
+    setSwellyHintVisible(showEmptyState || showSwellyoTeamWelcome);
+    return () => setSwellyHintVisible(false);
+  }, [showEmptyState, showSwellyoTeamWelcome]);
+
   // Early return for SwellyoTeamWelcome - must come BEFORE other screens
   if (showSwellyoTeamWelcome) {
     return (
       <SwellyoTeamWelcome
         onBack={() => {
-          setShowSwellyoTeamWelcome(false);
-        }}
-        onDropInWithSwelly={() => {
-          // Navigate back to conversations screen (homepage)
           setShowSwellyoTeamWelcome(false);
         }}
       />
@@ -1310,81 +1289,11 @@ export default function ConversationsScreen({
                   </View>
                 )}
 
-                {/* Welcome message instructional text - only show when welcome conversation is displayed, or in dev mode for testing */}
-                {!loading && (conversations.length === 0 || isDevMode) && filter === 'all' && (
-                  <View style={styles.welcomeInstructionContainer}>
-                    <Animated.Text
-                      style={[
-                        styles.welcomeInstructionText,
-                        Platform.OS === 'web' && { fontFamily: 'var(--Family-Body, Inter), sans-serif' } as any,
-                        {
-                          shadowColor: '#9D4EDD',
-                          shadowOffset: { width: 0, height: 0 },
-                          shadowOpacity: arrowAnim.interpolate({
-                            inputRange: [0, 0.5, 1],
-                            outputRange: [0.2, 0.4, 0.2],
-                          }),
-                          shadowRadius: 6,
-                          ...(Platform.OS === 'web' && {
-                            // Web-specific shadow for better glow effect
-                            textShadow: arrowAnim.interpolate({
-                              inputRange: [0, 0.5, 1],
-                              outputRange: [
-                                '0 0 6px rgba(157, 78, 221, 0.2)',
-                                '0 0 12px rgba(157, 78, 221, 0.4)',
-                                '0 0 6px rgba(157, 78, 221, 0.2)',
-                              ],
-                            }) as any,
-                          }),
-                        },
-                      ]}
-                    >
-                      Connect with surfers who match your {'\n'}
-                      style, experience, and travel interests. {'\n'}
-                      {'\n'}
-                      Looking for advice about a destination? {'\n'}
-                      Swelly can introduce you to surfers{'\n'}
-                      who know it best.
-                      {'\n'}
-                      Just ask Swelly!
-                    </Animated.Text>
-                    <Animated.View
-                      style={[
-                        styles.welcomeArrowContainer,
-                        {
-                          transform: [
-                            {
-                              translateY: arrowAnim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [0, 8],
-                              }),
-                            },
-                          ],
-                          shadowColor: '#9D4EDD',
-                          shadowOffset: { width: 5, height: 5 },
-                          shadowOpacity: arrowAnim.interpolate({
-                            inputRange: [0, 0.8, 1],
-                            outputRange: [0.5, 0.8, 0.5],
-                          }),
-                          shadowRadius: 18,
-                          ...(Platform.OS === 'web' && {
-                            // Web-specific shadow for better glow effect
-                            boxShadow: arrowAnim.interpolate({
-                              inputRange: [0, 0.5, 1],
-                              outputRange: [
-                                '0 0 20px rgba(157, 78, 221, 0.3)',
-                                '0 0 40px rgba(157, 78, 221, 0.6)',
-                                '0 0 20px rgba(157, 78, 221, 0.3)',
-                              ],
-                            }) as any,
-                          }),
-                        },
-                      ]}
-                    >
-                      <Ionicons name="arrow-down" size={40} color="#333333" />
-                    </Animated.View>
-                  </View>
-                )}
+                {/* Empty state — Figma "No conversations yet" (14351:55077).
+                    The "Tap to get started" label + arrow that go with it are
+                    rendered in the nav layer (SwellyTapHint) so they can point
+                    at the floating Swelly avatar. */}
+                {showEmptyState && <NoConversationsEmptyState />}
               </>
             }
           />
@@ -2167,40 +2076,38 @@ const styles = StyleSheet.create({
   welcomeAvatarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: 0,
-    paddingRight: 16,
-    position: 'relative',
   },
   welcomeAvatar: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
     overflow: 'hidden',
   },
   welcomeAvatarImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: '100%',
+    height: '100%',
     ...(Platform.OS === 'web' && {
       objectFit: 'cover' as any,
     }),
   },
-  welcomeAvatarBack: {
-    marginRight: -16, // Negative margin for overlap
-    zIndex: 1,
-  },
   welcomeAvatarFront: {
-    marginRight: -16, // Negative margin for overlap (or 0 if last)
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    marginRight: -14, // Figma mr:-14 — overlaps the avatar behind it.
     zIndex: 2,
+  },
+  // Figma's row is tighter than the shared conversation row (gap 4 vs 8). Only
+  // the welcome row is spec'd, and it never renders next to real rows, so the
+  // override stays local instead of retuning every conversation.
+  welcomeTextContainer: {
+    gap: 4,
   },
   welcomeTimeText: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontSize: 12,
     fontWeight: '400',
-    lineHeight: 15,
-    color: '#05BCD3',
+    lineHeight: 18,
+    color: '#212121',
     textAlign: 'right',
   },
   welcomeUnreadBadge: {
@@ -2210,27 +2117,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#05BCD3',
-  },
-  welcomeInstructionContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 24,
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  welcomeInstructionText: {
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    fontSize: 15,
-    fontWeight: '400',
-    lineHeight: 19,
-    color: '#333333',
-    textAlign: 'center',
-  },
-  welcomeArrowContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    // Purple glow will be applied via shadowColor in animated style
   },
 });
 

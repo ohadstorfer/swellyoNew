@@ -37,6 +37,7 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { logEvent } from '../services/analytics/eventLogger';
 import { getImageUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
+import SwellyFaceBubble from '../components/SwellyFaceBubble';
 import { MatchedUsersCarousel } from '../components/MatchedUsersCarousel';
 import { messagingService } from '../services/messaging/messagingService';
 import { MatchedUser, TripPlanningRequest } from '../types/tripPlanning';
@@ -271,6 +272,19 @@ interface TripPlanningChatScreenProps {
    *  double-animate. Shared values initialize at their resting pose. */
   noTransition?: boolean;
 }
+
+/** Figma "settings-04" (14382:86512) — the filters pill icon. */
+const FiltersIcon = () => (
+  <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+    <Path
+      d="M3 8L15 8M15 8C15 9.65686 16.3431 11 18 11C19.6569 11 21 9.65685 21 8C21 6.34315 19.6569 5 18 5C16.3431 5 15 6.34315 15 8ZM9 16L21 16M9 16C9 17.6569 7.65685 19 6 19C4.34315 19 3 17.6569 3 16C3 14.3431 4.34315 13 6 13C7.65685 13 9 14.3431 9 16Z"
+      stroke="#333"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </Svg>
+);
 
 export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   onChatComplete,
@@ -2200,24 +2214,14 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
               <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             
+            {/* Figma "Sweely" (14382:86489) — one flattened PNG: the beanie
+                breaks out of the ring while the neck is masked by it. */}
             <View style={styles.avatar}>
-              <View style={styles.avatarRing}>
-                <LinearGradient
-                  colors={['#B72DF2', '#D3D3D3']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.ellipseBackgroundNative}
-                >
-                  <View style={styles.ellipseInnerFill} />
-                </LinearGradient>
-                <View style={styles.avatarImageContainer}>
-                  <Image
-                    source={Images.swellyAvatar}
-                    style={styles.avatarImage}
-                    resizeMode="cover"
-                  />
-                </View>
-              </View>
+              <Image
+                source={Images.sweely}
+                style={styles.avatarImage}
+                resizeMode="contain"
+              />
             </View>
           </View>
           
@@ -2286,7 +2290,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                 <Text style={styles.filtersButtonCountText}>{filterCount}</Text>
               </View>
             )}
-            <Ionicons name="options-outline" size={24} color="#333" />
+            <FiltersIcon />
           </TouchableOpacity>
         </View>
 
@@ -2448,7 +2452,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
                       <Text style={styles.filtersButtonCountText}>{displayFilterCount}</Text>
                     </View>
                   )}
-                  <Ionicons name="options-outline" size={24} color="#333" />
+                  <FiltersIcon />
                 </TouchableOpacity>
               </View>
               <View style={styles.filtersOverlaySpacer} pointerEvents="none" />
@@ -2555,13 +2559,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
             </View>
 
             {/* Swelly avatar bubble */}
-            <View style={styles.modalAvatarBubble}>
-              <Image
-                source={Images.swellyAvatar}
-                style={styles.modalAvatarImage}
-                resizeMode="cover"
-              />
-            </View>
+            <SwellyFaceBubble width={79} height={86} style={styles.modalAvatarBubble} />
 
             {/* Title */}
             <Text style={styles.modalTitle}>Start a new chat?</Text>
@@ -2722,58 +2720,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 1,
   },
-  avatarRing: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 31,
-    overflow: 'visible',
-    position: 'relative',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1,
-  },
-  ellipseBackground: {
-    position: 'absolute',
-    width: '105%',
-    height: '105%',
-    top: '-2.5%',
-    left: '-2.5%',
-    zIndex: 0,
+  avatarImage: {
+    width: 62,
+    height: 68,
     ...(Platform.OS === 'web' && {
       objectFit: 'contain' as any,
-    }),
-  },
-  ellipseBackgroundNative: {
-    // LinearGradient acts as a 2px purple→light-gray "border ring":
-    // padding gives the visible gradient strip; the inner View paints the
-    // gray fill on top, leaving only the strip visible.
-    position: 'absolute',
-    width: '105%',
-    height: '98%',
-    left: '-2.5%',
-    zIndex: 0,
-    borderRadius: 45,
-    padding: 1.5,
-  },
-  ellipseInnerFill: {
-    flex: 1,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 43.5,
-  },
-  avatarImageContainer: {
-    position: 'absolute',
-    width: 75,
-    height: 75,
-    left: -6.1,
-    top: -5.1,
-    overflow: 'hidden',
-    zIndex: 1,
-  },
-  avatarImage: {
-    width: 75,
-    height: 75,
-    ...(Platform.OS === 'web' && {
-      objectFit: 'cover' as any,
     }),
   },
   profileInfo: {
@@ -2876,28 +2827,28 @@ const styles = StyleSheet.create({
     marginBottom: 0,
     gap: 10,
   },
+  // Size/md (14px), weight 400, line-height: normal (no explicit lineHeight)
   userMessageText: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 22,
   },
   botMessageText: {
     color: '#333333',
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 22,
   },
   timestampContainer: {
     alignItems: 'flex-start',
   },
+  // Size/xs (10px), weight 400, line-height 17
   timestamp: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '400',
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
-    lineHeight: 20,
+    lineHeight: 17,
   },
   userTimestamp: {
     color: 'rgba(255, 255, 255, 0.5)',
@@ -3314,30 +3265,9 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
   },
+  // Ring/fill/glow live in SwellyFaceBubble — only the spacing is local.
   modalAvatarBubble: {
-    width: 79,
-    height: 86,
-    borderRadius: 40,
-    borderWidth: 1,
-    borderColor: '#B72DF2',
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginBottom: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: 'rgba(183, 45, 242, 0.24)',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 1,
-        shadowRadius: 14,
-      },
-      android: { elevation: 4 },
-    }),
-  },
-  modalAvatarImage: {
-    width: 75,
-    height: 82,
-    borderRadius: 37,
   },
   modalTitle: {
     fontSize: 22,

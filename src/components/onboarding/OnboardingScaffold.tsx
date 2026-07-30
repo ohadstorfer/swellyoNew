@@ -15,6 +15,7 @@ import { useIsDesktopWeb } from '../../utils/responsive';
 import { OnboardingStepProvider } from '../../context/OnboardingStepContext';
 import { OnboardingHeader, OnboardingFooter } from './OnboardingChrome';
 import { OnboardingContentHost } from './OnboardingContentHost';
+import { OnboardingStatusBar } from './OnboardingStatusBar';
 import { resolveStepKey, type OnboardingStepKey } from './onboardingStepConfig';
 
 interface Props {
@@ -40,6 +41,8 @@ export const OnboardingScaffold: React.FC<Props> = ({
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      {/* Steps 1–7 sit on #FAFAFA — dark bar icons, not the app-wide white. */}
+      <OnboardingStatusBar />
       <OnboardingStepProvider>
         <View style={[styles.body, isDesktop && styles.bodyDesktop]}>
           <OnboardingHeader stepKey={stepKey} />

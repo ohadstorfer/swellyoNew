@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Passports on Group Trips — How It Works</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --no:#a3323f; --no-bg:#fceef0;
+    --sun:#c98a00; --sun-bg:#fdf6e3;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:6px}
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;font-size:14px;margin:16px 0 34px}
+  .rule b{color:var(--cyan-dark)}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:680;margin:0 0 6px}
+  p{margin-bottom:12px}
+  p:last-child{margin-bottom:0}
+  a{color:var(--cyan-dark)}
+  strong{font-weight:660}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:16px;overflow:hidden}
+  .chead{background:var(--panel);padding:11px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead b{font-size:14px;font-weight:680}
+  .cbody{padding:14px 16px;font-size:14px}
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-new{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-no{color:var(--no);background:var(--no-bg)}
+  .t-rec{color:var(--cyan-dark);background:var(--cyan-tint)}
+
+  /* MRZ sample */
+  .mrz{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:16px;margin:0 0 14px;overflow-x:auto}
+  .mrz pre{font:600 13px/1.7 ui-monospace,Menlo,monospace;letter-spacing:.06em;color:#2a2a26}
+  .mrzcap{font-size:12.5px;color:var(--muted);margin-top:10px;letter-spacing:0}
+
+  /* flow steps */
+  .steps{counter-reset:s;list-style:none}
+  .steps li{position:relative;padding:0 0 22px 44px;counter-increment:s}
+  .steps li:before{content:counter(s);position:absolute;left:0;top:-1px;
+    width:28px;height:28px;border-radius:99px;background:var(--cyan);color:#fff;
+    font:680 13px/28px -apple-system,sans-serif;text-align:center}
+  .steps li:after{content:"";position:absolute;left:13.5px;top:32px;bottom:2px;width:1px;background:var(--line)}
+  .steps li:last-child{padding-bottom:0}
+  .steps li:last-child:after{display:none}
+  .steps h3{margin-bottom:3px}
+  .steps p{font-size:14px;color:#3a3a36;margin-bottom:0}
+  .steps .who{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;
+    letter-spacing:.06em;margin-bottom:2px}
+
+  .tscroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--muted);font-weight:680;padding:9px 14px;background:var(--panel);white-space:nowrap}
+  td{padding:9px 14px;border-top:1px solid var(--line);vertical-align:top}
+  td.mono{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+  .yes{color:var(--ok);font-weight:680}
+  .nope{color:var(--no);font-weight:680}
+
+  ul.plain{list-style:none;font-size:14px}
+  ul.plain li{padding:5px 0 5px 20px;position:relative;color:#3a3a36}
+  ul.plain li:before{content:"";position:absolute;left:4px;top:12px;width:5px;height:5px;
+    border-radius:99px;background:var(--cyan)}
+
+  .callout{border:1px solid var(--line);border-left:3px solid var(--cyan);border-radius:8px;
+    background:var(--cyan-tint);padding:13px 16px;font-size:14px;margin:0 0 16px}
+  .callout.warn{border-left-color:var(--sun);background:var(--sun-bg)}
+  .callout.stop{border-left-color:var(--no);background:var(--no-bg)}
+  .callout b{font-weight:680}
+
+  code{font:12.5px ui-monospace,Menlo,monospace;background:var(--panel2);
+    padding:1px 5px;border-radius:4px}
+
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);
+    font-size:12.5px;color:var(--muted)}
+  footer a{display:block;padding:3px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Passports on Group Trips</h1>
+  <p class="sub">How uploading, reading, storing and serving a passport works — and the one decision still open.</p>
+  <div class="rule">
+    <b>Why we collect it at all:</b> the operator books flights for the group. An airline needs the
+    seven fields printed in the passport. It does not need the picture.
+  </div>
+
+  <!-- ───────────────────────────────── -->
+  <h2>The big idea</h2>
+
+  <p>We are not "using AI to read a document." A passport is <strong>already machine-readable by
+  design.</strong> At the bottom of the page there are two lines of chunky monospace text:</p>
+
+  <div class="mrz">
+    <pre>PPGBRSPECIMEN&lt;&lt;ANGELA&lt;ZOE&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;
+5334755193GBR8812198F3009286&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;00</pre>
+    <div class="mrzcap">This is the <strong>MRZ</strong> — Machine Readable Zone. It exists so border
+    e-gates can read passports. It holds all seven fields we need.</div>
+  </div>
+
+  <p>The MRZ has <strong>check digits</strong> built in — small checksums that prove the read was
+  correct. Tested locally with the free <code>mrz</code> package:</p>
+
+  <ul class="plain">
+    <li>Valid MRZ → <span class="yes">VALID: true</span>, all seven fields extracted.</li>
+    <li>One digit of the passport number changed → <span class="nope">VALID: false</span>, failed checks:
+      <code>Document number check digit</code>, <code>Composite check digit</code>.</li>
+  </ul>
+
+  <div class="callout">
+    <b>This is the whole answer.</b> We cannot silently get wrong data. Either the checksums pass, or we
+    ask the traveler to scan again. It also removes the usual worry about AI reading documents — a made-up
+    number fails the checksum.
+  </div>
+
+  <div class="callout warn">
+    <b>2026 standard change.</b> Since 1 January 2026, ICAO requires a two-letter document code
+    (<code>PP</code> for an ordinary passport) instead of one letter. Both <code>P</code> and
+    <code>PP</code> parsed correctly in the test. Do not write our own regex for this — use the
+    maintained package.
+  </div>
+
+  <!-- ───────────────────────────────── -->
+  <h2>The whole flow</h2>
+
+  <ol class="steps">
+    <li>
+      <div class="who">Traveler</div>
+      <h3>Asked</h3>
+      <p>The trip has a "passport" requirement. It shows up in the traveler's checklist.</p>
+    </li>
+    <li>
+      <div class="who">Traveler</div>
+      <h3>Photographs the passport</h3>
+      <p>The page with the two machine-readable lines.</p>
+    </li>
+    <li>
+      <div class="who">Not decided yet</div>
+      <h3>The lines are turned into text</h3>
+      <p>This is the only real decision left. Three routes below.</p>
+    </li>
+    <li>
+      <div class="who">Automatic</div>
+      <h3>The maths is checked</h3>
+      <p>The <code>mrz</code> package parses the text and validates the check digits.
+      Pass → continue. Fail → "that didn't scan clearly, try again."</p>
+    </li>
+    <li>
+      <div class="who">Traveler</div>
+      <h3>Confirms the seven fields</h3>
+      <p><strong>Never skip this.</strong> Checksums prove the read is right — not that it is the right
+      passport, or that the operator will accept it.</p>
+    </li>
+    <li>
+      <div class="who">Server</div>
+      <h3>Stored, in three different ways</h3>
+      <p>The <strong>photo</strong> → private bucket, never public.<br>
+      The <strong>six ordinary fields</strong> → plain columns.<br>
+      The <strong>passport number</strong> → scrambled with a key that lives outside the database.</p>
+    </li>
+    <li>
+      <div class="who">Operator</div>
+      <h3>Served</h3>
+      <p>The operator opens the trip, reads the seven fields as text, and books the flight. If they want
+      to look at the photo they get a link that dies after 60 seconds. Only the traveler and the trip
+      host can get that link.</p>
+    </li>
+    <li>
+      <div class="who">Automatic, nightly</div>
+      <h3>Deleted</h3>
+      <p>30 days after the trip ends, the photo is deleted and the passport number erased. The six
+      ordinary fields stay, so a repeat traveler does not retype them.</p>
+    </li>
+  </ol>
+
+  <!-- ───────────────────────────────── -->
+  <h2>Step 3 — how to read the lines</h2>
+
+  <div class="card">
+    <div class="chead"><b>A. On the phone</b><span class="tag t-rec">Best privacy</span></div>
+    <div class="cbody">
+      <p>The camera reads the lines on the device. <strong>The photo never leaves the phone to be
+      read.</strong> Either a free option (VisionCamera + Google MLKit text recognition) or a paid SDK
+      (Dynamsoft MRZ Scanner — near-100% accuracy, fully offline).</p>
+      <ul class="plain">
+        <li><span class="yes">+</span> No third party ever sees a passport. Works with no signal.</li>
+        <li><span class="yes">+</span> Nothing to add to the privacy policy.</li>
+        <li><span class="nope">−</span> It is a <strong>native module — it will not work in Expo Go.</strong>
+          Needs a dev build to test at all.</li>
+        <li><span class="nope">−</span> The most work of the three.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><b>B. On our server</b><span class="tag t-no">Would skip</span></div>
+    <div class="cbody">
+      <p>The photo is already going to our private bucket. An edge function reads it there.</p>
+      <ul class="plain">
+        <li><strong>B1 — OpenAI vision.</strong> No new vendor account, we already use them. But the
+          passport photo goes to OpenAI, who keep API data up to 30 days unless we hold a zero-retention
+          agreement. They become a subprocessor we must disclose.</li>
+        <li><strong>B2 — A dedicated passport OCR API.</strong> Mindee, Klippa, Regula, Base64.ai. Built
+          for exactly this, priced per page, free tiers exist, proper data-processing agreements. Cleanest
+          server option, but a new vendor.</li>
+        <li><strong>B3 — AWS Textract.</strong> Plain text detection is enough, because the MRZ is just
+          printed text. AWS already holds our images, so no new company enters the picture.</li>
+      </ul>
+      <p style="margin-top:12px"><span class="yes">+</span> Easy to build, works in Expo Go.
+      &nbsp;<span class="nope">−</span> The passport travels to someone else's computer to be read.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><b>C. Typed by hand</b><span class="tag t-rec">Ship this first</span></div>
+    <div class="cbody">
+      <p>No scanning. Seven fields, a form.</p>
+      <ul class="plain">
+        <li><span class="yes">+</span> Zero new vendors, zero new disclosure, works everywhere.</li>
+        <li><span class="yes">+</span> Already built — the <code>save</code> action.</li>
+        <li><span class="nope">−</span> Typos. And a typo on a flight booking costs real money in airline
+          name-change fees.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout">
+    <b>Recommendation: ship C now, add A later.</b> Not as a compromise — <strong>C is not optional
+    anyway.</strong> Worn passports don't scan, bad light doesn't scan, some travelers won't give camera
+    access. Every scanning route needs a typed fallback underneath it, so build the floor first. Then add
+    on-device scanning on the next native build as a pure speed upgrade, and we get the strongest privacy
+    answer if anyone ever asks.
+  </div>
+
+  <p><strong>Route B is worth skipping entirely.</strong> Sending passports to a third party to read them
+  is the one part of this flow we can avoid completely — and route A avoids it while being <em>better</em>
+  on privacy, not worse. B only wins on "we want scanning this week without a native build." If that is
+  the real constraint, <strong>B3 (AWS)</strong> is the pick, because AWS already holds our images.</p>
+
+  <p>One thing worth revisiting once A is in place: if the phone extracts the fields, <strong>do we still
+  need to keep the photo at all?</strong> The operator books from text. If they don't need to eyeball the
+  document, the photo could be optional per trip — and a photo we never stored cannot leak.</p>
+
+  <!-- ───────────────────────────────── -->
+  <h2>Decisions already locked</h2>
+
+  <div class="tscroll">
+    <table>
+      <tr><th>Decision</th><th>Choice</th><th>Why</th></tr>
+      <tr>
+        <td>Passport number</td>
+        <td><strong>Stored, encrypted</strong></td>
+        <td>AES-256-GCM. Key lives in Edge Function secrets, never in the database — so a database dump
+          holds ciphertext and nothing that opens it. Wiped by the 30-day purge, unlike the other fields.</td>
+      </tr>
+      <tr>
+        <td>Access logging</td>
+        <td><strong>No log</strong></td>
+        <td>Access rules are the only gate. If a passport ever leaks there is no list of who opened it.
+          Easy to add later.</td>
+      </tr>
+      <tr>
+        <td>Photo retention</td>
+        <td><strong>30 days after the trip ends</strong></td>
+        <td>Also applies to someone who leaves or is removed. The six ordinary fields survive on purpose.</td>
+      </tr>
+      <tr>
+        <td>Signed link life</td>
+        <td><strong>60 seconds</strong></td>
+        <td>A signed URL is a bearer token — whoever holds the link has the file until it expires, logged
+          in or not. Everything else in this app signs for an hour; documents do not.</td>
+      </tr>
+      <tr>
+        <td>Who can see it</td>
+        <td><strong>The traveler, or a trip host</strong></td>
+        <td>Nobody else. No public URL, ever. Documents never enter the thumbnail or video pipeline, so
+          there are no untracked copies.</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ───────────────────────────────── -->
+  <h2>Where the code stands</h2>
+
+  <div class="tscroll">
+    <table>
+      <tr><th>Piece</th><th>State</th><th>Note</th></tr>
+      <tr><td>Private bucket + access rules</td><td><span class="tag t-new">Applied</span></td>
+        <td>Live on prod since 24 Jul 2026.</td></tr>
+      <tr><td class="mono">group_trip_documents</td><td><span class="tag t-new">Applied</span></td>
+        <td>Plus the new APIS columns, written but not applied.</td></tr>
+      <tr><td>APIS fields migration</td><td><span class="tag t-open">Written</span></td>
+        <td>Adds surname, given names, DOB, sex, issuing country, encrypted number.</td></tr>
+      <tr><td class="mono">group-document-passport</td><td><span class="tag t-open">Written</span></td>
+        <td>Saves and reveals the fields. Not deployed.</td></tr>
+      <tr><td class="mono">purge-group-documents</td><td><span class="tag t-open">Written</span></td>
+        <td><strong>This did not exist before.</strong> The "we delete within 30 days" promise was a
+        document — nothing was deleting anything.</td></tr>
+      <tr><td>Upload / confirm / operator screens</td><td><span class="tag t-no">Not started</span></td>
+        <td>Steps 1, 2 and 5 of the flow.</td></tr>
+    </table>
+  </div>
+
+  <div class="callout stop">
+    <b>Before a real traveler uses this:</b> generate <code>DOCUMENT_ENCRYPTION_KEY</code> (32 bytes,
+    base64) and back it up somewhere that is not this repo — <strong>lose it and every stored passport
+    number is gone forever.</strong> Apply both migrations. Deploy both functions.
+    <strong>Turn on the nightly delete before the first real passport arrives</strong>, or passports pile
+    up and never leave.
+  </div>
+
+  <p>Still open and needing a person, not a commit: the real point-in-time-restore window (a restore
+  inside 30 days brings deleted files back), and the data-protection clause in the operator agreement —
+  now a hard requirement, since an operator pasting passport data into a booking system is the designed
+  flow, not an edge case.</p>
+
+  <!-- ───────────────────────────────── -->
+  <h2>The open question</h2>
+  <div class="callout">
+    Is <b>"scanning must work in Expo Go"</b> a hard requirement — or are we fine typing the fields until
+    the next native build?
+  </div>
+
+  <footer>
+    Sources
+    <a href="https://www.npmjs.com/package/mrz">mrz — npm (v5.0.2, MIT, tested locally)</a>
+    <a href="https://www.iata.org/en/publications/newsletters/iata-knowledge-hub/icao-to-standardize-passport-codes-what-it-means-for-airlines-airports-and-travelers/">ICAO to Standardize Passport Codes — IATA</a>
+    <a href="https://www.icao.int/sites/default/files/Meetings/TAG-TRIP/TAG-TRIP5/TAGTRIP.5.WP_.30.Second-letter-code.FINAL_.FULL_.en_.pdf">Second-letter code working paper — ICAO TAG/TRIP/5</a>
+    <a href="https://mrzscanner.com/v1.x/knowledge/react-native">MRZ Scanner SDK for React Native — Dynamsoft</a>
+    <a href="https://github.com/tony-xlh/expo-mrz-scanner">expo-mrz-scanner — GitHub</a>
+    <a href="https://www.mindee.com/product/passport-ocr-api">Passport OCR API — Mindee</a>
+  </footer>
+
+</div>
+</body>
+</html>

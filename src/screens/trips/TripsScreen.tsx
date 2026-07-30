@@ -23,7 +23,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 // copies never go stale. Local bundled assets keep using RN's Image.
 import { Image as CachedImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 const NOISE_TEXTURE = require('../../../assets/textures/noise.png');
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -33,7 +32,7 @@ import {
   MyTripsBuckets,
   TripCardMeta,
 } from '../../services/trips/groupTripsService';
-import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
+import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_TAG } from '../../services/trips/tripVocabulary';
 import { BUDGET_THRESHOLD } from '../../services/trips/exploreFilterPredicates';
 import { COUNTRY_NAMES } from '../../data/countryNames';
 import { formatPrice, formatPriceRange, FALLBACK_USD_TO_ILS, isIsraeli, usdToIls } from '../../utils/currency';
@@ -45,6 +44,7 @@ import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
 import { ff, fs } from '../../theme/fonts';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
+import NoTripsEmptyState from '../../components/trips/NoTripsEmptyState';
 import { FadeInView } from '../../components/FadeInView';
 import { WIZARD_STATE_VERSION } from './CreateTripFlowA';
 import {
@@ -412,7 +412,7 @@ const ExploreTripCard: React.FC<{
   const { profile } = useUserProfile();
   const viewerCountry = profile?.country_from ?? null;
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
-  const typeGradient = TRIP_TYPE_GRADIENT[trip.hosting_style] ?? TRIP_TYPE_GRADIENT.A;
+  const typeTag = TRIP_TYPE_TAG[trip.hosting_style] ?? TRIP_TYPE_TAG.A;
   const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
@@ -490,17 +490,12 @@ const ExploreTripCard: React.FC<{
         )}
       </View>
 
-      {/* Trip-type pill (top-right) — coloured per hosting style, matching the
-          gradient tag in the trip Overview (Crew=blue, Captain=purple, Operator=gold). */}
-      <LinearGradient
-        colors={typeGradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.tripTypePill}
-      >
-        <Ionicons name={type.icon} size={14} color="#FFFFFF" />
-        <Text style={styles.tripTypeLabel}>{type.label}</Text>
-      </LinearGradient>
+      {/* Trip-type tag (top-right) — one flat colour per hosting style
+          (Crew=white/dark, Captain=cyan/white, Operator=purple/white). */}
+      <View style={[styles.tripTypePill, { backgroundColor: typeTag.bg }]}>
+        <Ionicons name={type.icon} size={16} color={typeTag.fg} />
+        <Text style={[styles.tripTypeLabel, { color: typeTag.fg }]}>{type.label}</Text>
+      </View>
 
       {/* Noise-glass panel — same layers as the My Trips card (blur 3.5px +
           black tint + fractalNoise grain). Parent clips the rounded corners. */}
@@ -1117,10 +1112,9 @@ const STAGGER_MS = 55;
 const MyTripsView: React.FC<{
   userId: string | null;
   onGoCreate: () => void;
-  onGoExplore: () => void;
   onOpenTrip: (tripId: string) => void;
   onNavScroll?: NavScrollHandler;
-}> = ({ userId, onGoCreate, onGoExplore, onOpenTrip, onNavScroll }) => {
+}> = ({ userId, onGoCreate, onOpenTrip, onNavScroll }) => {
   // Cached + stale-while-revalidate (see useExploreTrips). Re-entry is instant;
   // pull-to-refresh and post-create/edit invalidation drive background updates.
   const { data, isLoading, isFetching, refetch } = useMyTrips(userId);
@@ -1174,56 +1168,11 @@ const MyTripsView: React.FC<{
   }
 
   if (tagged.length === 0) {
-    // Empty state rendered *as a trip card*: the age-range hero photo with the
-    // headline overlaid where a real card shows its title, and the CTA sitting
-    // where a real card shows its status pill. Same white-card footprint.
+    // Figma 14351:29403 — palm illustration, "No trips yet?" and a single
+    // accent CTA into the create flow.
     return (
       <FadeInView style={styles.emptyWrap}>
-        <View style={styles.inviteCard}>
-          <View style={styles.inviteImageWrap}>
-            <Image source={Images.whoIsItFor.ageRange} style={styles.cardImageBg} resizeMode="cover" />
-            <View style={styles.inviteBadge}>
-              <Ionicons name="paper-plane" size={13} color="#FFFFFF" />
-              <Text style={styles.inviteBadgeText}>Your next adventure</Text>
-            </View>
-
-            {/* Same noise-glass panel the real cards use behind the title/location. */}
-            <View style={styles.cardTextBlock}>
-              <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={styles.cardGlassTint} pointerEvents="none" />
-              <Image
-                source={NOISE_TEXTURE}
-                style={styles.cardNoise}
-                resizeMode="repeat"
-                pointerEvents="none"
-              />
-              <View style={styles.inviteTextContent}>
-                <Text style={styles.inviteHeadline}>No trips yet</Text>
-                <Text style={styles.inviteSubline}>Join a trip or create your own</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.inviteActions}>
-            <TouchableOpacity
-              testID="trips-empty-create-button"
-              style={styles.inviteCreate}
-              activeOpacity={0.9}
-              onPress={onGoCreate}
-            >
-              <Ionicons name="add" size={20} color="#FFFFFF" />
-              <Text style={styles.inviteCreateText}>Create a trip</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              testID="trips-empty-explore-button"
-              style={styles.inviteExplore}
-              activeOpacity={0.9}
-              onPress={onGoExplore}
-            >
-              <Text style={styles.inviteExploreText}>Explore</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <NoTripsEmptyState onCreate={onGoCreate} />
       </FadeInView>
     );
   }
@@ -1517,7 +1466,6 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
               <MyTripsView
                 userId={currentUserId}
                 onGoCreate={() => goToTab('create')}
-                onGoExplore={() => goToTab('explore')}
                 onOpenTrip={openTrip}
                 onNavScroll={handleMyNavScroll}
               />
@@ -1712,10 +1660,10 @@ const styles = StyleSheet.create({
   // Explore section title (Figma — Montserrat 24/600, 140% line-height).
   exploreTitle: {
     fontFamily: ff('Montserrat', '600'),
-    fontSize: fs(31),
+    fontSize: fs(24),
     fontWeight: Platform.OS === 'web' ? '600' : undefined,
     includeFontPadding: false,
-    lineHeight: 40,
+    lineHeight: 32,
     color: '#333',
     paddingHorizontal: 16,
     marginTop: 24,
@@ -2017,11 +1965,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  tripTypeLabel: { fontFamily: ff('Inter', '700'), color: '#FFFFFF', fontSize: fs(13), fontWeight: Platform.OS === 'web' ? '700' : undefined, includeFontPadding: false },
+  // Body/M B-2 — Size/md (14px), weight 400, line-height Size/xl (18).
+  tripTypeLabel: { fontFamily: ff('Inter', '400'), fontSize: fs(14), lineHeight: 18, fontWeight: Platform.OS === 'web' ? '400' : undefined, includeFontPadding: false },
   exBottom: {
     position: 'absolute',
     left: 0,
@@ -2070,109 +2019,9 @@ const styles = StyleSheet.create({
   },
   emptyCtaText: { fontFamily: ff('Inter', '600'), color: '#FFFFFF', fontWeight: Platform.OS === 'web' ? '600' : undefined, includeFontPadding: false },
 
-  // "No trips yet" invitation, rendered as a trip card (hero photo + CTA pill).
-  emptyWrap: { paddingHorizontal: 16, paddingTop: 8 },
-  inviteCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 32,
-    padding: 10,
-    gap: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.09,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  inviteImageWrap: {
-    width: '100%',
-    aspectRatio: 328 / 246,
-    borderRadius: 24,
-    overflow: 'hidden',
-    backgroundColor: '#F2F2F2',
-  },
-  inviteBadge: {
-    position: 'absolute',
-    top: 14,
-    left: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.38)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-  },
-  inviteBadgeText: {
-    fontFamily: ff('Inter', '700'),
-    color: '#FFFFFF',
-    fontSize: fs(12),
-    fontWeight: Platform.OS === 'web' ? '700' : undefined,
-    includeFontPadding: false,
-  },
-  inviteTextContent: {
-    justifyContent: 'flex-end',
-    paddingTop: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    gap: 3,
-  },
-  inviteHeadline: {
-    fontFamily: ff('Montserrat', '700'),
-    color: '#FFFFFF',
-    fontSize: fs(26),
-    lineHeight: 34,
-    fontWeight: Platform.OS === 'web' ? '700' : undefined,
-    includeFontPadding: false,
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-  },
-  inviteSubline: {
-    fontFamily: ff('Inter', '400'),
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: fs(15),
-    lineHeight: 20,
-    includeFontPadding: false,
-    textShadowColor: 'rgba(0,0,0,0.4)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  inviteActions: { flexDirection: 'row', gap: 10 },
-  inviteCreate: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#212121',
-    borderRadius: 999,
-    paddingVertical: 15,
-  },
-  inviteCreateText: {
-    fontFamily: ff('Inter', '700'),
-    color: '#FFFFFF',
-    fontSize: fs(16),
-    fontWeight: Platform.OS === 'web' ? '700' : undefined,
-    includeFontPadding: false,
-  },
-  inviteExplore: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 999,
-    borderWidth: 1.5,
-    borderColor: '#E2E7EA',
-    paddingVertical: 15,
-    paddingHorizontal: 24,
-  },
-  inviteExploreText: {
-    fontFamily: ff('Inter', '700'),
-    color: '#3C4A50',
-    fontSize: fs(15),
-    fontWeight: Platform.OS === 'web' ? '700' : undefined,
-    includeFontPadding: false,
-  },
+  // "No trips yet?" empty state (see NoTripsEmptyState) — fills the pane so the
+  // illustration + CTA sit centred.
+  emptyWrap: { flex: 1 },
 
   // Inline hosting-style chooser (moved out of CreateTripWizard).
   createRoot: { flex: 1 },
