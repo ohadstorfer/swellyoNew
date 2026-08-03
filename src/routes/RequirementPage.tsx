@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
 import { fetchTripReview, type ReviewItem } from '../services/review';
 import { fetchProfiles } from '../services/travelers';
+import { isUploadRequirement } from '../domain/requirements';
 import { approveDocuments, rejectDocument } from '../services/actions';
 import { downloadAll, safeFileName } from '../services/files';
 import { fileNameFor, formatDate, plural } from '../lib/format';
@@ -89,7 +90,10 @@ export function RequirementPage() {
     item: t.items.find(i => i.requirementId === requirementId)!,
   }));
 
-  const isUpload = requirement.reqType === 'upload';
+  // Ask the shared rule, not `reqType === 'upload'`. A requirement can be
+  // kind 'medical' AND req_type 'upload' at once, and that shape never has a
+  // file — see isUploadRequirement.
+  const isUpload = isUploadRequirement(requirement);
   const pending = rows.filter(r => r.item.state === 'submitted' && r.item.documentId);
   const exportable = rows.filter(r => r.item.storagePath && !r.item.fileDeleted);
   const received = rows.filter(r => r.item.state !== 'not_started' && r.item.state !== 'overdue');

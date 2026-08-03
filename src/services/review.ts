@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import {
   compareRequirements,
   deriveState,
+  isUploadRequirement,
   todayISO,
   type Requirement,
   type RequirementState,
@@ -152,7 +153,7 @@ export async function fetchTripReview(
             ? (med?.completed_at ?? null)
             : (d?.uploaded_at ?? null);
 
-      const isUpload = r.reqType !== 'acknowledge' && r.kind !== 'medical';
+      const isUpload = isUploadRequirement(r);
 
       return {
         requirementId: r.id,

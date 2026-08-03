@@ -7,6 +7,8 @@ export type OperatorTrip = {
   endDate: string | null;
   status: string | null;
   maxParticipants: number | null;
+  /** 'C' is an operator trip. Anything else is only visible in testing mode. */
+  hostingStyle: string | null;
 };
 
 export type TripMember = {
@@ -14,6 +16,21 @@ export type TripMember = {
   role: string;
   joinedAt: string | null;
 };
+
+/**
+ * Testing escape hatch.
+ *
+ * With VITE_ALLOW_ALL_HOSTED_TRIPS=true the list stops filtering on
+ * `hosting_style`, so ANY trip you host appears. This exists because the
+ * operator product has almost no real trips yet, and the ones with useful
+ * document data are ordinary peer trips.
+ *
+ * It only widens what YOU can see among trips you already host. RLS is
+ * untouched, so it cannot reveal anyone else's trip. Leave it off in
+ * production — an operator seeing their peer trips here would be confusing,
+ * not dangerous.
+ */
+const ALLOW_ALL_HOSTED = import.meta.env.VITE_ALLOW_ALL_HOSTED_TRIPS === 'true';
 
 /**
  * Trips this operator hosts.
@@ -25,14 +42,19 @@ export type TripMember = {
  * `user_id` filter here is about asking the right question, not about safety.
  */
 export async function fetchOperatorTrips(userId: string): Promise<OperatorTrip[]> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('group_trip_participants')
     .select(
       'trip_id, group_trips!inner(id, title, start_date, end_date, status, max_participants, hosting_style)',
     )
     .eq('user_id', userId)
-    .eq('role', 'host')
-    .eq('group_trips.hosting_style', 'C');
+    .eq('role', 'host');
+
+  if (!ALLOW_ALL_HOSTED) {
+    query = query.eq('group_trips.hosting_style', 'C');
+  }
+
+  const { data, error } = await query;
 
   if (error) throw error;
 
@@ -47,6 +69,7 @@ export async function fetchOperatorTrips(userId: string): Promise<OperatorTrip[]
         endDate: t.end_date ?? null,
         status: t.status ?? null,
         maxParticipants: t.max_participants ?? null,
+        hostingStyle: t.hosting_style ?? null,
       }),
     );
 
@@ -59,7 +82,7 @@ export async function fetchOperatorTrips(userId: string): Promise<OperatorTrip[]
 export async function fetchTrip(tripId: string): Promise<OperatorTrip> {
   const { data, error } = await supabase
     .from('group_trips')
-    .select('id, title, start_date, end_date, status, max_participants')
+    .select('id, title, start_date, end_date, status, max_participants, hosting_style')
     .eq('id', tripId)
     .single();
 
@@ -71,6 +94,7 @@ export async function fetchTrip(tripId: string): Promise<OperatorTrip> {
     endDate: data.end_date ?? null,
     status: data.status ?? null,
     maxParticipants: data.max_participants ?? null,
+    hostingStyle: data.hosting_style ?? null,
   };
 }
 

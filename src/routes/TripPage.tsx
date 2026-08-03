@@ -6,6 +6,7 @@ import { fetchTripReview } from '../services/review';
 import { fetchCounts, fetchMedicalFlags } from '../services/counts';
 import { fetchProfiles } from '../services/travelers';
 import { isKnownUploadKind, kindLabel } from '../domain/catalog';
+import { isUploadRequirement } from '../domain/requirements';
 import { formatRange, plural } from '../lib/format';
 import { ErrorBox, Loading, CountPair } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
@@ -40,8 +41,11 @@ export function TripPage() {
   const countBy = new Map((counts.data ?? []).map(c => [c.requirementId, c]));
   const reqs = review.data?.requirements ?? [];
 
-  const uploads = reqs.filter(r => r.reqType === 'upload' && isKnownUploadKind(r.kind));
-  const custom = reqs.filter(r => r.reqType === 'upload' && !isKnownUploadKind(r.kind));
+  // isUploadRequirement, not `reqType === 'upload'`. A kind 'medical' row can
+  // also be req_type 'upload'; without this it would show up twice — once as a
+  // custom item and again in the medical line below.
+  const uploads = reqs.filter(r => isUploadRequirement(r) && isKnownUploadKind(r.kind));
+  const custom = reqs.filter(r => isUploadRequirement(r) && !isKnownUploadKind(r.kind));
   const waiver = reqs.find(r => r.kind === 'waiver');
   const medical = reqs.find(r => r.kind === 'medical');
 

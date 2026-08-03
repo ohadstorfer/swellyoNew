@@ -50,6 +50,11 @@ export function TripsPage() {
                     </p>
                   </div>
                   <div className="row" style={{ gap: 10 }}>
+                    {/* Testing mode can list peer trips. Say so, or you will
+                        forget which one is the real operator trip. */}
+                    {trip.hostingStyle !== 'C' && (
+                      <span className="tag tag-warn">Not an operator trip</span>
+                    )}
                     {days !== null && days >= 0 && (
                       <span className="tag tag-idle">{plural(days, 'day')} to go</span>
                     )}

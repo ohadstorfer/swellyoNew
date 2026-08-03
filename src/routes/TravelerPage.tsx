@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
 import { fetchTripReview, type ReviewItem } from '../services/review';
 import { fetchMedicalForm, fetchProfiles } from '../services/travelers';
+import { isUploadRequirement } from '../domain/requirements';
 import { approveDocuments, rejectDocument } from '../services/actions';
 import { downloadAll, downloadOne, safeFileName } from '../services/files';
 import { fileNameFor, formatDate, plural } from '../lib/format';
@@ -86,7 +87,9 @@ export function TravelerPage() {
     );
   }
 
-  const uploads = traveler.items.filter(i => i.reqType === 'upload');
+  // Same rule as everywhere else — a kind 'medical' row never has a file to
+  // export, whatever its req_type says.
+  const uploads = traveler.items.filter(i => isUploadRequirement(i));
   const exportable = uploads.filter(i => i.storagePath && !i.fileDeleted);
 
   async function exportAll() {

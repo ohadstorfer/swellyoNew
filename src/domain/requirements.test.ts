@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   deriveState,
   compareRequirements,
+  isUploadRequirement,
   todayISO,
   type Requirement,
 } from './requirements';
@@ -126,6 +127,30 @@ describe('deriveState — medical form', () => {
     const r = req({ kind: 'medical', reqType: 'fill' });
     expect(deriveState(r, { doc: doc({ approvedAt: '2026-08-01' }) }, TODAY))
       .toBe('not_started');
+  });
+});
+
+describe('isUploadRequirement', () => {
+  it('is true for a plain upload', () => {
+    expect(isUploadRequirement(req())).toBe(true);
+  });
+
+  it('is false for an agreement', () => {
+    expect(isUploadRequirement(req({ kind: 'waiver', reqType: 'acknowledge' }))).toBe(false);
+  });
+
+  it('is false for kind medical EVEN WHEN req_type is upload', () => {
+    // Real shape on the trip "El Salvador 26". deriveState reads the medical
+    // form for this requirement, so it can never carry a file — a screen that
+    // trusted req_type alone would show Export for something with no file.
+    expect(isUploadRequirement(req({ kind: 'medical', reqType: 'upload' }))).toBe(false);
+  });
+
+  it('agrees with deriveState for the medical-upload shape', () => {
+    const r = req({ kind: 'medical', reqType: 'upload' });
+    // A document row exists, but state ignores it because kind is medical.
+    expect(deriveState(r, { doc: doc({ approvedAt: '2026-08-01' }) }, TODAY)).toBe('not_started');
+    expect(isUploadRequirement(r)).toBe(false);
   });
 });
 

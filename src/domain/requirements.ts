@@ -135,6 +135,25 @@ export function deriveState(
   return 'submitted';
 }
 
+/**
+ * Does this requirement ever produce a FILE?
+ *
+ * This is NOT the same question as `reqType === 'upload'`, and the difference
+ * is not hypothetical: the trip "El Salvador 26" has a requirement with
+ * `kind = 'medical'` and `req_type = 'upload'` at the same time.
+ *
+ * `deriveState` treats any `kind = 'medical'` as the medical FORM, so such a
+ * requirement can never carry a document. Any screen that decides "show upload
+ * controls" must ask THIS, or it renders View / Export / Approve buttons for
+ * something that will never have a file behind it.
+ */
+export function isUploadRequirement(req: {
+  kind: string;
+  reqType: string;
+}): boolean {
+  return req.reqType !== 'acknowledge' && req.kind !== 'medical';
+}
+
 /** Sort order the traveler sees: must-haves first, then by deadline. */
 export function compareRequirements(a: Requirement, b: Requirement): number {
   return (
