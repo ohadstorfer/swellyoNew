@@ -1,0 +1,371 @@
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--cyan-dark);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────
+ * Only transform and opacity are animated — they skip layout and paint and
+ * run on the GPU. The press scale is what makes a click feel heard. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--text);
+  border-radius: var(--r-sm);
+  padding: 8px 14px;
+  font: 500 14px/1 var(--font);
+  cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out),
+    background-color var(--t-fast) ease, border-color var(--t-fast) ease,
+    opacity var(--t-fast) ease;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--cyan-dark);
+  border-color: var(--cyan-dark);
+  color: #fff;
+}
+.btn-danger {
+  background: #fff;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--cyan-dark);
+}
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) {
+    background: var(--panel);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: #055a75;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: var(--danger-bg);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--panel);
+  }
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+.wrap {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 20px 80px;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.spacer {
+  flex: 1;
+}
+
+h1 {
+  font-size: 24px;
+  letter-spacing: -0.02em;
+  font-weight: 680;
+}
+h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 680;
+  color: var(--muted);
+}
+h3 {
+  font-size: 15px;
+  font-weight: 640;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 13px;
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: #fff;
+  overflow: hidden;
+}
+.card-head {
+  background: var(--panel);
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.card-body {
+  padding: 14px 16px;
+}
+
+/* A card that is also a link. Lifts slightly, never jumps. */
+.card-link {
+  display: block;
+  color: inherit;
+  transition: transform var(--t-press) var(--ease-out),
+    border-color var(--t-fast) ease, box-shadow var(--t-fast) ease;
+}
+.card-link:hover {
+  text-decoration: none;
+}
+.card-link:active {
+  transform: scale(0.995);
+}
+@media (hover: hover) and (pointer: fine) {
+  .card-link:hover {
+    border-color: var(--line-strong);
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+/* ── Tags ───────────────────────────────────────────────────────────────── */
+.tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 680;
+  padding: 3px 9px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.tag-ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+.tag-wait {
+  color: var(--wait);
+  background: var(--wait-bg);
+}
+.tag-warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+.tag-danger {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+.tag-idle {
+  color: var(--muted);
+  background: var(--panel-2);
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+.tscroll {
+  overflow-x: auto;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 680;
+  padding: 9px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+/* ── Banner ─────────────────────────────────────────────────────────────── */
+.banner {
+  border: 1px solid var(--line);
+  background: var(--cyan-tint);
+  border-radius: var(--r);
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--cyan-dark);
+  font-weight: 640;
+  transition: transform var(--t-press) var(--ease-out);
+}
+a.banner:hover {
+  text-decoration: none;
+}
+a.banner:active {
+  transform: scale(0.995);
+}
+
+/* ── Spinner ────────────────────────────────────────────────────────────── */
+/* Fast on purpose: a quicker spin makes loading feel shorter even when it
+ * takes exactly as long. */
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line-strong);
+  border-top-color: var(--cyan-dark);
+  border-radius: 50%;
+  animation: spin 600ms linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Entry ──────────────────────────────────────────────────────────────── */
+/* Never from scale(0) — nothing in the real world appears from nothing. */
+.enter {
+  animation: enter var(--t-panel) var(--ease-out) both;
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.dim {
+  opacity: 0.55;
+}
+
+/* ── Modal ──────────────────────────────────────────────────────────────── */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 28, 26, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+  animation: fade 150ms var(--ease-out) both;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+/* Modals keep transform-origin center — they are not anchored to a trigger. */
+.modal {
+  background: #fff;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 560px;
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: pop var(--t-panel) var(--ease-out) both;
+}
+.modal-wide {
+  max-width: 900px;
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+textarea,
+input[type='text'] {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
+  font: 14px/1.5 var(--font);
+  color: var(--text);
+  resize: vertical;
+}
+textarea:focus,
+input[type='text']:focus {
+  outline: 2px solid var(--cyan);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+/* Motion sickness is real. Keep opacity, drop movement. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .spinner {
+    animation-duration: 900ms !important;
+    animation-iteration-count: infinite !important;
+  }
+}
