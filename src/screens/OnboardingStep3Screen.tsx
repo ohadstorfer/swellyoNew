@@ -109,7 +109,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xl,
     paddingBottom: spacing.xl,
-    gap: 14,
+    // 12 between the step header and its description, app-wide.
+    gap: 12,
   },
   titleAccent: {
     fontSize: 24,

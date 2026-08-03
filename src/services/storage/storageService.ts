@@ -234,6 +234,22 @@ export const uploadProfileVideoThumbnail = async (
 };
 
 /**
+ * Upload a surf PHOTO for the Surf Skill card to the `profile-images` bucket.
+ *
+ * This is the still-image alternative to `uploadProfileVideoS3` — a user can
+ * show their surfing with either a clip or a photo. Sized like a cover (2048px
+ * @ q0.85) because the card is full-bleed and the photo is the hero of it.
+ *
+ * Unlike the video path there is no MediaConvert step and no DB write here:
+ * the caller persists the returned URL to `surfers.profile_photo_url`.
+ */
+export const uploadSurfPhoto = async (
+  imageUri: string,
+  userId: string
+): Promise<UploadResult> =>
+  uploadImageToS3(imageUri, userId, 'profile-images', 'surf-photo', { maxDimension: 2048, quality: 0.85 });
+
+/**
  * Upload a surftrip hero image to swellyo-images S3 (`surftrip-images/` prefix).
  * Rewired to S3 in images-to-s3 Phase 1 (2048px @ q0.85, matches trip heroes).
  */

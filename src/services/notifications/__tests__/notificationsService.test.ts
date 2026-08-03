@@ -86,6 +86,7 @@ describe('renderNotification — happy path (full snapshot)', () => {
       'group_gear_updated', 'personal_gear_updated', 'gear_request_decided',
       'commitment_decided', 'join_request_decided', 'join_request_received',
       'gear_request_received', 'commitment_request_received',
+      'operator_document_rejected',
     ];
     for (const t of types) {
       const r = renderNotification(row(t, full));

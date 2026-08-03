@@ -5,8 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
-  Alert,
-  Linking,
+  Image,
 } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import Svg, { Path } from 'react-native-svg';
@@ -16,9 +15,16 @@ import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay
 import { ff, fs } from '../theme/fonts';
 import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
-import { validateVideoComplete } from '../utils/videoValidation';
 import { startProfileVideoUpload } from '../services/media/pendingProfileVideoUpload';
 import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
+import {
+  launchSurfMediaPicker,
+  pickSurfMediaOnWeb,
+  releasePickedMedia,
+  usesAndroidPhotoPicker,
+  type PickedSurfMedia,
+} from '../services/media/surfMediaPicker';
+import { uploadAndSaveSurfPhoto, clearSurfPhoto } from '../services/media/surfSkillMedia';
 
 const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
   0: [
@@ -110,15 +116,18 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   surfLevel,
   userId,
 }) => {
-  const [userVideoUri, setUserVideoUri] = useState<string | null>(null);
-  const [mimeType, setMimeType] = useState<string | undefined>(undefined);
-  // Picker asset hints so the pre-upload transcode decision is right without
+  // The user's own clip OR photo — one slot, never both (see surfSkillMedia).
+  // `hints` on a video asset feed the pre-upload transcode decision without
   // probing the file (see startProfileVideoUpload / videoTranscode.shouldTranscode).
-  const [videoHints, setVideoHints] = useState<{ width?: number; height?: number; fileSize?: number } | undefined>(undefined);
+  const [userMedia, setUserMedia] = useState<PickedSurfMedia | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showPermissionOverlay, setShowPermissionOverlay] = useState(false);
 
-  const hasUserVideo = userVideoUri !== null;
+  const hasUserMedia = userMedia !== null;
+  // Split out so the video-player effects below can stay keyed on "is there a
+  // user clip?" — a picked photo leaves the player on the demo clip (paused).
+  const userVideoUri = userMedia?.kind === 'video' ? userMedia.uri : null;
+  const userPhotoUri = userMedia?.kind === 'photo' ? userMedia.uri : null;
 
   const surfLevelInfo = getSurfLevelMapping(boardType, surfLevel);
 
@@ -147,9 +156,16 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     }
   });
 
+  // A picked photo replaces the card's video entirely — the VideoView unmounts,
+  // so stop the player rather than leave it decoding the demo clip off-screen.
+  useEffect(() => {
+    if (!userPhotoUri || !previewPlayer) return;
+    try { previewPlayer.pause(); } catch { /* player may already be released */ }
+  }, [userPhotoUri, previewPlayer]);
+
   // Hook A: Status change listener — play when readyToPlay
   useEffect(() => {
-    if (!previewPlayer || !defaultVideoUrl) return;
+    if (!previewPlayer || !defaultVideoUrl || userPhotoUri) return;
 
     let isMounted = true;
 
@@ -195,12 +211,12 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     return () => {
       isMounted = false;
     };
-  }, [previewPlayer, defaultVideoUrl]);
+  }, [previewPlayer, defaultVideoUrl, userPhotoUri]);
 
   // Hook B: replaceAsync + web playsInline + canplay wait
   useEffect(() => {
     const videoUrl = userVideoUri || defaultVideoUrl;
-    if (!videoUrl || !previewPlayer) {
+    if (!videoUrl || !previewPlayer || userPhotoUri) {
       isInitialMountRef.current = false;
       return;
     }
@@ -323,12 +339,12 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     } else {
       isInitialMountRef.current = false;
     }
-  }, [userVideoUri, defaultVideoUrl, previewPlayer]);
+  }, [userVideoUri, defaultVideoUrl, previewPlayer, userPhotoUri]);
 
   // Hook C: Workaround timeout — backup play attempt
   useEffect(() => {
     const videoUrl = userVideoUri || defaultVideoUrl;
-    if (!previewPlayer || !videoUrl) return;
+    if (!previewPlayer || !videoUrl || userPhotoUri) return;
 
     const timeoutId = setTimeout(() => {
       if (previewPlayer) {
@@ -347,141 +363,81 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
     }, Platform.OS === 'web' ? 200 : 100);
 
     return () => clearTimeout(timeoutId);
-  }, [previewPlayer, userVideoUri, defaultVideoUrl]);
+  }, [previewPlayer, userVideoUri, defaultVideoUrl, userPhotoUri]);
 
-  const launchVideoPicker = async () => {
-    try {
-      const ImagePicker = require('expo-image-picker');
-      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
-
-      if (!usePhotoPicker) {
-        const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          if (!canAskAgain) {
-            Alert.alert(
-              'Permission Required',
-              'Swellyo needs access to your photos. Please enable it in your device settings.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Open Settings', onPress: () => Linking.openSettings() },
-              ]
-            );
-          } else {
-            Alert.alert('Permission Required', 'Sorry, we need media library permissions to upload your video!');
-          }
-          return;
-        }
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['videos'],
-        allowsEditing: false,
-        quality: 1.0,
-      });
-
-      if (!result.canceled && result.assets[0]) {
-        const videoAsset = result.assets[0];
-        const assetMimeType = videoAsset.mimeType || undefined;
-
-        const validation = await validateVideoComplete(videoAsset.uri, assetMimeType);
-        if (!validation.valid) {
-          setError(validation.error || 'Please select a valid video file.');
-          return;
-        }
-        setUserVideoUri(videoAsset.uri);
-        setMimeType(assetMimeType);
-        setVideoHints({
-          width: videoAsset.width,
-          height: videoAsset.height,
-          fileSize: (videoAsset as any).fileSize,
-        });
-      }
-    } catch (err) {
-      console.warn('expo-image-picker not available:', err);
-      Alert.alert('Video Picker Not Available', 'Please install expo-image-picker for native platforms.');
+  // Applies a picker result to state. Shared by the native and web paths so a
+  // photo and a clip land in the same single slot.
+  const applyPickResult = (result: Awaited<ReturnType<typeof launchSurfMediaPicker>>) => {
+    if (result.status === 'error') {
+      setError(result.message);
+      return;
     }
+    if (result.status !== 'picked') return;
+    releasePickedMedia(userMedia); // free the previous blob: URI on web
+    setUserMedia(result.media);
+    setError(null);
   };
 
-  const pickVideo = async () => {
+  const launchMediaPicker = async () => {
+    applyPickResult(await launchSurfMediaPicker());
+  };
+
+  const pickMedia = async () => {
     setError(null);
 
     if (Platform.OS === 'web') {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'video/mp4,video/quicktime,video/webm,video/x-msvideo';
-      input.style.display = 'none';
+      applyPickResult(await pickSurfMediaOnWeb());
+      return;
+    }
 
-      input.onchange = async (event: any) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
-
-        const uri = URL.createObjectURL(file);
-        const fileMimeType = file.type || undefined;
-
-        try {
-          const validation = await validateVideoComplete(uri, fileMimeType);
-          if (!validation.valid) {
-            setError(validation.error || 'Please select a valid video file.');
-            URL.revokeObjectURL(uri);
-            return;
-          }
-          setUserVideoUri(uri);
-          setMimeType(fileMimeType);
-          setVideoHints({ fileSize: file.size });
-        } catch (err) {
-          console.error('Error validating video:', err);
-          setError('Failed to validate video. Please try again.');
-          URL.revokeObjectURL(uri);
-        }
-
-        document.body.removeChild(input);
-      };
-
-      document.body.appendChild(input);
-      input.click();
+    // Android 13+ uses the system Photo Picker (no permission, no primer).
+    // Elsewhere, show the primer overlay once before the OS prompt.
+    if (usesAndroidPhotoPicker()) {
+      await launchMediaPicker();
+      return;
+    }
+    const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
+    if (primerShown) {
+      await launchMediaPicker();
     } else {
-      const usePhotoPicker = Platform.OS === 'android' && Platform.Version >= 33;
-      if (usePhotoPicker) {
-        await launchVideoPicker();
-      } else {
-        const primerShown = await AsyncStorage.getItem('@swellyo_gallery_primer_shown');
-        if (primerShown) {
-          await launchVideoPicker();
-        } else {
-          setShowPermissionOverlay(true);
-        }
-      }
+      setShowPermissionOverlay(true);
     }
   };
 
-  // Trash button: drop the picked clip and fall back to the default surf-level
-  // preview. A no-op when the user hasn't picked anything yet.
-  const clearVideo = () => {
+  // Trash button: drop the picked photo/clip and fall back to the default
+  // surf-level preview. A no-op when the user hasn't picked anything yet.
+  const clearMedia = () => {
     setError(null);
-    if (!userVideoUri) return;
-    if (Platform.OS === 'web' && userVideoUri.startsWith('blob:')) {
-      URL.revokeObjectURL(userVideoUri);
-    }
-    setUserVideoUri(null);
-    setMimeType(undefined);
-    setVideoHints(undefined);
+    if (!userMedia) return;
+    releasePickedMedia(userMedia);
+    setUserMedia(null);
   };
 
   const handleNext = () => {
-    if (hasUserVideo && userVideoUri) {
+    if (userMedia?.kind === 'video') {
       // Shrink → durable copy → resumable upload. Fire-and-forget: the user
       // never waits, but the upload survives an app-kill and won't saturate
       // the first session (see startProfileVideoUpload, 2026-07-25).
-      startProfileVideoUpload(userVideoUri, userId, { mimeType, hints: videoHints })
-        .catch(err => console.error('Background S3 video upload error:', err));
+      startProfileVideoUpload(userMedia.uri, userId, {
+        mimeType: userMedia.mimeType,
+        hints: userMedia.hints,
+      }).catch(err => console.error('Background S3 video upload error:', err));
+      // A clip wins over any photo left from an earlier pass through this step.
+      clearSurfPhoto();
+    } else if (userMedia?.kind === 'photo') {
+      // Photos are small enough to upload directly — no transcode, no durable
+      // copy, no MediaConvert. Still fire-and-forget so the user isn't held up.
+      uploadAndSaveSurfPhoto(userMedia.uri, userId).catch(err =>
+        console.error('Background S3 photo upload error:', err),
+      );
     }
     onNext();
   };
 
   useRegisterOnboardingStep({
-    nextLabel: hasUserVideo ? 'Next' : 'Skip',
+    nextLabel: hasUserMedia ? 'Next' : 'Skip',
     canProceed: true,
-    onNext: hasUserVideo ? handleNext : onSkip,
+    onNext: hasUserMedia ? handleNext : onSkip,
     onBack,
   });
 
@@ -497,26 +453,37 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         <View style={styles.headerBlock}>
           <Text style={styles.title}>Show us your style</Text>
           <Text style={styles.subtitle}>
-            Drop a clip of you surfing so others can see how you ride
+            Drop a photo or clip of you surfing so others can see how you ride
           </Text>
         </View>
 
         <View style={styles.videoCard} pointerEvents="box-none">
-          <VideoView
-            player={previewPlayer}
-            style={styles.videoThumbnail}
-            contentFit="cover"
-            nativeControls={false}
-            allowsFullscreen={false}
-            allowsPictureInPicture={false}
-            {...(Platform.OS === 'web' && {
-              controls: false,
-              disablePictureInPicture: true,
-              playsinline: true,
-              'webkit-playsinline': true,
-              playsInline: true,
-            } as any)}
-          />
+          {/* A picked photo replaces the clip in the same frame — same rounded
+              card, same overlays, so the two media types read identically. */}
+          {userPhotoUri ? (
+            <Image
+              source={{ uri: userPhotoUri }}
+              style={styles.videoThumbnail}
+              resizeMode="cover"
+              accessibilityLabel="Your surf photo"
+            />
+          ) : (
+            <VideoView
+              player={previewPlayer}
+              style={styles.videoThumbnail}
+              contentFit="cover"
+              nativeControls={false}
+              allowsFullscreen={false}
+              allowsPictureInPicture={false}
+              {...(Platform.OS === 'web' && {
+                controls: false,
+                disablePictureInPicture: true,
+                playsinline: true,
+                'webkit-playsinline': true,
+                playsInline: true,
+              } as any)}
+            />
+          )}
           {/* Transparent overlay to prevent interactions with the video itself */}
           <View style={styles.videoTapBlocker} />
 
@@ -533,22 +500,22 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
           <View style={styles.cardActions}>
             <TouchableOpacity
               style={styles.cardActionButton}
-              onPress={pickVideo}
+              onPress={pickMedia}
               activeOpacity={0.8}
               accessibilityRole="button"
-              accessibilityLabel="Upload your own surf video"
+              accessibilityLabel="Upload your own surf photo or video"
               testID="video-upload-button"
             >
               <UploadCloudIcon />
             </TouchableOpacity>
             {/* Nothing to delete until the user replaces the default clip. */}
-            {hasUserVideo && (
+            {hasUserMedia && (
               <TouchableOpacity
                 style={styles.cardActionButton}
-                onPress={clearVideo}
+                onPress={clearMedia}
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                accessibilityLabel="Remove your surf video"
+                accessibilityLabel="Remove your surf photo or video"
                 testID="video-remove-button"
               >
                 <TrashIcon />
@@ -574,7 +541,7 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
         onAllow={async () => {
           await AsyncStorage.setItem('@swellyo_gallery_primer_shown', 'true');
           setShowPermissionOverlay(false);
-          launchVideoPicker();
+          launchMediaPicker();
         }}
         onDismiss={() => setShowPermissionOverlay(false)}
       />

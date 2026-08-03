@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What other trip platforms show on their dashboard</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --wait:#5b5bb0; --wait-bg:#eeeefb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:0 0 14px}
+  .rule b{color:var(--cyan-dark)}
+  .rule.ok{background:var(--ok-bg)} .rule.ok b{color:var(--ok)}
+  .rule.warn{background:var(--open-bg)} .rule.warn b{color:var(--open)}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:660;margin:0 0 6px}
+  p.lead{font-size:14px;color:#3a3a36;margin-bottom:12px}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead strong{font-size:14px;font-weight:660}
+  .chead span{font-size:13px;color:var(--muted)}
+  .cbody{padding:12px 16px;font-size:14px}
+  .cbody p+p{margin-top:8px}
+  .cbody ul{list-style:none;margin:8px 0 0}
+  .cbody ul li{padding-left:16px;position:relative;margin-bottom:5px}
+  .cbody ul li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;
+    border-radius:99px;background:var(--line)}
+  .cbody ul li b{font-weight:640}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-wait{color:var(--wait);background:var(--wait-bg)}
+
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  .tscroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:680;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 16px;border-top:1px solid var(--line);vertical-align:top}
+
+  a{color:var(--cyan-dark)}
+  .src{font-size:12.5px;color:var(--muted);margin-top:6px}
+  .src a{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>What other trip platforms show on their dashboard</h1>
+  <p class="sub">Research, 3 August 2026 · for the Swellyo operator dashboard</p>
+
+  <div class="rule warn">
+    <b>First, a correction.</b> There is no competitor comparison anywhere in our docs.
+    I searched all of <code>docs/</code>. The only outside product we ever wrote about is
+    Klook, in the promotion spec. So this is fresh research, not a re-read.
+  </div>
+
+  <p class="lead">
+    I looked at four platforms that do what we want to do, plus the general tour-operator
+    booking tools. Below: what each one shows, then the pattern they all share, then what
+    it means for us.
+  </p>
+
+
+  <h2>The four platforms</h2>
+
+  <div class="card">
+    <div class="chead">
+      <strong>TrovaTrip</strong>
+      <span>Creators take their audience on trips. Closest to us.</span>
+      <span class="tag t-ok">most useful</span>
+    </div>
+    <div class="cbody">
+      <p>Their "Host Portal" has three tabs. The interesting one is <b>Audience</b> — nobody else has it.</p>
+      <ul>
+        <li><b>Home</b> — what needs your attention right now, and where each trip is in the process.</li>
+        <li><b>Audience</b> — survey answers from their followers, live: top destinations asked for, travel budget, age, gender. This is how a host decides <em>where</em> to run the next trip.</li>
+        <li><b>Bookings</b> — traveler list with booking status, how much each one paid, and traveler details.</li>
+        <li>Money shown as <b>potential earnings</b>, live, not just money already in.</li>
+        <li>Bookings are grouped by status: pending, approved, <b>waitlisted</b>.</li>
+        <li>The host <b>approves or rejects</b> each booking by hand.</li>
+        <li>Important dates and deadlines have their own page.</li>
+      </ul>
+    </div>
+    <div class="note">Takeaway: they treat "who wants to come" as data, not just a list.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead">
+      <strong>WeTravel</strong>
+      <span>Booking + payments for multi-day trips. The most complete back office.</span>
+    </div>
+    <div class="cbody">
+      <ul>
+        <li><b>Sales graph</b> — value of packages and add-ons sold so far, paid <em>and</em> unpaid, minus discounts. Cancelled bookings do not count.</li>
+        <li><b>Number of travelers booked</b> in a chosen period, minus cancellations.</li>
+        <li><b>Number of people on the waitlist</b>.</li>
+        <li>A <b>cash-flow report</b>: money collected, net collected, money still owed.</li>
+        <li>One reporting screen <b>across all trips</b>, not per trip — to spot trends.</li>
+        <li>Every number <b>exports</b> to CSV, XLSX or PNG.</li>
+        <li><b>Participant manifest</b> — traveler info collected automatically, ready to send to a hotel or partner in one click.</li>
+        <li>Documents (passports, waivers, dietary) are collected and managed <b>from the dashboard</b>.</li>
+        <li><b>Bulk actions</b> — change payment plans or prices for many bookings at once.</li>
+        <li>Message all travelers, or one, and <b>schedule</b> the message for later.</li>
+        <li><b>Auto-reminders</b> for tasks that are not done.</li>
+      </ul>
+    </div>
+    <div class="note">Takeaway: the export button is everywhere, and reminders are automatic.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead">
+      <strong>YouLi</strong>
+      <span>Group travel operations. Closest to our documents-and-tasks idea.</span>
+    </div>
+    <div class="cbody">
+      <ul>
+        <li>Everything is a <b>task</b>: forms, waivers, profile, packing list, passport. One model for all of it — same as our requirements.</li>
+        <li>Tasks go <b>both ways</b>: things you need <em>from</em> the traveler, and things you must make sure they <em>received</em>.</li>
+        <li>Each traveler gets their <b>own portal</b>: their tasks, their payments, their waivers, the itinerary.</li>
+        <li>Traveler sees <b>what is due next</b> — next payment and next unfinished task.</li>
+        <li>Planner side = one dashboard for the whole trip.</li>
+        <li><b>Automated reminders</b> at set intervals, for tasks and for invoices.</li>
+        <li>Manifests <b>update themselves</b> when something changes — the pitch is "not a spreadsheet".</li>
+      </ul>
+    </div>
+    <div class="note">Takeaway: our requirements model is the right shape. They just push harder on reminders.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead">
+      <strong>JoinMyTrip</strong>
+      <span>Solo travelers join a trip led by a "TripLeader". Mobile-first.</span>
+      <span class="tag t-wait">thinnest</span>
+    </div>
+    <div class="cbody">
+      <ul>
+        <li><b>Who wants to join</b> — the request list is the main screen.</li>
+        <li>All chats in one place, with a notification so the leader never misses a message.</li>
+        <li>Payments in and out, held in the app.</li>
+        <li>Deliberately <b>mobile only</b>. No desktop back office at all.</li>
+      </ul>
+    </div>
+    <div class="note">
+      They are the least like a dashboard. Their bet: a trip leader is a person with a phone,
+      not a company with a desk. Worth remembering — that is our mobile side.
+    </div>
+  </div>
+
+
+  <h2>The classic tour-operator tools</h2>
+  <p class="lead">
+    Bokun, Rezdy, Checkfront, FareHarbor, Xola. These sell day tours, not our kind of trip,
+    so most of it does not apply. What they all show:
+  </p>
+  <div class="card">
+    <div class="cbody">
+      <ul>
+        <li><b>Revenue</b>, by channel.</li>
+        <li><b>Occupancy</b> — how full each departure is.</li>
+        <li><b>Availability</b> in real time, synced across sales channels.</li>
+        <li>Payments with deposits and instalments.</li>
+        <li>Guide and resource scheduling.</li>
+      </ul>
+      <p class="src">Occupancy is the one worth stealing. Everything else here is for a business selling 40 tours a week.</p>
+    </div>
+  </div>
+
+
+  <h2>The pattern — every one of them shows these</h2>
+  <div class="card">
+    <div class="cbody">
+      <ul>
+        <li><b>How full is the trip.</b> Spots sold out of spots available.</li>
+        <li><b>How much money is in, how much is still owed.</b> Never just one number.</li>
+        <li><b>What is waiting for me.</b> A short list on the first screen. Approvals, unread, overdue.</li>
+        <li><b>Who is coming, in one list</b>, with each person's status on the same row.</li>
+        <li><b>Every list exports.</b> Because a hotel or a bus company always asks for a file.</li>
+        <li><b>Automatic reminders</b> to travelers who have not finished something.</li>
+        <li><b>Deadlines</b> shown as their own thing, not buried in the trip settings.</li>
+      </ul>
+    </div>
+  </div>
+
+
+  <h2>The numbers they actually put on screen</h2>
+  <div class="tscroll">
+    <table>
+      <thead>
+        <tr><th>Number</th><th>Who shows it</th><th>Should we?</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Spots sold / spots total</td><td>All of them</td><td><span class="tag t-ok">yes</span> easy, we have the data</td></tr>
+        <tr><td>Money collected</td><td>WeTravel, TrovaTrip</td><td><span class="tag t-open">later</span> no payments yet</td></tr>
+        <tr><td>Money still owed</td><td>WeTravel, YouLi</td><td><span class="tag t-open">later</span> no payments yet</td></tr>
+        <tr><td>Potential earnings (if it fills)</td><td>TrovaTrip</td><td><span class="tag t-open">later</span></td></tr>
+        <tr><td>Documents waiting for review</td><td>WeTravel, YouLi</td><td><span class="tag t-ok">have it</span></td></tr>
+        <tr><td>Tasks not done, per traveler</td><td>YouLi, WeTravel</td><td><span class="tag t-ok">have it</span></td></tr>
+        <tr><td>Days until departure</td><td>Most</td><td><span class="tag t-ok">have it</span></td></tr>
+        <tr><td>Waitlist size</td><td>TrovaTrip, WeTravel</td><td><span class="tag t-wait">no waitlist yet</span></td></tr>
+        <tr><td>Cancellations</td><td>WeTravel</td><td><span class="tag t-wait">open</span></td></tr>
+        <tr><td>Audience wants: destinations, budget, age</td><td>TrovaTrip only</td><td><span class="tag t-wait">interesting</span> we have this data already</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+
+  <h2>Traveler information they collect</h2>
+  <p class="lead">This is the "manifest" — the file an operator hands to a hotel, an airline or a bus company.</p>
+  <div class="card">
+    <div class="cbody">
+      <ul>
+        <li>Name and email</li>
+        <li>Passport details <span class="tag t-ok">we have</span></li>
+        <li>Payment status <span class="tag t-open">not yet</span></li>
+        <li>Dietary needs and allergies <span class="tag t-ok">we have</span></li>
+        <li>Emergency contact — name, email, and up to three phone numbers <span class="tag t-wait">we do not have</span></li>
+        <li>Flight details, arrival and departure <span class="tag t-wait">we do not have</span></li>
+        <li>Rooming — who shares with who <span class="tag t-wait">we do not have</span></li>
+        <li>Waiver signed, yes or no <span class="tag t-ok">we have</span></li>
+        <li>Insurance <span class="tag t-ok">we have</span></li>
+      </ul>
+    </div>
+    <div class="note">
+      One rule everyone follows: passports must not expire within six months of the trip.
+      We store the expiry date but do not warn about it.
+    </div>
+  </div>
+
+
+  <h2>What I would take from this</h2>
+
+  <div class="rule ok">
+    <b>1. Emergency contact and flight details.</b>
+    Every serious platform collects both. We collect neither. For a surf trip in El Salvador,
+    an emergency contact is not a nice-to-have.
+  </div>
+
+  <div class="rule ok">
+    <b>2. Automatic reminders.</b>
+    WeTravel and YouLi both send them without the operator doing anything. Today our operator
+    has to chase people by hand. This is probably the highest value thing on the page.
+  </div>
+
+  <div class="rule ok">
+    <b>3. Passport expiry warning.</b>
+    Six months. We already have the date. It is a comparison and a red badge.
+  </div>
+
+  <div class="rule">
+    <b>4. "Spots sold" on the trip card.</b>
+    Everyone leads with it. We show days to go but not how full the trip is.
+  </div>
+
+  <div class="rule">
+    <b>5. One export, whole trip.</b>
+    We export per traveler and per requirement. Nobody else does it that way — they export
+    the <em>whole trip</em> as one manifest file, because that is what a hotel asks for.
+  </div>
+
+  <div class="rule warn">
+    <b>6. The TrovaTrip audience idea — worth a real conversation with Eyal.</b>
+    They show a host what their followers want before the trip is even planned: top
+    destinations, budgets, ages. <b>We already hold all of that</b> in surfer profiles and
+    onboarding answers. Nobody else in this list can do it. It is not a dashboard feature,
+    it is a reason for an operator to choose us.
+  </div>
+
+  <div class="rule warn">
+    <b>7. What to skip.</b>
+    Channel revenue, OTA sync, guide scheduling, dynamic pricing. That is day-tour software
+    for a company running 40 departures a week. Not us, not soon.
+  </div>
+
+
+  <h2>Sources</h2>
+  <div class="card">
+    <div class="cbody">
+      <p class="src">
+        <a href="https://help.trovatrip.com/en/articles/9175666-host-portal-an-introduction">TrovaTrip — Host Portal: An Introduction</a><br>
+        <a href="https://help.trovatrip.com/en/articles/9205114-approving-and-rejecting-bookings">TrovaTrip — Approving and Rejecting Bookings</a><br>
+        <a href="https://help.trovatrip.com/en/articles/9236265-important-dates-and-deadlines-for-hosts">TrovaTrip — Important Dates and Deadlines for Hosts</a><br>
+        <a href="https://trovatrip.com/host/host-benefits">TrovaTrip — Hosting Benefits</a><br>
+        <a href="https://product.wetravel.com/bookings">WeTravel — Travel Booking Software</a><br>
+        <a href="https://help.wetravel.com/en/articles/6423630-how-to-read-the-cash-flow-report">WeTravel — How To Read the Cash Flow Report</a><br>
+        <a href="https://product.wetravel.com/tour-operators-us">WeTravel — Booking and Payments for Tour Operators</a><br>
+        <a href="https://go.youli.io/travel-management-software">YouLi — Group Travel Management Software</a><br>
+        <a href="https://support.youli.io/youli-video-tutorial-how-to-manage-tasks-and-waivers">YouLi — Manage Tasks, Forms, Profiles &amp; Waivers</a><br>
+        <a href="https://blog.youli.io/a-practical-guide-to-understanding-group-travel-management-challenges">YouLi — Group Travel Management Challenges</a><br>
+        <a href="https://www.joinmytrip.com/en/help/faq-collection/tripleader,W2f3QSoAAPHUtqwo">JoinMyTrip — TripLeader FAQ</a><br>
+        <a href="https://www.joinmytrip.com/blog/en/the-benefits-of-the-joinmytrip-app/">JoinMyTrip — Benefits of the App</a><br>
+        <a href="https://www.bokun.io/tour-operator-software">Bokun — Tour Operator Software comparison</a><br>
+        <a href="https://www.zaui.com/resources/blog/tour-operator-booking-software">Zaui — Tour Operator Booking Software guide</a>
+      </p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

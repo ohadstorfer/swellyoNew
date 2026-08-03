@@ -31,7 +31,13 @@ export type NotificationType =
   | 'trip_ended'
   | 'trip_invite_received'
   | 'trip_invite_accepted'
-  | 'trip_invite_declined';
+  | 'trip_invite_declined'
+  // The operator sent a document back. `operator_reject_document` has always
+  // written this row; until now nothing here knew the type, so it rendered as a
+  // blank "Notification". There is deliberately no `operator_document_approved`
+  // counterpart: the approve RPC writes no row (Ohad, 30 Jul — a push per
+  // approval would mean eight pushes for one operator clearing a queue).
+  | 'operator_document_rejected';
 
 /**
  * Every bell type, as a runtime set for the foreground push gate.
@@ -59,6 +65,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   trip_invite_received: true,
   trip_invite_accepted: true,
   trip_invite_declined: true,
+  operator_document_rejected: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
   Object.keys(BELL_TYPE_FLAGS)
@@ -108,6 +115,7 @@ export type TripDetailFocus =
   | 'your-gear'     // Plan → Packing & Gear → Your Gear card
   | 'requests'      // Plan → pending join requests (host)
   | 'gear-requests' // Plan → gear requests badge + auto-open the sheet (host)
+  | 'documents'     // Plan → Documents card
   | 'breakdown';    // Plan → group breakdown
 
 /**
@@ -141,6 +149,10 @@ export function tripFocusForNotification(
       return 'your-gear';
     case 'admin_update_posted':
       return 'updates';
+    // Straight to the Documents card, where the row is already sitting in the
+    // "Send a new one" state with the operator's reason under it.
+    case 'operator_document_rejected':
+      return 'documents';
     case 'trip_invite_accepted':
     case 'trip_invite_declined':
       return 'overview';
@@ -552,6 +564,19 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         bodyParts: [{ t: 'declined your invite to ' }, { t: tripName, b: true }],
         icon: 'close-circle-outline',
       };
+    case 'operator_document_rejected': {
+      // The operator's reason IS the notification — it is the only thing that
+      // tells the traveler what to do differently. The document name leads so
+      // someone with several outstanding items knows which one to redo.
+      const what = d.requirement_title || 'document';
+      return {
+        title: `${what} sent back`,
+        body: d.note
+          ? `${d.note}`
+          : `Your organiser asked for a new one for ${trip}.`,
+        icon: 'close-circle-outline',
+      };
+    }
     default:
       return { title: 'Notification', body: '', icon: 'notifications-outline' };
   }

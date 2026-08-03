@@ -52,6 +52,15 @@ export const tripsKeys = {
   detailGearRequests: (id: string) => ['trips', 'detail-gear-requests', id] as const,
   /** Traveler document requirements (v1: passport). Operator trips only. */
   detailDocuments: (id: string) => ['trips', 'detail-documents', id] as const,
+  /** Host-side review of EVERY traveler's documents. `members` is the joined
+   *  participant ids: a new member changes what this query returns, and nothing
+   *  else would refetch it. */
+  detailReview: (id: string, members: string) =>
+    ['trips', 'detail-review', id, members] as const,
+  /** Host-only: the stored requirement rows, as the operator edits them. Kept
+   *  apart from `detailDocuments` because that one is the caller's own derived
+   *  state and hides inactive rows — the editor needs neither. */
+  detailRequirements: (id: string) => ['trips', 'detail-requirements', id] as const,
 };
 
 export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };

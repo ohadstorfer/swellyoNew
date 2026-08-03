@@ -747,10 +747,36 @@ export type DocumentRowState =
 
 export type DocumentRow = {
   requirementId: string;
+  /** passport | waiver | medical | insurance | visa | flights | custom */
+  kind: string;
+  /** upload | acknowledge | pay */
+  reqType: string;
   title: string;
   state: DocumentRowState;
+  /** Resolved deadline (YYYY-MM-DD) for skippable items, or null for must-have
+   *  items and months-only trips. */
+  dueDate?: string | null;
   /** The operator's note. On a rejection, this is the reason. */
   note?: string | null;
+};
+
+/** "12 Oct" — deadlines are always shown as a real date, never as
+ *  "30 days before departure", which nobody can act on. */
+function formatDue(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+// Row icons. Only `passport` exists as a TripIcon — an unknown TripIcon name
+// renders nothing at all, so the rest come from Ionicons.
+export const DOC_ICON: Record<string, any> = {
+  waiver: 'document-text-outline',
+  medical: 'medkit-outline',
+  insurance: 'shield-checkmark-outline',
+  visa: 'earth-outline',
+  flights: 'airplane-outline',
+  custom: 'ellipse-outline',
 };
 
 // One place decides what each state looks like, so the traveler card and the
@@ -759,8 +785,45 @@ const DOC_STATUS: Record<DocumentRowState, { label: string; tone: 'accent' | 'mu
   not_started: { label: 'Add', tone: 'accent' },
   overdue: { label: 'Add — late', tone: 'bad' },
   submitted: { label: 'In review', tone: 'muted' },
-  approved: { label: 'Approved', tone: 'done' },
-  rejected: { label: 'Add a new photo', tone: 'bad' },
+  approved: { label: 'Done', tone: 'done' },
+  rejected: { label: 'Send a new one', tone: 'bad' },
+};
+
+// A waiver is agreed to and a medical form is filled in — neither is reviewed,
+// so "In review" would be a lie and "Add" is the wrong verb.
+function statusFor(row: DocumentRow): { label: string; tone: 'accent' | 'muted' | 'bad' | 'done' } {
+  const base = DOC_STATUS[row.state];
+  if (row.state === 'approved') return base;
+  if (row.kind === 'waiver') {
+    return row.state === 'overdue'
+      ? { label: 'Agree — late', tone: 'bad' }
+      : { label: 'Agree', tone: 'accent' };
+  }
+  if (row.kind === 'medical') {
+    return row.state === 'overdue'
+      ? { label: 'Fill in — late', tone: 'bad' }
+      : { label: 'Fill in', tone: 'accent' };
+  }
+  return base;
+}
+
+/** A thin, static progress bar. Deliberately NOT animated: this sits in a tab
+ *  the traveler opens repeatedly, and an entrance animation on something seen
+ *  that often reads as slow rather than delightful. It should simply be there,
+ *  already filled, the moment the tab paints. */
+const DocProgress: React.FC<{ done: number; total: number }> = ({ done, total }) => {
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+  return (
+    <View style={styles.docProgTrack}>
+      <View
+        style={[
+          styles.docProgFill,
+          { width: `${pct}%` },
+          done === total && styles.docProgFillDone,
+        ]}
+      />
+    </View>
+  );
 };
 
 export const TripDocumentsCard: React.FC<{
@@ -769,41 +832,144 @@ export const TripDocumentsCard: React.FC<{
   mode: 'member' | 'host';
   /** host mode only — how many uploads are waiting for a decision. */
   pendingReviewCount?: number;
+  /** host mode only — how many travelers have finished everything, out of how many. */
+  travelersDone?: number;
+  travelerCount?: number;
   onPressRow: (row: DocumentRow) => void;
   onReviewAll?: () => void;
-}> = ({ rows, mode, pendingReviewCount = 0, onPressRow, onReviewAll }) => {
+  /** host mode only — open the editor for what this trip asks for. Its presence
+   *  is also what keeps the card alive on a trip that asks for nothing yet. */
+  onManage?: () => void;
+}> = ({
+  rows,
+  mode,
+  pendingReviewCount = 0,
+  travelersDone = 0,
+  travelerCount = 0,
+  onPressRow,
+  onReviewAll,
+  onManage,
+}) => {
+  const canManage = mode === 'host' && !!onManage;
   // Nothing asked for = nothing to show. Keeps peer trips completely untouched.
-  if (rows.length === 0) return null;
+  // The one exception is an operator who can still add something: with no card
+  // there is no way in, and "add your first document" is exactly the state that
+  // needs a way in most.
+  if (rows.length === 0 && !canManage) return null;
 
-  const isHost = mode === 'host';
+  // ── Host: a summary, not a checklist ────────────────────────────────────
+  // The host does not "do" these items, so the traveler's row-by-row list told
+  // them nothing. What they need is one number — how many people are waiting on
+  // a decision — and a way in.
+  if (mode === 'host') {
+    const waiting = pendingReviewCount > 0;
+    const asksForNothing = rows.length === 0;
+    return (
+      <View style={styles.ygBlock}>
+        <View style={styles.ygHeader}>
+          <View style={styles.ygHeaderText}>
+            <Text style={styles.ygTitle}>Documents</Text>
+            <Text style={styles.ygSub}>What travelers need to send you</Text>
+          </View>
+          {/* Only once something is being asked for. On the empty state the
+              card below IS the add button, and two of them would be one too
+              many. */}
+          {canManage && !asksForNothing ? (
+            <Pressable onPress={onManage} hitSlop={10} style={styles.ygHeaderRight}>
+              <Text style={styles.docManage}>Edit</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {asksForNothing ? (
+          <Pressable
+            onPress={onManage}
+            style={({ pressed }) => [
+              styles.docHostCard,
+              styles.docEmptyCard,
+              pressed && styles.docRowPressed,
+            ]}
+          >
+            <View style={styles.docHostIcon}>
+              <Ionicons name="add" size={20} color={T.accent} />
+            </View>
+            <View style={styles.docRowText}>
+              <Text style={styles.ygItem} numberOfLines={1}>
+                Ask for documents
+              </Text>
+              <Text style={styles.docDue} numberOfLines={1}>
+                Passport, waiver, insurance and more
+              </Text>
+            </View>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={onReviewAll}
+            style={({ pressed }) => [styles.docHostCard, pressed && styles.docRowPressed]}
+          >
+            <View style={[styles.docHostIcon, waiting && styles.docHostIconWaiting]}>
+              <Ionicons
+                name={waiting ? 'time-outline' : 'checkmark-done-outline'}
+                size={20}
+                color={waiting ? '#C4361E' : T.done}
+              />
+            </View>
+            <View style={styles.docRowText}>
+              <Text style={styles.ygItem} numberOfLines={1}>
+                {waiting
+                  ? `${pendingReviewCount} waiting for you`
+                  : 'Nothing to review'}
+              </Text>
+              <Text style={styles.docDue} numberOfLines={1}>
+                {travelerCount > 0
+                  ? `${travelersDone} of ${travelerCount} travelers finished`
+                  : 'No travelers yet'}
+              </Text>
+            </View>
+            <Text style={[styles.docStatusPill, styles.docStatusPillAccent]}>Review</Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+
+  // ── Traveler: their own checklist ───────────────────────────────────────
+  const done = rows.filter(r => r.state === 'approved').length;
+  const allDone = done === rows.length;
 
   return (
     <View style={styles.ygBlock}>
       <View style={styles.ygHeader}>
         <View style={styles.ygHeaderText}>
           <Text style={styles.ygTitle}>Documents</Text>
-          <Text style={styles.ygSub}>
-            {isHost
-              ? 'What travelers need to send you'
-              : 'Your organiser needs these to book for you'}
-          </Text>
+          <Text style={styles.ygSub}>Your organiser needs these to book for you</Text>
         </View>
+        {/* The count answers the only question a traveler has here — "how much
+            is left?" — which the list itself never said out loud. */}
         <View style={styles.ygHeaderRight}>
-          {isHost && onReviewAll ? (
-            <Pressable onPress={onReviewAll} hitSlop={8}>
-              <Text style={styles.ygViewAll}>
-                {pendingReviewCount > 0 ? `Review (${pendingReviewCount})` : 'View all'}
-              </Text>
-            </Pressable>
-          ) : null}
+          <Text style={[styles.docCount, allDone && styles.docCountDone]}>
+            {allDone ? 'All done' : `${done} of ${rows.length}`}
+          </Text>
         </View>
       </View>
 
+      <DocProgress done={done} total={rows.length} />
+
       <View style={styles.ygCard}>
         {rows.map((row, i) => {
-          const status = DOC_STATUS[row.state];
+          const status = statusFor(row);
           const isLast = i === rows.length - 1;
           const showNote = row.state === 'rejected' && !!row.note;
+          // A deadline is only worth showing while it still matters.
+          const due =
+            row.dueDate && row.state !== 'approved' && row.state !== 'submitted'
+              ? formatDue(row.dueDate)
+              : null;
+          const showSecondLine = showNote || !!due;
+          // Only these two states are quiet enough to be plain text. Anything
+          // the traveler still has to act on gets a pill, so scanning the card
+          // shows the work without reading a single word.
+          const quiet = status.tone === 'muted' || status.tone === 'done';
 
           return (
             <Pressable
@@ -811,13 +977,14 @@ export const TripDocumentsCard: React.FC<{
               onPress={() => onPressRow(row)}
               // A rejection needs two lines, so the fixed row height is dropped
               // for that case only — every other row keeps the gear-row rhythm.
-              style={[styles.ygRow, showNote && styles.docRowTall, isLast && styles.ygRowLast]}
+              style={({ pressed }) => [
+                styles.ygRow,
+                showSecondLine && styles.docRowTall,
+                isLast && styles.ygRowLast,
+                pressed && styles.docRowPressed,
+              ]}
             >
-              {isHost ? (
-                <TripIcon name="passport" size={20} color="#333333" strokeWidth={1.4} />
-              ) : (
-                <GearCheckbox checked={row.state === 'approved'} />
-              )}
+              <GearCheckbox checked={row.state === 'approved'} />
 
               <View style={styles.docRowText}>
                 <Text style={styles.ygItem} numberOfLines={1}>
@@ -827,21 +994,26 @@ export const TripDocumentsCard: React.FC<{
                   <Text style={styles.docNote} numberOfLines={2}>
                     {row.note}
                   </Text>
+                ) : due ? (
+                  <Text
+                    style={[styles.docDue, row.state === 'overdue' && styles.docDueLate]}
+                    numberOfLines={1}
+                  >
+                    {row.state === 'overdue' ? `was due ${due}` : `by ${due}`}
+                  </Text>
                 ) : null}
               </View>
 
-              {isHost ? null : (
-                <Text
-                  style={[
-                    styles.docStatus,
-                    status.tone === 'accent' && styles.docStatusAccent,
-                    status.tone === 'bad' && styles.docStatusBad,
-                    status.tone === 'done' && styles.docStatusDone,
-                  ]}
-                >
-                  {status.label}
-                </Text>
-              )}
+              <Text
+                style={[
+                  quiet ? styles.docStatus : styles.docStatusPill,
+                  status.tone === 'accent' && styles.docStatusPillAccent,
+                  status.tone === 'bad' && styles.docStatusPillBad,
+                  status.tone === 'done' && styles.docStatusDone,
+                ]}
+              >
+                {status.label}
+              </Text>
             </Pressable>
           );
         })}
@@ -1175,11 +1347,74 @@ const styles = StyleSheet.create({
   // Documents rows — same rhythm as ygRow; only a rejection needs two lines.
   docRowTall: { height: undefined, minHeight: 54, paddingVertical: 10 },
   docRowText: { flex: 1, gap: 2 },
+  // Rows sit inside a bordered card, so a press scales badly (the corners peel
+  // away from the divider). A background wash gives the same "heard you" without
+  // breaking the card.
+  docRowPressed: { backgroundColor: '#F4F4F2' },
   docNote: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: '#C4361E' },
+  docDue: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: T.muted },
+  docDueLate: { color: '#C4361E' },
   docStatus: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted },
-  docStatusAccent: { color: T.accent },
-  docStatusBad: { color: '#C4361E' },
   docStatusDone: { color: T.done },
+  // Actionable states only. A pill is loud on purpose — it is the difference
+  // between "you still owe this" and "nothing to do".
+  docStatusPill: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  docStatusPillAccent: { color: T.accent, backgroundColor: '#E4F8FB' },
+  docStatusPillBad: { color: '#C4361E', backgroundColor: '#FCEBE8' },
+
+  // Header count + progress bar (traveler view).
+  docCount: { fontFamily: ff('Inter', '600'), fontSize: 12, fontWeight: '600', color: T.muted },
+  docCountDone: { color: T.done },
+  docProgTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#EDEDEB',
+    marginBottom: 14,
+    marginTop: -4,
+    overflow: 'hidden',
+  },
+  docProgFill: { height: 4, borderRadius: 2, backgroundColor: T.accent },
+  docProgFillDone: { backgroundColor: T.done },
+
+  // Host summary card — one tap into the review screen.
+  docHostCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EDEDEB',
+    backgroundColor: '#FFFFFF',
+  },
+  docHostIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EDF7F1',
+  },
+  docHostIconWaiting: { backgroundColor: '#FCEBE8' },
+  // Dashed, because it is an outline of something that is not there yet — the
+  // same language the wizard uses for its empty waiver slot.
+  docEmptyCard: { borderStyle: 'dashed', borderColor: '#D5D7DA' },
+  docManage: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 13,
+    fontWeight: '600',
+    color: T.accent,
+  },
 
   // Sticky Trip Chat
   footerOverlay: {

@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Trips — Dashboard Spec</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --wait:#5b5bb0; --wait-bg:#eeeefb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:0 0 14px}
+  .rule b{color:var(--cyan-dark)}
+  .rule.ok{background:var(--ok-bg)} .rule.ok b{color:var(--ok)}
+  .rule.warn{background:var(--open-bg)} .rule.warn b{color:var(--open)}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:38px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:660;margin:0 0 6px}
+  p.lead{font-size:14px;color:#3a3a36;margin-bottom:12px}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead strong{font-size:14px;font-weight:660}
+  .chead span{font-size:13px;color:var(--muted)}
+  .cbody{padding:12px 16px;font-size:14px}
+  .cbody p+p{margin-top:8px}
+  .cbody ul{list-style:none;margin:8px 0 0}
+  .cbody ul li{padding-left:16px;position:relative;margin-bottom:5px}
+  .cbody ul li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;
+    border-radius:99px;background:var(--line)}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-wait{color:var(--wait);background:var(--wait-bg)}
+
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  .tscroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:680;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 16px;border-top:1px solid var(--line);vertical-align:top}
+  td.mono{font:12.5px ui-monospace,Menlo,monospace;white-space:nowrap}
+
+  .mock{border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    padding:16px;margin-bottom:14px}
+  .phone{max-width:340px;margin:0 auto;background:#fff;border:1px solid var(--line);
+    border-radius:14px;overflow:hidden}
+  .ph-top{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .ph-top b{font-size:15px}
+  .ph-top span{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+  .tile{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .tile:last-child{border-bottom:0}
+  .tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+    font-weight:680;margin-bottom:6px}
+  .tile .v{font-size:14px}
+  .tile .v em{font-style:normal;color:var(--muted)}
+  .tile.alert{background:var(--cyan-tint)}
+  .tile.alert .v{font-weight:640;color:var(--cyan-dark)}
+  .tile.off{background:var(--panel);opacity:.65}
+  .chev{float:right;color:var(--muted);font-size:13px}
+
+  ol.q{list-style:none;counter-reset:q}
+  ol.q li{counter-increment:q;padding:11px 0 11px 34px;border-bottom:1px solid var(--line);
+    font-size:14px;position:relative}
+  ol.q li:last-child{border-bottom:0}
+  ol.q li::before{content:counter(q);position:absolute;left:0;top:11px;width:22px;height:22px;
+    border-radius:99px;background:var(--open-bg);color:var(--open);font-size:12px;font-weight:680;
+    display:flex;align-items:center;justify-content:center}
+  ol.q b{font-weight:640}
+  ol.q span{color:var(--muted)}
+
+  ol.steps{list-style:none;counter-reset:s}
+  ol.steps li{counter-increment:s;padding:11px 0 11px 34px;border-bottom:1px solid var(--line);
+    font-size:14px;position:relative}
+  ol.steps li:last-child{border-bottom:0}
+  ol.steps li::before{content:counter(s);position:absolute;left:0;top:11px;width:22px;height:22px;
+    border-radius:99px;background:var(--cyan-tint);color:var(--cyan-dark);font-size:12px;
+    font-weight:680;display:flex;align-items:center;justify-content:center}
+
+  .foot{margin-top:34px;font-size:13px;color:var(--muted);background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Operator Trips — Dashboard Spec</h1>
+  <p class="sub">The operator's screen for one trip: who paid, who uploaded, who needs a look. Draft, 2 August 2026.</p>
+
+  <div class="rule"><b>What this is.</b> The operator opens a trip and sees how it is going in one screen. Numbers on top, a full page behind every number, and a page per traveler. Read and act — it does not replace trip creation or trip editing.</div>
+  <div class="rule ok"><b>Most of the data is already in the database.</b> Requirements, documents, waivers and medical forms went live on 24 July. Approve and reject already work in the app. The dashboard screen itself does not exist yet.</div>
+  <div class="rule ok"><b>Six questions closed on 2 August (Ohad).</b> Medical gets export · purged files leave the row behind · exports are not logged · the approval step is in · desktop is a small separate site. Only two things are still open — see §8.</div>
+  <div class="rule warn"><b>Money is blocked.</b> The payment ledger was never applied. Until payments are decided, the money tile shows nothing. Everything else can ship without it.</div>
+
+  <h2>1 · Where it lives</h2>
+  <div class="card">
+    <div class="chead"><strong>Entry</strong><span>operator · mobile first</span><span class="tag t-ok">agreed</span></div>
+    <div class="cbody">
+      <p>Like App Store Connect: a list of your trips, then a space per trip.</p>
+      <ul>
+        <li><b>Mobile</b> — everything. This is the product.</li>
+        <li><b>Desktop</b> — <b>yes, and it stays small.</b> A separate simple website on Netlify, built later. It may live in its own codebase. Read, review and export only. No editing, no messaging.</li>
+      </ul>
+      <p>An operator trip is a normal <code>group_trips</code> row with <code>hosting_style = 'C'</code>. There is no separate operator trips table.</p>
+      <p>Because desktop is its own site, it does not revive the React Native web build. It talks to the same Supabase project and the same RPCs. Nothing in the mobile app has to change for it to exist.</p>
+    </div>
+  </div>
+
+  <h2>2 · The snapshot</h2>
+  <p class="lead">Five blocks, top to bottom. Every block opens a full page.</p>
+
+  <div class="mock">
+    <div class="phone">
+      <div class="ph-top"><b>Costa Rica · March</b><span>15 travelers · 42 days to go</span></div>
+      <div class="tile alert"><div class="v">12 documents waiting for you <span class="chev">›</span></div></div>
+      <div class="tile off">
+        <div class="k">Money</div>
+        <div class="v"><em>Not built yet — waiting on payments</em></div>
+      </div>
+      <div class="tile">
+        <div class="k">Documents <span class="chev">›</span></div>
+        <div class="v">Passports &nbsp;<b>15/15 in</b> &nbsp;<em>· 3/15 approved</em></div>
+        <div class="v">Visas &nbsp;<b>9/15 in</b> &nbsp;<em>· 9/15 approved</em></div>
+        <div class="v">Insurance &nbsp;<b>14/15 in</b> &nbsp;<em>· 11/15 approved</em></div>
+        <div class="v">Flights &nbsp;<b>6/15 in</b> &nbsp;<em>· 6/15 approved</em></div>
+        <div class="v"><em>Waiver signed 13/15 · Medical form 11/15</em></div>
+      </div>
+      <div class="tile">
+        <div class="k">Medical flags <span class="chev">›</span></div>
+        <div class="v">3 injuries · 2 allergies · 5 diet notes</div>
+      </div>
+      <div class="tile">
+        <div class="k">Surf stats <span class="chev">›</span></div>
+        <div class="v">4 beginner · 8 intermediate · 3 advanced</div>
+        <div class="v"><em>Ages 22–48 · 6 countries</em></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Needs review</strong><span>top of the screen</span><span class="tag t-ok">decided</span></div>
+    <div class="cbody">
+      <p>One line: <b>"12 documents waiting for you"</b>. Tap it and you get the list, oldest first.</p>
+      <ul>
+        <li>It is a shortcut, not a queue you must clear.</li>
+        <li>Nothing happens on its own. No auto-approve, no timers, no chasing the operator.</li>
+        <li>Approve is one tap inside the document viewer. Bulk approve is in v1.</li>
+        <li>We do not push a notification for every upload. 60 pushes a trip and the operator mutes us. This count is the signal.</li>
+      </ul>
+      <p>The traveler sees "waiting for the operator", so the wait is honest.</p>
+      <p><b>Confirmed 2 Aug:</b> this whole approval step is not in <code>SPEC.md</code> — Eyal's document has no approved state and no review step. It is added scope, and it is in. "Done" means approved, not merely submitted.</p>
+    </div>
+    <div class="note">Already built: <code>DocumentReviewScreen</code>, <code>RejectDocumentSheet</code>, <code>operator_approve_documents</code>, <code>operator_reject_document</code>.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Money</strong><span>blocked</span><span class="tag t-wait">waiting</span></div>
+    <div class="cbody">
+      <p>Planned numbers: paid in full, total collected (₪ and $), still owed, paid deposit only, paid in installments.</p>
+      <ul>
+        <li>Numbers are counted from an append-only ledger, never written straight from a webhook. That is what makes them safe when a webhook arrives twice or late.</li>
+        <li>The ledger table, <code>deposit_amount</code> and <code>price_snapshot</code> are not in the database yet.</li>
+        <li>For Israeli operators the money runs through their own gateway, so these totals are only as good as what their gateway reports back.</li>
+      </ul>
+      <p><b>Until payments land:</b> hide the tile. Do not show a fake zero.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Documents</strong><span>the main tile</span><span class="tag t-ok">data ready</span></div>
+    <div class="cbody">
+      <p>One line per requirement: <b>received</b> and <b>approved</b>, both shown.</p>
+      <ul>
+        <li>"Received 15/15 · approved 3/15" makes the gap clearly the operator's own backlog, not a traveler problem.</li>
+        <li>Expected = trip members with role <code>member</code>. Rejected uploads do not count as received.</li>
+        <li>Waiver and medical are not uploads. Show them as a short line: signed 13/15, form filled 11/15.</li>
+        <li>Custom requirements go in a separate <b>Other requirements</b> list, one line each. No big tile, no export column.</li>
+      </ul>
+    </div>
+    <div class="note">Source: <code>group_trip_document_counts(trip_id)</code> → expected / received / approved per requirement. Live since 24 July.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Medical flags</strong><span>counts only</span><span class="tag t-ok">data ready</span></div>
+    <div class="cbody">
+      <p>Small counts, no names, no medical text on this screen: "3 injuries", "2 allergies", "5 diet notes".</p>
+      <ul>
+        <li>Each count opens a view-all page.</li>
+        <li><b>The view-all page has export</b> (decided 2 Aug). Same rule as every other tile — the operator has to hand a diet and allergy list to a hotel or a cook.</li>
+        <li>Never send medical text to an Edge Function, analytics or Swelly. Export is a direct download only.</li>
+      </ul>
+      <p>This overrides <code>SPEC.md</code> §7, which said medical is view-only with no export.</p>
+    </div>
+    <div class="note">Source: view <code>organized_trip_medical_flags</code> — injuries, allergies, dietary, medications, forms completed.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Surf stats</strong><span>nice to know</span><span class="tag t-ok">data ready</span></div>
+    <div class="cbody">
+      <p>Levels, board types, age range, nationalities. This is background for the operator, not a to-do list.</p>
+      <p>All of it comes from profiles we already have. No new tables.</p>
+    </div>
+  </div>
+
+  <h2>3 · Detail page per tile</h2>
+  <div class="card">
+    <div class="cbody">
+      <p>Every tile gets its own page: the full list, every traveler, and <b>export</b>. No exceptions — medical included.</p>
+      <ul>
+        <li><b>Export means the real files</b>, not a summary sheet. Operators have to send passports on to hotels and visa agents.</li>
+        <li>Accepted cost: our 30-day delete only bounds Swellyo. A downloaded copy is the operator's and lives on.</li>
+        <li>Files are private. Short-lived signed URLs only.</li>
+        <li><b>Exports are not logged</b> (decided 2 Aug). No download history, no "who took what" record.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>After the 30-day purge</strong><span>decided 2 Aug</span><span class="tag t-ok">decided</span></div>
+    <div class="cbody">
+      <p><b>The row stays, the file does not.</b> The purge deletes the file from storage and leaves the document row in place.</p>
+      <ul>
+        <li>Counts do not change. "15/15 received · 15/15 approved" still reads 15/15 after the purge. History does not rewrite itself.</li>
+        <li>The row shows <b>"File deleted after 30 days"</b> instead of a thumbnail. View and export are gone for that row.</li>
+        <li>Passport typed fields (name, nationality, expiry) survive the purge, so expiry warnings and repeat travelers still work.</li>
+        <li>Nothing is re-requested. A purged file is done, not missing.</li>
+      </ul>
+    </div>
+    <div class="note">Already modelled: <code>file_deleted_at</code> on the document row, surfaced as <code>fileDeleted</code> in <code>ReviewItem</code>.</div>
+  </div>
+
+  <h2>4 · One traveler</h2>
+  <div class="tscroll">
+    <table>
+      <thead><tr><th>Block</th><th>What the operator sees</th><th>What they can do</th></tr></thead>
+      <tbody>
+        <tr><td>Profile</td><td>Name, photo, age, nationality, surf level, board, home break, places been</td><td>Read</td></tr>
+        <tr><td>Waiver</td><td>Signed yes / no, which version, date</td><td>Read</td></tr>
+        <tr><td>Passport</td><td>File + typed fields (name, nationality, expiry)</td><td>View · export · delete + reclaim</td></tr>
+        <tr><td>Insurance</td><td>File</td><td>View · export · delete + reclaim</td></tr>
+        <tr><td>Visa</td><td>File</td><td>View · export · delete + reclaim</td></tr>
+        <tr><td>Flights</td><td>File</td><td>View · export · delete + reclaim</td></tr>
+        <tr><td>Medical</td><td>Allergies, injuries, diet, medication</td><td>View · export</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="rule warn" style="margin-top:14px"><b>Knock-on from the medical export decision.</b> Once the view-all page exports everyone's medical, keeping the single-traveler card view-only protects nothing — the same data leaves through the other door. So medical is view + export in both places. If you meant export on the aggregate page <em>only</em>, say so and this row goes back to view-only.</div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="chead"><strong>Before medical export ships</strong><span>worth 10 minutes</span></div>
+    <div class="cbody">
+      <p>Exporting medical data is a bigger step than exporting a passport scan, and the specs were written the other way round. Two cheap things to settle first:</p>
+      <ul>
+        <li><b>Tell travelers.</b> <code>waiver-medical.md</code> promises the medical form is collected to run one trip and is view-only for the operator. If the operator can now download it, the consent text the traveler reads must say so before they type anything.</li>
+        <li><b>Keep the purpose limit.</b> Export is a direct file download and nothing else. Medical text still never reaches analytics, an Edge Function, or Swelly.</li>
+      </ul>
+      <p>Neither blocks the build. Both are much cheaper to do now than after the first trip has real data in it.</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="chead"><strong>Delete + reclaim</strong><span>one action</span><span class="tag t-ok">decided</span></div>
+    <div class="cbody">
+      <p>Reject and delete + reclaim are the <b>same button</b>. It deletes the file, marks the row rejected, and re-opens the task for the traveler with a notification.</p>
+      <ul>
+        <li>A reason is optional. Next to it there is a <b>Send a message</b> button, so the operator can explain in one tap.</li>
+        <li>The row stays with <code>rejected_at</code> and the note. Re-upload replaces the row. There is no reject history — only the latest note.</li>
+        <li>There is no "not approved but keep the file" state.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Other actions</strong></div>
+    <div class="cbody">
+      <ul>
+        <li><b>Message</b> — mobile only.</li>
+        <li><b>Remove from trip</b> — the action is agreed, what happens to money already paid is not.</li>
+        <li><b>Send a reminder</b> — nice to have. Mostly covered by auto-chasing.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>5 · What we build</h2>
+  <div class="tscroll">
+    <table>
+      <thead><tr><th>Piece</th><th>State</th><th>Work</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">group_trip_document_counts</td><td><span class="tag t-ok">live</span></td><td>None</td></tr>
+        <tr><td class="mono">organized_trip_medical_flags</td><td><span class="tag t-ok">live</span></td><td>None</td></tr>
+        <tr><td class="mono">operator_approve / reject</td><td><span class="tag t-ok">live</span></td><td>None</td></tr>
+        <tr><td class="mono">fetchTripReview()</td><td><span class="tag t-ok">built</span></td><td>Reuse — it already gives per-traveler state and a needs-review count</td></tr>
+        <tr><td class="mono">operator_trip_requirement_matrix</td><td><span class="tag t-open">missing</span></td><td>Spec'd, never applied. Only needed if <code>fetchTripReview</code> gets slow</td></tr>
+        <tr><td class="mono">payment ledger</td><td><span class="tag t-open">missing</span></td><td>Blocked on the payments decision</td></tr>
+        <tr><td>Dashboard screens</td><td><span class="tag t-open">missing</span></td><td>Snapshot, 4 detail pages, traveler page</td></tr>
+        <tr><td>Export</td><td><span class="tag t-open">missing</span></td><td>Signed URLs, zip or share sheet. No logging</td></tr>
+        <tr><td>Desktop site</td><td><span class="tag t-open">missing</span></td><td>Separate small Netlify site, own codebase, later</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>6 · Build order</h2>
+  <ol class="steps">
+    <li><b>Snapshot screen</b> — needs-review line, documents tile, medical tile, surf tile. All data exists.</li>
+    <li><b>Detail page per tile</b> — full list + view. No export yet.</li>
+    <li><b>Traveler page</b> — profile, file, medical, message, remove.</li>
+    <li><b>Export</b> — real files, signed URLs, medical included.</li>
+    <li><b>Money tile</b> — only after the payment ledger exists.</li>
+    <li><b>Desktop site</b> — a separate small Netlify site. Review and export, the two things that hurt on a phone. Own codebase, same Supabase.</li>
+  </ol>
+
+  <h2>7 · Not in v1</h2>
+  <div class="card"><div class="cbody"><ul>
+    <li>No auto-approve, no deadlines that escalate on their own.</li>
+    <li>No export logging or download history.</li>
+    <li>No staff roles — only the operator sees the dashboard.</li>
+    <li>No cross-trip view. One trip at a time.</li>
+    <li>No charts. Counts and lists.</li>
+    <li>No desktop in the first release. It comes after mobile works.</li>
+  </ul></div></div>
+
+  <h2>8 · Still open</h2>
+  <p class="lead">Two left. Neither blocks starting the snapshot screen.</p>
+  <ol class="q">
+    <li><b>Custom requirements on the dashboard.</b> <span>Operators can define their own items. The tiles are built around passport, visa, insurance, flights. Interim: an "Other requirements" list, one line each, with its own received and approved counts. How they are properly counted and exported — <b>needs Eyal &amp; Ohad</b>.</span></li>
+    <li><b>Removing a traveler who already paid.</b> <span>The action is agreed, the money is not. Ties into refunds and chargeback liability. <b>TBD</b> — moves with the payments decision, same as the money tile.</span></li>
+  </ol>
+
+  <h2>9 · Closed on 2 August</h2>
+  <div class="tscroll">
+    <table>
+      <thead><tr><th>Question</th><th>Answer</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td>Medical view-all: export?</td><td><b>Yes, build with export</b></td><td>Overrides <code>SPEC.md</code> §7. Medical is view + export in both places</td></tr>
+        <tr><td>After the 30-day purge?</td><td><b>Rows stay, files do not</b></td><td>Counts unchanged, row reads "File deleted after 30 days"</td></tr>
+        <tr><td>Are exports logged?</td><td><b>No</b></td><td>No download history at all</td></tr>
+        <tr><td>Approval step not in SPEC.md</td><td><b>Fine, build it</b></td><td>"Done" means approved. Needs-review count is in</td></tr>
+        <tr><td>Committing to desktop?</td><td><b>Yes, but small</b></td><td>Separate Netlify site, own codebase, after mobile</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="foot">
+    Sources: <code>SPEC.md</code> §4.3 and §6.3 · <code>docs/operator-trips-workbench.html</code> group 5 · <code>docs/specs/operator-trips/approval-review.md</code>, <code>documents-storage.md</code>, <code>waiver-medical.md</code>, <code>requirements-model.md</code> · <code>docs/operator-trips-db-changes.html</code> · code in <code>src/services/trips/tripDocumentsService.ts</code>.
+  </div>
+
+</div>
+</body>
+</html>

@@ -9,7 +9,7 @@ import {
   Platform,
   useWindowDimensions,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { VideoCarousel, VideoLevel } from '../VideoCarousel';
 import { getSurfLevelVideos } from '../../services/media/surfLevelVideos';
@@ -25,8 +25,6 @@ type Props = {
   onSave?: (selectedVideoId: number) => void | Promise<void>;
   saving?: boolean;
 };
-
-const SafeAreaContainer = Platform.OS === 'web' ? View : SafeAreaView;
 
 const FIGMA = {
   bg: '#FFFFFF',
@@ -151,11 +149,14 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
           { width: screenWidth, transform: [{ translateX }] },
         ]}
       >
-        <SafeAreaContainer style={styles.safeArea} edges={['top', 'bottom']}>
+        {/* Top inset comes from JS, not a native <SafeAreaView> — see
+            ProfileEditSurfVideoScreen for why the native one silently
+            contributes 0 padding inside ProfileEditPanel's Modal. */}
+        <View style={styles.safeArea}>
           <View
             style={[
               styles.backRow,
-              { paddingTop: 6 },
+              { paddingTop: insets.top + 6 },
             ]}
           >
             <TouchableOpacity
@@ -217,7 +218,7 @@ export const ProfileEditSurfSkillScreen: React.FC<Props> = ({
               <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save'}</Text>
             </TouchableOpacity>
           </View>
-        </SafeAreaContainer>
+        </View>
       </Animated.View>
     </View>
   );

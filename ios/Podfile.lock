@@ -299,6 +299,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - ExpoOcrKit (0.1.4):
+    - ExpoModulesCore
   - ExpoSecureStore (15.0.8):
     - ExpoModulesCore
   - ExpoShareIntentModule (5.1.1):
@@ -2842,6 +2844,7 @@ DEPENDENCIES:
   - ExpoLocalization (from `../node_modules/expo-localization/ios`)
   - ExpoMediaLibrary (from `../node_modules/expo-media-library/ios`)
   - ExpoModulesCore (from `../node_modules/expo-modules-core`)
+  - ExpoOcrKit (from `../node_modules/expo-ocr-kit/ios`)
   - ExpoSecureStore (from `../node_modules/expo-secure-store/ios`)
   - ExpoShareIntentModule (from `../node_modules/expo-share-intent/ios`)
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
@@ -3042,6 +3045,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-media-library/ios"
   ExpoModulesCore:
     :path: "../node_modules/expo-modules-core"
+  ExpoOcrKit:
+    :path: "../node_modules/expo-ocr-kit/ios"
   ExpoSecureStore:
     :path: "../node_modules/expo-secure-store/ios"
   ExpoShareIntentModule:
@@ -3288,6 +3293,7 @@ SPEC CHECKSUMS:
   ExpoLocalization: 7c29dc7a5193c732f6eae1da42b427ac15507ae1
   ExpoMediaLibrary: ee1cf07104fbcc533618d3800c489636d17b3347
   ExpoModulesCore: 5ef9a58f0cd1f10dd42391496cf5f6cf7039cc95
+  ExpoOcrKit: fc46b0a4a9e6805b4eb6beefe6743911f77f8d77
   ExpoSecureStore: decd2943fa19fa6f02c5ef3689f9ba5012ad6a6d
   ExpoShareIntentModule: eee475fa39b66bf7e9d8cb784d7cba1ed5c32a33
   ExpoSharing: a0e593c497c49377e9797b72586964e31c17ca7c

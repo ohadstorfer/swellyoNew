@@ -7,12 +7,13 @@ import {
   Image as RNImage,
   Platform,
 } from 'react-native';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Text } from './Text';
 
@@ -37,6 +38,7 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   cropShape = 'round',
   title = 'Move and scale',
 }) => {
+  const insets = useSafeAreaInsets();
   const [containerWidth, setContainerWidth] = useState(0);
   const [containerHeight, setContainerHeight] = useState(0);
   const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
@@ -211,9 +213,31 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent={false} animationType="fade" statusBarTranslucent>
+    // `onRequestClose` is what wires the Android hardware/gesture back button:
+    // RN's Modal captures KEYCODE_BACK and consumes it (ReactModalHostView.kt),
+    // handing the decision to JS. Without this prop the press is swallowed and
+    // dropped, leaving no way out of the crop screen.
+    <Modal
+      visible={visible}
+      transparent={false}
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onCancel}
+    >
+      {/* Android Modals render in their own native window and don't inherit the
+          app's root gesture context, so pan/pinch never fire without a local
+          GestureHandlerRootView. Same fix as ProfilePhotoViewer /
+          FullscreenImageViewer / AlbumMediaViewer. */}
+      <GestureHandlerRootView style={styles.root}>
       <View style={styles.overlay}>
-        <Text style={styles.title}>{title}</Text>
+        <Text
+          style={[
+            styles.title,
+            { paddingTop: Platform.OS === 'ios' ? 60 : insets.top + 20 },
+          ]}
+        >
+          {title}
+        </Text>
 
         <View
           style={styles.cropperWrapper}
@@ -256,7 +280,12 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
           )}
         </View>
 
-        <View style={styles.buttonRow}>
+        <View
+          style={[
+            styles.buttonRow,
+            { paddingBottom: Platform.OS === 'ios' ? 40 : insets.bottom + 24 },
+          ]}
+        >
           <TouchableOpacity onPress={onCancel} disabled={busy}>
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -267,11 +296,15 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
           </TouchableOpacity>
         </View>
       </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   overlay: {
     flex: 1,
     backgroundColor: '#000',
@@ -281,7 +314,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     color: '#fff',
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    // paddingTop is applied inline from the safe-area inset on Android.
     paddingBottom: 20,
   },
   cropperWrapper: {
@@ -299,7 +332,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingVertical: 20,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+    // paddingBottom is applied inline from the safe-area inset on Android.
   },
   cancelText: {
     fontSize: 17,

@@ -102,6 +102,19 @@ export function renderPush(
       return { title: 'Invite accepted 🎉', body: `${actor} accepted your invite to ${trip}` };
     case 'trip_invite_declined':
       return { title: 'Invite update', body: `${actor} declined your invite to ${trip}` };
+    case 'operator_document_rejected': {
+      // The operator's note is the whole point — it is the only thing that tells
+      // the traveler what to send instead. It leads the body, and the document
+      // name leads the title so someone with several outstanding items knows
+      // which one to redo. No emoji: this is a chore, not good news.
+      const what = data?.requirement_title || 'document';
+      return {
+        title: `Send a new ${String(what).toLowerCase()}`,
+        body: data?.note
+          ? `${data.note}`
+          : `Your organiser asked for a new one for ${trip}`,
+      };
+    }
     default:
       return { title: trip, body: 'You have a new trip update' };
   }

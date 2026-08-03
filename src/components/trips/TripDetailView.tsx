@@ -224,7 +224,17 @@ const MONTH_SHORT = [
 ];
 
 /** "Jun 15–22, 2026 · 7 days" (exact) or "Aug – Sep 2026" (months). */
-export function formatDateRange(vm: TripDetailVM): string {
+/**
+ * Just the date fields formatDateRange reads. Lets callers that only have a
+ * few trip fields (e.g. the post-publish share card) format dates without
+ * building a whole TripDetailVM.
+ */
+export type TripDateVM = Pick<
+  TripDetailVM,
+  'startDateISO' | 'endDateISO' | 'durationDays' | 'dateMonths'
+>;
+
+export function formatDateRange(vm: TripDateVM): string {
   if (vm.startDateISO) {
     const [y, m, d] = vm.startDateISO.split('-').map(Number);
     const startLabel = `${MONTH_SHORT[m - 1]} ${d}`;

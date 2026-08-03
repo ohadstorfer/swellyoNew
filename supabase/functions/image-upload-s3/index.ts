@@ -13,7 +13,7 @@ const S3_BASE = "https://swellyo-images.s3.us-east-1.amazonaws.com";
 
 // Public buckets this fn may sign uploads for, and the allowed filename kinds.
 const ALLOWED: Record<string, Set<string>> = {
-  "profile-images": new Set(["profile", "cover", "video-thumbnail"]),
+  "profile-images": new Set(["profile", "cover", "video-thumbnail", "surf-photo"]),
   "trip-images": new Set(["hero", "accommodation"]),
   "surftrip-images": new Set(["hero"]),
 };

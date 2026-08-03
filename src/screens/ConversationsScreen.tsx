@@ -15,6 +15,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../config/supabase';
 import { Ionicons } from '@expo/vector-icons';
+import { ShareTripSheetDevLauncher } from '../components/trips/ShareTripSheetDevLauncher';
 import Svg, { Path } from 'react-native-svg';
 import { usePostHog } from 'posthog-react-native';
 import { messagingService, Conversation, getMuteUntilFromMember, MessageSearchResult } from '../services/messaging/messagingService';
@@ -273,6 +274,8 @@ export default function ConversationsScreen({
   const [showSwellyoTeamWelcome, setShowSwellyoTeamWelcome] = useState(false);
   // Dev-menu preview of the onboarding welcome splash, without starting onboarding.
   const [showWelcomePreview, setShowWelcomePreview] = useState(false);
+  // Dev-menu preview of the post-publish "Share your trip" sheet.
+  const [showShareTripPreview, setShowShareTripPreview] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
   const scrollViewRef = useRef<FlatList<Conversation>>(null);
@@ -1398,6 +1401,28 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
+                {/* Post-publish share sheet — local mode only. Opens the
+                    "Share your trip" sheet against a real trip so the design
+                    can be checked without re-running the create wizard. */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      // Wait for THIS menu's Modal to finish dismissing before
+                      // mounting the sheet. Presenting a Modal while another is
+                      // dismissing makes iOS drop the new one straight back out
+                      // (same reason "Replay surftrips tip" defers below).
+                      setTimeout(() => setShowShareTripPreview(true), 350);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="share-social-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>Share Trip Sheet</Text>
+                  </TouchableOpacity>
+                )}
+
                 {/* Replay welcome guide — local mode only. Clears the
                     completed flag so the guide fires again the next time the
                     user enters Swelly chat. */}
@@ -1479,6 +1504,14 @@ export default function ConversationsScreen({
             onBack={() => setShowWelcomePreview(false)}
           />
         </Modal>
+      )}
+
+      {/* Post-publish "Share your trip" sheet preview (dev only). */}
+      {showShareTripPreview && (
+        <ShareTripSheetDevLauncher
+          tripTitle="El Salvador 26"
+          onDone={() => setShowShareTripPreview(false)}
+        />
       )}
 
       {/* Global message search — full-screen overlay above the list */}

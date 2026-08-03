@@ -2,8 +2,12 @@
 // created. Figma node 13451:18151 ("Your trip is live!"), built to match the
 // "You're in!" join overlay (JoinDecisionOverlay): full doodle illustration
 // background (line + icons), a success check badge, the trip card, and a
-// "Share your trip" / "Maybe later" footer. Share sends a join link; friends
-// open the trip in-app and tap "Request to join" (group trips are host-approved).
+// "Share your trip" / "Maybe later" footer.
+//
+// "Share your trip" opens ShareTripSheet (Figma node 14417:95452) rather than
+// the OS share sheet: WhatsApp, Instagram (the branded story card), or Copy
+// link. Every route carries the same join link — friends open the trip in-app
+// and tap "Request to join" (group trips are host-approved).
 
 import React, { useState } from 'react';
 import {
@@ -12,8 +16,8 @@ import {
   Image,
   StyleSheet,
   TouchableOpacity,
-  Share,
   Alert,
+  Platform,
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
@@ -21,9 +25,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ff } from '../../theme/fonts';
-import { getGroupTripInviteUrl } from '../../services/trips/groupTripsService';
-import { logEvent } from '../../services/analytics/eventLogger';
-import { friendlyErrorMessage } from '../../utils/friendlyError';
+import { ShareTripSheet } from '../../components/trips/ShareTripSheet';
+import { ShareTripStorySheet, type TripStoryVM } from '../../components/trips/ShareTripStorySheet';
+import { isExpoGo } from '../../utils/keyboardAvoidingView';
 
 // Full "Your trip is live!" doodle illustration (line + icons) — Figma node
 // 13451:18152, exported at the design's native 391×756. Its baked background is
@@ -58,6 +62,12 @@ export interface TripPublishedScreenProps {
   description?: string | null;
   startDate?: string | null;
   endDate?: string | null;
+  /** Shown on the Instagram story card under the title. */
+  destinationLabel?: string | null;
+  /** group_trips.trip_structure — becomes the "how it's run" line when sharing. */
+  structureSlugs?: string[] | null;
+  /** Drives the "N spots open" line when sharing. Null = no cap set. */
+  maxParticipants?: number | null;
   /** Counts shown in the info pill — a just-created trip has 0/0. */
   requestCount?: number;
   memberCount?: number;
@@ -72,39 +82,57 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
   description,
   startDate,
   endDate,
+  destinationLabel,
+  structureSlugs,
+  maxParticipants,
   requestCount = 0,
   memberCount = 0,
   onDone,
 }) => {
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
-  const [sharing, setSharing] = useState(false);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
+  const [storySheetVisible, setStorySheetVisible] = useState(false);
+  // Set when the host taps Instagram: the story sheet may only open once the
+  // share sheet's Modal has fully torn down (see ShareTripSheet.onDismissed).
+  const [storyPending, setStoryPending] = useState(false);
 
   const title = tripTitle?.trim() || 'Your trip';
   const desc = description?.trim() || null;
   const dates = formatDateRange(startDate ?? null, endDate ?? null);
 
-  const handleShare = async () => {
-    if (sharing) return;
-    setSharing(true);
-    try {
-      const url = getGroupTripInviteUrl(tripId);
-      const name = tripTitle?.trim() || 'my surf trip';
-      await Share.share({
-        // `message` carries the link on Android + as the body on iOS; `url`
-        // gives iOS a rich link target. Keep the URL in the message so it
-        // survives apps that ignore the url field (WhatsApp, etc.).
-        message: `Join ${name} on Swellyo 🌊\n${url}`,
-        url,
-      });
-      logEvent('trip_invite_shared', { tripId });
-    } catch (e: any) {
-      if (e?.message && !/cancel/i.test(e.message)) {
-        Alert.alert('Could not share', friendlyErrorMessage(e, 'Please try again.'));
-      }
-    } finally {
-      setSharing(false);
+  // The story card is captured with react-native-view-shot — a native module
+  // that isn't in Expo Go, and view-shot doesn't exist on web at all.
+  const canCreatePost = Platform.OS !== 'web' && !isExpoGo;
+
+  // Dates arrive as DATE columns ("YYYY-MM-DD"); slice defensively in case a
+  // caller hands over a full timestamp, which would misparse on split('-').
+  const storyVm: TripStoryVM = {
+    heroImageUri: heroImageUri ?? null,
+    title: tripTitle ?? null,
+    destinationLabel: destinationLabel ?? null,
+    startDateISO: startDate ? startDate.slice(0, 10) : null,
+    endDateISO: endDate ? endDate.slice(0, 10) : null,
+    durationDays: null,
+    dateMonths: null,
+  };
+
+  const handleCreatePost = () => {
+    if (!canCreatePost) {
+      Alert.alert(
+        'Not available here',
+        'Creating an Instagram post needs the full app. Share the link instead — it works everywhere.'
+      );
+      return;
     }
+    setStoryPending(true);
+    setShareSheetVisible(false);
+  };
+
+  const handleShareSheetDismissed = () => {
+    if (!storyPending) return;
+    setStoryPending(false);
+    setStorySheetVisible(true);
   };
 
   return (
@@ -231,7 +259,7 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
         />
         <TouchableOpacity
           style={styles.cta}
-          onPress={handleShare}
+          onPress={() => setShareSheetVisible(true)}
           activeOpacity={0.85}
           accessibilityRole="button"
           accessibilityLabel="Share your trip"
@@ -249,6 +277,31 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
           <Text style={styles.secondaryText}>Maybe later</Text>
         </TouchableOpacity>
       </View>
+
+      <ShareTripSheet
+        visible={shareSheetVisible}
+        onClose={() => setShareSheetVisible(false)}
+        onDismissed={handleShareSheetDismissed}
+        tripId={tripId}
+        tripTitle={tripTitle}
+        details={{
+          startDate,
+          endDate,
+          structureSlugs,
+          participantCount: memberCount,
+          maxParticipants,
+        }}
+        onCreatePost={handleCreatePost}
+      />
+
+      {storySheetVisible && (
+        <ShareTripStorySheet
+          visible={storySheetVisible}
+          tripId={tripId}
+          vm={storyVm}
+          onClose={() => setStorySheetVisible(false)}
+        />
+      )}
     </View>
   );
 };

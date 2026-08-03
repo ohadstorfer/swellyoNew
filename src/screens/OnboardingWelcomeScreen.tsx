@@ -219,10 +219,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonText: {
-    // Headings/SemiBold, Size/md 14 over Size/2-xl 22, Text/M - White.
+    // Headings/SemiBold, Text/M - White. Figma has this at Size/md 14, but it's
+    // bumped to 16/24 to match the Next button the scaffold renders on steps 1-7
+    // (OnboardingChrome) — the label shouldn't resize on the step 0 → 1 hop.
     fontFamily: ff('Montserrat', '600'),
-    fontSize: fs(14),
-    lineHeight: 22,
+    fontSize: fs(16),
+    lineHeight: 24,
     color: '#FFFFFF',
     textAlign: 'center',
     ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),

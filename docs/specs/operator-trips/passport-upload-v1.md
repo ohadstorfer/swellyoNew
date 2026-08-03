@@ -347,6 +347,8 @@ Only on a trip whose members are all developers — group trips are live on prod
 
 Left out anyway, because v1's job is to prove upload → store → view → delete with nothing else moving. Worth revisiting the moment v1 is stable, and it does not need to wait for full extraction.
 
+**Superseded 2026-08-03 — see `passport-copy-details.md`.** Extraction shipped, but not the way v2 imagined it: the phone reads the passport's code lines on demand and copies the fields to the clipboard, and **nothing is stored**. So the expiry date is now read for free, and the encryption key, the typed-field columns and the extra purge obligation are all still unnecessary. `20260729000000_passport_apis_fields.sql` and `group-document-passport` stay unapplied.
+
 **The bigger question v2 raises:** if the phone extracts the fields, do we still need to keep the image at all? The operator books from text. Storing the photo is a v1 requirement precisely because there is no extraction — it is the only way the operator can read anything. Once v2 exists, the photo may become optional per trip, and a photo we never stored cannot leak.
 
 ---

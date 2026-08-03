@@ -44,7 +44,7 @@ import {
 import { ProfileEditSurfStyleScreen } from './ProfileEditSurfStyleScreen';
 import { ProfileEditTravelExperienceScreen } from './ProfileEditTravelExperienceScreen';
 import { ProfileEditSurfSkillScreen } from './ProfileEditSurfSkillScreen';
-import { ProfileEditSurfVideoScreen } from './ProfileEditSurfVideoScreen';
+import { ProfileEditSurfVideoScreen, type SurfSkillMediaSave } from './ProfileEditSurfVideoScreen';
 import { ProfileEditDestinationScreen } from './ProfileEditDestinationScreen';
 import { ProfileEditLifestyleScreen } from './ProfileEditLifestyleScreen';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -204,6 +204,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
       coverImageUrl: 'cover_image_url',
       profileVideoUrl: 'profile_video_url',
       profileVideoThumbnailUrl: 'profile_video_thumbnail_url',
+      profilePhotoUrl: 'profile_photo_url',
       destinationsArray: 'destinations_array',
       lifestyleKeywords: 'lifestyle_keywords',
       lifestyleImageUrls: 'lifestyle_image_urls',
@@ -300,13 +301,14 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
   );
 
   const handleSurfVideoSave = useCallback(
-    async (userVideoUri: string | null) => {
-      // Persist the new video URL (or empty string to clear it). The S3
-      // upload itself was kicked off inside the editor — this only writes
-      // the DB pointer.
+    async (media: SurfSkillMediaSave) => {
+      // The Surf Skill card holds one medium, so every save writes BOTH columns
+      // — picking a photo clears the video and vice versa. The upload itself
+      // already happened inside the editor; this only writes the DB pointers.
       await persist('skill', {
         surfboardType: surfer?.surfboard_type ?? undefined,
-        profileVideoUrl: userVideoUri ?? '',
+        profileVideoUrl: media.kind === 'video' ? media.videoUri : '',
+        profilePhotoUrl: media.kind === 'photo' ? media.photoUrl : '',
       });
     },
     [persist, surfer?.surfboard_type],
@@ -1032,9 +1034,13 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       thumbnail={
                         surfVideoUpload.localThumbnail
                           ? { uri: surfVideoUpload.localThumbnail }
-                          : surfer?.profile_video_thumbnail_url
-                            ? { uri: surfer.profile_video_thumbnail_url }
-                            : surfSkillThumb
+                          // A surf photo IS its own thumbnail — and it outranks a
+                          // stale video poster, matching the card's photo > video order.
+                          : surfer?.profile_photo_url
+                            ? { uri: surfer.profile_photo_url }
+                            : surfer?.profile_video_thumbnail_url
+                              ? { uri: surfer.profile_video_thumbnail_url }
+                              : surfSkillThumb
                       }
                       thumbnailResize="cover"
                       label="Surf Skill"
@@ -1049,9 +1055,9 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                       value="Not set"
                     /> */}
                   </View>
-                  {/* Direct video entry — opens the dedicated Surf Video editor
+                  {/* Direct media entry — opens the dedicated Surf Media editor
                       (separate from Surf Skill so editing one doesn't touch the
-                      other). */}
+                      other). A user shows their surfing with a photo OR a clip. */}
                   <TouchableOpacity
                     style={styles.surfVideoLinkRow}
                     onPress={() => setShowSurfVideoEditor(true)}
@@ -1060,7 +1066,13 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                     disabled={isSurfVideoUploading}
                   >
                     <Ionicons
-                      name={surfer?.profile_video_url ? 'videocam' : 'videocam-outline'}
+                      name={
+                        surfer?.profile_photo_url
+                          ? 'image'
+                          : surfer?.profile_video_url
+                            ? 'videocam'
+                            : 'videocam-outline'
+                      }
                       size={18}
                       color={isSurfVideoUploading ? '#B0B0B0' : FIGMA.brandTeal}
                     />
@@ -1072,9 +1084,9 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                     >
                       {isSurfVideoUploading
                         ? 'Uploading surf video…'
-                        : surfer?.profile_video_url
-                          ? 'Change surf video'
-                          : 'Add surf video'}
+                        : surfer?.profile_photo_url || surfer?.profile_video_url
+                          ? 'Change surf photo or video'
+                          : 'Add surf photo or video'}
                     </Text>
                   </TouchableOpacity>
                 </Section>
@@ -1191,6 +1203,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
           initialBoardType={surfer?.surfboard_type ?? null}
           initialSurfLevel={surfer?.surf_level ?? 1}
           initialUserVideoUri={surfer?.profile_video_url ?? null}
+          initialUserPhotoUrl={surfer?.profile_photo_url ?? null}
           userId={surfer?.user_id ?? null}
           onSave={handleSurfVideoSave}
           saving={savingTarget === 'skill'}

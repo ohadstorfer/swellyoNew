@@ -23,6 +23,7 @@ import {
   ImageSourcePropType,
   Keyboard,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -78,6 +79,19 @@ import { WhenSheetContent } from '../../components/trips/sheets/WhenSheetContent
 import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { TripIcon } from '../../components/trips/tripIcons';
+import { formatFileSize } from '../../utils/videoValidation';
+import {
+  createRequirements,
+  publishWaiverPdf,
+  resolveDeadlineDate,
+  stepDeadline,
+  isDeadlineAtEnd,
+  DEFAULT_TIMING,
+  REQUIREMENT_CATALOG,
+  REQUIREMENT_ORDER,
+  type RequirementKind,
+  type RequirementTiming,
+} from '../../services/trips/tripDocumentsService';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from '../../components/trips/sheets/SpecificStaySheetContent';
 
@@ -146,10 +160,22 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 // changed from a string to an array of {title, description}.
 // v5 -> v6: hostingStyle (A/B/C) is now stored in the draft so the resume prompt
 // only offers to restore a draft into the same flow it was started in.
-export const WIZARD_STATE_VERSION = 6;
+// v6 -> v7: the Flow C Requirements step — requirementKinds, requirementTiming
+// and waiverText. The bump matters:
+// useTripWizardDraft's `looksLikeShape` refuses to restore a draft missing any
+// key of the initial state, so without it TripsScreen would still OFFER to
+// resume a v6 draft and then silently restore nothing.
+export const WIZARD_STATE_VERSION = 7;
 
 // Step KEYS — flat step list. Preview is the final step (publishes directly).
-type StepKey = 'audience' | 'basics' | 'vibez' | 'budget' | 'aboutYou' | 'preview';
+type StepKey =
+  | 'audience'
+  | 'basics'
+  | 'vibez'
+  | 'budget'
+  | 'aboutYou'
+  | 'requirements'
+  | 'preview';
 // Flow A/C step order. Flow B inserts 'aboutYou' before 'preview' (see `steps`
 // memo in the component) so the destination + stay names exist by the time the
 // leader describes their familiarity with them.
@@ -172,6 +198,10 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
   vibez: { title: 'Trip Vibe', subtitle: 'How it runs, the feel, the stay.' },
   budget: { title: 'Budget', subtitle: 'Per person, in USD.' },
   aboutYou: { title: 'About you', subtitle: 'Why you’re the right Captain for this.' },
+  requirements: {
+    title: 'What travelers must send',
+    subtitle: 'So you can book flights and organise the trip.',
+  },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
 };
 
@@ -238,6 +268,7 @@ const MONTH_SHORT: Record<string, string> = {
 // Field error keys (per spec). Used as keys in useFieldErrors.
 // -----------------------------------------------------------------------------
 type FieldKey =
+  | 'waiverText'
   | 'title'
   | 'description'
   | 'heroImage'
@@ -343,7 +374,21 @@ interface WizardState extends Record<string, unknown> {
   costPerPerson: string;
   priceInclusions: PriceInclusions;
 
-  // Step 5 — preview
+  // Step 5 (Flow C only) — traveler requirements. Written as
+  // `organized_trip_requirements` rows on publish, never before; the wizard
+  // keeps them in the draft like every other answer.
+  requirementKinds: RequirementKind[];
+  // When each requirement is due: at onboarding ("when they join"), or skippable
+  // with a deadline counted back from departure. Keyed by kind so a deselect →
+  // reselect keeps whatever the operator set.
+  requirementTiming: Record<string, RequirementTiming>;
+  // The waiver PDF the operator uploads. A waiver requirement is useless
+  // without it: the state RPC only counts an agreement that points at the
+  // CURRENT waiver document, so with no document the requirement can never
+  // reach `approved`.
+  waiverFile: { uri: string; name: string; size: number } | null;
+
+  // Step 6 — preview
   visibility: Visibility;
 }
 
@@ -390,6 +435,11 @@ const INITIAL_STATE: WizardState = {
   budgetManualMax: '',
   costPerPerson: '',
   priceInclusions: {},
+  // Passport is on by default — it is the reason the operator can book
+  // anything. Everything else is opt-in.
+  requirementKinds: ['passport'],
+  requirementTiming: { ...DEFAULT_TIMING },
+  waiverFile: null,
   visibility: 'public',
 };
 
@@ -397,6 +447,17 @@ const INITIAL_STATE: WizardState = {
 // Helpers
 // -----------------------------------------------------------------------------
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
+
+// Requirement icons. Only `passport` exists as a TripIcon; the rest come from
+// Ionicons. A TripIcon name that does not exist renders nothing at all — silent
+// failure — so these are deliberately kept in one place.
+const REQ_ICON: Record<Exclude<RequirementKind, 'passport'>, any> = {
+  waiver: 'document-text-outline',
+  medical: 'medkit-outline',
+  insurance: 'shield-checkmark-outline',
+  visa: 'earth-outline',
+  flights: 'airplane-outline',
+};
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const COLORS = {
@@ -555,6 +616,12 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: 'ILS' | 'USD'): Wizard
   return {
     version: WIZARD_STATE_VERSION,
     hostingStyle: trip.hosting_style ?? 'A',
+    // Inert in edit mode: the Requirements step is create-only and
+    // updateGroupTrip never writes requirement rows. Present because
+    // WizardState requires it.
+    requirementKinds: [],
+    requirementTiming: { ...DEFAULT_TIMING },
+    waiverFile: null,
     ageMin: trip.age_min != null ? String(trip.age_min) : '',
     ageMax: trip.age_max != null ? String(trip.age_max) : '',
     skillLevels,
@@ -1235,10 +1302,22 @@ export default function CreateTripFlowA({
   // Step order — B & C insert 'aboutYou' after 'budget' (dest + stay are known
   // by then, so the familiarity fields can name them).
   const steps = useMemo<StepKey[]>(() => {
-    if (!hasAboutYou) return STEPS_BASE;
     const idx = STEPS_BASE.indexOf('preview');
-    return [...STEPS_BASE.slice(0, idx), 'aboutYou', ...STEPS_BASE.slice(idx)];
-  }, [hasAboutYou]);
+    const head = STEPS_BASE.slice(0, idx);
+    const tail = STEPS_BASE.slice(idx);
+    const middle: StepKey[] = [];
+    if (hasAboutYou) middle.push('aboutYou');
+    // Requirements is Flow C only. A DB trigger refuses a passport requirement
+    // on an A/B trip, so showing this step anywhere else would produce a raw
+    // Postgres error at publish.
+    // Create only. Edit mode saves through updateGroupTrip, which never writes
+    // requirement rows, so a toggle there would silently do nothing. After
+    // publish this lives in ManageRequirementsSheet, opened from the Plan tab's
+    // Documents card — it diffs against the stored rows instead of rewriting
+    // them, which is what keeps already-uploaded documents attached.
+    if (isFixedFlow && !editMode) middle.push('requirements');
+    return [...head, ...middle, ...tail];
+  }, [hasAboutYou, isFixedFlow, editMode]);
 
   // ---- Wizard state (draft-backed) ----------------------------------------
   const initialState = useMemo<WizardState>(
@@ -1665,6 +1744,14 @@ export default function CreateTripFlowA({
           fail('hostStayFamiliarity', 'Pick how well you know the stay');
         return ok;
       }
+      case 'requirements': {
+        // Selecting nothing is valid — an operator may genuinely need nothing.
+        // But a waiver with no text can never be agreed to, so that one blocks.
+        if (state.requirementKinds.includes('waiver') && !state.waiverFile) {
+          fail('waiverText', 'Upload your waiver PDF so travelers can agree to it');
+        }
+        return ok;
+      }
       case 'preview':
         return true;
     }
@@ -1920,6 +2007,23 @@ export default function CreateTripFlowA({
         };
         const trip = await createGroupTrip(hostId, input);
 
+        // Traveler requirements (Flow C only). Written AFTER the trip row
+        // exists because they point at trip_id. A failure here must not lose a
+        // published trip — the operator can add requirements later — so this
+        // warns and carries on rather than throwing.
+        if (isFixedFlow && state.requirementKinds.length > 0) {
+          try {
+            // The waiver DOCUMENT goes first. A waiver requirement whose
+            // document does not exist can never be satisfied.
+            if (state.requirementKinds.includes('waiver') && state.waiverFile) {
+              await publishWaiverPdf(trip.id, state.waiverFile.uri);
+            }
+            await createRequirements(trip.id, state.requirementKinds, state.requirementTiming);
+          } catch (reqErr) {
+            console.warn('[CreateTripFlowA] requirement insert failed:', reqErr);
+          }
+        }
+
         if (state.destinationGeo) {
           const g = state.destinationGeo;
           try {
@@ -2037,9 +2141,289 @@ export default function CreateTripFlowA({
         return renderBudgetStep();
       case 'aboutYou':
         return renderAboutYouStep();
+      case 'requirements':
+        return renderRequirementsStep();
       case 'preview':
         return renderPreviewStep();
     }
+  };
+
+  // -----------------------------------------------------------------------
+  // STEP — REQUIREMENTS (Flow C only)
+  //
+  // v1 offers exactly one requirement: the passport. The other five kinds the
+  // schema allows (waiver, medical, insurance, visa, flights) are deliberately
+  // NOT here — none of them has a traveler-side screen yet, and offering an
+  // operator something their travelers cannot act on is worse than offering
+  // nothing. Add each one here as its traveler flow lands.
+  //
+  // Written on publish as an `organized_trip_requirements` row, `must_have`
+  // (which the schema requires to have no deadline). Nothing is written if the
+  // host turns it off.
+  // -----------------------------------------------------------------------
+  const renderRequirementsStep = () => {
+    const setTiming = (kind: RequirementKind, patch: Partial<RequirementTiming>) => {
+      const current = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
+      update('requirementTiming', {
+        ...state.requirementTiming,
+        [kind]: { ...current, ...patch },
+      });
+    };
+
+    // The real date the deadline lands on. Months-only trips have no exact
+    // start date, so there is nothing honest to show — say so instead of
+    // inventing one.
+    const deadlineLabel = (daysBefore: number) => {
+      const due = resolveDeadlineDate(
+        state.datesMode === 'exact' ? state.startDateISO : null,
+        daysBefore,
+      );
+      if (!due) return 'Set exact dates to see the date';
+      return due.toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    };
+
+    const pickWaiverFile = async () => {
+      try {
+        const DocumentPicker = require('expo-document-picker');
+        const res = await DocumentPicker.getDocumentAsync({
+          type: 'application/pdf',
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+        const asset = !res.canceled ? res.assets?.[0] : null;
+        if (asset?.uri) {
+          update('waiverFile', {
+            uri: asset.uri,
+            name: asset.name ?? 'waiver.pdf',
+            size: asset.size ?? 0,
+          });
+          setError('waiverText', null);
+        }
+      } catch (e) {
+        console.error('[CreateTripFlowA] waiver picker failed:', e);
+        showErrorAlert('Something went wrong', e, 'Could not open your files. Please try again.');
+      }
+    };
+
+    const toggle = (kind: RequirementKind) => {
+      const on = state.requirementKinds.includes(kind);
+      update(
+        'requirementKinds',
+        on
+          ? state.requirementKinds.filter(k => k !== kind)
+          : [...state.requirementKinds, kind],
+      );
+    };
+
+    return (
+      <View style={localStyles.reqStack}>
+        {REQUIREMENT_ORDER.map(kind => {
+          const c = REQUIREMENT_CATALOG[kind];
+          const on = state.requirementKinds.includes(kind);
+          const timing = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
+          return (
+            // One card per requirement — header AND its settings live in the same
+            // container. They used to be siblings separated by a left rail, which
+            // made an expanded block read as a free-floating item between two
+            // cards. Containment is what stops the list feeling crowded: six
+            // selections still means six blocks, never eighteen.
+            <View key={kind} style={[localStyles.reqCard, on && localStyles.reqCardOn]}>
+              <Pressable
+                onPress={() => toggle(kind)}
+                // Tint on press, not scale. The card border is drawn by the
+                // parent, so scaling this row would read as the content shrinking
+                // inside a fixed frame. The tint paints exactly the tappable
+                // region, which is the whole card when collapsed and just the
+                // header once it is open.
+                style={({ pressed }) => [
+                  localStyles.reqHeader,
+                  pressed && (on ? localStyles.reqHeaderPressedOn : localStyles.reqHeaderPressed),
+                ]}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: on }}
+              >
+                <View style={localStyles.reqIconWrap}>
+                  {kind === 'passport' ? (
+                    <TripIcon name="passport" size={22} color="#212121" strokeWidth={1.5} />
+                  ) : (
+                    <Ionicons name={REQ_ICON[kind]} size={21} color="#212121" />
+                  )}
+                </View>
+                <View style={localStyles.reqBody}>
+                  <Text style={localStyles.reqTitle}>{c.operatorTitle}</Text>
+                  <Text style={localStyles.reqSub}>{c.operatorSub}</Text>
+                </View>
+                <View style={[localStyles.reqCheck, on && localStyles.reqCheckOn]}>
+                  {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                </View>
+              </Pressable>
+
+              {/* When is it due? Two timings only (workbench, 22 Jul): must-have
+                  during onboarding, or skippable until a deadline counted back
+                  from departure. Deadlines are stored RELATIVE to departure and
+                  shown as the real date — moving or duplicating a trip then
+                  keeps every deadline correct.
+
+                  Revealed with a short ease-out fade: selecting a requirement is
+                  occasional, so an entrance is worth it, but it stays under 200ms
+                  so the wizard never feels slow. */}
+              {on ? (
+                <FadeInView duration={180} translateY={4} style={localStyles.reqExpand}>
+                  <View style={localStyles.reqDivider} />
+
+                  <View style={localStyles.timingRow}>
+                    <Pressable
+                      onPress={() => setTiming(kind, { skippable: false })}
+                      style={[
+                        localStyles.timingPill,
+                        !timing.skippable && localStyles.timingPillOn,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          localStyles.timingPillText,
+                          !timing.skippable && localStyles.timingPillTextOn,
+                        ]}
+                      >
+                        When they join
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setTiming(kind, { skippable: true })}
+                      style={[
+                        localStyles.timingPill,
+                        timing.skippable && localStyles.timingPillOn,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          localStyles.timingPillText,
+                          timing.skippable && localStyles.timingPillTextOn,
+                        ]}
+                      >
+                        They can skip
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  {timing.skippable ? (
+                    <View style={localStyles.daysRow}>
+                      <Pressable
+                        onPress={() =>
+                          setTiming(kind, { daysBefore: Math.max(0, timing.daysBefore - 7) })
+                        }
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                          localStyles.stepBtn,
+                          pressed && localStyles.stepBtnPressed,
+                        ]}
+                      >
+                        <Ionicons name="remove" size={16} color="#212121" />
+                      </Pressable>
+                      <View style={localStyles.daysLabel}>
+                        <Text style={localStyles.daysValue}>
+                          {timing.daysBefore === 1
+                            ? '1 day before the trip'
+                            : `${timing.daysBefore} days before the trip`}
+                        </Text>
+                        <Text style={localStyles.daysDate}>{deadlineLabel(timing.daysBefore)}</Text>
+                      </View>
+                      <Pressable
+                        onPress={() =>
+                          setTiming(kind, { daysBefore: Math.min(365, timing.daysBefore + 7) })
+                        }
+                        hitSlop={8}
+                        style={({ pressed }) => [
+                          localStyles.stepBtn,
+                          pressed && localStyles.stepBtnPressed,
+                        ]}
+                      >
+                        <Ionicons name="add" size={16} color="#212121" />
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Text style={localStyles.timingHint}>No Skip button.</Text>
+                  )}
+
+                  {/* The waiver is the one requirement that needs something FROM
+                      the operator. Without this document there is nothing for a
+                      traveler to agree to, and the requirement could never be
+                      completed. */}
+                  {kind === 'waiver' ? (
+                    <View style={localStyles.waiverBox}>
+                      <Text style={localStyles.waiverLabel}>Your waiver document</Text>
+
+                      {state.waiverFile ? (
+                        <View style={localStyles.waiverFileRow}>
+                          <Ionicons name="document-text-outline" size={20} color="#212121" />
+                          <View style={localStyles.waiverFileText}>
+                            <Text style={localStyles.waiverFileName} numberOfLines={1}>
+                              {state.waiverFile.name}
+                            </Text>
+                            <Text style={localStyles.waiverFileSize}>
+                              {formatFileSize(state.waiverFile.size)}
+                            </Text>
+                          </View>
+                          <Pressable onPress={pickWaiverFile} hitSlop={8}>
+                            <Text style={localStyles.waiverReplace}>Replace</Text>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <Pressable
+                          onPress={pickWaiverFile}
+                          style={({ pressed }) => [
+                            localStyles.waiverPickBtn,
+                            errors.waiverText ? localStyles.waiverInputError : null,
+                            pressed && localStyles.waiverPickBtnPressed,
+                          ]}
+                        >
+                          <Ionicons name="cloud-upload-outline" size={18} color="#212121" />
+                          <Text style={localStyles.waiverPickText}>Upload a PDF</Text>
+                        </Pressable>
+                      )}
+
+                      {/* The card subtitle already says travelers agree by typing
+                          their name — repeating it here was pure noise. Only the
+                          part it does NOT say survives. */}
+                      {errors.waiverText ? (
+                        <Text style={localStyles.waiverError}>{errors.waiverText}</Text>
+                      ) : (
+                        <Text style={localStyles.waiverHint}>
+                          We record who agreed, when, and to which version.
+                        </Text>
+                      )}
+                    </View>
+                  ) : null}
+                </FadeInView>
+              ) : null}
+            </View>
+          );
+        })}
+
+        {/* Meta text, pulled away from the list. Two gray paragraphs sitting at
+            the same 12px rhythm as the cards read as more list items; the extra
+            top margin says "this is a footnote, not another choice". */}
+        <View style={localStyles.reqMeta}>
+          {state.requirementKinds.includes('passport') ? (
+            <View style={localStyles.reqNote}>
+              <Ionicons name="lock-closed-outline" size={14} color="#7B7B7B" />
+              <Text style={localStyles.reqNoteText}>
+                Only you and the traveler can see their documents. We delete every file
+                within 30 days after the trip ends.
+              </Text>
+            </View>
+          ) : null}
+
+          <Text style={localStyles.reqFooter}>
+            You can change these after the trip is published.
+          </Text>
+        </View>
+      </View>
+    );
   };
 
   // -----------------------------------------------------------------------
@@ -3236,6 +3620,13 @@ export default function CreateTripFlowA({
         description={published.description}
         startDate={published.startDate}
         endDate={published.endDate}
+        destinationLabel={
+          state.destinationGeo?.short || state.destinationGeo?.name || state.destination || null
+        }
+        structureSlugs={state.tripStructure}
+        maxParticipants={
+          state.maxParticipants ? parseInt(state.maxParticipants, 10) : null
+        }
         onDone={onCreated}
       />
     );
@@ -3741,6 +4132,178 @@ export default function CreateTripFlowA({
 // Styles
 // =============================================================================
 const localStyles = StyleSheet.create({
+  // --- Requirements step (Flow C) ---
+  // 14 between cards vs 12 inside one: the gap around a group has to beat the
+  // gaps inside it, or six cards read as one undifferentiated wall.
+  reqStack: { gap: 14 },
+  reqCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
+    // Lets the expanded section's full-bleed divider stop at the rounded corner.
+    overflow: 'hidden',
+  },
+  reqCardOn: { borderColor: '#05BCD3', backgroundColor: '#F4FDFE' },
+  reqHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+  },
+  reqHeaderPressed: { backgroundColor: '#F4F4F4' },
+  reqHeaderPressedOn: { backgroundColor: '#E7F7F9' },
+  reqExpand: { paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
+  reqDivider: {
+    height: 1,
+    // Negative margins bleed it to the card edges, so it reads as a seam in one
+    // card rather than a border around a nested box.
+    marginHorizontal: -16,
+    marginBottom: 4,
+    backgroundColor: 'rgba(5,188,211,0.16)',
+  },
+  reqIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F3F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reqBody: { flex: 1, gap: 3 },
+  reqTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#212121',
+  },
+  reqSub: { fontFamily: FONT_INTER, fontSize: 12, lineHeight: 17, color: '#7B7B7B' },
+  reqCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#D5D7DA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  reqCheckOn: { backgroundColor: '#05BCD3', borderColor: '#05BCD3' },
+  // Timing control inside a selected requirement card.
+  timingRow: { flexDirection: 'row', gap: 8 },
+  timingPill: {
+    flex: 1,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  timingPillOn: { backgroundColor: '#212121', borderColor: '#212121' },
+  timingPillText: { fontFamily: FONT_INTER, fontSize: 12, fontWeight: '600', color: '#555555' },
+  timingPillTextOn: { color: '#FFFFFF' },
+  timingHint: { fontFamily: FONT_INTER, fontSize: 11, lineHeight: 16, color: '#9A9A9A' },
+  // The stepper gets its own white inset so it visibly belongs to "They can
+  // skip". Loose on the page it looked like a third, unrelated control.
+  daysRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E7F1F3',
+    backgroundColor: '#FFFFFF',
+  },
+  stepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F3F3',
+  },
+  stepBtnPressed: { backgroundColor: '#E6E6E6', transform: [{ scale: 0.94 }] },
+  stepBtnOff: { borderColor: '#F0F0F0', backgroundColor: '#FAFAFA' },
+  daysLabel: { flex: 1, alignItems: 'center' },
+  daysValue: { fontFamily: FONT_INTER, fontSize: 13, fontWeight: '600', color: '#212121' },
+  daysDate: { fontFamily: FONT_INTER, fontSize: 11, color: '#7B7B7B', marginTop: 1 },
+  waiverBox: { gap: 8 },
+  waiverLabel: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#212121',
+  },
+  waiverInput: {
+    minHeight: 110,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#212121',
+    textAlignVertical: 'top',
+  },
+  waiverInputError: { borderColor: '#C4361E' },
+  waiverPickBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#D5D7DA',
+    backgroundColor: '#FFFFFF',
+  },
+  waiverPickBtnPressed: { backgroundColor: '#F6F6F6', transform: [{ scale: 0.985 }] },
+  waiverPickText: { fontFamily: FONT_INTER, fontSize: 14, fontWeight: '600', color: '#212121' },
+  waiverFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
+  },
+  waiverFileText: { flex: 1, gap: 1 },
+  waiverFileName: { fontFamily: FONT_INTER, fontSize: 13, fontWeight: '600', color: '#212121' },
+  waiverFileSize: { fontFamily: FONT_INTER, fontSize: 11, color: '#7B7B7B' },
+  waiverReplace: { fontFamily: FONT_INTER, fontSize: 13, fontWeight: '600', color: '#05BCD3' },
+  waiverError: { fontFamily: FONT_INTER, fontSize: 11, color: '#C4361E' },
+  waiverHint: { fontFamily: FONT_INTER, fontSize: 11, lineHeight: 16, color: '#9A9A9A' },
+  reqMeta: { marginTop: 10, gap: 10 },
+  reqNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  reqNoteText: {
+    flex: 1,
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#7B7B7B',
+  },
+  reqFooter: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#9A9A9A',
+    paddingHorizontal: 4,
+  },
+
   // Step 1 card stack — gap tuned so the bigger "floating" shadow has room
   // to bloom between adjacent cards without looking like the cards touch.
   // Card stack — inset horizontally so cards are narrower than the screen

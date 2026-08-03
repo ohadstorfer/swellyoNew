@@ -16,6 +16,21 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
 import { Text } from './Text';
 import { spacing } from '../styles/theme';
+import { ff, fs } from '../theme/fonts';
+
+// Figma "Rectangle 1031" (14082:18115) strokes the frame ON the video's edge —
+// 4px centred, so 2 sit outside the video and 2 inside. The brackets therefore
+// live outside the clipped video box, and their outer radius is the video's
+// 24 plus the 2 they stick out by.
+const FRAME_OVERHANG = 2;
+const VIDEO_RADIUS = 24;
+
+// Figma 14082:18113 — the video is 340.456 wide on a 393 frame, so 26 of screen
+// margin each side. The cap used to be screenWidth-32, which rendered it 361
+// wide (only ~15 of margin): too big, and the brackets ended up crowding the
+// screen edges. mainVideoContainer's own padding is 0 on native so this cap is
+// the single thing controlling the margin.
+const VIDEO_SIDE_MARGIN = 26;
 
 const getScreenWidth = () => Dimensions.get('window').width;
 
@@ -227,7 +242,7 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       const calculatedWidth = calculatedHeight * aspectRatio;
 
       // Ensure width doesn't exceed screen bounds
-      const maxWidth = getScreenWidth() - 32; // 16px padding on each side
+      const maxWidth = getScreenWidth() - VIDEO_SIDE_MARGIN * 2;
       const finalWidth = Math.min(calculatedWidth, maxWidth);
       const finalHeight = finalWidth / aspectRatio;
 
@@ -250,8 +265,8 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
       }
 
       return {
-        width: Math.min(baseWidth, getScreenWidth() - 32),
-        height: Math.min(baseWidth, getScreenWidth() - 32) * (324 / 340),
+        width: Math.min(baseWidth, getScreenWidth() - VIDEO_SIDE_MARGIN * 2),
+        height: Math.min(baseWidth, getScreenWidth() - VIDEO_SIDE_MARGIN * 2) * (324 / 340),
       };
     }
   };
@@ -495,6 +510,17 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
     <View style={[styles.container, { flex: 1, justifyContent: 'flex-end' }]}>
       {/* Main Video Display */}
       <View style={styles.mainVideoContainer}>
+        {/* Stage is the video's box but does NOT clip, so the corner brackets
+            can straddle its edge the way the Figma stroke does. Its size is set
+            explicitly: with an auto-sized stage, Yoga resolved the frame's
+            negative top/bottom insets but NOT left/right, so the brackets sat
+            flush on the sides instead of sticking out. */}
+        <View
+          style={[
+            styles.videoStage,
+            { width: videoDimensions.width, height: videoDimensions.height },
+          ]}
+        >
         <View
           style={[styles.videoWrapper, { width: videoDimensions.width, height: videoDimensions.height }]}
           {...(Platform.OS === 'web' && {
@@ -591,30 +617,40 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
             } as any)}
           />
 
-          {/* Frame: 4 corners only, same radius (24) as video */}
-          <View style={styles.frameBorderWrapper} pointerEvents="none">
-            <View style={[styles.frameCorner, styles.frameCornerTopLeft]} />
-            <View style={[styles.frameCorner, styles.frameCornerTopRight]} />
-            <View style={[styles.frameCorner, styles.frameCornerBottomLeft]} />
-            <View style={[styles.frameCorner, styles.frameCornerBottomRight]} />
-          </View>
-
           {/* Recording Indicator */}
           <View style={styles.recIcon}>
             <Svg width="11" height="15.43" viewBox="0 0 11 15.43" fill="none">
               <Circle cx="5" cy="7.715" r="5" fill="#EB4C43"/>
             </Svg>
           </View>
+        </View>
 
-          {/* Video Title */}
-          <View style={styles.titleContainer}>
-            <Text style={styles.videoTitle}>{selectedVideo.name}</Text>
-          </View>
+        {/* Frame: 4 corner brackets, sitting OUTSIDE the clipped video box so
+            they stick out over its edge (Figma 14082:18115). */}
+        <View
+          style={[
+            styles.frameBorderWrapper,
+            {
+              width: videoDimensions.width + FRAME_OVERHANG * 2,
+              height: videoDimensions.height + FRAME_OVERHANG * 2,
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <View style={[styles.frameCorner, styles.frameCornerTopLeft]} />
+          <View style={[styles.frameCorner, styles.frameCornerTopRight]} />
+          <View style={[styles.frameCorner, styles.frameCornerBottomLeft]} />
+          <View style={[styles.frameCorner, styles.frameCornerBottomRight]} />
+        </View>
         </View>
       </View>
 
       {/* Thumbnails Carousel */}
       <View style={styles.thumbnailsSection}>
+        {/* Dots sit ABOVE the thumbnails (Figma "Video Container" 14082:18091
+            orders them dots → thumbnails → title). */}
+        {renderDots()}
+
         <View
           style={styles.thumbnailsWrapper}
           onLayout={(event) => {
@@ -697,8 +733,10 @@ export const VideoCarousel: React.FC<VideoCarouselProps> = ({
           })}
         </View>
 
-        {/* Dots Indicator */}
-        {renderDots()}
+        {/* Selected level name, under the carousel (Figma "Subtitle" 14082:18109). */}
+        <Text style={styles.carouselTitle} numberOfLines={1}>
+          {selectedVideo.name}
+        </Text>
       </View>
     </View>
   );
@@ -719,7 +757,10 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    // No padding: the video's own width cap (VIDEO_SIDE_MARGIN) sets the margin.
+    // With 16 here on top of the scaffold's own 16, the video was wider than the
+    // content box it sat in, which also stopped the frame's overhang rendering.
+    paddingHorizontal: 0,
     flex: 1, // Take up available space
     ...(isDesktopWeb() && {
       paddingHorizontal: 26,
@@ -796,22 +837,34 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: 0,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    borderBottomLeftRadius: VIDEO_RADIUS + FRAME_OVERHANG,
+    borderBottomRightRadius: VIDEO_RADIUS + FRAME_OVERHANG,
     opacity: 0.2,
+  },
+  videoStage: {
+    // Sized inline to the video. Deliberately NOT clipped, so the brackets in
+    // frameBorderWrapper can hang over its edge.
+    position: 'relative',
+    alignSelf: 'center',
   },
   frameBorderWrapper: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: -FRAME_OVERHANG,
+    left: -FRAME_OVERHANG,
+    // Size is passed inline (video + 2×overhang) rather than using right/bottom.
+    // With right/left insets the horizontal overhang silently collapsed to 0 and
+    // the brackets sat flush on the sides; an explicit width leaves nothing for
+    // Yoga to resolve against the parent.
   },
   frameCorner: {
     position: 'absolute',
-    width: 56,
-    height: 56,
-    borderColor: 'white',
+    // Figma "Rectangle 1031" (14082:18115): each bracket arm runs a quarter of
+    // the way along its edge — 84.84 of 339.365 wide, 80.99 of 323.95 tall. As a
+    // percentage it tracks the video box, which is sized at runtime.
+    width: '25%',
+    height: '25%',
+    // Figma stroke #212121 at 4px. Was white, which vanished against the surf.
+    borderColor: '#212121',
   },
   frameCornerTopLeft: {
     top: 0,
@@ -820,7 +873,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderRightWidth: 0,
     borderBottomWidth: 0,
-    borderTopLeftRadius: 24,
+    borderTopLeftRadius: VIDEO_RADIUS + FRAME_OVERHANG,
   },
   frameCornerTopRight: {
     top: 0,
@@ -829,7 +882,7 @@ const styles = StyleSheet.create({
     borderRightWidth: 4,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
-    borderTopRightRadius: 24,
+    borderTopRightRadius: VIDEO_RADIUS + FRAME_OVERHANG,
   },
   frameCornerBottomLeft: {
     bottom: 0,
@@ -838,7 +891,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderTopWidth: 0,
     borderRightWidth: 0,
-    borderBottomLeftRadius: 24,
+    borderBottomLeftRadius: VIDEO_RADIUS + FRAME_OVERHANG,
   },
   frameCornerBottomRight: {
     bottom: 0,
@@ -847,27 +900,30 @@ const styles = StyleSheet.create({
     borderRightWidth: 4,
     borderTopWidth: 0,
     borderLeftWidth: 0,
-    borderBottomRightRadius: 24,
+    borderBottomRightRadius: VIDEO_RADIUS + FRAME_OVERHANG,
   },
   recIcon: {
     position: 'absolute',
+    // Figma 14082:18116 — the 10px dot sits 34 down and 28 in from the video's
+    // edges. The box is 11 × 15.43 with the circle centred, hence the offsets.
     top: 31,
-    right: 31,
+    right: 27,
     width: 11,
     height: 15.43,
   },
-  titleContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    right: 20,
-  },
-  videoTitle: {
-    color: '#FFF',
-    fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'System',
-    fontSize: 16,
-    fontWeight: '700',
+  carouselTitle: {
+    // Figma "Subtitle" 14082:18109 — Inter Bold at Size/lg (16) over 24, black,
+    // centred under the carousel. The flattened export claims 20px; the bound
+    // variable and the rendered ink width (128px for "Dipping My Toes") are 16.
+    // Was white and overlaid on the video, where it was invisible against surf.
+    marginTop: 16,
+    fontFamily: ff('Inter', '700'),
+    fontSize: fs(16),
     lineHeight: 24,
+    color: '#000000',
+    textAlign: 'center',
+    ...(Platform.OS === 'web' ? { fontWeight: '700' as const } : null),
+    ...(Platform.OS === 'android' && { includeFontPadding: false }),
   },
   thumbnailsSection: {
     width: '100%',
@@ -926,10 +982,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 16, // Native mobile and mobile web: same as mobile web
+    // Above the thumbnails now. Figma gives the dots row 8 bottom padding plus
+    // the container's 16 gap, so 24 down to the carousel.
+    marginTop: 16,
+    marginBottom: 24,
     ...(isDesktopWeb() && {
-      marginTop: 16, // Desktop: reduced spacing
-      marginBottom: 8, // Desktop: minimal bottom margin
+      marginTop: 16,
+      marginBottom: 24,
     }),
   },
   dot: {
@@ -939,7 +998,8 @@ const styles = StyleSheet.create({
   },
   dotActive: {
     width: 24,
-    backgroundColor: '#0788B0',
+    // Fill/M - Accent (Figma 2599:2120)
+    backgroundColor: '#05BCD3',
   },
   dotInactive: {
     width: 8,

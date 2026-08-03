@@ -326,11 +326,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     alignItems: 'center',
-    paddingBottom: 36, // gap-[36px] from Figma
+    // 12 between the step header and its description, app-wide.
+    paddingBottom: 12,
   },
   titleContainerDesktop: {
     paddingTop: spacing.xl,
-    paddingBottom: 36,
+    paddingBottom: 12,
   },
   title: {
     fontSize: 24, // var(--Size-2-xl, 24px)
@@ -348,7 +349,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     gap: 8, // gap-[8px] from Figma
-    marginTop: -8, // Adjust to account for titleContainer paddingBottom
+    // titleContainer's paddingBottom is the whole gap now — nothing to cancel.
+    marginTop: 0,
   },
   subtitleContainerDesktop: {
     paddingTop: 0,

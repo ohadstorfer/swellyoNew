@@ -196,6 +196,9 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
     canProceed: true,
     onNext: handleNext,
     onBack,
+    // The grid runs under the Next button and fades out behind it (Figma
+    // 14082:17604), instead of being cut off square at the button's top edge.
+    overlayFooter: true,
   });
 
   // Data fed to FlatList. Filtered presets + optional "add" synthetic.
@@ -284,7 +287,9 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
   return (
     <View style={styles.contentRoot}>
       <View style={styles.headerCopy}>
-        <Text style={styles.subtitle}>Beyond surfing, what else are you into?</Text>
+        <Text style={styles.subtitle}>
+          Beyond surfing,{'\n'}what else are you into?
+        </Text>
         <Text style={styles.helper}>Select 3 or more!</Text>
       </View>
 
@@ -510,7 +515,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.md,
-    gap: 4,
+    // 12 between the step header and its description, app-wide.
+    gap: 12,
   },
   subtitle: {
     fontSize: 18,
@@ -569,7 +575,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: SCROLL_HORIZONTAL_PAD,
     paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    // Clears the floating Next button (56 + its bottom padding) plus the fade
+    // above it, so the last row can still be scrolled fully into view.
+    paddingBottom: 160,
     rowGap: GRID_GAP,
   },
   columnWrapper: {

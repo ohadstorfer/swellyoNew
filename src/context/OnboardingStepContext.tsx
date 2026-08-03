@@ -36,6 +36,13 @@ export interface StepChromeDescriptor {
   labelKeyOverride?: OnboardingStepKey;
   /** Optional text shown on the button while the scaffold's isLoading is true. */
   loadingLabel?: string;
+  /**
+   * Float the Next button OVER the step's content instead of sitting below it in
+   * the column. The content host then extends to the bottom of the screen, so a
+   * scrolling list runs under the button and can be faded out behind it (Figma
+   * "CTA" 14113:19993). Opt-in: every other step keeps the button in flow.
+   */
+  overlayFooter?: boolean;
 }
 
 /** Render-affecting slice exposed to the chrome. */
@@ -44,6 +51,7 @@ interface ChromeView {
   canProceed: boolean;
   labelKeyOverride?: OnboardingStepKey;
   loadingLabel?: string;
+  overlayFooter?: boolean;
 }
 
 const DEFAULT_VIEW: ChromeView = {
@@ -99,7 +107,8 @@ export const OnboardingStepProvider: React.FC<{ children: React.ReactNode }> = (
         prev.nextLabel === d.nextLabel &&
         prev.canProceed === d.canProceed &&
         prev.labelKeyOverride === d.labelKeyOverride &&
-        prev.loadingLabel === d.loadingLabel
+        prev.loadingLabel === d.loadingLabel &&
+        prev.overlayFooter === d.overlayFooter
       ) {
         return prev;
       }
@@ -108,6 +117,7 @@ export const OnboardingStepProvider: React.FC<{ children: React.ReactNode }> = (
         canProceed: d.canProceed,
         labelKeyOverride: d.labelKeyOverride,
         loadingLabel: d.loadingLabel,
+        overlayFooter: d.overlayFooter,
       };
     });
   }, []);

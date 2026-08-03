@@ -26,7 +26,11 @@ import {
 } from '../../services/trips/groupTripsService';
 import {
   fetchMyRequirements,
+  fetchTripReview,
+  fetchTripRequirements,
+  type EditableRequirement,
   type TripRequirement,
+  type TripReview,
 } from '../../services/trips/tripDocumentsService';
 import { tripsKeys, EMPTY_EXPLORE_FILTER_KEY } from './useTripQueries';
 import { isTripHost } from '../../utils/tripRole';
@@ -155,19 +159,60 @@ export function useTripRequests(tripId: string, isHost: boolean) {
 /**
  * The current user's document requirements on this trip (v1: passport only).
  *
- * `enabled` is gated on hosting_style 'C': only organized/operator trips ask for
- * a passport, and a DB trigger refuses to create the requirement anywhere else.
- * Gating here means peer trips never fire the request at all.
+ * Gated on membership, not on hosting_style — the RPC returns nothing to a
+ * non-participant anyway, and the database is what guarantees passports only
+ * exist on operator trips (`trg_passport_requires_operator_trip`). Keeping the
+ * client dumb here means a trip with no requirements simply gets an empty list.
  *
  * Deliberately NOT cached long. The state is derived server-side from the
  * document row, so a stale value would show "Add" next to a passport that was
  * already uploaded.
  */
-export function useTripDocuments(tripId: string, isOperatorTrip: boolean) {
+export function useTripDocuments(tripId: string, isMember: boolean) {
   return useQuery<TripRequirement[]>({
     queryKey: tripsKeys.detailDocuments(tripId),
-    enabled: isOperatorTrip,
+    enabled: isMember,
     queryFn: () => fetchMyRequirements(tripId),
+    staleTime: 0,
+    gcTime: TRIP_DETAIL_GC_MS,
+  });
+}
+
+/**
+ * Host-only: every traveler's requirement state on this trip, for the review
+ * screen and the "N waiting for you" count on the Plan card.
+ *
+ * `userIds` is baked into the key rather than closed over, because a new member
+ * joining changes the answer and nothing else here would notice.
+ *
+ * Same `staleTime: 0` reasoning as useTripDocuments — state is derived from
+ * evidence rows, so a cached value can claim something is still waiting for a
+ * decision that the host already made on another device.
+ */
+export function useTripReview(tripId: string, isHost: boolean, userIds: string[]) {
+  const key = userIds.join(',');
+  return useQuery<TripReview>({
+    queryKey: tripsKeys.detailReview(tripId, key),
+    enabled: isHost && userIds.length > 0,
+    queryFn: () => fetchTripReview(tripId, userIds),
+    staleTime: 0,
+    gcTime: TRIP_DETAIL_GC_MS,
+  });
+}
+
+/**
+ * Host-only: the stored requirement rows, for the "what does this trip ask for"
+ * editor.
+ *
+ * `staleTime: 0` for the same reason as the two above — the operator may have
+ * edited the list on another device, and an editor that opens on stale rows
+ * would quietly undo that change the moment they hit Save.
+ */
+export function useTripRequirements(tripId: string, isHost: boolean) {
+  return useQuery<EditableRequirement[]>({
+    queryKey: tripsKeys.detailRequirements(tripId),
+    enabled: isHost,
+    queryFn: () => fetchTripRequirements(tripId),
     staleTime: 0,
     gcTime: TRIP_DETAIL_GC_MS,
   });

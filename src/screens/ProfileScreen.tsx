@@ -298,6 +298,7 @@ interface SurfSkillCardProps {
   surfLevelCategory: string;
   surfLevelProgress: number;
   customVideoUrl?: string; // User-uploaded custom video URL
+  customPhotoUrl?: string | null; // User-uploaded surf PHOTO (profile_photo_url) — wins over the video
   posterUrl?: string | null; // Stored poster for a custom video (profile_video_thumbnail_url)
   onUploadVideo?: () => void; // Callback when upload icon is clicked
   isViewingOwnProfile?: boolean; // Whether viewing own profile
@@ -310,13 +311,18 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   surfLevelCategory,
   surfLevelProgress,
   customVideoUrl,
+  customPhotoUrl,
   posterUrl,
   onUploadVideo,
   isViewingOwnProfile = false,
 }) => {
+  // A surf PHOTO replaces the clip entirely: no player, no download, no play
+  // button — just the still. Photo > custom video > demo clip.
+  const hasPhoto = !!(customPhotoUrl && customPhotoUrl.trim() !== '');
+
   // Use custom video if available, otherwise use default surf level video
   const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
-  const videoUrl = customVideoUrl || defaultVideoUrl;
+  const videoUrl = hasPhoto ? '' : (customVideoUrl || defaultVideoUrl);
 
   // Poster shown while the video downloads to disk on first view (then the video
   // covers it). Default videos → bundled local frame (instant). Custom videos →
@@ -329,6 +335,8 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
   
   // Calculate readiness synchronously (not in useEffect) - Safari needs immediate URL
   const isVideoUrlReady = !!(videoUrl && videoUrl.trim() !== '');
+  // Gates the card's media frame: a photo has no video URL but is still ready.
+  const isMediaReady = hasPhoto || isVideoUrlReady;
   
   // Check if video is preloaded - initialize based on preload status
   const isVideoPreloaded = React.useMemo(() => {
@@ -813,14 +821,23 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
     <View style={styles.surfSkillCard}>
       {/* Video Container with Overlaid Text */}
       <View style={styles.surfSkillVideoContainer}>
-        {isVideoUrlReady && videoUrl ? (
-          <View 
+        {isMediaReady ? (
+          <View
             style={styles.surfSkillVideoWrapper}
             pointerEvents="box-none"
             {...(Platform.OS === 'web' && {
               'data-surf-skill-video': 'true',
             } as any)}
           >
+            {hasPhoto ? (
+              <ExpoImage
+                source={{ uri: customPhotoUrl as string }}
+                style={styles.surfSkillVideo}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                accessibilityLabel="Surf photo"
+              />
+            ) : (
             <VideoView
               player={videoPlayer}
               style={styles.surfSkillVideo}
@@ -836,10 +853,11 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
                 playsInline: true,
               } as any)}
             />
+            )}
             {/* Poster frame shown until the video renders its first frame. Bundled
                 (instant) for default videos; stored poster for custom ones. Covers
                 the black download gap; the playing video then draws over it. */}
-            {posterSource && !hasStartedPlaying && (
+            {!hasPhoto && posterSource && !hasStartedPlaying && (
               <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
                 <ExpoImage
                   source={posterSource}
@@ -853,12 +871,15 @@ const SurfSkillCard: React.FC<SurfSkillCardProps> = ({
             {/* Full-bleed tap target: tapping the video while it plays pauses it
                 (and re-reveals the play button). Sits below the play/upload
                 buttons (zIndex 20) so those still receive their own taps. */}
-            <Pressable style={styles.surfSkillVideoOverlay} onPress={handleVideoPress} />
+            {!hasPhoto && (
+              <Pressable style={styles.surfSkillVideoOverlay} onPress={handleVideoPress} />
+            )}
 
             {/* Tap-to-play button (bottom-right). Shown whenever the clip isn't
                 playing — the initial poster state, after it ends, or after a
-                tap-to-pause. The video only downloads + plays after a press. */}
-            {!wantsPlay && (
+                tap-to-pause. The video only downloads + plays after a press.
+                A photo has nothing to play. */}
+            {!hasPhoto && !wantsPlay && (
               <View style={[styles.surfSkillPlayButton, { pointerEvents: 'auto' }]}>
                 <TouchableOpacity
                   style={{ width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' }}
@@ -2950,6 +2971,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
             surfLevelCategory={profileData.surf_level_category || 'beginner'}
             surfLevelProgress={surfLevelInfo.progress}
             customVideoUrl={profileData.profile_video_url}
+            customPhotoUrl={profileData.profile_photo_url}
             posterUrl={profileData.profile_video_thumbnail_url}
             // Video upload moved to the Edit Profile screen — omit the
             // onUploadVideo prop so the inline upload button is hidden.

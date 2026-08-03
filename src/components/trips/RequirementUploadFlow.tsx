@@ -1,5 +1,5 @@
 /**
- * PassportUploadFlow — the whole traveler-side upload journey in one component:
+ * RequirementUploadFlow — the whole traveler-side upload journey in one component:
  *
  *   disclosure sheet  ->  OS picker  ->  confirm the photo  ->  upload
  *
@@ -37,24 +37,44 @@ import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { TripIcon } from './tripIcons';
 import { ff } from '../../theme/fonts';
-import { uploadDocument } from '../../services/trips/tripDocumentsService';
+import {
+  uploadDocument,
+  REQUIREMENT_CATALOG,
+  type RequirementKind,
+} from '../../services/trips/tripDocumentsService';
 import { showErrorAlert } from '../../utils/friendlyError';
 
-type PendingPick = 'camera' | 'library' | null;
+type PendingPick = 'camera' | 'library' | 'file' | null;
 
-export const PassportUploadFlow: React.FC<{
+export const RequirementUploadFlow: React.FC<{
   visible: boolean;
   onClose: () => void;
   tripId: string;
   requirementId: string;
   userId: string;
+  /** Which requirement this is. Drives every piece of copy and whether a PDF
+   *  is accepted. */
+  kind: RequirementKind;
   /** Fired after the row exists in the database. */
   onUploaded: () => void;
-  /** Shown when the operator rejected the previous photo. */
+  /** Shown when the operator rejected the previous file. */
   rejectionNote?: string | null;
-}> = ({ visible, onClose, tripId, requirementId, userId, onUploaded, rejectionNote }) => {
+}> = ({
+  visible,
+  onClose,
+  tripId,
+  requirementId,
+  userId,
+  kind,
+  onUploaded,
+  rejectionNote,
+}) => {
+  const catalog = REQUIREMENT_CATALOG[kind];
+  const allowPdf = catalog.allowPdf;
   const [pendingPick, setPendingPick] = useState<PendingPick>(null);
   const [pickedUri, setPickedUri] = useState<string | null>(null);
+  const [pickedIsPdf, setPickedIsPdf] = useState(false);
+  const [pickedName, setPickedName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   // Survives the sheet closing, so "Retake" can reopen the picker directly
   // instead of bouncing the traveler back through the disclosure.
@@ -63,13 +83,33 @@ export const PassportUploadFlow: React.FC<{
   const reset = useCallback(() => {
     setPendingPick(null);
     setPickedUri(null);
+    setPickedIsPdf(false);
+    setPickedName(null);
     setUploading(false);
   }, []);
 
   // ── the OS picker ────────────────────────────────────────────────────────
-  const launch = useCallback(async (source: 'camera' | 'library') => {
+  const launch = useCallback(async (source: 'camera' | 'library' | 'file') => {
     lastSource.current = source;
     try {
+      // A PDF comes from the document picker, not the photo library, and is
+      // uploaded untouched — nothing to re-encode, and no camera EXIF to strip.
+      if (source === 'file') {
+        const DocumentPicker = require('expo-document-picker');
+        const res = await DocumentPicker.getDocumentAsync({
+          type: 'application/pdf',
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+        const asset = !res.canceled ? res.assets?.[0] : null;
+        if (asset?.uri) {
+          setPickedUri(asset.uri);
+          setPickedIsPdf(true);
+          setPickedName(asset.name ?? 'document.pdf');
+        }
+        return;
+      }
+
       const ImagePicker = require('expo-image-picker');
 
       if (source === 'camera') {
@@ -108,7 +148,11 @@ export const PassportUploadFlow: React.FC<{
           : await ImagePicker.launchImageLibraryAsync(options);
 
       const uri = !result.canceled ? result.assets?.[0]?.uri : null;
-      if (uri) setPickedUri(uri);
+      if (uri) {
+        setPickedUri(uri);
+        setPickedIsPdf(false);
+        setPickedName(null);
+      }
     } catch (e) {
       console.error('[PassportUploadFlow] picker failed:', e);
       showErrorAlert(
@@ -128,7 +172,7 @@ export const PassportUploadFlow: React.FC<{
     if (next) launch(next);
   }, [pendingPick, launch]);
 
-  const choose = (source: 'camera' | 'library') => {
+  const choose = (source: 'camera' | 'library' | 'file') => {
     setPendingPick(source);
     onClose();
   };
@@ -138,7 +182,13 @@ export const PassportUploadFlow: React.FC<{
     if (!pickedUri || uploading) return;
     setUploading(true);
     try {
-      await uploadDocument({ tripId, requirementId, userId, localUri: pickedUri });
+      await uploadDocument({
+        tripId,
+        requirementId,
+        userId,
+        localUri: pickedUri,
+        isPdf: pickedIsPdf,
+      });
       reset();
       onUploaded();
     } catch (e) {
@@ -152,7 +202,7 @@ export const PassportUploadFlow: React.FC<{
         'Could not upload your passport. Please try again.',
       );
     }
-  }, [pickedUri, uploading, tripId, requirementId, userId, reset, onUploaded]);
+  }, [pickedUri, pickedIsPdf, uploading, tripId, requirementId, userId, reset, onUploaded]);
 
   const handleRetake = useCallback(() => {
     setPickedUri(null);
@@ -175,20 +225,33 @@ export const PassportUploadFlow: React.FC<{
       >
         <View style={styles.surface}>
           <View style={styles.grabber} />
-          <Text style={styles.title}>Check the photo</Text>
+          <Text style={styles.title}>{pickedIsPdf ? 'Check the file' : 'Check the photo'}</Text>
           <Text style={styles.checkLine}>
-            Can you read the two lines of letters and numbers at the bottom of the page?
+            {kind === 'passport'
+              ? 'Can you read the two lines of letters and numbers at the bottom of the page?'
+              : pickedIsPdf
+              ? 'Make sure this is the right document.'
+              : 'Make sure everything on it is readable.'}
           </Text>
 
-          <Image
-            source={{ uri: pickedUri }}
-            style={styles.preview}
-            contentFit="contain"
-            // Never leave a plain copy of a passport in the app's disk cache —
-            // it would outlive the signed URL, the 30-day delete, and logout.
-            cachePolicy="memory"
-            transition={120}
-          />
+          {pickedIsPdf ? (
+            <View style={styles.pdfPreview}>
+              <Ionicons name="document-text-outline" size={36} color="#7B7B7B" />
+              <Text style={styles.pdfName} numberOfLines={2}>
+                {pickedName ?? 'document.pdf'}
+              </Text>
+            </View>
+          ) : (
+            <Image
+              source={{ uri: pickedUri }}
+              style={styles.preview}
+              contentFit="contain"
+              // Never leave a plain copy of a document in the app's disk cache —
+              // it would outlive the signed URL, the 30-day delete, and logout.
+              cachePolicy="memory"
+              transition={120}
+            />
+          )}
 
           <Pressable
             onPress={handleUse}
@@ -204,7 +267,7 @@ export const PassportUploadFlow: React.FC<{
 
           <Pressable onPress={handleRetake} disabled={uploading} hitSlop={8}>
             <Text style={[styles.secondaryText, uploading && styles.textDisabled]}>
-              Take another
+              {pickedIsPdf ? 'Choose another file' : 'Take another'}
             </Text>
           </Pressable>
         </View>
@@ -219,10 +282,12 @@ export const PassportUploadFlow: React.FC<{
         <View style={styles.grabber} />
 
         <View style={styles.titleRow}>
-          <TripIcon name="passport" size={22} color="#212121" strokeWidth={1.5} />
-          <Text style={styles.title}>Add your passport</Text>
+          {kind === 'passport' ? (
+            <TripIcon name="passport" size={22} color="#212121" strokeWidth={1.5} />
+          ) : null}
+          <Text style={styles.title}>Add your {catalog.title.toLowerCase()}</Text>
         </View>
-        <Text style={styles.purpose}>Your trip organiser needs it to book your flights.</Text>
+        <Text style={styles.purpose}>{catalog.helpText}</Text>
 
         {rejectionNote ? (
           <View style={styles.rejectBox}>
@@ -240,7 +305,7 @@ export const PassportUploadFlow: React.FC<{
           />
           <DisclosureRow
             icon="information-circle-outline"
-            text="Your organiser can save a copy to do the booking. That copy is theirs, and our deletion does not reach it."
+            text="Your organiser can save a copy to do their job. That copy is theirs, and our deletion does not reach it."
           />
         </View>
 
@@ -253,6 +318,13 @@ export const PassportUploadFlow: React.FC<{
           <Ionicons name="images-outline" size={18} color="#212121" />
           <Text style={styles.outlineBtnText}>Choose from photos</Text>
         </Pressable>
+
+        {allowPdf ? (
+          <Pressable onPress={() => choose('file')} style={styles.outlineBtn}>
+            <Ionicons name="document-outline" size={18} color="#212121" />
+            <Text style={styles.outlineBtnText}>Choose a PDF</Text>
+          </Pressable>
+        ) : null}
 
         <Pressable onPress={onClose} hitSlop={8}>
           <Text style={styles.secondaryText}>Not now</Text>
@@ -364,6 +436,25 @@ const styles = StyleSheet.create({
     height: 260,
     borderRadius: 12,
     backgroundColor: '#F2F2F2',
+  },
+  pdfPreview: {
+    alignSelf: 'stretch',
+    height: 140,
+    borderRadius: 12,
+    backgroundColor: '#F7F7F5',
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+  },
+  pdfName: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#212121',
+    textAlign: 'center',
   },
 
   primaryBtn: {

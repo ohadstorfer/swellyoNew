@@ -522,7 +522,20 @@ const ExploreTripCard: React.FC<{
 
           <View style={styles.exInfoRow}>
             <View style={styles.exInfoLeft}>
-              {!!price && <Text style={styles.exPrice}>{price}</Text>}
+              {/* Price ranges ("₪1,700-₪2,500") are wide enough to wrap onto a
+                  second line on narrow cards, which pushes the dates down and
+                  breaks the row. Pin it to one line and let it scale down
+                  instead of wrapping. */}
+              {!!price && (
+                <Text
+                  style={styles.exPrice}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >
+                  {price}
+                </Text>
+              )}
               <Text style={styles.exDates}>{formatTripDates(trip)}</Text>
             </View>
 
@@ -1678,10 +1691,10 @@ const styles = StyleSheet.create({
   // "Popular" section label above the trips carousel (Figma 11966:32390).
   exSectionTitle: {
     fontFamily: ff('Montserrat', '700'),
-    fontSize: fs(22),
+    fontSize: fs(18),
     fontWeight: Platform.OS === 'web' ? '700' : undefined,
     includeFontPadding: false,
-    lineHeight: 28,
+    lineHeight: 24,
     color: '#333333',
     paddingLeft: 16,
     marginTop: 14,
@@ -1761,7 +1774,6 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 32,
-    padding: 10,
     marginBottom: 16,
     gap: 12,
     shadowColor: '#000000',
@@ -1803,8 +1815,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: ff('Inter', '600'),
     color: '#FFFFFF',
-    fontSize: fs(17),
-    fontWeight: Platform.OS === 'web' ? '600' : undefined,
+    fontSize: 14,
+    fontWeight: Platform.OS === 'web' ? '600' : 700,
     includeFontPadding: false,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
@@ -2055,18 +2067,18 @@ const styles = StyleSheet.create({
     // Native: big starting size; adjustsFontSizeToFit shrinks it so the single
     // line always spans the 60%-width container. Web has no font auto-fit, so
     // it gets a fixed size that fits one line on typical widths.
-    fontSize: Platform.OS === 'web' ? 36 : fs(64),
+    fontSize: Platform.OS === 'web' ? 36 : 24,
     // Weight is baked into the family on native (Inter-SemiBold). Setting
     // fontWeight there makes Android synth-bold on top → heavier than iOS. So
     // only web (which uses the CSS family) needs the numeric weight.
-    fontWeight: Platform.OS === 'web' ? '600' : undefined,
+    fontWeight: Platform.OS === 'web' ? '600' : 700,
     // Android adds extra vertical font padding by default → text block reads
     // bigger than iOS. Remove it (no-op on iOS/web) so sizing matches.
     includeFontPadding: false,
     color: '#333333',
     width: '64%',
     marginTop: 24,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   chooserHeadingCompact: {
     marginTop: 10,
@@ -2074,8 +2086,8 @@ const styles = StyleSheet.create({
   },
   chooserSubheading: {
     fontFamily: ff('Inter', '400'),
-    fontSize: fs(15),
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '400',
     includeFontPadding: false,
     color: '#333333',

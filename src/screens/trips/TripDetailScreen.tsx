@@ -110,8 +110,15 @@ import {
   TripDocumentsCard,
   type DocumentRow,
 } from '../../components/trips/plan/PlanSections';
-import { PassportUploadFlow } from '../../components/trips/PassportUploadFlow';
+import { RequirementUploadFlow } from '../../components/trips/RequirementUploadFlow';
+import { WaiverAgreeSheet } from '../../components/trips/WaiverAgreeSheet';
+import { MedicalFormSheet } from '../../components/trips/MedicalFormSheet';
 import { DocumentViewer } from '../../components/trips/DocumentViewer';
+import {
+  DocumentReviewScreen,
+  type ReviewTraveler,
+} from '../../components/trips/DocumentReviewScreen';
+import { ManageRequirementsSheet } from '../../components/trips/ManageRequirementsSheet';
 import { ff } from '../../theme/fonts';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
@@ -124,11 +131,18 @@ import {
   useTripRequests,
   useTripGearRequests,
   useTripDocuments,
+  useTripReview,
+  useTripRequirements,
 } from '../../hooks/trips/useTripDetail';
 import { useTripRealtime } from '../../hooks/trips/useTripRealtime';
 import { TripDetailSkeleton } from '../../components/skeletons';
 import { friendlyErrorMessage, showErrorAlert } from '../../utils/friendlyError';
-import { fetchMyDocument } from '../../services/trips/tripDocumentsService';
+import {
+  fetchMyDocument,
+  actionForRequirement,
+  type EditableRequirement,
+  type RequirementKind,
+} from '../../services/trips/tripDocumentsService';
 import { isTripHost } from '../../utils/tripRole';
 
 interface TripDetailScreenProps {
@@ -165,6 +179,11 @@ interface TripDetailScreenProps {
   /** Member "Commit to this trip" → pushes the full-screen commitment flow. */
   onOpenCommitment?: (args: { tripTitle: string | null; initialItems: string[]; initialNote: string | null }) => void;
 }
+
+/** Stable empty list for the requirements editor. An inline `?? []` would be a
+ *  new array on every render, and the sheet reseeds its draft when that prop
+ *  changes identity — which is a render loop, not a re-render. */
+const NO_REQUIREMENTS: EditableRequirement[] = [];
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors TripsScreen formatting so cards and details stay in sync)
@@ -386,26 +405,110 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const gearRequests = gearRequestsQuery.data ?? [];
 
   // ── Documents (v1: passport image only) ───────────────────────────────────
-  // Organized/operator trips only. A DB trigger refuses to create a passport
-  // requirement on a peer trip, so the query is gated rather than filtered.
-  const isOperatorTrip = trip?.hosting_style === 'C';
-  const documentsQuery = useTripDocuments(tripId, isOperatorTrip);
+  // Gated on membership, NOT on hosting_style. The database is the real gate:
+  // `trg_passport_requires_operator_trip` refuses to create a passport
+  // requirement on anything but an operator trip, so the client can simply
+  // render whatever requirements come back. That also means any future
+  // requirement kind works here without touching this condition.
+  //
+  // The RPC itself returns nothing to a non-participant, so this only saves a
+  // pointless round trip for people browsing a trip they have not joined.
+  const isTripMember =
+    !!currentUserId &&
+    (isHostDerived || participants.some(p => p.user_id === currentUserId));
+  const documentsQuery = useTripDocuments(tripId, isTripMember);
   const documentRows: DocumentRow[] = useMemo(
     () =>
       (documentsQuery.data ?? [])
-        .filter(r => r.reqType === 'upload')
+        // Everything except `pay`, which has no traveler UI until payments land.
+        .filter(r => r.reqType !== 'pay')
         .map(r => ({
           requirementId: r.requirementId,
+          kind: r.kind,
+          reqType: r.reqType,
           title: r.title,
           state: r.state as DocumentRow['state'],
+          dueDate: r.dueDate,
           note: r.note,
         })),
     [documentsQuery.data],
   );
-  const passportReq = useMemo(
-    () => (documentsQuery.data ?? []).find(r => r.kind === 'passport') ?? null,
-    [documentsQuery.data],
+
+  // ── Host review ───────────────────────────────────────────────────────────
+  // Everyone except the hosts: an operator reviewing their own passport is not a
+  // thing. Sorted so the query key is stable no matter what order the
+  // participants come back in — otherwise every refetch would look like a new
+  // key and re-run.
+  const reviewTravelers: ReviewTraveler[] = useMemo(
+    () =>
+      participants
+        .filter(p => p.role !== 'host')
+        .map(p => ({
+          userId: p.user_id,
+          name: p.name,
+          avatarUrl: p.profile_image_url,
+        })),
+    [participants],
   );
+  const reviewUserIds = useMemo(
+    () => reviewTravelers.map(t => t.userId).sort(),
+    [reviewTravelers],
+  );
+  // Only worth fetching once this trip actually asks for something. On a peer
+  // trip `documentRows` is empty and this never runs.
+  const hasRequirements = documentRows.length > 0;
+  const reviewQuery = useTripReview(
+    tripId,
+    isHostDerived && hasRequirements,
+    reviewUserIds,
+  );
+  const reviewData = reviewQuery.data?.travelers ?? [];
+  const travelersFinished = reviewData.filter(r => r.total > 0 && r.done === r.total).length;
+  const [reviewOpen, setReviewOpen] = useState(false);
+
+  // ── Editing what the trip asks for (host) ─────────────────────────────────
+  //
+  // Two ways in, and the first one is the important one: ANY trip that already
+  // asks for something is editable. `hosting_style === 'C'` alone was wrong —
+  // there are live trips on `A` carrying requirements (they predate
+  // `trg_passport_requires_operator_trip`, or were flipped to A afterwards), and
+  // gating on style hid the editor from exactly the trips that most need it.
+  // This screen's own rule, one section up, is that the database is the real
+  // gate; this now follows it.
+  //
+  // The second way in is for a `C` trip that asks for nothing yet, which needs
+  // an empty state to add its first requirement.
+  //
+  // `documentsQuery.data` rather than `documentRows`, which drops `pay` rows —
+  // a trip whose only requirement is a payment is still a trip with a
+  // requirement to edit.
+  const isOperatorTrip = trip?.hosting_style === 'C';
+  const canManageRequirements =
+    isHostDerived && ((documentsQuery.data?.length ?? 0) > 0 || isOperatorTrip);
+  // Enabled on `isHost`, matching where the sheet is mounted. Tying it to
+  // `canManageRequirements` would let the rows disappear underneath an open
+  // editor the moment its own Save invalidated the documents query.
+  const requirementsQuery = useTripRequirements(tripId, isHostDerived);
+  const [manageOpen, setManageOpen] = useState(false);
+  // Refetch on the way in. Save diffs the draft against these rows, so opening
+  // the editor on a cached list is how a change made on another device gets
+  // quietly undone.
+  //
+  // Goes through queryClient rather than `requirementsQuery.refetch`: react-query
+  // hands back a new result object every render, so depending on it rebuilt this
+  // callback constantly and pushed a new `onManage` into the card each time.
+  const openManageRequirements = useCallback(() => {
+    queryClient.refetchQueries({ queryKey: tripsKeys.detailRequirements(tripId) });
+    setManageOpen(true);
+  }, [queryClient, tripId]);
+  const handleRequirementsSaved = useCallback(() => {
+    // Everything downstream of the requirement list: the host's own checklist
+    // read, the stored rows, and the per-traveler review whose totals just moved.
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequirements(tripId) });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+    queryClient.invalidateQueries({ queryKey: ['trips', 'detail-review', tripId] });
+  }, [queryClient, tripId]);
+
 
   // Live refresh while the screen is open — other users' approvals, joins,
   // leaves, trip edits and admin updates invalidate the queries above.
@@ -447,10 +550,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [addPersonalSheetOpen, setAddPersonalSheetOpen] = useState(false);
   const [processingGearRequestId, setProcessingGearRequestId] = useState<string | null>(null);
 
-  // Documents (v1: passport). The upload flow owns the picker + confirm steps;
-  // the viewer holds only a storage path, never a signed URL.
-  const [passportUploadOpen, setPassportUploadOpen] = useState(false);
-  const [viewingDocPath, setViewingDocPath] = useState<string | null>(null);
+  // Requirements. `openRequirement` says which row the traveler tapped and what
+  // it wants them to do; the three sheets below are driven off it. The viewer
+  // holds only a storage path, never a signed URL.
+  const [openRequirement, setOpenRequirement] = useState<{
+    requirementId: string;
+    kind: RequirementKind;
+    action: 'upload' | 'agree' | 'medical';
+    note: string | null;
+    agreed: boolean;
+  } | null>(null);
+  // The kind travels with the path because the viewer offers "Copy details" on
+  // passports only, and the storage path alone cannot say what it holds.
+  const [viewingDoc, setViewingDoc] = useState<{
+    storagePath: string;
+    kind: string;
+  } | null>(null);
 
   // Admin updates — host-posted free-text lines, visible to all members.
   // adminUpdates now comes from react-query (declared above).
@@ -1199,22 +1314,43 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // -------------------------------------------------------------------------
   // Admin updates handlers
   // -------------------------------------------------------------------------
-  // ── Documents (v1: passport) ───────────────────────────────────────────────
-  // Tapping the row either opens the upload flow (nothing uploaded yet, or the
-  // operator rejected the last photo) or opens the traveler's own file.
+  // ── Requirements ──────────────────────────────────────────────────────────
+  // One tap handler for all six kinds. Where it goes depends on what the
+  // requirement wants: a file, an agreement, or a form.
   const handlePressDocumentRow = useCallback(
     async (row: DocumentRow) => {
-      if (row.state === 'not_started' || row.state === 'overdue' || row.state === 'rejected') {
-        setPassportUploadOpen(true);
+      const action = actionForRequirement({ kind: row.kind, reqType: row.reqType });
+      if (!action) return; // custom / pay — no traveler UI yet
+
+      const open = () =>
+        setOpenRequirement({
+          requirementId: row.requirementId,
+          kind: row.kind as RequirementKind,
+          action,
+          note: row.note ?? null,
+          agreed: row.state === 'approved',
+        });
+
+      // Agreements and the medical form are re-openable in every state: the
+      // traveler may want to re-read the waiver or correct an allergy.
+      if (action === 'agree' || action === 'medical') {
+        open();
         return;
       }
+
+      // Uploads: nothing sent yet (or rejected) opens the picker.
+      if (row.state === 'not_started' || row.state === 'overdue' || row.state === 'rejected') {
+        open();
+        return;
+      }
+
       // 'submitted' or 'approved' — show them what they sent. The storage path
       // is fetched on demand; it is not kept in the requirement row.
       if (!currentUserId) return;
       try {
         const doc = await fetchMyDocument(tripId, row.requirementId, currentUserId);
         if (doc?.storagePath && !doc.fileDeletedAt) {
-          setViewingDocPath(doc.storagePath);
+          setViewingDoc({ storagePath: doc.storagePath, kind: row.kind });
         } else {
           // Past the 30-day purge the row survives but the file does not. Say so
           // rather than opening an empty viewer.
@@ -1228,9 +1364,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     [currentUserId, tripId],
   );
 
-  const handlePassportUploaded = useCallback(() => {
-    setPassportUploadOpen(false);
-    // The row's state is derived server-side, so refetch rather than guess.
+  const handleRequirementDone = useCallback(() => {
+    setOpenRequirement(null);
+    // Every state is derived server-side, so refetch rather than guess.
     queryClient.invalidateQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
   }, [queryClient, tripId]);
 
@@ -1762,16 +1898,25 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           )}
         </View>
 
-        {/* 4) Documents — organized/operator trips only (v1: passport image).
-            Placed after Packing & Gear so the Figma order above stays intact.
-            Renders nothing when the trip asks for no documents, which is every
-            peer trip. */}
-        {isOperatorTrip && documentRows.length > 0 && (
+        {/* 4) Documents (v1: passport image). Placed after Packing & Gear so the
+            Figma order above stays intact. Renders only when this trip actually
+            asks for a document — which is no peer trip, because the DB refuses
+            to create a passport requirement on one. */}
+        {(documentRows.length > 0 || canManageRequirements) && (
           <View style={styles.planSection} onLayout={registerSection('documents')}>
+            {/* The host is the operator here, not a traveler — they get the
+                review summary, not a checklist of their own passport. An
+                operator whose trip asks for nothing yet still gets the card, or
+                there would be no way to start asking. */}
             <TripDocumentsCard
               rows={documentRows}
-              mode="member"
+              mode={isHost ? 'host' : 'member'}
+              pendingReviewCount={reviewQuery.data?.totalToReview ?? 0}
+              travelersDone={travelersFinished}
+              travelerCount={reviewTravelers.length}
               onPressRow={handlePressDocumentRow}
+              onReviewAll={() => setReviewOpen(true)}
+              onManage={canManageRequirements ? openManageRequirements : undefined}
             />
           </View>
         )}
@@ -1949,28 +2094,96 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onApprove={handleApproveGearRequest}
         onDecline={handleDeclineGearRequest}
       />
-      {/* Passport upload (v1) — disclosure, OS picker, confirm, upload. Only
-          mounted once a requirement actually exists, so peer trips never carry
-          it. */}
-      {isOperatorTrip && passportReq && currentUserId && (
-        <PassportUploadFlow
-          visible={passportUploadOpen}
-          onClose={() => setPassportUploadOpen(false)}
+      {/* Host review — every traveler's documents, with Approve / Ask again.
+          Mounted on `isHost` alone. It used to also require
+          `documentRows.length > 0`, but that reads a query this screen
+          invalidates on every approve/reject — so the mount could drop while
+          the review Modal (or the viewer/reject sheet nested inside it) was
+          mid-dismiss. Same stability rule as the requirements editor below:
+          a Modal's MOUNT must not depend on data that moves under it. */}
+      {isHost && (
+        <DocumentReviewScreen
+          visible={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+          loading={reviewQuery.isLoading}
+          travelers={reviewTravelers}
+          review={reviewData}
+          onChanged={() => reviewQuery.refetch()}
+        />
+      )}
+
+      {/* The operator edits what the trip asks for. Kept out of the create
+          wizard's edit mode on purpose: `updateGroupTrip` never writes
+          requirement rows, so a toggle there would silently do nothing.
+
+          Mounted on `isHost` ALONE, never on `canManageRequirements`. That flag
+          reads `documentsQuery.data`, which this sheet's own Save invalidates —
+          so the mount condition could go false while the sheet was still
+          animating out, unmounting a Modal mid-dismiss. On iOS that strands a
+          layer that swallows every touch on the tab underneath while the screen
+          still looks and behaves alive. The mount has to be stable for the
+          lifetime of the screen; only the AFFORDANCE is data-dependent. */}
+      {isHost && (
+        <ManageRequirementsSheet
+          visible={manageOpen}
+          onClose={() => setManageOpen(false)}
           tripId={tripId}
-          requirementId={passportReq.requirementId}
+          startDateISO={trip?.start_date ?? null}
+          requirements={requirementsQuery.data ?? NO_REQUIREMENTS}
+          isOperatorTrip={!!isOperatorTrip}
+          onSaved={handleRequirementsSaved}
+        />
+      )}
+
+      {/* Requirement sheets. Only one is ever mounted, chosen by what the
+          tapped requirement actually asks the traveler to do. */}
+      {openRequirement && currentUserId && openRequirement.action === 'upload' && (
+        <RequirementUploadFlow
+          visible
+          onClose={() => setOpenRequirement(null)}
+          tripId={tripId}
+          requirementId={openRequirement.requirementId}
           userId={currentUserId}
-          onUploaded={handlePassportUploaded}
-          rejectionNote={passportReq.state === 'rejected' ? passportReq.note : null}
+          kind={openRequirement.kind}
+          onUploaded={handleRequirementDone}
+          rejectionNote={openRequirement.note}
+        />
+      )}
+
+      {openRequirement && openRequirement.action === 'agree' && (
+        <WaiverAgreeSheet
+          visible
+          onClose={() => setOpenRequirement(null)}
+          tripId={tripId}
+          requirementId={openRequirement.requirementId}
+          agreed={openRequirement.agreed}
+          onAgreed={handleRequirementDone}
+        />
+      )}
+
+      {openRequirement && currentUserId && openRequirement.action === 'medical' && (
+        <MedicalFormSheet
+          visible
+          onClose={() => setOpenRequirement(null)}
+          tripId={tripId}
+          userId={currentUserId}
+          onSaved={handleRequirementDone}
         />
       )}
 
       {/* Document viewer — mints its own ~60s signed URL per open and never
           disk-caches the image. Read-only here; the host review screen is the
-          one that passes approve/reject. */}
+          one that passes approve/reject.
+
+          "Copy details" IS offered here, on a traveler's own passport. Ohad,
+          3 August: a traveler filling in an airline booking has to retype the
+          same seven fields the operator does, off the same photo. Nothing is
+          stored either way, and the passport being read is their own. */}
       <DocumentViewer
-        visible={!!viewingDocPath}
-        storagePath={viewingDocPath}
-        onClose={() => setViewingDocPath(null)}
+        visible={!!viewingDoc}
+        storagePath={viewingDoc?.storagePath ?? null}
+        onClose={() => setViewingDoc(null)}
+        isPassport={viewingDoc?.kind === 'passport'}
       />
 
       {/* Admin update — host writes/edits an announcement. Driven by the same

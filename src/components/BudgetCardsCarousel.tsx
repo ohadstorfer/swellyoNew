@@ -520,8 +520,8 @@ const styles = StyleSheet.create({
   structuredCardTitle: {
     fontFamily: Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat',
     fontWeight: '700',
-    fontSize: 22,
-    lineHeight: 32,
+    fontSize: 18,
+    lineHeight: 24,
     color: '#333',
     textAlign: 'center',
     width: '100%',
@@ -546,8 +546,8 @@ const styles = StyleSheet.create({
   structuredCardTagline: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '700',
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 18,
     color: '#333',
     textAlign: 'center',
     minWidth: 228,
@@ -558,8 +558,8 @@ const styles = StyleSheet.create({
   structuredCardDescription: {
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
     fontWeight: '400',
-    fontSize: 16,
-    lineHeight: Platform.OS === 'web' ? 15 : 18,
+    fontSize: 12,
+    lineHeight: 18,
     color: '#a0a0a0',
     textAlign: 'center',
     maxWidth: 228,

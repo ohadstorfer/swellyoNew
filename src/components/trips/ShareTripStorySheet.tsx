@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
-import { type TripDetailVM, formatDateRange } from './TripDetailView';
+import { type TripDetailVM, type TripDateVM, formatDateRange } from './TripDetailView';
 import { toWidthThumbUrl, toThumbUrl } from '../../services/media/thumbnails';
 import { Logo } from '../Logo';
 import { ff } from '../../theme/fonts';
@@ -30,10 +30,18 @@ import { getGroupTripInviteUrl } from '../../services/trips/groupTripsService';
 const STORY_W = 1080;
 const STORY_H = 1920;
 
+/**
+ * The only trip fields the story card renders. Narrower than TripDetailVM so
+ * screens that never built one (the post-publish screen) can share too — a
+ * full TripDetailVM still satisfies it, so Trip Detail is unaffected.
+ */
+export type TripStoryVM = TripDateVM &
+  Pick<TripDetailVM, 'heroImageUri' | 'title' | 'destinationLabel'>;
+
 interface ShareTripStorySheetProps {
   visible: boolean;
   tripId: string;
-  vm: TripDetailVM;
+  vm: TripStoryVM;
   onClose: () => void;
 }
 

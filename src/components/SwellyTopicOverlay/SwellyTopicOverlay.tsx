@@ -73,6 +73,9 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose
   const [selectedId, setSelectedId] = useState<SwellyTopicId | null>(null);
   const translateY = useRef(new Animated.Value(0)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
+  // Guards the enter animation so it runs exactly once per mount, no matter
+  // whether `onShow` or the fallback timer below gets there first.
+  const hasEnteredRef = useRef(false);
 
   // Mount on visible=true; stay mounted through the slide-down and only unmount
   // once the exit animation finishes. Reset values to the off-screen start state
@@ -82,6 +85,7 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose
       translateY.setValue(screenHeight);
       backdropOpacity.setValue(0);
       setSelectedId(null);
+      hasEnteredRef.current = false;
       setMounted(true);
     }
   }, [visible, mounted, screenHeight, translateY, backdropOpacity]);
@@ -112,6 +116,8 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose
   // the animation kicks off before the native Modal has finished mounting, which
   // otherwise causes the sheet to appear in place without sliding.
   const runEnterAnimation = useCallback(() => {
+    if (hasEnteredRef.current) return;
+    hasEnteredRef.current = true;
     translateY.setValue(screenHeight);
     backdropOpacity.setValue(0);
     Animated.parallel([
@@ -131,6 +137,22 @@ export const SwellyTopicOverlay: React.FC<Props> = ({ visible, onSelect, onClose
       }),
     ]).start();
   }, [screenHeight, translateY, backdropOpacity]);
+
+  // `onShow` is NOT guaranteed to fire. iOS drops the presentation-completion
+  // callback when this Modal is presented while another Modal is still being
+  // dismissed — which is exactly what handleStartNewChat does
+  // (setShowNewChatModal(false) + setShowTopicOverlay(true) in one tick).
+  // Without this fallback a missed onShow leaves the sheet parked off-screen
+  // at translateY=screenHeight behind a fully transparent backdrop: nothing is
+  // visible, but the Modal window still swallows every touch, so the whole
+  // Swelly chat becomes permanently unresponsive with a healthy JS thread and
+  // no error to log. Same reason ProfileEditSurfStyleScreen stopped relying on
+  // onShow. hasEnteredRef keeps whichever trigger wins from double-animating.
+  useEffect(() => {
+    if (!mounted) return;
+    const t = setTimeout(runEnterAnimation, 250);
+    return () => clearTimeout(t);
+  }, [mounted, runEnterAnimation]);
 
   const handleConfirm = () => {
     if (!selectedId) return;
