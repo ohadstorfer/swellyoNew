@@ -14,6 +14,7 @@
  */
 import { supabase } from '../../config/supabase';
 import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 
 export type PayStep = 'deposit' | 'balance';
 
@@ -73,10 +74,37 @@ export function commissionCents(totalCents: number, bps: number): number {
   return Math.min(totalCents, Math.round((totalCents * bps) / 10000));
 }
 
-/** Where Stripe sends the browser after Checkout. Stripe rejects custom URL
- *  schemes, so this cannot be `swellyo://`. It is a plain page that tells the
- *  traveler to go back to the app — we never read anything from it. */
-const RETURN_URL = 'https://swellyo.com/pay/done';
+/**
+ * Where Stripe sends the browser after Checkout — a link straight back into
+ * THIS app.
+ *
+ * This used to be `https://swellyo.com/pay/done`, on the belief that Stripe
+ * rejects custom URL schemes. It does not: `swellyo://pay/done`,
+ * `exp://…/--/pay/done` and `exp+swellyo://…` were all accepted by the
+ * Checkout Sessions API (verified against the live API, 2026-08-04). The https
+ * URL was the worst of the three — swellyo.com/pay/done does not exist, so
+ * every payer landed on a 404 and had to close the browser by hand.
+ *
+ * `Linking.createURL` and not a hardcoded 'swellyo://': in Expo Go the app's
+ * scheme is `exp://<dev-machine-ip>:8081/--/…`, which no constant can know.
+ * This resolves to whatever the current environment actually answers on, so
+ * the same code returns to a standalone build and to Expo Go.
+ *
+ * Passing the SAME value to openAuthSessionAsync is what makes iOS dismiss the
+ * browser sheet automatically the moment Stripe redirects — the OS matches on
+ * the scheme, which an https URL could never satisfy.
+ *
+ * ⚠️ Coming back still is NOT proof of payment. See startCheckout.
+ *
+ * A FUNCTION, not a module-level constant: `createURL` reads the scheme out of
+ * the expo-constants manifest and THROWS when it cannot find one. At module
+ * scope that turns into a crash on import — it took down the whole
+ * tripPaymentsService test suite, and anywhere else the manifest is not ready
+ * at import time it would take the app down the same way. Called lazily, the
+ * cost is one cheap lookup per checkout and the failure (if any) lands inside
+ * the tap that caused it.
+ */
+const returnUrl = () => Linking.createURL('pay/done');
 
 export async function fetchTravelerPrices(
   tripId: string,
@@ -169,22 +197,28 @@ async function edgeFunctionErrorMessage(error: unknown, fallback: string): Promi
  * Open Stripe Checkout and wait for the browser sheet to close.
  *
  * ⚠️ The return trip is NOT proof of payment, and the resolution of this
- * promise is not either. `openAuthSessionAsync` only resolves `success` when
- * the OS hands the redirect back via an associated domain, which
- * swellyo.com is not, so today this always resolves the same way regardless
- * of outcome. The webhook is the only source of truth — the caller MUST
- * refetch and trust the server, never branch on how this call returned.
+ * promise is not either. RETURN_URL now brings the traveler straight back
+ * (see it), so `openAuthSessionAsync` DOES resolve 'success' on a real
+ * redirect — but that only means Stripe finished with the browser, not that
+ * the money moved. The payer can also lose their connection between paying
+ * and being redirected, in which case they never come back at all and the
+ * payment is still real. The webhook is the only source of truth: the caller
+ * MUST refetch and trust the server, never branch on how this call returned.
  */
 export async function startCheckout(requirementId: string): Promise<void> {
+  // Resolved once and reused: the value handed to Stripe and the value
+  // openAuthSessionAsync watches for MUST be the same string, or the browser
+  // sheet never closes itself.
+  const url = returnUrl();
   const { data, error } = await supabase.functions.invoke('payments-checkout', {
-    body: { requirementId, returnUrl: RETURN_URL },
+    body: { requirementId, returnUrl: url },
   });
   if (error) {
     throw new Error(await edgeFunctionErrorMessage(error, 'Could not start the payment'));
   }
   if (!data?.url) throw new Error(data?.error ?? 'Could not start the payment');
 
-  await WebBrowser.openAuthSessionAsync(data.url, RETURN_URL);
+  await WebBrowser.openAuthSessionAsync(data.url, url);
 }
 
 export async function fetchConnectStatus(): Promise<{
@@ -206,14 +240,16 @@ export async function fetchConnectStatus(): Promise<{
 }
 
 export async function startConnectOnboarding(): Promise<void> {
+  // Same string to Stripe and to openAuthSessionAsync — see startCheckout.
+  const url = returnUrl();
   const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
-    body: { action: 'onboard', returnUrl: RETURN_URL },
+    body: { action: 'onboard', returnUrl: url },
   });
   if (error) {
     throw new Error(await edgeFunctionErrorMessage(error, 'Could not open Stripe'));
   }
   if (!data?.onboardingUrl) throw new Error(data?.error ?? 'Could not open Stripe');
-  await WebBrowser.openAuthSessionAsync(data.onboardingUrl, RETURN_URL);
+  await WebBrowser.openAuthSessionAsync(data.onboardingUrl, url);
 }
 
 /** Operator sets one traveler's own price. Goes through the

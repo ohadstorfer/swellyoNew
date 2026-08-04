@@ -435,6 +435,69 @@ export async function createRequirements(
   if (error) throw error;
 }
 
+/**
+ * Bring the trip's two `pay` rows in line with how it collects money.
+ *
+ * Called whenever either input to that shape changes: payment_mode flipping to
+ * 'managed', or deposit_amount crossing 0 on a trip that already is. There is
+ * always a `balance` row on a managed trip — it is what the traveler owes.
+ * `deposit` exists only when the operator actually asks for one, matching the
+ * wizard's `rawDeposit != null` rule at publish.
+ *
+ * Rows are reactivated, never re-inserted: `uq_organized_trip_req_kind_per_trip`
+ * is UNIQUE on (trip_id, kind), and turning payments off leaves the old rows in
+ * place with is_active = false (trg_deactivate_pay_rows_when_offline). A plain
+ * insert on the second switch-on would be a 23505.
+ *
+ * CALL ORDER MATTERS: the trip row must already say `payment_mode = 'managed'`
+ * before any pay row is INSERTED — trg_pay_requires_managed_trip reads it off
+ * the trip and raises otherwise. (It fires on INSERT and on UPDATE OF req_type,
+ * trip_id only, so flipping `is_active` alone never trips it.)
+ */
+export async function syncPayRequirements(
+  tripId: string,
+  hasDeposit: boolean,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('organized_trip_requirements')
+    .select('id, kind, is_active')
+    .eq('trip_id', tripId)
+    .eq('req_type', 'pay');
+  if (error) throw error;
+
+  const existing = new Map(
+    ((data ?? []) as { id: string; kind: string; is_active: boolean }[]).map(r => [r.kind, r]),
+  );
+  const wanted: RequirementKind[] = hasDeposit ? ['deposit', 'balance'] : ['balance'];
+
+  const toInsert = wanted.filter(k => !existing.has(k));
+  if (toInsert.length > 0) {
+    // Same shape createRequirements writes, from the same catalog — a pay row
+    // built by hand here would drift from the one the wizard writes.
+    await createRequirements(tripId, toInsert, {});
+  }
+
+  // Reactivate a wanted row that a previous switch-off deactivated, and retire
+  // a deposit row the operator has since dropped. `is_active` only — never
+  // delete: the ledger's requirement_id points at these rows.
+  const flips = [
+    ...wanted
+      .map(k => existing.get(k))
+      .filter((r): r is { id: string; kind: string; is_active: boolean } => !!r && !r.is_active)
+      .map(r => ({ id: r.id, is_active: true })),
+    ...[...existing.values()]
+      .filter(r => !wanted.includes(r.kind as RequirementKind) && r.is_active)
+      .map(r => ({ id: r.id, is_active: false })),
+  ];
+  for (const f of flips) {
+    const { error: upErr } = await supabase
+      .from('organized_trip_requirements')
+      .update({ is_active: f.is_active })
+      .eq('id', f.id);
+    if (upErr) throw upErr;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Operator side — changing what the trip asks for, after publish
 //

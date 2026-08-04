@@ -119,6 +119,7 @@ import {
   type ReviewTraveler,
 } from '../../components/trips/DocumentReviewScreen';
 import { ManageRequirementsSheet } from '../../components/trips/ManageRequirementsSheet';
+import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
 import { ff } from '../../theme/fonts';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
@@ -552,6 +553,16 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // trip's price. Same reasoning as operator_set_traveler_price's C3 fix
   // (supabase/migrations/20260803000100_operator_set_traveler_price.sql:14-44).
   const isTripOwner = !!currentUserId && trip?.host_id === currentUserId;
+  // TEMPORARY TEST HATCH — remove before this ships.
+  // "El Salvador 26" is a hosting_style 'A' trip, so it would not normally get
+  // the operator Edit screen. Opened up so Ohad (its host) can walk the screen
+  // on a real trip before any type-C trip exists to test against. Still gated
+  // on isTripOwner, so it only ever appears for that trip's own host.
+  // Caveat while testing: the Price, Deposit and Requirements rows are
+  // operator-only concepts. A peer trip is always payment_mode 'offline' (a DB
+  // CHECK forbids 'managed' unless hosting_style = 'C'), so those rows will
+  // read as empty or not apply — that is expected here, not a bug.
+  const isEditTestTrip = trip?.id === '5c042bf4-18af-496c-a3e1-262bfa0a3efc';
   const canManageRequirements =
     isHostDerived && ((documentsQuery.data?.length ?? 0) > 0 || isOperatorTrip);
   // Enabled on `isHost`, matching where the sheet is mounted. Tying it to
@@ -1683,7 +1694,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // host actions) so they collapse cleanly when a section isn't shown.
   type TripMenuEntry = {
     key: string;
-    icon: React.ComponentProps<typeof Ionicons>['name'];
+    /** Set exactly one of `icon` / `tripIcon`. `tripIcon` wins if both are set. */
+    icon?: React.ComponentProps<typeof Ionicons>['name'];
+    /** Renders a TripIcon instead of the Ionicon. Edit actions use the
+     *  project's standard pencil (`edit-02`) — the same one the "Edit cover"
+     *  pill and every other edit affordance uses. Ionicons has no match for it,
+     *  so the two icon sets have to coexist in this menu. */
+    tripIcon?: TripIconName;
     label: string;
     group: number;
     onPress: () => void;
@@ -1732,9 +1749,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // Same reasoning as operator_set_traveler_price's C3 fix. Peer A/B hosts
       // keep the inline Overview pills; the wizard's edit mode stays
       // unreachable for them, exactly as it is today.
-      (isTripOwner && isOperatorTrip && !isLocked) && {
+      (isTripOwner && (isOperatorTrip || isEditTestTrip) && !isLocked) && {
         key: 'edit',
-        icon: 'create-outline' as const,
+        tripIcon: 'edit-02' as const,
         label: 'Edit trip',
         group: 2,
         onPress: () => onEditOperatorTrip?.(trip.id),
@@ -2494,7 +2511,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                       item.onPress();
                     }}
                   >
-                    <Ionicons name={item.icon} size={22} color={item.destructive ? '#FF5367' : '#222B30'} />
+                    {item.tripIcon ? (
+                      <TripIcon
+                        name={item.tripIcon}
+                        // 22 to match the Ionicons beside it. strokeWidth is in
+                        // the icon's OWN viewBox units, and edit-02's viewBox is
+                        // 12.27 where most TripIcons are ~16 — so the default 1
+                        // renders visibly heavier here than the same 1 does
+                        // elsewhere. 0.85 lands on ~1.5px, the weight IconCell
+                        // gets from strokeWidth 1.1 at this size.
+                        size={22}
+                        strokeWidth={0.85}
+                        color={item.destructive ? '#FF5367' : '#222B30'}
+                      />
+                    ) : item.icon ? (
+                      <Ionicons name={item.icon} size={22} color={item.destructive ? '#FF5367' : '#222B30'} />
+                    ) : null}
                     <Text style={[styles.menuItemText, item.destructive && styles.menuItemTextDestructive]}>{item.label}</Text>
                   </TouchableOpacity>
                 </React.Fragment>

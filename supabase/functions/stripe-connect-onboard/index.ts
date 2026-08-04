@@ -119,8 +119,18 @@ serve(async req => {
     }
 
     if (action !== 'onboard') return json({ error: 'Unknown action' }, 400);
-    if (typeof returnUrl !== 'string' || !returnUrl.startsWith('https://')) {
-      return json({ error: 'returnUrl must be an https URL' }, 400);
+    // Same allowlist as payments-checkout — see the long comment there. An
+    // app-scheme return closes the browser sheet by itself instead of stranding
+    // the operator on a web page.
+    const devSchemes = STRIPE_SECRET_KEY.startsWith('sk_test_')
+      ? ['exp://', 'exp+swellyo://']
+      : [];
+    const allowedPrefixes = ['https://', 'swellyo://', ...devSchemes];
+    if (
+      typeof returnUrl !== 'string' ||
+      !allowedPrefixes.some((p) => returnUrl.startsWith(p))
+    ) {
+      return json({ error: 'returnUrl scheme is not allowed' }, 400);
     }
 
     // Authentication (above) is the only gate on onboarding. There is

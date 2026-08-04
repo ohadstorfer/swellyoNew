@@ -490,6 +490,23 @@ const REQ_ICON: Record<Exclude<RequirementKind, 'passport'>, any> = {
 // insert of the whole batch, so the failure would silently drop every other
 // requirement too.
 const DOCUMENT_REQUIREMENT_ORDER = REQUIREMENT_ORDER.filter(k => !isPayKind(k));
+/** The money rows, in catalog order. Rendered on this step as TIMING-ONLY
+ *  cards: which payments exist is decided on the budget step (payment mode +
+ *  whether a deposit amount was typed), so they carry no on/off toggle — the
+ *  reason DOCUMENT_REQUIREMENT_ORDER exists in the first place. WHEN each one
+ *  is due is a separate question, and it belongs here beside the documents,
+ *  set the same way. Mirrors ManageRequirementsSheet, which already edits
+ *  exactly these two after publish. */
+const PAY_REQUIREMENT_ORDER = REQUIREMENT_ORDER.filter(isPayKind);
+/** Overrides the catalog's `operatorSub` on this step. The catalog copy is
+ *  written for the budget step, where the operator is deciding the AMOUNT
+ *  ("Leave the amount blank for one single payment") — here they are only
+ *  deciding the deadline, and that sentence would point at a field that is
+ *  two steps behind them. Same override ManageRequirementsSheet applies. */
+const PAY_KIND_TIMING_SUB: Partial<Record<RequirementKind, string>> = {
+  deposit: 'A first payment, to hold their place.',
+  balance: 'The rest of the price.',
+};
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const COLORS = {
@@ -2296,6 +2313,109 @@ export default function CreateTripFlowA({
       });
     };
 
+    // The timing controls, shared by the document cards and the pay cards.
+    // Extracted rather than duplicated: "when is it due" must look and behave
+    // identically for a passport and for a deposit, and two copies drift.
+    const renderTimingControls = (kind: RequirementKind) => {
+      const timing = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
+      return (
+        <>
+          <View style={localStyles.timingRow}>
+            <Pressable
+              onPress={() => setTiming(kind, { skippable: false })}
+              style={[localStyles.timingPill, !timing.skippable && localStyles.timingPillOn]}
+            >
+              <Text
+                style={[
+                  localStyles.timingPillText,
+                  !timing.skippable && localStyles.timingPillTextOn,
+                ]}
+              >
+                When they join
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setTiming(kind, { skippable: true })}
+              style={[localStyles.timingPill, timing.skippable && localStyles.timingPillOn]}
+            >
+              <Text
+                style={[
+                  localStyles.timingPillText,
+                  timing.skippable && localStyles.timingPillTextOn,
+                ]}
+              >
+                They can skip
+              </Text>
+            </Pressable>
+          </View>
+
+          {timing.skippable ? (
+            <View style={localStyles.daysRow}>
+              <Pressable
+                onPress={() => setTiming(kind, { daysBefore: Math.max(0, timing.daysBefore - 7) })}
+                hitSlop={8}
+                style={({ pressed }) => [
+                  localStyles.stepBtn,
+                  pressed && localStyles.stepBtnPressed,
+                ]}
+              >
+                <Ionicons name="remove" size={16} color="#212121" />
+              </Pressable>
+              <View style={localStyles.daysLabel}>
+                <Text style={localStyles.daysValue}>
+                  {timing.daysBefore === 1
+                    ? '1 day before the trip'
+                    : `${timing.daysBefore} days before the trip`}
+                </Text>
+                <Text style={localStyles.daysDate}>{deadlineLabel(timing.daysBefore)}</Text>
+              </View>
+              <Pressable
+                onPress={() =>
+                  setTiming(kind, { daysBefore: Math.min(365, timing.daysBefore + 7) })
+                }
+                hitSlop={8}
+                style={({ pressed }) => [
+                  localStyles.stepBtn,
+                  pressed && localStyles.stepBtnPressed,
+                ]}
+              >
+                <Ionicons name="add" size={16} color="#212121" />
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={localStyles.timingHint}>
+              {isPayKind(kind) ? 'Due before they are in.' : 'No Skip button.'}
+            </Text>
+          )}
+        </>
+      );
+    };
+
+    // Which money rows this trip will actually create — the SAME rule the
+    // publish handler applies (`rawDeposit != null ? [deposit, balance] :
+    // [balance]`). If those two ever disagree, the operator sets a deadline on
+    // a payment that is never created, or one gets created with no deadline
+    // they ever saw.
+    const payKinds: RequirementKind[] = (() => {
+      if (!isFixedFlow || state.paymentMode !== 'managed') return [];
+      const dep = state.depositAmount ? parseInt(state.depositAmount, 10) : NaN;
+      const hasDeposit = Number.isFinite(dep) && dep > 0;
+      return PAY_REQUIREMENT_ORDER.filter(k => k !== 'deposit' || hasDeposit);
+    })();
+
+    // The operator's OWN typed figures, not the canonical USD the trip will
+    // store. They set these two screens ago in this currency; converting here
+    // would show them a number they never typed.
+    const payAmountLabel = (kind: RequirementKind): string | null => {
+      const price = state.costPerPerson ? parseInt(state.costPerPerson, 10) : NaN;
+      if (!Number.isFinite(price)) return null;
+      const depRaw = state.depositAmount ? parseInt(state.depositAmount, 10) : 0;
+      const dep = Number.isFinite(depRaw) ? depRaw : 0;
+      const n = kind === 'deposit' ? dep : price - dep;
+      if (!Number.isFinite(n) || n < 0) return null;
+      return `${operatorCurrency === 'ILS' ? '₪' : '$'}${n.toLocaleString('en-US')}`;
+    };
+
     const pickWaiverFile = async () => {
       try {
         const DocumentPicker = require('expo-document-picker');
@@ -2331,10 +2451,45 @@ export default function CreateTripFlowA({
 
     return (
       <View style={localStyles.reqStack}>
+        {/* Money first, matching REQUIREMENT_ORDER and the post-publish editor.
+            These cards have NO checkbox: whether a payment exists was already
+            decided on the budget step. All that is open here is WHEN it is due,
+            asked exactly as it is for a passport. Always expanded, because
+            there is no collapsed state to toggle into. */}
+        {payKinds.map(kind => {
+          const c = REQUIREMENT_CATALOG[kind];
+          const amount = payAmountLabel(kind);
+          return (
+            <View key={kind} style={[localStyles.reqCard, localStyles.reqCardOn]}>
+              {/* A View, not a Pressable: nothing here responds to a tap, and a
+                  pressable that does nothing invites the operator to keep
+                  trying it. */}
+              <View style={localStyles.reqHeader} accessibilityRole="text">
+                <View style={localStyles.reqIconWrap}>
+                  <TripIcon name="currency-dollar-circle" size={22} color="#212121" />
+                </View>
+                <View style={localStyles.reqBody}>
+                  <Text style={localStyles.reqTitle}>{c.operatorTitle}</Text>
+                  <Text style={localStyles.reqSub}>
+                    {PAY_KIND_TIMING_SUB[kind] ?? c.operatorSub}
+                  </Text>
+                  {/* Every other card on this step describes itself. A payment
+                      asking for a deadline with no figure in sight does not. */}
+                  {amount ? <Text style={localStyles.reqPayAmount}>{amount}</Text> : null}
+                </View>
+              </View>
+
+              <View style={localStyles.reqExpand}>
+                <View style={localStyles.reqDivider} />
+                {renderTimingControls(kind)}
+              </View>
+            </View>
+          );
+        })}
+
         {DOCUMENT_REQUIREMENT_ORDER.map(kind => {
           const c = REQUIREMENT_CATALOG[kind];
           const on = state.requirementKinds.includes(kind);
-          const timing = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
           return (
             // One card per requirement — header AND its settings live in the same
             // container. They used to be siblings separated by a left rail, which
@@ -2385,79 +2540,7 @@ export default function CreateTripFlowA({
                 <FadeInView duration={180} translateY={4} style={localStyles.reqExpand}>
                   <View style={localStyles.reqDivider} />
 
-                  <View style={localStyles.timingRow}>
-                    <Pressable
-                      onPress={() => setTiming(kind, { skippable: false })}
-                      style={[
-                        localStyles.timingPill,
-                        !timing.skippable && localStyles.timingPillOn,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          localStyles.timingPillText,
-                          !timing.skippable && localStyles.timingPillTextOn,
-                        ]}
-                      >
-                        When they join
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => setTiming(kind, { skippable: true })}
-                      style={[
-                        localStyles.timingPill,
-                        timing.skippable && localStyles.timingPillOn,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          localStyles.timingPillText,
-                          timing.skippable && localStyles.timingPillTextOn,
-                        ]}
-                      >
-                        They can skip
-                      </Text>
-                    </Pressable>
-                  </View>
-
-                  {timing.skippable ? (
-                    <View style={localStyles.daysRow}>
-                      <Pressable
-                        onPress={() =>
-                          setTiming(kind, { daysBefore: Math.max(0, timing.daysBefore - 7) })
-                        }
-                        hitSlop={8}
-                        style={({ pressed }) => [
-                          localStyles.stepBtn,
-                          pressed && localStyles.stepBtnPressed,
-                        ]}
-                      >
-                        <Ionicons name="remove" size={16} color="#212121" />
-                      </Pressable>
-                      <View style={localStyles.daysLabel}>
-                        <Text style={localStyles.daysValue}>
-                          {timing.daysBefore === 1
-                            ? '1 day before the trip'
-                            : `${timing.daysBefore} days before the trip`}
-                        </Text>
-                        <Text style={localStyles.daysDate}>{deadlineLabel(timing.daysBefore)}</Text>
-                      </View>
-                      <Pressable
-                        onPress={() =>
-                          setTiming(kind, { daysBefore: Math.min(365, timing.daysBefore + 7) })
-                        }
-                        hitSlop={8}
-                        style={({ pressed }) => [
-                          localStyles.stepBtn,
-                          pressed && localStyles.stepBtnPressed,
-                        ]}
-                      >
-                        <Ionicons name="add" size={16} color="#212121" />
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <Text style={localStyles.timingHint}>No Skip button.</Text>
-                  )}
+                  {renderTimingControls(kind)}
 
                   {/* The waiver is the one requirement that needs something FROM
                       the operator. Without this document there is nothing for a
@@ -4368,6 +4451,15 @@ const localStyles = StyleSheet.create({
     color: '#212121',
   },
   reqSub: { fontFamily: FONT_INTER, fontSize: 12, lineHeight: 17, color: '#7B7B7B' },
+  // Same treatment ManageRequirementsSheet gives a pay row's amount, so the
+  // card reads identically before and after publish.
+  reqPayAmount: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0788B0',
+    marginTop: 2,
+  },
   reqCheck: {
     width: 22,
     height: 22,

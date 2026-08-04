@@ -1,310 +1,469 @@
 # Operator trip editing
 
-> **APPLIED TO PRODUCTION 2026-07-24.** Tables renamed to the `organized_trip_*` scheme and
-> created on prod via migrations `20260724000000`–`20260724000700`. Anything payment-related is
-> still unbuilt. `group_trip_acknowledgements` is **OPEN** — Eyal wants it removed; not dropped
-> yet because it is the only record of who signed which waiver version. The storage bucket is
-> still named `group-trip-documents` (naming-consistency question, deliberately left alone).
+**Status:** v2, 2026-08-03. Approved by Ohad. Replaces Draft v1 (2026-07-22).
+**Scope of this rewrite:** v1 was written before payments shipped and before Ohad made the
+calls in §3. Every decision below is current. Where v2 reverses v1, it says so.
 
-
-**Status:** Draft v1, 2026-07-22.
-**Data model:** extends `hosting_style='C'` group trips. An operator trip IS a `group_trips` row. Overrides SPEC.md §5.
-**Parent:** `SPEC.md` §4.2 "Simple trip management".
-**Workbench:** `docs/operator-trips-workbench.html` — features `edit-trip`, `unlock`, `notify-change`, `comms`.
-**Siblings:** `docs/specs/operator-trips/requirements-model.md` (not written yet — its content lives in the workbench `onb-req` feature for now).
+> **Needs Eyal's sign-off on one point.** v1 §1 quoted him: *"Plan is plan. I'm talking about
+> editing only the trip's overview."* v2 puts Plan editing in this screen too — see §3.1. This
+> was Ohad's call on 2026-08-03. Eyal should know before it ships.
 
 ---
 
-## 1. Summary
+## 1. What this is
 
-An operator publishes a trip. Then something changes. The dates move. The price goes up. A photo is bad. Today the only way to change a trip is the creation wizard in edit mode, and that wizard locks several fields on purpose.
+An operator publishes a trip. Then something changes. The dates move, the price goes up, a
+photo is bad. Today the only way to change a trip is the creation wizard in edit mode, and
+that wizard locks fields on purpose. For operator trips it is not even reachable — see §2.
 
-This spec adds a dedicated **Edit trip** screen for operator trips. It is reached from the 3-dot menu on the trip Overview. It is flat and direct — not the wizard with a flag flipped.
+This spec adds a dedicated **Edit trip** screen for operator trips (`hosting_style = 'C'`).
+It is reached from the 3-dot menu on the trip Overview. It is flat and direct, not the
+wizard with a flag flipped.
 
-Scope is the **Overview only**: everything the operator filled during the creation flow. Photos, dates, surf levels, board types, description, price fields, capacity, stay. Eyal was explicit: *"Plan is plan. I'm talking about editing only the trip's overview."* Gear items, requirements, tasks and other Plan content are out of scope for this screen.
-
-Operators may edit fields peer hosts cannot. See §2 "The trust decision".
+An operator trip IS a `group_trips` row. There is no separate operator model.
 
 **Mobile only.** Desktop is read and review only (SPEC.md §2).
 
-**Data model:** an operator trip IS a `group_trips` row with `hosting_style='C'`. There is no separate operator model. This spec edits that same row's Overview. This overrides SPEC.md §5. Where the creation flow is shared, we **extract** the shared piece — we do not copy it. See §8.
-
 ---
 
-## 2. What is editable and what is not
+## 2. Where the code stands today
 
-"Peer host today" = what `CreateTripFlowA.tsx` actually does when `editMode` is true (`editMode = !!initialTrip`, line 1215). Every "Locked" claim below carries its line number. "Operator v1" = what this spec proposes.
-
-| Field | Column | Peer host today (wizard edit mode) | Operator v1 | Where the lock lives |
-|---|---|---|---|---|
-| Cover photo | `hero_image_url` | Editable | Editable | — (also editable inline via `EditCoverSheet`) |
-| Trip name | `title` | Editable | Editable | — |
-| Description | `description` | Editable | Editable | — (also inline via `EditTextSheet`) |
-| **Destination** | `destination` (own table, set by `setTripDestination`) | **LOCKED** | **Editable — unlocked** | `CreateTripFlowA.tsx:2126` placeholder `'Locked'`, `:2131` `disabled={editMode}`, `:2139` map disabled, `:2162-2166` footnote "Destination can't be changed after a trip is created.", `:1590` validation skipped, and `updateGroupTrip` never writes it at all (`groupTripsService.ts:889-892`) |
-| Dates mode | `dates_set_in_stone` | Editable | Editable | — |
-| Exact dates | `start_date` / `end_date` | Editable | Editable | inline `EditDatesSheet` only when `isLooseFlow && !hasExactDates` (`TripDetailViewRedesigned.tsx:429`) |
-| Month range | `date_months` | Editable | Editable | — |
-| Trip length | `duration_days` | Editable | Editable | — |
-| **Max participants** | `max_participants` | Editable, no floor check | **Editable, with a floor** | Client stepper `:2266-2299` clamps 2–50 only. Nothing checks bookings. See §7.3 |
-| Surf levels | `target_surf_levels` | Editable | Editable | — |
-| Board types | `target_surf_styles` | Editable | Editable | — |
-| Wave shape | `wave_shapes` | Editable | Editable | — |
-| Wave size | `wave_size_min` / `wave_size_max` | Editable | Editable | — |
-| Age range | `age_min` / `age_max` | Editable | Editable | span rule `AGE_WINDOW_BY_STYLE`, `:1578` |
-| How it works | `trip_structure` | Editable | Editable | — |
-| Vibe | `trip_vibes` | Editable | Editable | — |
-| Stay type | `accommodation_type` | Editable | Editable | — |
-| **"Specific stay?" gate** | `specific_stay_selected` | **LOCKED** | **Editable — unlocked** | `:2369` `canToggle = !editMode`, `:2419-2421` helper "Locked from when you first published.", `:2448` "No" card disabled. "Yes" stays tappable only so the details sheet opens |
-| Stay name / link / photo | `accommodation_name` / `_url` / `_image_url` | Editable (when gate is Yes) | Editable | — |
-| **AI budget estimate** | `budget_tier` | **UNAVAILABLE** | Not used by operators | `:1446` estimate early-returns, `:1702` skipped on Next, `:2744` forces the manual branch, `:595` preloads `manualBudget: true`, `:2821` "Back to AI estimate" hidden. **Side effect:** `:1851` writes `budget_tier: null` whenever `manualBudget` is true, so a peer host who edits an AI-tier trip silently wipes its tier |
-| Budget range | `budget_min` / `budget_max` | Editable (manual only) | Editable | — |
-| FX rate | `budget_fx_rate` | Frozen to the trip's own rate | Frozen — same rule | `:1513` and `:1796`. Never re-fetch on edit |
-| **Fixed price** | `cost_per_person` | Editable (Flow C) | Editable — see §7.4 | canonical USD; operator inputs ₪ or $ per `budget_currency` |
-| What's included | `price_inclusions` | Editable (Flow C) | Editable | — |
-| Host familiarity | `host_destination_familiarity` / `host_stay_familiarity` | Editable (Flow B/C) | Operator profile, not per trip | — |
-| Host lead note | `host_lead_note` | Editable | Editable | also inline via `EditTextSheet` |
-| **Hosting style / flow** | `hosting_style` | **Not editable** | **Not editable** | `:1220` derived from `initialTrip`; it decides the whole step order |
-| **Visibility** | `visibility` | **Not editable** — hardcoded | **Editable — reuses the existing `visibility` column, values `'public'` \| `'link_only'` (decided 2026-07-23)** | `:1865` writes `'public'` on every save, no UI exists. Operator trips need the toggle per SPEC.md §2 |
-| Status | `status` | Not in the edit flow | Not in this screen | separate menu actions (Complete / Cancel) |
-| Gear | `personal_gear_host_suggestion` | Not in the edit flow | **Out of scope** | Plan content |
-| Requirements | new table | n/a | **Out of scope** | see `requirements-model.md` |
-
-### The trust decision — read this before shipping
-
-Two fields are locked for peer hosts on purpose: **destination** and the **specific-stay gate**. They are locked because people joined the trip based on them.
-
-Operators get both. Eyal: *"operators is different. These are businesses, our partners… we can trust them, at least at the start, when there's a limited number of them."* Ohad agreed.
-
-> ⚠️ **This is trust-at-small-scale, not a permission model.** It works because we can name every operator. It stops working the moment operators sign up without Eyal in the loop. Before the operator count grows past a handful, revisit this section and decide what needs a guard rail: a change log, an approval step, or a hard lock like peer hosts have.
-
-Honest note: the edit log that would have made the revisit easy was cut on 2026-07-23 (see §8).
-So today there is **no record of operator edits at all**. If the operator count grows, bringing
-the edit log back is the first thing to do.
-
----
-
-## 3. Entry point and navigation
-
-1. Operator opens their trip. They land on **Overview**.
-2. They tap the 3-dot (⋮) in the header. The menu is built in `TripDetailScreen.tsx:1371-1426` as `menuItems`.
-3. A new entry appears — **Edit trip**, icon `create-outline`, in the host-actions group (`group: 2`), shown only when the viewer is the operator and the trip is not cancelled or completed.
-4. Tapping it pushes a full screen.
-
-Route: a new `OperatorEditTrip` entry in `RootNavigator.tsx`. Mirror `EditTripCardScreen` (`RootNavigator.tsx:199-229`) — same header shape (back chevron, centered "Edit trip"), but it renders the new screen instead of `CreateTripWizard`.
-
-On save, invalidate the operator trip detail query and pop back to Overview. The operator sees their change immediately.
-
-Existing inline "Edit" pills on Overview (cover, description, about-host, and the conditional dates/stay pills in `TripDetailViewRedesigned.tsx:502-934`) stay as they are. They are a fast path for one field. The Edit trip screen is the full surface. Both write through the same service function.
-
----
-
-## 4. Screen layout
-
-One screen. One scroll. No steps. Header: back chevron, "Edit trip", a **Save** button on the right.
-
-Six sections, in Overview's own order. Text fields are inline. Everything else is a row that opens a sheet.
-
-1. **Photos** — cover thumbnail + Change.
-2. **The basics** — trip name, description, Where ›, When ›, Spots (stepper).
-3. **Who it's for** — Surf level ›, Boards ›, The wave ›, Age ›.
-4. **The trip** — How it works ›, Vibe ›, Stay type ›, Your stay ›.
-5. **Price** — price per person (inline), What's included ›.
-6. **Visibility** — listed in explore (toggle).
-
-### How this is simpler than the wizard
-
-| Wizard | Edit screen |
+| Thing | State |
 |---|---|
-| 5–6 steps, Next between each | one scroll, no steps |
-| Progress chrome, step titles, subtitles | section headers only |
-| Strict-sequential audience gating (`:2051-2055`) and a one-time intro modal (`:1310`) | none — everything is already set |
-| AI budget estimate step with loading + retry | none — the operator types their price |
-| Preview step rendering a full trip card (`:3028`) | none — Overview is the preview, one tap back |
-| Draft autosave to AsyncStorage (`:1407`, `:1693`) | none — either you save or you don't |
-| "Publish" and a published/share screen | "Save" and back to Overview |
-| Validates the whole step before letting you move on | validates only what you touched, on Save |
+| 3-dot menu | `TripDetailScreen.tsx:1570` — 7 entries. **No Edit entry.** |
+| `onEditTrip` prop | Declared at `TripDetailScreen.tsx:152`. **Never called.** A dead wire. |
+| `EditTrip` route | `RootNavigator.tsx:204-235`, pushed at `:119`. Wraps `CreateTripWizard` with `initialTrip`. Unreachable from the app. |
+| `isOperatorTrip` | Already computed — `TripDetailScreen.tsx:485` (`trip.hosting_style === 'C'`). |
+| Inline edit pills on Overview | Cover, description and host note work for every host. **Dates and stay pills are hidden for C trips** — `TripDetailViewRedesigned.tsx:429-430` gates them on `isLooseFlow` (A or B only). |
 
-Rows that open a sheet keep the same sheet. The sheet bodies are **already extracted** into `src/components/trips/sheets/` (`LevelsSheetContent`, `StyleSheetContent`, `WaveSheetContent`, `AgeSheetContent`, `WhenSheetContent`, `HowItWorksSheetContent`, `VibeSheetContent`, `StayTypeSheetContent`, `SpecificStaySheetContent`, `IncludesSheets`). Reuse them. Do not copy them.
-
-### UI rules (project conventions, not optional)
-
-- Sheets: wrap the extracted contents in **`BottomSheetShell`** (`src/components/BottomSheetShell.tsx`). Do **not** use `WizardBottomSheet` — it is a hand-rolled `Modal` with its own backdrop. Migrating the wizard's own sheets is out of scope; just don't add a new one.
-- Fonts: **`ff(family, weight)`** from `src/theme/fonts.ts`. Never bare `fontFamily` + `fontWeight` — iOS renders Regular.
-- Colours: existing tokens. Do not re-declare a local `COLORS` block the way `CreateTripFlowA.tsx:402` does.
-- Android modals need `navigationBarTranslucent`; `BottomSheetShell` already handles it.
+So today an operator can change a cover photo, a description and their host note. Nothing else.
 
 ---
 
-## 5. Save, validation, and failure
+## 3. Decisions (2026-08-03)
 
-### Save
+### 3.1 Plan items are included — reverses v1
 
-- The **Save** button in the header is disabled until something changes.
-- Save sends a **diff patch** — only the fields the operator touched. Not the whole row. This keeps an untouched `budget_fx_rate` from drifting (the bug `:1796` guards against) and keeps the change set small enough to describe in a notification later (§6).
-- One `updateOperatorTrip(tripId, patch)` call. Destination, if changed, is a second call to its own writer (destination lives in its own table — `updateGroupTrip` deliberately excludes it, `groupTripsService.ts:889-892`).
-- Images upload **before** the row update, same order as `CreateTripFlowA.tsx:1740-1783`. Skip the upload when the URI is already remote (`isRemoteUrl`).
-- On success: patch the local cache optimistically (copy the `patchTripCache` pattern at `TripDetailScreen.tsx:896-902`), invalidate the trip detail and trips-list queries, then pop back.
+The screen holds Overview fields **and** the things a host edits from the Plan tab:
+requirements, group gear, packing suggestions, admin updates.
 
-### Validation
+**Not included:** join requests. Approving a person is not editing a trip; that stays in the
+Plan tab. Also out: `hosting_style` (it decides the whole flow) and `status` (Complete and
+Cancel are their own menu actions).
 
-Only validate what changed. Reuse the wizard's rules so the two screens never disagree:
+### 3.2 Rows show the field name only
 
-- Age: 16–99, max ≥ min, span ≥ `AGE_WINDOW_BY_STYLE[style]` (`:1571-1583`). The DB has a matching CHECK — both must change together.
-- Dates: end on or after start (`:1599-1606`). Month mode needs a month and a length.
-- Title, description, cover: required, non-empty (`:1609-1612`).
-- Stay: if the gate is Yes, name + link + photo are all required (`:1617-1630`).
-- Price: > 0 (`:1637-1640`). Budget range: min ≤ max (`:1653`).
-- **Spots: new floor.** See §7.3.
+No values on the rows. Just name + chevron. Same structure as `ProfileEditPanel` — sections,
+rows, and a sub-editor per row — but simpler, because `ProfileEditPanel`'s `InlineField`
+(`:1363`) and `EditCard` (`:1411`) both render a value and this screen does not.
 
-Errors render inline on the field, and the screen scrolls to the first one. Save stays disabled while any error is showing.
+### 3.3 No global Save button
 
-### Failure
+Every sheet has its own Save. It writes to the database straight away and closes. This is how
+`ProfileEditPanel` already works. Leaving the screen is a plain dismiss — there is never
+anything unsaved to lose.
 
-- Row update fails → keep the screen open, keep every local edit, show the alert through `showErrorAlert` / `friendlyErrorMessage` (`src/utils/friendlyError.ts`). Never `Alert.alert(title, e.message)`.
-- Image uploaded but the row update failed → the uploaded file is orphaned in storage. Harmless, and retrying reuses the already-remote URL. Worth a cleanup job later; not a v1 blocker.
-- Destination write fails after the row update succeeded → the trip is half-saved. Do the destination write **first**, then the row update, so the failure order is the harmless one.
-- Two devices editing at once: last write wins. Acceptable for one operator. If it ever bites, add an `updated_at` precondition to the update.
+This is why §3.2 works: a row with no value is fine when there is no pending state to show.
 
----
+### 3.4 No automatic notification to travelers
 
-## 6. 🔴 OPEN — do joined travelers get notified?
+v1 §6 listed four options and called this a ship gate. Ohad chose: **nothing is sent
+automatically.** The operator tells people themselves, using group chat or an admin update.
 
-**Nothing is decided here. Do not pick one while building. Owner: Eyal & Ohad.**
+> ⚠️ v1's own words were *"silence is not really an option."* The risk that buys: a traveler
+> can find out the dates moved by opening the app. The confirm popup in §3.5 is the only thing
+> standing between an operator and a silent change. Revisit when operators are no longer
+> hand-picked.
 
-The question: an operator changes the dates, the price, or the destination after people have already joined and paid a deposit. Do those travelers hear about it?
+### 3.5 A confirm popup before changing dates or destination
 
-Silence is not really an option — the workbench says so plainly ("If operators can edit fields people joined on the basis of, silence is not an option"). But *which* fields count as material, and *how* the message lands, is undecided. So is whether a price change is even allowed once someone has paid (§7.4).
+Fires **before** the write, on **Where** and **When** only. Cancel writes nothing.
 
-### The options, and what each costs
+```
+┌────────────────────────────────┐
+│       Change the dates?        │
+│                                │
+│  12 travelers joined on the    │
+│  old dates. Make sure you      │
+│  tell them about this change.  │
+│                                │
+│  [ Cancel ]      [ Change it ] │
+└────────────────────────────────┘
+```
 
-**A. Nothing. Operator tells people themselves.**
-Cost: zero build. The operator already has group chat, admin updates and (per SPEC.md §2) a 1:1 DM. Risk: a traveler discovers the new dates by opening the app. That is exactly the trust failure the unlock decision (§2 "The trust decision") is betting against.
+The count is the non-host participants — `participant_count - 1`, already on the trip row the
+screen loads, so it costs no extra query. Everyone holding a spot needs telling, whether or not
+they have paid yet. When the count is 0, skip the popup.
 
-**B. Nudge the operator at save time.**
-On Save, if a material field changed, show a sheet: "You changed the dates. Tell your travelers?" with a prefilled admin update they can edit or skip.
-Cost: small. Admin updates already exist (`group_trip_admin_updates` + `tg_notify_admin_update` trigger, `20260601010000_notification_center.sql:184-202`) and the operator model mirrors that pattern. One sheet, one prefilled string. Keeps the human in the loop, which suits partners we trust. Risk: they skip it.
+For a date change the popup also says what it does to the requirement deadlines, because those
+are stored relative to departure and move with the trip (§9): *"3 deadlines move. 1 lands in
+the past."*
 
-**C. Automatic notification on material change.**
-Save writes the change, a trigger fans out a notification to every booking.
-Cost: a new `notification_type` enum value, a template row (`20260611000200_notification_templates.sql`), a trigger on `group_trips` that diffs OLD vs NEW, and a rule for what counts as material. Also a debounce — an operator fixing a typo three times must not send three pushes. Risk: noisy, and an automatic "the price changed" push with no explanation is worse than no push.
+### 3.6 The trust unlock stays
 
-**D. Automatic, and the traveler must acknowledge.**
-Like C, plus the change sits on the traveler's trip until they tap "Got it". For dates or price after payment this is close to a re-consent.
-Cost: highest. New state per booking per change, a UI surface for it, and a decision about what happens to someone who never acknowledges. Straight into refund territory (SPEC.md open question #3).
+Two fields are locked for peer hosts on purpose: **destination**
+(`CreateTripFlowA.tsx:2529-2565`) and the **specific-stay gate** (`:2772` `canToggle =
+!editMode`). They are locked because people joined based on them.
 
-### What has to be settled either way
+Operators get both. Eyal: *"operators is different. These are businesses, our partners… we can
+trust them, at least at the start, when there's a limited number of them."*
 
-- The list of material fields. Candidates: dates, price, destination, capacity, visibility. Not: description wording, a new photo.
-- Whether "material" is a property of the field or of the size of the change (a $20 price bump vs a $600 one).
-- Whether a price change is permitted at all once money has moved. This is the same conversation as refunds — SPEC.md open question #3.
+> ⚠️ This is trust at small scale, not a permission model. It works because we can name every
+> operator. The edit log that would have made this reviewable was cut on 2026-07-23, so there
+> is **no record of operator edits at all**. If the operator count grows, bring the edit log
+> back first.
 
----
-
-## 7. Edge cases
-
-### 7.1 Editing a trip while travelers are mid-onboarding
-
-A traveler is on the passport step when the operator saves a new price.
-
-- Overview fields (photos, description, vibe) are harmless. Their client re-fetches and moves on.
-- Dates, price, destination and capacity change the deal they are part-way through accepting.
-- Their app may be holding a cached trip row. The operator's save must bump something the traveler's client watches, so a stale trip does not sit on screen through a whole onboarding.
-- If a payment is **in flight** — a checkout session open, a charge authorised but not captured — the amount charged must be the amount they were quoted. The checkout has to carry a price snapshot, not read the trip row at capture time. Whether a price edit should be blocked while a session is open depends on where payment sits in the flow (SPEC.md open question #2).
-
-### 7.2 Moving the dates when deadlines are relative to departure
-
-Requirement deadlines are stored **relative to departure** and displayed as real dates — "30 days before departure". See the requirements model (workbench `onb-req`; `docs/specs/operator-trips/requirements-model.md` when it is written). That design exists precisely so moving a trip keeps every deadline correct.
-
-Consequences of a date edit:
-
-- Push the trip **later** → every deadline moves later. Usually right.
-- Pull the trip **earlier** → deadlines move earlier, and some may land in the past. Everyone who owed that item is instantly overdue, with no warning and no chance to act.
-- A deadline that had **already passed**, on a trip that then moves later — does the requirement quietly re-open? **This is already flagged OPEN in the workbench** (`onb-req` → "Does a moved trip move its deadlines?", owner Eyal & Ohad). Do not decide it here.
-
-Minimum this screen must do: before saving a date change, show what it does to the deadlines. "3 deadlines move. 1 lands in the past." Let the operator see it before they commit. That is true whichever way the open question lands.
-
-### 7.3 Reducing capacity below the number already booked
-
-Today, on peer trips, nothing stops this. The capacity trigger (`20260617000000_lock_capacity_check_triggers.sql:127-176`) fires **`BEFORE INSERT` on `group_trip_participants`** only. It reads `max_participants`, locks the trip row, counts, and rejects the join. It never runs when the trip row itself is updated. So a host can set max to 4 on a trip with 9 people and the database accepts it. The trip is then over capacity and no new joins are possible — a silent, confusing state.
-
-For operator trips the same hole must not be dug. A **spot is secured by the deposit** (SPEC.md §2), so "booked" means bookings in `deposit_paid` or later, not everyone who started onboarding.
-
-Proposed behaviour:
-
-- **Raising capacity** is always fine.
-- **Lowering to exactly the booked count** is fine. It closes the trip to new bookings. Say so: "This closes the trip — all 12 spots are taken."
-- **Lowering below the booked count** is blocked in the UI. The stepper floor is the booked count, with a line explaining why: "12 travelers have secured a spot. Remove someone first."
-- Back the floor with a **DB check on `group_trips`**, not just the client. A client-only floor is the same mistake as the pre-2026-06 capacity hole.
-- The operator's real escape hatch is to remove a traveler (SPEC.md §4.3 already lists "remove from trip"). That path involves refunding money, which is **SPEC.md open question #3**. Do not let this screen become a back door around it.
-- Race: two people paying deposits while the operator lowers the cap. The check must read the count under the same row lock the join path uses.
-
-### 7.4 Changing the price after someone has paid
-
-The dangerous version of this bug is quiet, not loud.
-
-If a traveler's outstanding balance is computed as `trip.cost_per_person − sum(payments)`, then editing the trip price silently changes what an already-booked traveler owes. Raise the price by $300 and twelve people wake up owing $300 more, with no one having decided that.
-
-Rules:
-
-- **The traveler's row snapshots its price (decided 2026-07-23).** There is no bookings table. `price_snapshot` is a column on `group_trip_participants` — that table already carries per-person state like `commitment_status` — and ships together with the payments migration (payment timing and method will be decided later on). Make it a hard requirement: balance owed = `price_snapshot − sum(ledger)`. Never `trip.price − paid`.
-- **A price edit applies to future bookings only.** Existing bookings keep the price they were booked at.
-- The payment ledger is append-only and records what was actually charged. It is never rewritten by a price edit. Good — that means the money history stays true no matter what the operator does to the field.
-- **FX:** for an operator pricing in ₪, keep using the trip's own frozen `budget_fx_rate` on save, exactly as `:1796` does. Re-fetching a live rate would move the canonical USD amount on an edit that only touched a photo.
-- Lowering the price after people paid the old one raises "do they get the difference back?" That is a refund question — **SPEC.md open question #3**. Not answered here.
-- The price field shape is itself unsettled: flat per person vs room types vs add-ons is **SPEC.md open question #1**. Build the price block as one self-contained section so it can be swapped when that lands.
-- Whether a price edit should be allowed at all once money has moved is part of §6.
-
-### 7.5 Smaller ones
-
-- **Cancelled or completed trip** → no Edit trip entry in the menu.
-- **Trip already started** → dates and price edits are close to meaningless. Consider hiding them, or at least warning.
-- **Destination change** → touches more than one thing. It moves the trip in the explore feed, and visa is decided per trip (workbench `onb-req`), so a country change can make an existing visa requirement wrong. Flag it at save time.
-- **Visibility listed → private** → the trip disappears from explore. People already booked keep their access. Say that on the toggle.
-- **Cover photo replaced** → the old image stays in storage. Same as today. Fine.
+This spec does **not** unlock anything for peer hosts. The wizard keeps its locks exactly as
+they are.
 
 ---
 
-## 8. Files to create or change
+## 4. Entry point and route
+
+1. Operator opens their trip, lands on **Overview**.
+2. Taps the ⋮ in the header.
+3. A new **Edit trip** entry appears, icon `create-outline`, in the host group (`group: 2`).
+
+**Only the operator of record sees it** — `trip.host_id === currentUserId`, not `isHost`.
+
+> Decided 2026-08-03, after the payments branch landed its C3 ruling. `is_trip_host()` is flat
+> multi-host and includes every promoted admin; `group_trips.host_id` is the single operator
+> `operator_payout_accounts` pays. `group_trips` UPDATE RLS is `is_trip_host(id)`
+> (`20260708000000_group_trip_multiple_hosts.sql:165`), so a co-host can already write the trip
+> row — and this screen is the first UI anywhere that edits a published trip's
+> `cost_per_person`. Gating the whole screen on `host_id` is the simple version. It does take
+> away the cover / description / host-note editing a promoted co-host has today via the inline
+> Overview pills, which stay where they are and keep working. Ohad chose the simple version
+> for now and may loosen it to per-row gating (money on `host_id`, the rest on `isHost`) later.
+
+```ts
+(isHost && isOperatorTrip && !isLocked) && {
+  key: 'edit',
+  icon: 'create-outline',
+  label: 'Edit trip',
+  group: 2,
+  onPress: () => navigation.push('OperatorEditTrip', { tripId: trip.id }),
+}
+```
+
+`isLocked` is already `isCancelled || isCompleted || isTripPast(trip)`
+(`TripDetailScreen.tsx:1522`), so a cancelled, completed or finished trip has no Edit entry.
+
+New route `OperatorEditTrip` in `RootNavigator.tsx`, modelled on `EditTripCardScreen`
+(`:204`) — card presentation, back chevron, title "Edit trip". Card presentation gives the
+slide-in-from-the-right feel of the profile editor for free, and keeps the back gesture.
+
+The old `EditTrip` route and the dead `onEditTrip` prop are left alone. A and B trips are not
+touched by this spec.
+
+The inline edit pills on Overview stay. They are a fast path for one field. Both they and this
+screen write through the same service functions.
+
+---
+
+## 5. The screen
+
+```
+‹  Edit trip
+──────────────────────────
+ PHOTOS
+   Cover photo            ›
+ THE BASICS
+   Trip name              ›
+   Description            ›
+   Where                  ›   ← confirm popup
+   When                   ›   ← confirm popup
+   Spots                  ›
+ WHO IT'S FOR
+   Surf level             ›
+   Boards                 ›
+   The wave               ›
+   Age                    ›
+ THE TRIP
+   How it works           ›
+   Vibe                   ›
+   Stay type              ›
+   Your stay              ›
+   About you              ›
+ PRICE
+   Price per person       ›
+   Deposit                ›
+   What's included        ›
+ VISIBILITY
+   Listed in explore      ›
+ MANAGE
+   Requirements           ›
+   Group gear             ›
+   Packing suggestions    ›
+   Admin updates          ›
+```
+
+### Row → column → sheet
+
+| Row | Writes | Sheet to reuse |
+|---|---|---|
+| Cover photo | `hero_image_url` | `EditCoverSheet` (`TripEditSheets.tsx:248`) |
+| Trip name | `title` | `EditTextSheet` (`:157`) |
+| Description | `description` | `EditTextSheet` |
+| Where | `group_trip_destinations` row | **new** — see §6.1 |
+| When | `start_date`, `end_date`, `dates_set_in_stone`, `date_months`, `duration_days` | `EditDatesSheet` (`:350`) |
+| Spots | `max_participants` | **new** — see §7.1 |
+| Surf level | `target_surf_levels` | `sheets/LevelsSheetContent` |
+| Boards | `target_surf_styles` | `sheets/StyleSheetContent` |
+| The wave | `wave_shapes`, `wave_size_min`, `wave_size_max` | `sheets/WaveSheetContent` + `WaveSizeSheetContent` |
+| Age | `age_min`, `age_max` | `sheets/AgeSheetContent` |
+| How it works | `trip_structure` | `sheets/HowItWorksSheetContent` |
+| Vibe | `trip_vibes` | `sheets/VibeSheetContent` |
+| Stay type | `accommodation_type` | `sheets/StayTypeSheetContent` |
+| Your stay | `specific_stay_selected`, `accommodation_name`, `accommodation_url`, `accommodation_image_url` | `EditAccommodationSheet` (`:487`) + `sheets/SpecificStaySheetContent` |
+| About you | `host_lead_note` | `EditTextSheet` |
+| Price per person | `cost_per_person` | **new** — see §7.2 |
+| Deposit | `deposit_amount` | **new** — see §7.2 |
+| What's included | `price_inclusions` | `sheets/IncludesSheets` |
+| Listed in explore | `visibility` | **new** — see §6.2 |
+| Requirements | `organized_trip_requirements` | `ManageRequirementsSheet` |
+| Group gear | trip gear tables | `gear/ManageGearSheet` |
+| Packing suggestions | `personal_gear_host_suggestion` | `gear/EditSuggestedGearSheet` — controlled: it calls `onSave(fullArray)` after **every** change, so wire it to `setTripGroupGear` (`groupTripsService.ts:925`). It has no Save button of its own; that is fine under §3.3, just more eager. |
+| Admin updates | `group_trip_admin_updates` | `updates/AdminUpdateSheet` |
+
+**Reuse, do not copy.** Every sheet in the right column already exists and already has its own
+Save. Copying any of them means two places to fix each bug.
+
+### UI rules
+
+- New sheets wrap their body in **`BottomSheetShell`** (`src/components/BottomSheetShell.tsx`).
+  Do not add a new `WizardBottomSheet` — it is a hand-rolled Modal with its own backdrop.
+  `ManageGearSheet` is one of those; reuse it as-is, do not migrate it here.
+- Fonts: **`ff(family, weight)`** from `src/theme/fonts.ts`. Never bare `fontFamily` +
+  `fontWeight` — iOS renders Regular.
+- Colours: existing tokens. Do not re-declare a local `COLORS` block the way
+  `CreateTripFlowA.tsx:402` does.
+- Android modals need `navigationBarTranslucent`; `BottomSheetShell` handles it.
+
+---
+
+## 6. Fields that need new work
+
+### 6.1 Where — the destination
+
+`updateGroupTrip` deliberately excludes destination (`groupTripsService.ts:895-902`).
+`setTripDestination` (`:445`) already upserts on `trip_id`, so it handles an update with no
+change. The sheet reuses the wizard's place picker.
+
+Changing the country can make an existing visa requirement wrong, and it moves the trip in the
+explore feed. The §3.5 popup covers the traveler-facing half of that.
+
+### 6.2 Visibility — no migration needed
+
+`visibility` is a plain `text` column with `default 'public'` and **no CHECK constraint**
+(`20260525000002_group_trips_a_columns.sql:8`). `explore_feed` already filters
+`visibility IS NULL OR visibility = 'public'`
+(`20260701010000_explore_feed_sort_by_participants.sql:58`).
+
+So writing `'link_only'` removes the trip from explore with zero SQL. v1 assumed a migration
+was needed. It is not.
+
+The toggle says what it does: people already booked keep their access; the trip just stops
+showing in explore.
+
+---
+
+## 7. Safety rules
+
+These are validation, not popups. They stop states the database would otherwise accept.
+
+### 7.1 Spots cannot go below the booked count
+
+The capacity trigger (`20260617000000_lock_capacity_check_triggers.sql`) fires **BEFORE
+INSERT on `group_trip_participants`** only. It never runs when the trip row itself is updated.
+So today a host can set max to 4 on a trip with 9 people. The database accepts it, the trip is
+over capacity, and no one can ever join again. A silent, confusing state.
+
+**The floor is `participant_count`**, the trigger-maintained column on `group_trips`
+(`20260531000004_group_trips_participant_counts.sql`). It includes the host and it counts
+everyone holding a spot, paid or not.
+
+> v1 said the floor should be "travelers with a paid deposit". That is wrong for this codebase.
+> `max_participants` is compared against `participant_count` everywhere else — `isFull` on the
+> detail screen, the join trigger — so a floor built on a different number would let the client
+> accept a value the database then rejects. A traveler who joined and has not paid yet still
+> occupies a spot. Paid-deposit count is the right number for the §3.5 popup, not for capacity.
+
+- Raising is always fine.
+- Lowering to exactly `participant_count` is fine. Say so: "This closes the trip — all 12 spots
+  are taken."
+- Lowering below it is blocked. The stepper floor is `participant_count`: "12 people are on
+  this trip. Remove someone first."
+- Back the floor with a **trigger on `group_trips`**, not only the client. A client-only floor
+  repeats the pre-2026-06 capacity hole. It has to be a trigger and not a CHECK: trips that are
+  already over capacity exist today, and a CHECK cannot be added to a table that violates it.
+  The trigger guards the transition only.
+- The operator's escape hatch is removing a traveler, which involves a refund — SPEC.md open
+  question #3. This screen must not become a back door around that.
+
+### 7.2 Freeze existing prices before changing the trip price
+
+**This is new in v2. Payments shipped on 2026-08-03 and changed the picture.**
+
+`group_trip_participants.price_total_usd` and `deposit_usd` are the per-traveler frozen price
+(`20260803000000_operator_trip_payments.sql:127-129`). `operator_traveler_amount_due` resolves
+what a traveler owes as:
+
+```sql
+coalesce(p.price_total_usd, t.cost_per_person) as price
+```
+
+**Most of this is already handled.** `trg_freeze_traveler_price`
+(`20260803000000_operator_trip_payments.sql:418`) fires `BEFORE INSERT` on
+`group_trip_participants` and copies the trip price onto the row at join time. So on a trip
+that is already `payment_mode = 'managed'`, every new joiner gets their own frozen price and a
+later price edit cannot reach them. That trigger is also the sole authority on those two
+columns — a traveler cannot PATCH their own row to `price_total_usd = 0`.
+
+**The hole it leaves:** that trigger explicitly writes `null` when the trip is **not** managed:
+
+```sql
+if v_mode is distinct from 'managed' then
+  new.price_total_usd := null;
+  new.deposit_usd     := null;
+```
+
+So everyone who joined while the trip was `offline` still has `null`. The moment the operator
+switches the trip to `managed` and sets a price, those travelers are on the fallback. Editing
+`cost_per_person` after that silently changes what every one of them owes.
+
+Rule: **before writing a new `cost_per_person` on a managed trip, freeze the old one.**
+Backfill `price_total_usd` (and `deposit_usd` from `deposit_amount`) with the current values
+for every non-host participant who is still null. Then write the new price.
+
+One RPC, `operator_freeze_trip_prices(p_trip_id)`, in one transaction. It must be
+`SECURITY DEFINER` and re-check `is_trip_host()` itself — the only UPDATE policy on
+`group_trip_participants` is self-only, so a host has no RLS path to another traveler's row.
+This is the same reason `operator_set_traveler_price`
+(`20260803000100_operator_set_traveler_price.sql`, wrapped by `saveTravelerPrice` at
+`tripPaymentsService.ts:207`) is definer. Its UPDATE passes cleanly through
+`trg_freeze_traveler_price` because that trigger's UPDATE branch leaves a host's write alone.
+
+Other price rules that still hold:
+
+- The payment ledger is append-only and records what was actually charged. A price edit never
+  rewrites it.
+- **FX:** keep the trip's own frozen `budget_fx_rate` on save
+  (`CreateTripFlowA.tsx` does this at `:1949-1953`). Never re-fetch a live rate — that would
+  move the canonical USD amount on an edit that only touched a photo.
+- `budget_min`, `budget_max` and `cost_per_person` are always canonical USD. `budget_currency`
+  is only the operator's input currency.
+- Lowering the price after people paid the old one raises "do they get the difference back?" —
+  a refund question, SPEC.md open question #3. Not answered here.
+
+### 7.3 Deposit must not exceed the price
+
+The database already enforces it: `group_trips_deposit_not_over_price` and, per traveler,
+`gtp_deposit_not_over_total`. Validate in the sheet so the operator gets a sentence instead of
+a Postgres error.
+
+### 7.4 Reuse the wizard's other validation rules
+
+So the two screens never disagree:
+
+- Age: 16–99, max ≥ min, span ≥ `AGE_WINDOW_BY_STYLE[style]`. The DB has a matching CHECK —
+  both change together.
+- Dates: end on or after start. Month mode needs a month and a length.
+- Title, description, cover: required, non-empty.
+- Stay: if the gate is Yes, name + link + photo are all required.
+- Price: greater than 0. Budget range: min ≤ max.
+
+---
+
+## 8. Save and failure
+
+Each sheet saves on its own, so there is no multi-write ordering problem.
+
+- Most rows: one `updateGroupTrip(tripId, patch)` with only the fields that row owns.
+- Where: `setTripDestination(tripId, geo)` only.
+- Price: freeze (§7.2), then `updateGroupTrip`.
+- Cover: upload the image first, then write the row. Skip the upload when the URI is already
+  remote (`isRemoteUrl`).
+- Manage rows: their existing sheets already do their own writes. Do not wrap them.
+
+After a successful write: patch the local cache (`patchTripCache`,
+`TripDetailScreen.tsx:1042`), then invalidate the trip detail and trips list queries.
+
+On failure: keep the sheet open with the operator's input intact, and show the error through
+`showErrorAlert` / `friendlyErrorMessage` (`src/utils/friendlyError.ts`). Never
+`Alert.alert(title, e.message)`.
+
+An image that uploaded before a failed row update is orphaned in storage. Harmless — a retry
+reuses the already-remote URL. Worth a cleanup job later, not a blocker.
+
+Two devices editing at once: last write wins. Acceptable for one operator.
+
+---
+
+## 9. Edge cases
+
+- **Trip already started** — dates and price edits are close to meaningless. Warn, or hide.
+- **A traveler mid-onboarding** — Overview fields (photos, description, vibe) are harmless.
+  Dates, price, destination and capacity change the deal they are part-way through accepting.
+  Their client must re-fetch, so a stale trip does not sit on screen through a whole onboarding.
+- **A payment in flight** — the amount charged must be the amount quoted. Checkout carries a
+  price snapshot; §7.2's freeze is what makes that snapshot exist.
+- **Moving the dates** — requirement deadlines are stored relative to departure, so they move
+  with the trip. Pushing later is usually right. Pulling earlier can land a deadline in the
+  past and make everyone instantly overdue with no warning. Before saving a date change, show
+  what it does: "3 deadlines move. 1 lands in the past."
+- **Cover photo replaced** — the old image stays in storage. Same as today. Fine.
+
+---
+
+## 10. Files
 
 ### New
 
 - `src/screens/operator/OperatorTripEditScreen.tsx` — the screen.
-- `src/services/operator/operatorTripsService.ts` — `updateOperatorTrip(tripId, patch)`, `setOperatorTripDestination(tripId, geo)`, and the booked-count read the capacity floor needs. (This file is already anticipated in SPEC.md §10.)
-- SQL, applied **by hand in the Supabase SQL editor** (never `supabase db push`): the capacity check from §7.3 on `group_trips`. (A `group_trip_edit_log` was recommended here, but it was cut from the plan on 2026-07-23 — Ohad's call. If the §2 trust revisit or §6's "what changed" payload ever need it, it comes back as a new decision.)
+- `src/components/trips/sheets/` — four new sheet bodies: Where, Spots, Price/Deposit,
+  Visibility.
+- `src/services/operator/operatorTripsService.ts` — the price freeze for §7.2 plus thin
+  wrappers for the trip and destination writes. §7.1 needs no read: `participant_count` is
+  already on the trip row.
+- SQL, applied **by hand in the Supabase SQL editor** (never `supabase db push`): the capacity
+  floor trigger on `group_trips` (§7.1) and `operator_freeze_trip_prices` (§7.2).
 
 ### Changed
 
-- `src/navigation/RootNavigator.tsx` — new `OperatorEditTrip` route, modelled on `EditTripCardScreen` (line 199).
-- The operator trip detail screen's 3-dot menu — one new `menuItems` entry, following `TripDetailScreen.tsx:1371-1426`.
+- `src/navigation/RootNavigator.tsx` — new `OperatorEditTrip` route.
+- `src/screens/trips/TripDetailScreen.tsx` — one new `menuItems` entry at `:1570`.
 
 ### Extracted, not duplicated
 
-`CreateTripFlowA.tsx` is 4,661 lines. Copying any of it into the edit screen means two places to fix every bug. Pull these out to shared modules and have **both** the wizard and the edit screen import them:
+`CreateTripFlowA.tsx` is over 5,000 lines. Pull these out so the wizard and the edit screen
+share one copy:
 
 | What | Where it is now | Extract to |
 |---|---|---|
-| Trip row → form values (`stateFromTrip`) | `CreateTripFlowA.tsx:529-605` | `src/services/trips/tripFormMapping.ts` |
-| Form values → update patch (the `editable` object) | `:1822-1866` | same module, as a diff-producing function |
-| `SummaryRow`, `DeetsRow` | `:626-…` | `src/components/trips/rows/` |
-| Date helpers (`toISODate`, `parseISODate`, `expandMonthRange`, `formatLongDate`) | `:437-489` — and already re-inlined once in `TripEditSheets.tsx:30-60` | `src/utils/tripDates.ts` |
-| Chip formatters (`levelChips`, `styleChips`, `waveChips`, `ageChips`, `formatWhenSummary`) | `:1100-1191` | `src/components/trips/tripSummaryFormat.ts` |
-| Validation rules (age span, dates, stay, price) | `:1560-1670` | `src/services/trips/tripValidation.ts` |
+| Trip row → form values (`stateFromTrip`) | `CreateTripFlowA.tsx:602` | `src/services/trips/tripFormMapping.ts` |
+| Validation rules (age span, dates, stay, price) | `validateStep`, `:1667-1817` | `src/services/trips/tripValidation.ts` |
+| Date helpers (`toISODate`, `parseISODate`, `expandMonthRange`, `formatLongDate`) | `:437-489`, already re-inlined once in `TripEditSheets.tsx:30-60` | `src/utils/tripDates.ts` |
 
-Already extracted — reuse as-is: everything in `src/components/trips/sheets/`, and `src/services/trips/priceInclusions.ts`.
+Already extracted — reuse as-is: everything in `src/components/trips/sheets/`, and
+`src/services/trips/priceInclusions.ts`.
 
 ### Untouched
 
-`group_trips`, every `group_trip_*` table, their RLS, and `is_trip_host()`. The peer-host wizard keeps its locks exactly as they are — this spec does not unlock anything for peer hosts.
+`group_trips` and every `group_trip_*` table keep their RLS and `is_trip_host()`. The peer-host
+wizard keeps its locks.
 
 ---
 
-## 9. Open questions
+## 11. Open questions
+
+Settled in v2: notifications (§3.4, "nothing automatic"), Plan scope (§3.1, "included"), save
+model (§3.3, "per-sheet"), visibility migration (§6.2, "not needed").
 
 | # | Question | Owner | Blocks |
 |---|---|---|---|
-| 1 | 🔴 **Are joined travelers notified when a material field changes?** Which fields count, and which of options A–D in §6. | Eyal & Ohad | Ship gate for the unlock. Editing without an answer means silent changes to a paid trip. |
-| 2 | 🔴 Is a price change allowed at all once someone has paid? | Eyal & Ohad | §7.4, and the refund conversation (SPEC.md #3). |
-| 3 | 🟡 Does a moved trip re-open a deadline that had already passed? | Eyal & Ohad | §7.2. Already OPEN in the workbench `onb-req`. |
-| 4 | 🟡 When does the §2 "The trust decision" trust unlock get a guard rail, and what shape? (note: the edit log that would feed this was cut 2026-07-23) | Eyal | Not a v1 blocker. Becomes one as operator count grows. |
-| 5 | 🟡 Does the operator need a "changed since you joined" marker on Overview, so a traveler can see what moved? | Eyal & Ohad | Depends on how #1 lands. |
-| 6 | 🟡 The price block's shape depends on the pricing model (SPEC.md #1 — flat / room types / add-ons). | Design-partner operators | The Price section of the screen. Build it swappable. |
+| 1 | 🔴 Eyal to sign off on Plan editing living in this screen (§3.1 reverses his "Plan is plan"). | Eyal | Nothing technically — but he asked for the opposite. |
+| 2 | 🟡 Is a price change allowed at all once someone has paid? §7.2 makes it *safe*; it does not make it *allowed*. | Eyal & Ohad | The refund conversation, SPEC.md #3. |
+| 3 | 🟡 Does a moved trip re-open a deadline that had already passed? | Eyal & Ohad | §9. Already open in the workbench `onb-req`. |
+| 4 | 🟡 When does the §3.6 trust unlock get a guard rail? The edit log that would feed it was cut 2026-07-23. | Eyal | Not a v1 blocker. Becomes one as operator count grows. |
+| 5 | 🟡 The price block's shape depends on the pricing model (SPEC.md #1 — flat / room types / add-ons). | Design-partner operators | The Price section. Build it swappable. |

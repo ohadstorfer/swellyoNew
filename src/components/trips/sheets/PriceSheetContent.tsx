@@ -7,11 +7,35 @@
 // costPerPerson/depositAmount (it freezes every already-joined traveler's
 // price BEFORE the new number lands — never route these two fields through
 // the screen's generic `save()`).
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { ff } from '../../../theme/fonts';
 
 export type PriceDraft = { costPerPerson: number | null; depositAmount: number | null };
+
+/** Which field the operator meant to edit. Price and Deposit are two rows that
+ *  open this ONE sheet (they are tied by a DB CHECK — see the header comment),
+ *  so without this, tapping "Deposit" lands on a sheet whose first field is
+ *  "Price per person" and reads as a mis-tap. */
+export type PriceField = 'price' | 'deposit';
+
+/** `USD 1,200`. The one place that decides how these two amounts read. */
+const money = (amount: number, currency: string) =>
+  `${currency} ${amount.toLocaleString('en-US')}`;
+
+/** `USD 1,200`, or null when there is no amount. Matches the in-field
+ *  `currency` prefix exactly, so the row on the Edit screen and the field
+ *  inside the sheet read as the same number. Deliberately NOT utils/currency's
+ *  formatPrice: that converts into the VIEWER's currency via budget_fx_rate,
+ *  and these two fields are the operator's own raw input (see this file's
+ *  header). */
+export function formatTripAmount(
+  amount: number | null | undefined,
+  currency: string | null | undefined,
+): string | null {
+  if (amount == null) return null;
+  return money(amount, currency ?? 'USD');
+}
 
 const C = {
   inkBody: '#222B30',
@@ -46,7 +70,8 @@ const AmountField: React.FC<{
   hint?: string;
   onChangeValue: (n: number | null) => void;
   accessibilityLabel: string;
-}> = ({ label, value, currency, hint, onChangeValue, accessibilityLabel }) => {
+  inputRef?: React.RefObject<TextInput | null>;
+}> = ({ label, value, currency, hint, onChangeValue, accessibilityLabel, inputRef }) => {
   const [text, setText] = useState(value != null ? String(value) : '');
   const [focused, setFocused] = useState(false);
 
@@ -64,6 +89,7 @@ const AmountField: React.FC<{
       <View style={styles.field}>
         <Text style={styles.prefix}>{currency}</Text>
         <TextInput
+          ref={inputRef}
           style={styles.input}
           value={text}
           onChangeText={(t) => {
@@ -90,6 +116,37 @@ const AmountField: React.FC<{
   );
 };
 
+const NO_DEPOSIT_HINT = 'Leave empty if travelers pay in one go.';
+
+/**
+ * The deposit field's helper line. With both numbers set it spells out the
+ * actual split — the ONLY thing on this sheet that shows a deposit is PART of
+ * the price rather than a second, separate price. Two identically-styled
+ * amount fields cannot carry that on their own.
+ *
+ * Falls back to the static line whenever the split is not computable or would
+ * contradict the error `validate` is already showing (no price yet, or a
+ * deposit larger than the price).
+ */
+function depositHint(
+  costPerPerson: number | null,
+  depositAmount: number | null,
+  currency: string,
+): string {
+  if (depositAmount == null || depositAmount <= 0) return NO_DEPOSIT_HINT;
+  if (costPerPerson == null || depositAmount > costPerPerson) return NO_DEPOSIT_HINT;
+  // Round the subtraction, not the inputs: 1000.30 - 300.10 is 700.1999...
+  // in binary floating point, and toLocaleString would surface the tail.
+  const rest = Math.round((costPerPerson - depositAmount) * 100) / 100;
+  if (rest === 0) {
+    return `Travelers pay the whole ${money(costPerPerson, currency)} up front.`;
+  }
+  return (
+    `Travelers pay ${money(depositAmount, currency)} now, ` +
+    `${money(rest, currency)} before the trip.`
+  );
+}
+
 /**
  * Price per person and deposit. Mounted inside EditFieldSheet, which already
  * supplies the surface, bottom-inset padding, Save footer and the
@@ -105,8 +162,27 @@ export const PriceSheetContent: React.FC<{
   currency: string | null;
   onChange: (next: PriceDraft) => void;
   error?: string;
-}> = ({ costPerPerson, depositAmount, currency, onChange, error }) => {
+  /** The row the operator tapped to get here. Focused after the sheet has
+   *  finished sliding in. */
+  focusField?: PriceField | null;
+}> = ({ costPerPerson, depositAmount, currency, onChange, error, focusField }) => {
   const label = currency ?? 'USD';
+  const priceRef = useRef<TextInput | null>(null);
+  const depositRef = useRef<TextInput | null>(null);
+
+  // Keyed on `focusField`, NOT on mount: the caller sets it when a row is
+  // tapped and clears it on close, so this re-fires correctly even if the
+  // sheet's children are still mounted from the previous open. The delay
+  // clears useSheetTransition's enter animation (240-320ms) — focusing mid-
+  // slide raises the keyboard against a surface that is still moving.
+  useEffect(() => {
+    if (!focusField) return;
+    const t = setTimeout(() => {
+      (focusField === 'deposit' ? depositRef : priceRef).current?.focus();
+    }, 350);
+    return () => clearTimeout(t);
+  }, [focusField]);
+
   return (
     <View style={styles.wrap}>
       <AmountField
@@ -115,14 +191,16 @@ export const PriceSheetContent: React.FC<{
         currency={label}
         onChangeValue={(n) => onChange({ costPerPerson: n, depositAmount })}
         accessibilityLabel="Price per person"
+        inputRef={priceRef}
       />
       <AmountField
         label="Deposit"
         value={depositAmount}
         currency={label}
-        hint="Leave empty if travelers pay in one go."
+        hint={depositHint(costPerPerson, depositAmount, label)}
         onChangeValue={(n) => onChange({ costPerPerson, depositAmount: n })}
         accessibilityLabel="Deposit"
+        inputRef={depositRef}
       />
       {!!error && <Text style={styles.error}>{error}</Text>}
     </View>

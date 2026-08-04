@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../../BottomSheetShell';
 import { ff } from '../../../theme/fonts';
@@ -56,6 +65,13 @@ export function EditFieldSheet<T>({
   children,
 }: EditFieldSheetProps<T>) {
   const insets = useSafeAreaInsets();
+  // The cap has to be a NUMBER. `maxHeight: '85%'` resolves against the parent,
+  // and BottomSheetShell wraps children in auto-height views — so a percentage
+  // is silently ignored, the surface grows to its full content height, and the
+  // body renders clipped with the Save footer sitting on top of it. Same fix as
+  // ManageRequirementsSheet and InviteMembersSheet.
+  const { height: windowHeight } = useWindowDimensions();
+  const maxSheetHeight = Math.round(windowHeight * 0.85);
   const [draft, setDraft] = useState<T>(initial);
   const [saving, setSaving] = useState(false);
   const prevVisible = useRef(false);
@@ -108,7 +124,12 @@ export function EditFieldSheet<T>({
       swipeToDismiss={false}
     >
       {({ panHandlers }) => (
-        <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+        <View
+          style={[
+            styles.surface,
+            { maxHeight: maxSheetHeight, paddingBottom: Math.max(insets.bottom, 16) + 8 },
+          ]}
+        >
           <View style={styles.grabWrap} {...panHandlers}>
             <View style={styles.grabber} />
             <Text style={styles.title}>{title}</Text>
@@ -149,11 +170,14 @@ const styles = StyleSheet.create({
   // 0.45 black scrim; without the padding, androidNavBarNudge slides the Save
   // button under the Android nav bar. Both only show up on device, so tsc and
   // jest will not catch either. Reference: src/components/trips/RejectDocumentSheet.tsx
+  // maxHeight is applied INLINE, in pixels — see maxSheetHeight above. A
+  // percentage here is silently ignored (BottomSheetShell wraps children in
+  // auto-height views), the surface grows to its full content height, and the
+  // body renders clipped with the Save footer drawn on top of it.
   surface: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '85%',
   },
   grabWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 12, gap: 8 },
   grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E4E4E4' },

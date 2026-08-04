@@ -24,7 +24,11 @@ import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorks
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpotsSheetContent } from '../../components/trips/sheets/SpotsSheetContent';
-import { PriceSheetContent } from '../../components/trips/sheets/PriceSheetContent';
+import {
+  PriceSheetContent,
+  formatTripAmount,
+  type PriceField,
+} from '../../components/trips/sheets/PriceSheetContent';
 import { VisibilitySheetContent } from '../../components/trips/sheets/VisibilitySheetContent';
 import {
   ActivitiesSheetContent,
@@ -37,7 +41,15 @@ import TripTagPicker from '../../components/trips/TripTagPicker';
 import type { AccommodationKind } from '../../components/trips/AccommodationTypeGrid';
 import { useTripCore, useTripRequirements } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
-import { updateOperatorTrip, updateOperatorTripPrice } from '../../services/operator/operatorTripsService';
+import {
+  updateOperatorTrip,
+  updateOperatorTripPrice,
+  setOperatorTripPaymentMode,
+} from '../../services/operator/operatorTripsService';
+import {
+  GettingPaidSheetContent,
+  type PaymentMode,
+} from '../../components/trips/sheets/GettingPaidSheetContent';
 import { uploadTripImage } from '../../services/storage/storageService';
 import {
   type UpdateGroupTripInput,
@@ -106,7 +118,7 @@ type SheetKey =
   | 'when' | 'spots'
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
-  | 'price' | 'includes'
+  | 'price' | 'includes' | 'gettingPaid'
   | 'visibility'
   | 'requirements'
   | null;
@@ -325,7 +337,24 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   const trip = data?.trip ?? null;
 
   const [sheet, setSheet] = useState<SheetKey>(null);
-  const close = useCallback(() => setSheet(null), []);
+  // Which of the two Price rows was tapped. Cleared on close so the next open
+  // re-fires PriceSheetContent's focus effect even when it reopens on the same
+  // field (the effect is keyed on this value changing).
+  const [priceFocus, setPriceFocus] = useState<PriceField | null>(null);
+  // Stripe's charges_enabled, reported by ConnectStripeCard inside the Getting
+  // paid sheet. Enforces the same "block managed mode until connected" rule the
+  // create wizard applies with its own `stripeReady`.
+  //
+  // null = ConnectStripeCard has not answered yet, and is NOT the same as
+  // false. Starting at false would flash "Connect Stripe before you can..."
+  // over an ALREADY-connected managed trip for as long as the status fetch
+  // takes. Both non-true states still block Save; only `false` accuses the
+  // operator of not having connected.
+  const [stripeReady, setStripeReady] = useState<boolean | null>(null);
+  const close = useCallback(() => {
+    setSheet(null);
+    setPriceFocus(null);
+  }, []);
 
   /**
    * Two helpers, two families — fix round 1, Finding 1.
@@ -532,6 +561,13 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     depositAmount: trip?.deposit_amount ?? null,
   }), [trip?.cost_per_person, trip?.deposit_amount]);
 
+  // A one-key object rather than a bare string so EditFieldSheet's JSON dirty
+  // check and `initial` reseed behave the same as every other row here.
+  const gettingPaidInitial = useMemo(
+    () => ({ paymentMode: (trip?.payment_mode ?? 'offline') as PaymentMode }),
+    [trip?.payment_mode],
+  );
+
   const includesInitial = useMemo<PriceInclusions>(
     () => trip?.price_inclusions ?? {},
     [trip?.price_inclusions],
@@ -649,10 +685,28 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <EditRow label="About you" onPress={() => setSheet('aboutYou')} />
         </EditSection>
 
+        {/* Both rows open the SAME sheet (see its comment below). They carry
+            their values so the pair does not read as two identical rows, and
+            each one tells the sheet which field it meant. "None" rather than a
+            blank on Deposit: an empty deposit is a real, chosen state ("they
+            pay in one go"), not a missing one. */}
         <EditSection title="Price">
-          <EditRow label="Price per person" onPress={() => setSheet('price')} />
-          <EditRow label="Deposit" onPress={() => setSheet('price')} />
+          <EditRow
+            label="Price per person"
+            value={formatTripAmount(trip.cost_per_person, trip.budget_currency)}
+            onPress={() => { setPriceFocus('price'); setSheet('price'); }}
+          />
+          <EditRow
+            label="Deposit"
+            value={formatTripAmount(trip.deposit_amount, trip.budget_currency) ?? 'None'}
+            onPress={() => { setPriceFocus('deposit'); setSheet('price'); }}
+          />
           <EditRow label="What's included" onPress={() => setSheet('includes')} />
+          <EditRow
+            label="Getting paid"
+            value={trip.payment_mode === 'managed' ? 'In Swellyo' : 'Myself'}
+            onPress={() => setSheet('gettingPaid')}
+          />
         </EditSection>
 
         <EditSection title="Visibility">
@@ -960,14 +1014,22 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           try/catch here) would show the failure twice. */}
       <EditFieldSheet<{ costPerPerson: number | null; depositAmount: number | null }>
         visible={sheet === 'price'}
-        title="Price"
+        // Names BOTH fields: arriving here from the "Deposit" row and reading
+        // "Price" reads as having tapped the wrong row.
+        title="Price & deposit"
         initial={priceInitial}
         onClose={close}
         onSave={async (next) => {
-          await updateOperatorTripPrice(tripId, {
-            cost_per_person: next.costPerPerson,
-            deposit_amount: next.depositAmount,
-          });
+          await updateOperatorTripPrice(
+            tripId,
+            {
+              cost_per_person: next.costPerPerson,
+              deposit_amount: next.depositAmount,
+            },
+            // On a managed trip the deposit ROW has to follow the deposit
+            // AMOUNT — see updateOperatorTripPrice.
+            (trip.payment_mode ?? 'offline') as PaymentMode,
+          );
           await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
           queryClient.invalidateQueries({ queryKey: tripsKeys.all });
         }}
@@ -982,8 +1044,71 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             depositAmount={draft.depositAmount}
             currency={trip.budget_currency}
             onChange={setDraft}
+            focusField={priceFocus}
             // No `error` here — EditFieldSheet already shows the `validate`
             // message once (see PriceSheetContent's own doc comment / Task 6).
+          />
+        )}
+      </EditFieldSheet>
+
+      {/* Turning payment collection ON after publish. The wizard used to own
+          this exclusively, because 'managed' without the deposit/balance rows
+          is a trip that asks for money with no step to collect it —
+          setOperatorTripPaymentMode writes both halves, in the only order the
+          triggers allow, and reverts if the second half fails.
+          `validate` enforces the same rule the wizard enforces with its Next
+          button: no managed mode until Stripe says this operator can accept
+          charges. `stripeReady` is only ever true after ConnectStripeCard has
+          asked Stripe, and that card mounts only inside the managed branch. */}
+      <EditFieldSheet<{ paymentMode: PaymentMode }>
+        visible={sheet === 'gettingPaid'}
+        title="Getting paid"
+        initial={gettingPaidInitial}
+        onClose={close}
+        onSave={async (next) => {
+          await setOperatorTripPaymentMode(
+            tripId,
+            next.paymentMode,
+            trip.deposit_amount ?? null,
+          );
+          await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+          queryClient.invalidateQueries({ queryKey: tripsKeys.all });
+        }}
+        validate={(next) => {
+          if (next.paymentMode !== 'managed') return null;
+          // Price first: the balance row derives what a traveler owes from
+          // cost_per_person (per traveler, or this as the default). With no
+          // price, operator_traveler_amount_due is null and the pay step
+          // renders with nothing to pay — a managed trip that cannot collect.
+          if (trip.cost_per_person == null) {
+            return 'Set a price per person before you collect payment in the app.';
+          }
+          if (stripeReady === null) return 'Checking your Stripe account…';
+          if (!stripeReady) return 'Connect Stripe before you can collect payment in the app.';
+          return null;
+        }}
+        confirm={(next) =>
+          next.paymentMode === 'managed'
+            ? {
+                title: 'Collect payment in Swellyo?',
+                message:
+                  'Travelers on this trip will be asked to pay by card. Everyone who already joined keeps the price the trip has right now.',
+                confirmLabel: 'Turn on',
+              }
+            : {
+                title: 'Stop collecting payment?',
+                message:
+                  'Travelers will no longer be able to pay in the app. Payments already made stay recorded, and nothing is refunded.',
+                confirmLabel: 'Turn off',
+              }
+        }
+      >
+        {(draft, setDraft) => (
+          <GettingPaidSheetContent
+            value={draft.paymentMode}
+            onChange={(paymentMode) => setDraft({ paymentMode })}
+            onStripeStatusChange={setStripeReady}
+            depositLabel={formatTripAmount(trip.deposit_amount, trip.budget_currency)}
           />
         )}
       </EditFieldSheet>

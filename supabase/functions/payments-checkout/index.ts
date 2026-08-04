@@ -107,8 +107,27 @@ serve(async req => {
     }
     const { requirementId, returnUrl } = body;
     if (typeof requirementId !== 'string') return json({ error: 'requirementId required' }, 400);
-    if (typeof returnUrl !== 'string' || !returnUrl.startsWith('https://')) {
-      return json({ error: 'returnUrl must be an https URL' }, 400);
+    // Stripe accepts custom URL schemes here (verified against the API,
+    // 2026-08-04) — the old https-only rule was based on a wrong belief and
+    // forced every payer onto a web page that does not exist. An app-scheme
+    // return is what lets the browser sheet close itself and drop the traveler
+    // back where they were.
+    //
+    // Still an allowlist, not "anything goes": `returnUrl` arrives from the
+    // client and is handed to Stripe verbatim. The blast radius is only the
+    // payer's own browser, but there is no reason to accept `javascript:` or a
+    // data URL. Expo's dev schemes carry the dev machine's IP, so they cannot
+    // be pinned to a constant — they are gated on the TEST key instead, the
+    // same way the platform-charge path above is.
+    const devSchemes = STRIPE_SECRET_KEY.startsWith('sk_test_')
+      ? ['exp://', 'exp+swellyo://']
+      : [];
+    const allowedPrefixes = ['https://', 'swellyo://', ...devSchemes];
+    if (
+      typeof returnUrl !== 'string' ||
+      !allowedPrefixes.some((p) => returnUrl.startsWith(p))
+    ) {
+      return json({ error: 'returnUrl scheme is not allowed' }, 400);
     }
 
     // ── 1. The requirement must be a live pay row.
@@ -151,8 +170,32 @@ serve(async req => {
       .eq('user_id', trip.host_id)
       .maybeSingle();
 
-    if (!host?.stripe_account_id || !host.charges_enabled) {
+    // Can this charge actually be routed to the operator? Everything below —
+    // the amount, the ledger, the webhook, what the traveler sees — is
+    // identical either way; only the destination and the platform fee differ.
+    const routeToOperator = !!host?.stripe_account_id && !!host.charges_enabled;
+
+    // TEST-KEY ONLY: let the charge land on the PLATFORM account when the
+    // operator has no connected account. This exists so the payment flow can be
+    // exercised end to end before Stripe Connect onboarding is set up — a
+    // Connect platform signup is a business step, not a code one, and blocking
+    // every test on it meant the deposit/balance/refund paths could not be
+    // tested at all.
+    //
+    // The gate is the KEY ITSELF, not a flag anyone can set: a `sk_live_` key
+    // can never take this branch, so real money can never reach the platform
+    // account by this route. Do not replace it with an env var — an env var is
+    // one typo away from being true in production. Ohad, 2026-08-04.
+    const isTestKey = STRIPE_SECRET_KEY.startsWith('sk_test_');
+    if (!routeToOperator && !isTestKey) {
       return json({ error: 'The organiser cannot accept payments yet' }, 400);
+    }
+    if (!routeToOperator) {
+      console.warn(
+        '[payments-checkout] TEST KEY: no connected account for host',
+        trip.host_id,
+        '— charging the platform account, no operator transfer, no fee.',
+      );
     }
 
     // ── 4. What is still owed. Server-side, always.
@@ -214,7 +257,9 @@ serve(async req => {
     // commission_bps is `not null default 1200` in the database — the ?? 1200
     // fallback this used to have was dead code, and if it had ever fired it
     // would have applied a fee the database itself disagrees with.
-    const commission = feeCents(amountCents, host.commission_bps);
+    // No operator to pay means no cut to take. `host` is null on that path, so
+    // this also has to survive the missing row.
+    const commission = routeToOperator ? feeCents(amountCents, host!.commission_bps) : 0;
 
     // I9: the ledger only moves once the webhook fires, so two checkouts
     // opened back to back both compute the full outstanding amount and both
@@ -360,8 +405,16 @@ serve(async req => {
         'line_items[0][price_data][currency]': 'usd',
         'line_items[0][price_data][unit_amount]': String(amountCents),
         'line_items[0][price_data][product_data][name]': `${trip.title} — ${req_.title}`,
-        'payment_intent_data[application_fee_amount]': String(commission),
-        'payment_intent_data[transfer_data][destination]': host.stripe_account_id,
+        // Destination charge. Omitted entirely on the test-key platform path:
+        // Stripe rejects an empty `transfer_data[destination]`, and a zero
+        // `application_fee_amount` without a destination is a 400 as well —
+        // both keys have to be absent, not blank.
+        ...(routeToOperator
+          ? {
+              'payment_intent_data[application_fee_amount]': String(commission),
+              'payment_intent_data[transfer_data][destination]': host!.stripe_account_id as string,
+            }
+          : {}),
         // The webhook reads these back. They are the only link from a Stripe
         // event to a row in our database.
         'payment_intent_data[metadata][trip_id]': req_.trip_id,
