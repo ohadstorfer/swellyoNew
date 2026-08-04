@@ -52,6 +52,17 @@
 --   I1 — is_livemode was written and never read. operator_requirement_pay_state
 --        (section 7) now counts only rows matching the expected Stripe mode.
 --        See the comment there for the app.stripe_livemode switch.
+--
+-- Round 6 (2026-08-03): C3 was closed in the RPC only, and the attack
+-- survived on two paths the RPC never controls. Both are closed here:
+--   C3 route 1 — freeze_traveler_price (section 8) authorised on
+--        is_trip_host(), which IS the untrusted set C3 is about. A promoted
+--        admin could PATCH their own participant row's price to zero (and
+--        forge price_set_by in the same request) without going near the RPC.
+--        Now authorised on group_trips.host_id.
+--   C3 route 2 — a promoted admin could PATCH group_trips.host_id to
+--        themselves and redirect every future payment to their own connected
+--        account. guard_primary_trip_host is replaced in section 10 below.
 
 -- ══════════════════════════════════════════════════════════════════
 -- 1. Operator payout identity — its own table, not columns on `users`
@@ -477,7 +488,31 @@ revoke execute on function public.operator_requirement_pay_state(uuid, uuid, uui
 -- PATCH their own row to `price_total_usd = 0, deposit_usd = 0` and read as
 -- paid. Per Ohad's ruling: fix it here, not by touching grants on a live
 -- table six other features write to. This trigger is now the sole authority
--- on these two columns for anyone who isn't a host or the service role.
+-- on these two columns for anyone who isn't the operator or the service role.
+--
+-- C3 route 1 (round 6): this test used to be `not is_trip_host(new.trip_id)`,
+-- which was the C1 finding's own blind spot rather than a fix for it.
+-- `is_trip_host()` means `participants.role = 'host'` — i.e. the primary host
+-- PLUS every promoted admin — and for anyone it approved, the UPDATE branch
+-- below is a bare `return new`. So the RPC was never the only writer: a
+-- promoted admin could simply
+--
+--   PATCH group_trip_participants?trip_id=eq.X&user_id=eq.<self>
+--   {"price_total_usd": 0, "deposit_usd": 0, "price_set_by": "<operator>"}
+--
+-- RLS passes (own row, `role` unchanged), this trigger waved it through, every
+-- pay requirement read `approved`, and the attribution columns were forged in
+-- the same request. Hardening operator_set_traveler_price alone could not
+-- close that, because it is not the path.
+--
+-- The trusted set is therefore the operator of record — `group_trips.host_id`,
+-- the only identity payments-checkout ever pays — exactly as in
+-- 20260803000100. Three things keep working, all verified:
+--   • the RPC's own write: inside SECURITY DEFINER `auth.uid()` is still the
+--     caller, and the caller is host_id, so it lands on the trusted branch;
+--   • the trip creator's first participant INSERT: `group_trips` is inserted
+--     first and its INSERT policy already requires `auth.uid() = host_id`;
+--   • the service role: `auth.uid() is null` short-circuits ahead of this.
 create or replace function public.freeze_traveler_price()
 returns trigger
 language plpgsql
@@ -487,8 +522,11 @@ as $$
 declare v_mode text; v_price numeric; v_dep numeric;
 begin
   -- auth.uid() is null under the service role -- treat that as trusted the
-  -- same as a host, rather than assuming a JWT is always present.
-  if auth.uid() is not null and not public.is_trip_host(new.trip_id) then
+  -- same as the operator, rather than assuming a JWT is always present.
+  if auth.uid() is not null and not exists (
+       select 1 from public.group_trips
+        where id = new.trip_id and host_id = auth.uid()
+     ) then
     if TG_OP = 'UPDATE' then
       -- A traveler's PATCH succeeds (other columns still apply); these four
       -- silently do not move.
@@ -529,12 +567,12 @@ begin
     return new;
   end if;
 
-  -- Host or service role: may set both freely.
+  -- Operator of record or service role: may set both freely.
   if TG_OP = 'UPDATE' then
     return new;
   end if;
 
-  -- INSERT, host or service role: an explicit price passed in wins; never
+  -- INSERT, operator or service role: an explicit price passed in wins; never
   -- overwrite a deliberate value.
   if new.price_total_usd is not null then
     return new;
@@ -593,3 +631,73 @@ drop trigger if exists trg_deactivate_pay_rows_when_offline on public.group_trip
 create trigger trg_deactivate_pay_rows_when_offline
   after update of payment_mode on public.group_trips
   for each row execute function public.deactivate_pay_rows_when_offline();
+
+-- ══════════════════════════════════════════════════════════════════
+-- 10. host_id is now a financial identity — it must not be seizable
+-- ══════════════════════════════════════════════════════════════════
+-- C3 route 2 (round 6). This function is DEFINED in 20260708000000, which is
+-- already applied to production, so that file must not be edited. The
+-- replacement lives here instead, in the unapplied payments migration,
+-- because this is a payments change and belongs with the rest of them: it
+-- only became a vulnerability when THIS migration made money hang off
+-- `group_trips.host_id`. The trigger (trg_guard_primary_trip_host, BEFORE
+-- UPDATE on group_trips) already points at this function by name, so
+-- replacing the body is the whole change — no trigger to recreate.
+--
+-- The hole, verified against production before writing this:
+--   • policy `group_trips host can update` is
+--     `using (is_trip_host(id)) with check (is_trip_host(id))`;
+--   • the original guard only required the NEW host_id to be a current host
+--     participant — which a promoted admin IS.
+-- So a promoted admin could `PATCH group_trips {"host_id": "<self>"}`, become
+-- the operator of record, and from that moment payments-checkout would
+-- resolve `operator_payout_accounts` to THEIR connected account. Every
+-- traveler payment on the trip would land in their Stripe balance, and they
+-- would inherit operator_set_traveler_price's authority as well. Before this
+-- branch nothing financial hung off host_id, which is why the existing policy
+-- was fine until now — this is a vulnerability the payments feature creates,
+-- so the payments migration is where it gets closed.
+--
+-- The original invariant is kept verbatim. What is added is that a
+-- CLIENT-initiated handover must come from the current operator.
+-- `pg_trigger_depth()` is what separates the two writers, and it is the only
+-- thing that can: sync_primary_trip_host (20260708000000) legitimately
+-- reassigns host_id from an AFTER trigger on group_trip_participants when the
+-- current holder stops being a host, and it runs as the ordinary caller, so
+-- auth.uid() cannot tell it apart from a hand-written PATCH. Its inner UPDATE
+-- reaches this trigger at depth 2; a PATCH from a phone arrives at depth 1.
+--
+-- Nothing in the app updates host_id today (grep: it is only ever set by
+-- `createGroupTrip`'s INSERT), so this forbids no flow that currently exists.
+create or replace function public.guard_primary_trip_host()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  if new.host_id is distinct from old.host_id then
+    -- Unchanged from 20260708000000.
+    if not exists (
+      select 1 from public.group_trip_participants
+      where trip_id = new.id and user_id = new.host_id and role = 'host'
+    ) then
+      raise exception 'host_id must reference a current host of the trip'
+        using errcode = 'check_violation';
+    end if;
+
+    -- Added in round 5. auth.uid() is null under the service role, and
+    -- depth > 1 means we were reached from another trigger (i.e.
+    -- sync_primary_trip_host) rather than from a client statement.
+    if auth.uid() is not null
+       and pg_trigger_depth() <= 1
+       and auth.uid() is distinct from old.host_id then
+      raise exception 'only the current organiser can hand over a trip'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end $$;
+
+revoke execute on function public.guard_primary_trip_host()
+  from public, anon, authenticated;

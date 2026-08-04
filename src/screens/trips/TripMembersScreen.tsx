@@ -81,7 +81,11 @@ const formatJoined = (iso: string | null): string => (iso ? `Joined ${timeAgo(is
 
 /** Stable empty list for the price sheet's requirements prop. An inline
  *  `?? []` would be a new array identity on every render, defeating the
- *  memo that reads it. Same convention as TripDetailScreen's NO_REQUIREMENTS. */
+ *  memo that reads it. Same convention as TripDetailScreen's NO_REQUIREMENTS.
+ *
+ *  Only ever passed once the query has SUCCEEDED — see the call site. While
+ *  it is loading or errored the sheet gets `null`, which is a different
+ *  statement ("unknown") from this one ("this trip asks for nothing"). */
 const NO_REQUIREMENTS: { kind: string; isActive: boolean }[] = [];
 
 interface Props {
@@ -144,6 +148,17 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   // `tripsKeys.detailRequirements` with TripDetail's own requirements query,
   // so arriving here via "View all" usually hits a warm cache.
   const requirementsQuery = useTripRequirements(tripId, isOperator);
+  // `isSuccess`, not `data ?? []`. `staleTime: 0` means this refetches on
+  // every mount, so an operator can easily open the price sheet before it
+  // lands — and a bare `?? []` would tell the sheet "this trip has no deposit
+  // step", which hides the Deposit field AND sends `deposit = null` on save,
+  // silently wiping a traveler's negotiated deposit back to the trip default.
+  // This query also has no error surface, so a failure would do exactly the
+  // same thing, permanently. `null` = "not known", and the sheet refuses to
+  // save on it.
+  const knownRequirements = requirementsQuery.isSuccess
+    ? (requirementsQuery.data ?? NO_REQUIREMENTS)
+    : null;
 
   const [sheetMember, setSheetMember] = useState<EnrichedParticipant | null>(null);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
@@ -409,7 +424,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         viewerIsOperator={isOperator}
         paymentMode={trip?.payment_mode ?? null}
         budgetFxRate={trip?.budget_fx_rate ?? null}
-        requirements={requirementsQuery.data ?? NO_REQUIREMENTS}
+        requirements={knownRequirements}
         onClose={() => setSheetMember(null)}
         onViewProfile={userId => onViewUserProfile?.(userId)}
         onMessage={(userId, name, avatar) => onMessage?.(userId, name, avatar)}

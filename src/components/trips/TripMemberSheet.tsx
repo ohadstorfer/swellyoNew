@@ -35,8 +35,10 @@ interface Props {
   budgetFxRate: number | null;
   /** Every requirement row on the trip, active or not — passed straight
    *  through to the price sheet, which reads the pay rows out of it to decide
-   *  whether a Deposit field may be shown. */
-  requirements: { kind: string; isActive: boolean }[];
+   *  whether a Deposit field may be shown. `null` means not yet loaded (or
+   *  the load failed) and must NOT be flattened to `[]` on the way through:
+   *  the sheet blocks saving on it. */
+  requirements: { kind: string; isActive: boolean }[] | null;
   onClose: () => void;
   onViewProfile: (userId: string) => void;
   onMessage: (userId: string, name?: string, avatar?: string | null) => void;

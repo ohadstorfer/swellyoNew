@@ -341,7 +341,12 @@ set search_path = public, extensions, pg_temp
 as $$
 declare v_mode text; v_price numeric; v_dep numeric;
 begin
-  if auth.uid() is not null and not public.is_trip_host(new.trip_id) then
+  -- Round 6, C3 route 1: authorised on group_trips.host_id, NOT
+  -- is_trip_host() (which is every promoted admin, i.e. the untrusted set).
+  if auth.uid() is not null and not exists (
+       select 1 from public.group_trips
+        where id = new.trip_id and host_id = auth.uid()
+     ) then
     if TG_OP = 'UPDATE' then
       new.price_total_usd := old.price_total_usd;
       new.deposit_usd     := old.deposit_usd;
@@ -424,6 +429,38 @@ drop trigger if exists trg_deactivate_pay_rows_when_offline on public.group_trip
 create trigger trg_deactivate_pay_rows_when_offline
   after update of payment_mode on public.group_trips
   for each row execute function public.deactivate_pay_rows_when_offline();
+
+-- Round 6, C3 route 2: replaces the body defined in 20260708000000 (already
+-- applied to prod, so that file is not edited). The existing
+-- trg_guard_primary_trip_host trigger points at this name already.
+create or replace function public.guard_primary_trip_host()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+begin
+  if new.host_id is distinct from old.host_id then
+    if not exists (
+      select 1 from public.group_trip_participants
+      where trip_id = new.id and user_id = new.host_id and role = 'host'
+    ) then
+      raise exception 'host_id must reference a current host of the trip'
+        using errcode = 'check_violation';
+    end if;
+
+    if auth.uid() is not null
+       and pg_trigger_depth() <= 1
+       and auth.uid() is distinct from old.host_id then
+      raise exception 'only the current organiser can hand over a trip'
+        using errcode = 'check_violation';
+    end if;
+  end if;
+  return new;
+end $$;
+
+revoke execute on function public.guard_primary_trip_host()
+  from public, anon, authenticated;
 
 -- ══════════════════════════════════════════════════════════════════
 -- Migration DDL, part 2 -- identical to
@@ -1023,15 +1060,79 @@ begin
   reset role;
   perform set_config('request.jwt.claims', '', true);
 
+  -- Reads v_host's row, not v_user's. This assertion previously read
+  -- `user_id = v_user` -- the row the PREVIOUS test targets -- so it
+  -- re-verified that test's non-effect and left its own "price unmoved" half
+  -- completely untested. v_host was set to 1234 by the C1 host-PATCH case.
   select price_total_usd into v_price
     from public.group_trip_participants
-   where trip_id = v_trip and user_id = v_user;
-  if v_price = 2000 then
-    value := value || ' [own price still 2000]';
+   where trip_id = v_trip and user_id = v_host;
+  if v_price = 1234 then
+    value := value || ' [target price still 1234]';
   else
-    value := 'FAIL: price moved to ' || coalesce(v_price::text, 'null');
+    value := 'FAIL: target price moved to ' || coalesce(v_price::text, 'null');
   end if;
   return next;
+
+  -- ── C3 route 1: the RPC is NOT the only writer ────────────────────────
+  -- The whole point of C3 is that `role = 'host'` is the untrusted set, so a
+  -- promoted admin bypassing operator_set_traveler_price entirely and just
+  -- PATCHing their own participant row is the attack that matters. Nothing
+  -- in round 5 covered this, which is exactly why it read clean.
+  -- freeze_traveler_price used to wave this through on its
+  -- `is_trip_host` branch; it now authorises on group_trips.host_id.
+  -- v_user is already promoted to role = 'host' above.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
+  set local role authenticated;
+  update public.group_trip_participants
+     set price_total_usd = 0, deposit_usd = 0, price_set_by = v_operator, price_set_at = now()
+   where trip_id = v_trip and user_id = v_user;
+  get diagnostics v_rows = row_count;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+
+  select price_total_usd, deposit_usd, price_set_by into v_price, v_dep, v_setby
+    from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_user;
+
+  step := 'C3 route 1: promoted ADMIN PATCHes own price to 0 and forges price_set_by';
+  if v_rows = 1 and v_price = 2000 and v_dep = 500 and v_setby is null then
+    value := 'OK: reverted (2000/500, price_set_by still null)';
+  else
+    value := 'FAIL: bypass succeeded -- row_count=' || v_rows
+             || ', price=' || coalesce(v_price::text, 'null')
+             || '/' || coalesce(v_dep::text, 'null')
+             || ', price_set_by=' || coalesce(v_setby::text, 'null');
+  end if;
+  return next;
+
+  -- ── C3 route 2: seizing the trip redirects every future payment ───────
+  -- payments-checkout resolves operator_payout_accounts for group_trips.
+  -- host_id. The `group_trips host can update` policy is
+  -- `using/with check (is_trip_host(id))` and the original
+  -- guard_primary_trip_host only required the NEW host_id to be a current
+  -- host participant -- which a promoted admin is. So this PATCH used to
+  -- succeed and hand the admin every traveler payment on the trip.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
+  begin
+    set local role authenticated;
+    update public.group_trips set host_id = v_user where id = v_trip;
+    step := 'C3 route 2: promoted ADMIN seizes group_trips.host_id';
+    value := 'FAIL: was allowed -- all future payments would route to them';
+  exception when others then
+    step := 'C3 route 2: promoted ADMIN seizes group_trips.host_id';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+  return next;
+
+  select host_id into v_setby from public.group_trips where id = v_trip;
+  step := 'C3 route 2: host_id is unmoved after the attempt';
+  if v_setby = v_operator then value := 'OK: still ' || v_setby::text;
+  else value := 'FAIL: host_id is now ' || coalesce(v_setby::text, 'null'); end if;
+  return next;
+
 
   -- ── C3: the operator of record must still be able to price a traveler ──
   -- The load-bearing positive case. If this fails the feature is dead, not
@@ -1115,6 +1216,35 @@ begin
   end;
   reset role;
   perform set_config('request.jwt.claims', '', true);
+  return next;
+
+  -- ── C3 route 2, the other half: the LEGITIMATE reassignment still works ──
+  -- Deliberately last: it moves host_id, so it would break the fixture for
+  -- every operator-impersonating assertion above.
+  --
+  -- Demoting the current operator fires sync_primary_trip_host
+  -- (20260708000000), whose inner UPDATE of group_trips.host_id reaches
+  -- guard_primary_trip_host at trigger depth 2. That depth is the ONLY thing
+  -- separating it from the PATCH refused above -- it runs as the ordinary
+  -- caller, so auth.uid() cannot tell the two apart. If the
+  -- pg_trigger_depth() escape were wrong this would raise, and demoting a
+  -- host would become impossible on every trip in the app, payments or not.
+  begin
+    update public.group_trip_participants
+       set role = 'member'
+     where trip_id = v_trip and user_id = v_operator;
+    select host_id into v_setby from public.group_trips where id = v_trip;
+    step := 'C3 route 2: sync_primary_trip_host may still reassign (depth > 1 escape)';
+    if v_setby = v_user then
+      value := 'OK: reassigned to the remaining host ' || v_setby::text;
+    else
+      value := 'FAIL: host_id is ' || coalesce(v_setby::text, 'null')
+               || ', expected the remaining host ' || v_user::text;
+    end if;
+  exception when others then
+    step := 'C3 route 2: sync_primary_trip_host may still reassign (depth > 1 escape)';
+    value := 'FAIL: the internal reassignment was blocked (' || sqlerrm || ')';
+  end;
   return next;
 
   return;

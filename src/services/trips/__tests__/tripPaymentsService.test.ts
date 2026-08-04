@@ -1,6 +1,8 @@
 // Mock the supabase client so importing the service doesn't init a real client
-// (mirrors src/services/trips/__tests__/exploreSelect.test.ts).
-jest.mock('../../../config/supabase', () => ({ supabase: {} }));
+// (mirrors src/services/trips/__tests__/exploreSelect.test.ts). `from` is a
+// real jest.fn() rather than an empty object because the ledger-read tests at
+// the bottom of this file assert on the exact filter chain.
+jest.mock('../../../config/supabase', () => ({ supabase: { from: jest.fn() } }));
 
 import {
   amountDue,
@@ -146,5 +148,87 @@ describe('pay requirement kinds', () => {
   it('defaults the balance to a deadline before departure', () => {
     expect(DEFAULT_TIMING.balance.skippable).toBe(true);
     expect(DEFAULT_TIMING.balance.daysBefore).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// fetchPaidByRequirement — the ledger read
+//
+// This mirrors `operator_requirement_pay_state()` in
+// 20260803000000_operator_trip_payments.sql. The file header promises an exact
+// mirror, and two of the filters are the whole point:
+//   • `event_type <> 'failed'`
+//   • `is_livemode = <the mode this build treats as real money>`
+// A missing livemode filter is what made Stripe TEST payments — which the
+// device test writes straight into the PRODUCTION database — read as real
+// money on every screen.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('fetchPaidByRequirement', () => {
+  /** Builds the chain fetchPaidByRequirement walks, recording every call.
+   *  The final `.eq()` resolves, because that is what the service awaits. */
+  const mockLedger = (rows: unknown[]) => {
+    const calls: { fn: string; args: unknown[] }[] = [];
+    const record = (fn: string) => (...args: unknown[]) => {
+      calls.push({ fn, args });
+      return chain;
+    };
+    const chain: Record<string, unknown> = {
+      select: record('select'),
+      eq: record('eq'),
+      neq: record('neq'),
+      then: (resolve: (v: unknown) => unknown) => resolve({ data: rows, error: null }),
+    };
+    return { chain, calls };
+  };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('excludes failed rows and filters to the expected Stripe mode', async () => {
+    jest.isolateModules(() => {
+      // Default (no env var) is test mode — the state during the device test,
+      // where test-mode rows are exactly what should count.
+      delete process.env.EXPO_PUBLIC_STRIPE_LIVEMODE;
+    });
+    const { supabase } = require('../../../config/supabase');
+    const { fetchPaidByRequirement, STRIPE_LIVEMODE } = require('../tripPaymentsService');
+    const { chain, calls } = mockLedger([]);
+    (supabase.from as jest.Mock).mockReturnValue(chain);
+
+    await fetchPaidByRequirement('t1', 'u1');
+
+    expect(supabase.from).toHaveBeenCalledWith('organized_trip_payment_events');
+    expect(calls).toContainEqual({ fn: 'neq', args: ['event_type', 'failed'] });
+    // The load-bearing one. `STRIPE_LIVEMODE` is false by default, so this
+    // also pins the default: test rows count until the env var says otherwise.
+    expect(STRIPE_LIVEMODE).toBe(false);
+    expect(calls).toContainEqual({ fn: 'eq', args: ['is_livemode', false] });
+  });
+
+  it('follows EXPO_PUBLIC_STRIPE_LIVEMODE when it says live', () => {
+    // The go-live state. Must mirror the database's `app.stripe_livemode`;
+    // the two are the same decision stored twice, because a phone cannot read
+    // a Postgres GUC. Read at module load, hence isolateModules.
+    jest.isolateModules(() => {
+      process.env.EXPO_PUBLIC_STRIPE_LIVEMODE = 'true';
+      const { STRIPE_LIVEMODE } = require('../tripPaymentsService');
+      expect(STRIPE_LIVEMODE).toBe(true);
+    });
+    delete process.env.EXPO_PUBLIC_STRIPE_LIVEMODE;
+  });
+
+  it('sums by requirement and ignores rows whose requirement was detached', async () => {
+    const { supabase } = require('../../../config/supabase');
+    const { fetchPaidByRequirement } = require('../tripPaymentsService');
+    const { chain } = mockLedger([
+      { requirement_id: 'r1', amount_usd: 500 },
+      { requirement_id: 'r1', amount_usd: -200 }, // a refund is negative
+      { requirement_id: 'r2', amount_usd: 1000 },
+      // requirement_id goes NULL when a requirement is hard-deleted (the FK is
+      // ON DELETE SET NULL). Such a row cannot be attributed to a step.
+      { requirement_id: null, amount_usd: 900 },
+    ]);
+    (supabase.from as jest.Mock).mockReturnValue(chain);
+
+    await expect(fetchPaidByRequirement('t1', 'u1')).resolves.toEqual({ r1: 300, r2: 1000 });
   });
 });

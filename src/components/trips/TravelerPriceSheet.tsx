@@ -56,8 +56,15 @@ export const TravelerPriceSheet: React.FC<{
   budgetFxRate: number | null;
   /** Every requirement row on the trip, active or not — the same list the
    *  requirements editor reads. Only the pay rows are looked at, and only to
-   *  decide whether a Deposit field may be shown at all. */
-  requirements: { kind: string; isActive: boolean }[];
+   *  decide whether a Deposit field may be shown at all.
+   *
+   *  `null` means NOT YET KNOWN — the query has not resolved, or it failed.
+   *  It must not be collapsed to `[]` by the caller: an empty array is a
+   *  positive statement ("this trip has no deposit step") and this sheet acts
+   *  on it by hiding the field AND sending `deposit = null` on save. Reading
+   *  "unknown" as "none" would silently null a traveler's negotiated deposit
+   *  back to the trip default. See the disabled-Save branch below. */
+  requirements: { kind: string; isActive: boolean }[] | null;
   onClose: () => void;
   onSaved: () => void;
 }> = ({ visible, tripId, userId, travelerName, budgetFxRate, requirements, onClose, onSaved }) => {
@@ -80,9 +87,15 @@ export const TravelerPriceSheet: React.FC<{
    * gate: an ACTIVE `deposit` row, not `payment_mode === 'managed'`, which
    * does not distinguish the two wizard outcomes. `operator_set_traveler_price`
    * enforces the identical rule server-side — this is only the affordance.
+   *
+   * `requirementsKnown` is separate from `hasDepositStep` on purpose: they are
+   * "we know" and "the answer is yes", and folding them together is precisely
+   * the bug. Saving is blocked while unknown (see `handleSave`), because a
+   * false `hasDepositStep` both hides the field and forces `deposit = null`.
    */
+  const requirementsKnown = requirements != null;
   const hasDepositStep = useMemo(
-    () => requirements.some(r => r.kind === 'deposit' && r.isActive),
+    () => (requirements ?? []).some(r => r.kind === 'deposit' && r.isActive),
     [requirements],
   );
 
@@ -171,6 +184,14 @@ export const TravelerPriceSheet: React.FC<{
 
   const handleSave = () => {
     setFormError(null);
+    // Refuse to guess. Until the trip's pay rows have loaded, `hasDepositStep`
+    // is false-because-unknown, not false-because-no — and saving on that
+    // would send `deposit = null` and wipe a real negotiated deposit. The
+    // Save button is disabled in this state too; this is the second lock.
+    if (!requirementsKnown) {
+      setFormError('Still loading this trip’s payment steps. Try again in a moment.');
+      return;
+    }
     const t = toUsd(total);
     // A trip with no deposit STEP has no deposit field on screen, and must
     // never send one: `operator_set_traveler_price` rejects a non-null
@@ -249,7 +270,9 @@ export const TravelerPriceSheet: React.FC<{
 
             {/* Hidden, not disabled, when this trip has no deposit step —
                 a greyed-out field still reads as "a deposit is possible
-                here, later", and it is not. */}
+                here, later", and it is not. While the pay rows are still
+                unknown the field is also hidden, but Save is blocked, so the
+                hidden field can never be read as a deliberate "no deposit". */}
             {hasDepositStep ? (
               <>
                 <Text style={[styles.label, { marginTop: 16 }]}>Deposit · {currencyUnit}</Text>
@@ -270,8 +293,9 @@ export const TravelerPriceSheet: React.FC<{
             ) : null}
 
             <Text style={styles.summary}>
-              {hasDepositStep ? 'Final payment' : 'They pay'}: {balanceLabel} · Paid so far:{' '}
-              {paidLabel}
+              {!requirementsKnown
+                ? 'Loading this trip’s payment steps…'
+                : `${hasDepositStep ? 'Final payment' : 'They pay'}: ${balanceLabel} · Paid so far: ${paidLabel}`}
             </Text>
 
             {overpaidUsd > 0 ? (
@@ -314,11 +338,11 @@ export const TravelerPriceSheet: React.FC<{
             ) : (
               <Pressable
                 onPress={handleSave}
-                disabled={saving}
+                disabled={saving || !requirementsKnown}
                 style={({ pressed }) => [
                   styles.save,
                   pressed && styles.pressedScale,
-                  saving && styles.saveDisabled,
+                  (saving || !requirementsKnown) && styles.saveDisabled,
                 ]}
               >
                 <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save'}</Text>
