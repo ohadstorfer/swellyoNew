@@ -239,6 +239,29 @@ export async function fetchConnectStatus(): Promise<{
   };
 }
 
+/**
+ * A client secret for the NATIVE embedded onboarding component.
+ *
+ * The secret is short-lived and scoped to this operator's own Express
+ * account. The Stripe SDK calls this again by itself when the secret expires
+ * mid-flow, which is why it is fetched on demand and never cached.
+ *
+ * Same Express account as {@link startConnectOnboarding} — the two differ only
+ * in where the form is drawn. An operator who starts one and finishes the
+ * other still ends up with exactly one account, because the edge function
+ * looks up `operator_payout_accounts` by user_id before creating anything.
+ */
+export async function fetchConnectAccountSession(): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
+    body: { action: 'account_session' },
+  });
+  if (error) {
+    throw new Error(await edgeFunctionErrorMessage(error, 'Could not open Stripe'));
+  }
+  if (!data?.clientSecret) throw new Error(data?.error ?? 'Could not open Stripe');
+  return data.clientSecret as string;
+}
+
 export async function startConnectOnboarding(): Promise<void> {
   // Same string to Stripe and to openAuthSessionAsync — see startCheckout.
   const url = returnUrl();

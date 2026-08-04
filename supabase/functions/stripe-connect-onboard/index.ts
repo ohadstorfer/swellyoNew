@@ -62,6 +62,71 @@ async function stripe(path: string, params?: Record<string, string>, idempotency
   return body;
 }
 
+/**
+ * Create this operator's Express account and record it, or return null if it
+ * could not be recorded.
+ *
+ * Shared by the hosted (`onboard`) and native (`account_session`) paths so
+ * they can never drift into creating differently-configured accounts for the
+ * same product. `controller.stripe_dashboard.type` is IMMUTABLE once an
+ * account exists, so a divergence here would be unfixable without recreating
+ * every operator's account.
+ *
+ * Express, i.e. Stripe collects requirements and carries negative-balance
+ * liability. Ohad's decision on 2026-08-04, taken while zero accounts existed.
+ * Changing it is not an edit to this line — it is a migration of every
+ * connected account.
+ *
+ * Returns null (already logged) when Stripe made the account but we could not
+ * persist the id. See the caller comments: continuing past that would orphan
+ * a live Stripe account AND let a retry create a second one.
+ */
+async function createExpressAccount(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<string | null> {
+  // Email is not on operator_payout_accounts — read it from users separately.
+  const { data: userRow } = await supabase
+    .from('users')
+    .select('email')
+    .eq('id', userId)
+    .single();
+
+  // Deterministic and stable: only ONE Express account should ever exist per
+  // operator. A retried request must land on the same account, not create a
+  // second one. Shared by both actions on purpose — a user who starts the
+  // native flow and falls back to hosted must not end up with two accounts.
+  const acct = await stripe(
+    'accounts',
+    {
+      type: 'express',
+      email: userRow?.email ?? '',
+      'capabilities[card_payments][requested]': 'true',
+      'capabilities[transfers][requested]': 'true',
+    },
+    `connect-account:${userId}`,
+  );
+  const accountId = acct.id as string;
+
+  const { error: upsertErr } = await supabase
+    .from('operator_payout_accounts')
+    .upsert({ user_id: userId, stripe_account_id: accountId }, { onConflict: 'user_id' });
+
+  if (upsertErr) {
+    // I7: the Stripe account now exists but is not recorded anywhere.
+    // Continuing would let onboarding finish against an account we can no
+    // longer find, AND a retry of the whole request would create a SECOND
+    // Express account (the lookup by user_id still sees nothing). Fail
+    // loudly instead of quietly orphaning it.
+    console.error(
+      '[stripe-connect-onboard] failed to persist stripe_account_id',
+      upsertErr.message,
+    );
+    return null;
+  }
+  return accountId;
+}
+
 serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
@@ -118,6 +183,37 @@ serve(async req => {
       return json({ chargesEnabled, accountId });
     }
 
+    // ── account_session: the native embedded onboarding component.
+    //
+    // Same Express account as the hosted flow — this only changes WHERE the
+    // form is drawn, never who the account belongs to or who carries risk.
+    // The client secret is short-lived and scoped to this one account; the
+    // SDK refetches it by calling here again when it expires, so it is never
+    // stored anywhere.
+    //
+    // `disable_stripe_user_authentication` is deliberately NOT set. It is only
+    // accepted when `controller.requirement_collection` is `application`, and
+    // these are Express accounts where STRIPE collects requirements and
+    // carries negative-balance liability (Ohad's decision, 2026-08-04). Asking
+    // for it here would be rejected by Stripe, and getting it would mean
+    // taking that liability on. The operator therefore still authenticates
+    // with Stripe partway through — that is the trade that was chosen.
+    if (action === 'account_session') {
+      if (!accountId) {
+        accountId = await createExpressAccount(supabase, userId);
+        if (!accountId) return json({ error: 'Could not start Stripe onboarding' }, 500);
+      }
+      const session = await stripe('account_sessions', {
+        account: accountId,
+        'components[account_onboarding][enabled]': 'true',
+      });
+      return json({
+        accountId,
+        clientSecret: session.client_secret,
+        chargesEnabled: payoutRow?.charges_enabled ?? false,
+      });
+    }
+
     if (action !== 'onboard') return json({ error: 'Unknown action' }, 400);
     // Same allowlist as payments-checkout — see the long comment there. An
     // app-scheme return closes the browser sheet by itself instead of stranding
@@ -155,44 +251,8 @@ serve(async req => {
     // ── onboard: create the account once, then always hand back a fresh link.
     //    Account links expire in minutes, so they are never stored.
     if (!accountId) {
-      // Email is not on operator_payout_accounts — read it from users separately.
-      const { data: userRow } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', userId)
-        .single();
-
-      // Deterministic and stable: only ONE Express account should ever exist
-      // per operator. A retried request must land on the same account, not
-      // create a second one.
-      const acct = await stripe(
-        'accounts',
-        {
-          type: 'express',
-          email: userRow?.email ?? '',
-          'capabilities[card_payments][requested]': 'true',
-          'capabilities[transfers][requested]': 'true',
-        },
-        `connect-account:${userId}`,
-      );
-      accountId = acct.id as string;
-
-      const { error: upsertErr } = await supabase
-        .from('operator_payout_accounts')
-        .upsert({ user_id: userId, stripe_account_id: accountId }, { onConflict: 'user_id' });
-
-      if (upsertErr) {
-        // I7: the Stripe account now exists but is not recorded anywhere.
-        // Continuing on to mint a link would let onboarding finish against an
-        // account we can no longer find, AND a retry of this whole request
-        // would create a SECOND Express account (the lookup above still sees
-        // nothing). Fail loudly instead of quietly orphaning it.
-        console.error(
-          '[stripe-connect-onboard] failed to persist stripe_account_id',
-          upsertErr.message,
-        );
-        return json({ error: 'Could not start Stripe onboarding' }, 500);
-      }
+      accountId = await createExpressAccount(supabase, userId);
+      if (!accountId) return json({ error: 'Could not start Stripe onboarding' }, 500);
     }
 
     // Time-bucketed, not permanently stable: account links deliberately stay

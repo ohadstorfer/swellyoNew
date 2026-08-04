@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { fetchConnectStatus, startConnectOnboarding } from '../../services/trips/tripPaymentsService';
+import { fetchConnectStatus } from '../../services/trips/tripPaymentsService';
+import { isExpoGo } from '../../utils/keyboardAvoidingView';
 // showErrorAlert(title, error, fallback) — three arguments. It exists to keep a
 // raw `e.message` off the screen; never pass one through by hand.
 import { showErrorAlert } from '../../utils/friendlyError';
@@ -11,11 +12,41 @@ import { showErrorAlert } from '../../utils/friendlyError';
 import { ff } from '../../theme/fonts';
 
 /**
+ * The native Stripe SDK, loaded only where it can exist.
+ *
+ * `@stripe/stripe-react-native` is a native module with no JS fallback, so in
+ * Expo Go the import itself throws. A top-level `import` would therefore take
+ * down the WHOLE create-trip wizard on Expo Go — not just this one card —
+ * which is where Ohad tests every day. So it is required lazily, the failure
+ * is swallowed, and the result is allowed to be null.
+ *
+ * Onboarding is native-only by decision (Ohad, 2026-08-04): there is no
+ * browser fallback to drop back to. `nativeOnboarding` false means the button
+ * explains itself rather than pretending to work.
+ */
+const stripeConnect = isExpoGo
+  ? null
+  : (() => {
+      try {
+        return require('./StripeConnectOnboarding') as typeof import('./StripeConnectOnboarding');
+      } catch (e) {
+        console.warn('[ConnectStripeCard] native Stripe SDK unavailable:', e);
+        return null;
+      }
+    })();
+
+const Onboarding = stripeConnect?.StripeConnectOnboarding ?? null;
+const nativeOnboarding = !!Onboarding && (stripeConnect?.hasStripePublishableKey ?? false);
+
+/**
  * The gate on managed mode. Until Stripe says this operator can accept charges,
  * a trip must not be publishable asking for money it has no way to receive.
  *
- * Status is re-read on every mount because onboarding finishes on Stripe's own
- * site — nothing tells us it happened except asking.
+ * Status is re-read on every mount, and again whenever onboarding closes.
+ * Even though the form is now drawn in-app, the ACCOUNT still changes on
+ * Stripe's side and nothing tells us it happened except asking — and the
+ * operator can close the flow one step from the end, so a close is not a
+ * finish.
  *
  * This renders in the CREATE wizard's budget step, BEFORE any trip row exists.
  * `stripe-connect-onboard` must therefore never require the caller to already
@@ -28,6 +59,7 @@ export const ConnectStripeCard: React.FC<{
 }> = ({ onStatusChange }) => {
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [onboarding, setOnboarding] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -52,16 +84,41 @@ export const ConnectStripeCard: React.FC<{
     void refresh();
   }, [refresh]);
 
-  const onConnect = useCallback(async () => {
-    try {
-      await startConnectOnboarding();
-      // The browser sheet closing tells us nothing about whether they finished,
-      // so always re-ask Stripe rather than assuming success.
-      await refresh();
-    } catch (e) {
-      showErrorAlert('Stripe', e, 'Could not open Stripe. Try again.');
+  const onConnect = useCallback(() => {
+    if (!nativeOnboarding) {
+      // Expo Go, or a build with no publishable key. There is deliberately no
+      // browser fallback — Ohad chose native-only on 2026-08-04 — so say what
+      // is actually wrong instead of failing silently.
+      showErrorAlert(
+        'Stripe',
+        null,
+        isExpoGo
+          ? 'Connecting Stripe needs the full app, not Expo Go. Open a development build and try again.'
+          : 'Stripe is not configured in this build.',
+      );
+      return;
     }
+    setOnboarding(true);
+  }, []);
+
+  const onOnboardingExit = useCallback(() => {
+    setOnboarding(false);
+    // Closing the flow says nothing about whether they finished it — they can
+    // back out of the last step. Always re-ask Stripe rather than assuming.
+    void refresh();
   }, [refresh]);
+
+  if (onboarding && Onboarding) {
+    return (
+      <Onboarding
+        onExit={onOnboardingExit}
+        onLoadError={() => {
+          setOnboarding(false);
+          showErrorAlert('Stripe', null, 'Could not open Stripe. Try again.');
+        }}
+      />
+    );
+  }
 
   if (loading) {
     return (
