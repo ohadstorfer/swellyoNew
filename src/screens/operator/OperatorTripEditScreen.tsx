@@ -24,10 +24,19 @@ import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorks
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpotsSheetContent } from '../../components/trips/sheets/SpotsSheetContent';
+import { PriceSheetContent } from '../../components/trips/sheets/PriceSheetContent';
+import {
+  ActivitiesSheetContent,
+  SurfFilmSheetContent,
+  VideoAnalysisSheetContent,
+  CustomInclusionSheetContent,
+  WellnessSheetContent,
+} from '../../components/trips/sheets/IncludesSheets';
+import TripTagPicker from '../../components/trips/TripTagPicker';
 import type { AccommodationKind } from '../../components/trips/AccommodationTypeGrid';
 import { useTripCore, useTripRequirements } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
-import { updateOperatorTrip } from '../../services/operator/operatorTripsService';
+import { updateOperatorTrip, updateOperatorTripPrice } from '../../services/operator/operatorTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
 import {
   type UpdateGroupTripInput,
@@ -38,7 +47,19 @@ import {
   type TripVibeSlug,
 } from '../../services/trips/groupTripsService';
 import { resolveDeadlineDate } from '../../services/trips/tripDocumentsService';
-import { validateAgeRange, validateSpots } from '../../services/trips/tripValidation';
+import { validateAgeRange, validateSpots, validatePrice, validateDeposit } from '../../services/trips/tripValidation';
+import {
+  type PriceInclusions,
+  MEALS_OPTIONS,
+  ACCOMMODATION_INCL_OPTIONS,
+  TRANSPORTATION_OPTIONS,
+  SURF_SESSIONS_OPTIONS,
+  SURF_EQUIPMENT_OPTIONS,
+  CATEGORY_TITLE,
+  CATEGORY_ORDER,
+  summarizeCategory,
+  normalizePriceInclusions,
+} from '../../services/trips/priceInclusions';
 import { AGE_WINDOW_BY_STYLE } from '../trips/CreateTripFlowA';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { showErrorAlert } from '../../utils/friendlyError';
@@ -72,7 +93,188 @@ type SheetKey =
   | 'when' | 'spots'
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
+  | 'price' | 'includes'
   | null;
+
+/** Flat multi-select categories inside price_inclusions — rendered with
+ *  TripTagPicker, exactly like CreateTripFlowA's own pricing step
+ *  (CreateTripFlowA.tsx:4162-4241). */
+type FlatIncludeKey =
+  | 'meals' | 'accommodation' | 'transportation' | 'surfSessions' | 'surfEquipment';
+const FLAT_INCLUDE_OPTIONS: Record<FlatIncludeKey, readonly { slug: string; label: string }[]> = {
+  meals: MEALS_OPTIONS,
+  accommodation: ACCOMMODATION_INCL_OPTIONS,
+  transportation: TRANSPORTATION_OPTIONS,
+  surfSessions: SURF_SESSIONS_OPTIONS,
+  surfEquipment: SURF_EQUIPMENT_OPTIONS,
+};
+const FLAT_INCLUDE_KEYS = new Set<string>(Object.keys(FLAT_INCLUDE_OPTIONS));
+
+/**
+ * "What's included" editor. Every category body below — ActivitiesSheetContent,
+ * WellnessSheetContent, SurfFilmSheetContent, VideoAnalysisSheetContent,
+ * CustomInclusionSheetContent, and TripTagPicker for the flat categories — is
+ * the exact component the create-wizard's pricing step renders
+ * (CreateTripFlowA.tsx renderPricingStep, ~3136-3329 / 4162-4322), reused with
+ * its real props. Nothing here reimplements one of those bodies.
+ *
+ * The wizard opens each category in its own nested bottom sheet. This screen
+ * expands the category in place instead: EditFieldSheet already owns the one
+ * Modal this row gets, and stacking a second Modal per category (nine of them)
+ * on top of it is a lot of moving parts for the row that spec §7.2 explicitly
+ * says is NOT the risky one — Price/Deposit is. An accordion keeps every
+ * category inside the single surface EditFieldSheet already supplies, with no
+ * second Modal at all.
+ */
+const IncludesEditorContent: React.FC<{
+  value: PriceInclusions;
+  onChange: (next: PriceInclusions) => void;
+}> = ({ value, onChange }) => {
+  const [expanded, setExpanded] = useState<keyof PriceInclusions | null>(null);
+
+  const setCategory = (key: keyof PriceInclusions, v: unknown) => {
+    onChange({ ...value, [key]: v } as PriceInclusions);
+  };
+
+  const customList = Array.isArray(value.custom) ? value.custom : [];
+
+  return (
+    <View style={includesStyles.wrap}>
+      {CATEGORY_ORDER.map((key) => {
+        const isOpen = expanded === key;
+        const summary = summarizeCategory(value, key);
+        return (
+          <View key={key} style={includesStyles.card}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={includesStyles.rowHeader}
+              onPress={() => setExpanded(isOpen ? null : key)}
+              accessibilityRole="button"
+              accessibilityLabel={CATEGORY_TITLE[key]}
+              accessibilityState={{ expanded: isOpen }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={includesStyles.rowTitle}>{CATEGORY_TITLE[key]}</Text>
+                {!!summary && (
+                  <Text style={includesStyles.rowSummary} numberOfLines={1}>{summary}</Text>
+                )}
+              </View>
+              <Ionicons
+                name={isOpen ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color="#7B7B7B"
+              />
+            </TouchableOpacity>
+
+            {isOpen && (
+              <View style={includesStyles.rowBody}>
+                {FLAT_INCLUDE_KEYS.has(key) ? (
+                  <TripTagPicker<string>
+                    options={[...FLAT_INCLUDE_OPTIONS[key as FlatIncludeKey]]}
+                    selected={(value[key] as string[] | undefined) ?? []}
+                    onChange={(next) => setCategory(key, next)}
+                    accessibilityLabel={`${CATEGORY_TITLE[key]} included`}
+                  />
+                ) : key === 'surfFilm' ? (
+                  <SurfFilmSheetContent
+                    value={value.surfFilm ?? {}}
+                    onChange={(next) => setCategory('surfFilm', next)}
+                  />
+                ) : key === 'videoAnalysis' ? (
+                  <VideoAnalysisSheetContent
+                    value={value.videoAnalysis ?? {}}
+                    onChange={(next) => setCategory('videoAnalysis', next)}
+                  />
+                ) : key === 'activities' ? (
+                  <ActivitiesSheetContent
+                    value={value.activities ?? []}
+                    onChange={(next) => setCategory('activities', next)}
+                  />
+                ) : key === 'wellness' ? (
+                  <WellnessSheetContent
+                    value={value.wellness ?? []}
+                    onChange={(next) => setCategory('wellness', next)}
+                  />
+                ) : null}
+              </View>
+            )}
+          </View>
+        );
+      })}
+
+      <Text style={includesStyles.customHeader}>Add your own</Text>
+      {customList.map((item, i) => (
+        <View key={i} style={includesStyles.card}>
+          <CustomInclusionSheetContent
+            value={item}
+            onChange={(next) => {
+              setCategory('custom', customList.map((c, j) => (j === i ? next : c)));
+            }}
+            onRemove={() => {
+              setCategory('custom', customList.filter((_, j) => j !== i));
+            }}
+          />
+        </View>
+      ))}
+      <TouchableOpacity
+        activeOpacity={0.85}
+        style={includesStyles.addBtn}
+        onPress={() => setCategory('custom', [...customList, { title: '', description: '' }])}
+        accessibilityRole="button"
+        accessibilityLabel="Add an inclusion"
+      >
+        <Ionicons name="add" size={20} color="#0788B0" />
+        <Text style={includesStyles.addBtnText}>
+          {customList.length > 0 ? 'Add another' : 'Add an inclusion'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+const includesStyles = StyleSheet.create({
+  wrap: { paddingVertical: 8, gap: 12 },
+  card: {
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  rowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  rowTitle: { fontFamily: ff('Inter', '700'), fontSize: 15, color: '#222B30' },
+  rowSummary: { fontFamily: ff('Inter', '400'), fontSize: 13, color: '#7B7B7B', marginTop: 2 },
+  rowBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E4E4E4',
+    paddingTop: 14,
+  },
+  customHeader: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 14,
+    color: '#222B30',
+    marginTop: 8,
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderWidth: 1,
+    borderColor: '#0788B0',
+    borderRadius: 12,
+  },
+  addBtnText: { fontFamily: ff('Inter', '700'), fontSize: 14, color: '#0788B0' },
+});
 
 /** Extracted so the loading / not-found / loaded branches below can all show
  *  the same back button + title without repeating the JSX three times —
@@ -248,6 +450,22 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     trip?.accommodation_image_url,
   ]);
 
+  // Per the note above, EditFieldSheet itself doesn't need this memo to stay
+  // correct (its own prevVisible guard covers a churning reference) — this is
+  // just to stop the 'price' and 'includes' sheets from doing a pointless
+  // JSON.stringify dirty-check + re-render of their children on every
+  // unrelated re-render of this screen (Global Constraints: memoise
+  // object/array props passed to children that reset on reference change).
+  const priceInitial = useMemo(() => ({
+    costPerPerson: trip?.cost_per_person ?? null,
+    depositAmount: trip?.deposit_amount ?? null,
+  }), [trip?.cost_per_person, trip?.deposit_amount]);
+
+  const includesInitial = useMemo<PriceInclusions>(
+    () => trip?.price_inclusions ?? {},
+    [trip?.price_inclusions],
+  );
+
   /**
    * Spec §3.5. Ask before writing a field people joined on the basis of.
    *
@@ -361,9 +579,9 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         </EditSection>
 
         <EditSection title="Price">
-          <EditRow label="Price per person" onPress={noop} />
-          <EditRow label="Deposit" onPress={noop} />
-          <EditRow label="What's included" onPress={noop} />
+          <EditRow label="Price per person" onPress={() => setSheet('price')} />
+          <EditRow label="Deposit" onPress={() => setSheet('price')} />
+          <EditRow label="What's included" onPress={() => setSheet('includes')} />
         </EditSection>
 
         <EditSection title="Visibility">
@@ -651,6 +869,69 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       >
         {(draft, setDraft) => (
           <StayTypeSheetContent selected={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
+
+      {/* Price + Deposit share ONE sheet on purpose (spec §7.2): the DB CHECK
+          deposit_amount <= cost_per_person ties them, so splitting the rows
+          would let an operator save a deposit the very next price edit
+          invalidates. THE rule for this row: cost_per_person/deposit_amount
+          must never reach the database through anything but
+          updateOperatorTripPrice — it freezes every already-joined
+          traveler's price (trg_freeze_traveler_price only does this at join
+          time on a 'managed' trip; this is what covers everyone who joined
+          while the trip was 'offline') BEFORE the new number is written. The
+          screen's generic `save()` above calls updateOperatorTrip and must
+          never be used for these two fields.
+          onSave deliberately does NOT catch/alert here — EditFieldSheet's own
+          `write()` already does that once on a thrown error; save() above
+          also alerts, so routing this through save() (or duplicating its
+          try/catch here) would show the failure twice. */}
+      <EditFieldSheet<{ costPerPerson: number | null; depositAmount: number | null }>
+        visible={sheet === 'price'}
+        title="Price"
+        initial={priceInitial}
+        onClose={close}
+        onSave={async (next) => {
+          await updateOperatorTripPrice(tripId, {
+            cost_per_person: next.costPerPerson,
+            deposit_amount: next.depositAmount,
+          });
+          await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+          queryClient.invalidateQueries({ queryKey: tripsKeys.all });
+        }}
+        validate={(next) =>
+          validatePrice(next.costPerPerson)
+          ?? validateDeposit(next.depositAmount, next.costPerPerson)
+        }
+      >
+        {(draft, setDraft) => (
+          <PriceSheetContent
+            costPerPerson={draft.costPerPerson}
+            depositAmount={draft.depositAmount}
+            currency={trip.budget_currency}
+            onChange={setDraft}
+            // No `error` here — EditFieldSheet already shows the `validate`
+            // message once (see PriceSheetContent's own doc comment / Task 6).
+          />
+        )}
+      </EditFieldSheet>
+
+      {/* price_inclusions has nothing to do with the price number — its own
+          sheet, own row. Empty inclusions is a legitimate answer, so no
+          `validate` here. normalizePriceInclusions collapses an
+          all-untouched `{}` back to null so an operator who opens and closes
+          this sheet without picking anything doesn't leave a stray `{}` in
+          the column. */}
+      <EditFieldSheet<PriceInclusions>
+        visible={sheet === 'includes'}
+        title="What's included"
+        initial={includesInitial}
+        onClose={close}
+        onSave={(next) => save({ price_inclusions: normalizePriceInclusions(next) })}
+      >
+        {(draft, setDraft) => (
+          <IncludesEditorContent value={draft} onChange={setDraft} />
         )}
       </EditFieldSheet>
     </SafeAreaView>
