@@ -35,6 +35,21 @@ describe('validateAgeRange', () => {
   it('accepts nulls', () => {
     expect(validateAgeRange(null, null, 4)).toBeNull();
   });
+
+  // Half-filled sheet. Nothing in the database enforces the 16-99 floor, so a
+  // one-sided value has to be caught here or not at all.
+  it('still bounds a lone minimum', () => {
+    expect(validateAgeRange(5, null, 4)).toMatch(/16/);
+  });
+
+  it('still bounds a lone maximum', () => {
+    expect(validateAgeRange(null, 120, 4)).toMatch(/99/);
+  });
+
+  it('accepts an in-range lone value', () => {
+    expect(validateAgeRange(25, null, 4)).toBeNull();
+    expect(validateAgeRange(null, 40, 4)).toBeNull();
+  });
 });
 
 describe('validateDates', () => {

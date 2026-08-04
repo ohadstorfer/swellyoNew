@@ -20,9 +20,16 @@ export function validateAgeRange(
   ageMax: number | null,
   ageWindow: number,
 ): string | null {
+  // Each end is bounded on its own, BEFORE the both-must-be-set guard. No DB
+  // CHECK enforces the 16-99 floor — the migrations only carry `age_max >=
+  // age_min` and the span rule, and both of those pass when either end is null.
+  // So this function is the only thing standing between a half-filled sheet
+  // (min typed, max not yet) and an out-of-range age reaching the row.
+  if (ageMin != null && ageMin < MIN_AGE) return `The youngest age is ${MIN_AGE}.`;
+  if (ageMax != null && ageMax > MAX_AGE) return `The oldest age is ${MAX_AGE}.`;
+  // The comparison rules need both ends. An operator who has not opened the age
+  // sheet yet has two nulls, and that is not an error on its own.
   if (ageMin == null || ageMax == null) return null;
-  if (ageMin < MIN_AGE) return `The youngest age is ${MIN_AGE}.`;
-  if (ageMax > MAX_AGE) return `The oldest age is ${MAX_AGE}.`;
   if (ageMax < ageMin) return 'The oldest age has to be older than the youngest.';
   if (ageMax - ageMin < ageWindow) {
     return `Make the age range at least ${ageWindow} years wide.`;
