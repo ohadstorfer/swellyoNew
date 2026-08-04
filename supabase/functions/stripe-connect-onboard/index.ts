@@ -1,9 +1,15 @@
 // Stripe Connect Express onboarding for operators.
 //
-// Money never passes through Swellyo's own Stripe account: travelers pay the
-// operator's connected account and our commission is split off as an
-// application fee. That is what keeps Swellyo out of money transmission —
-// Stripe holds the licence, we do not need one.
+// This is a destination charge (see payments-checkout): the traveler's payment
+// settles on Swellyo's OWN Stripe platform balance first, and only then
+// transfers to the operator's connected account, with our commission held
+// back as an application fee. Because funds land on the platform balance
+// before moving anywhere else, Swellyo is merchant of record for these
+// charges and carries the dispute/chargeback liability that comes with that —
+// that is a fact about how a destination charge works, not a policy choice.
+// Whether to add `on_behalf_of` (which would make the operator the merchant
+// of record instead) is a liability decision for a human to make, not
+// something this file decides.
 //
 // Payout fields (stripe_account_id / charges_enabled / commission_bps) live in
 // `operator_payout_accounts`, not `users`. `users` grants `authenticated`
@@ -29,14 +35,23 @@ function json(body: unknown, status = 200) {
   });
 }
 
-/** Stripe's REST API, form-encoded. No SDK: one less dependency to pin in Deno. */
-async function stripe(path: string, params?: Record<string, string>) {
+/**
+ * Stripe's REST API, form-encoded. No SDK: one less dependency to pin in Deno.
+ *
+ * `idempotencyKey`, when given, is sent as Stripe's `Idempotency-Key` header —
+ * a retried POST (network blip, double form submit) replays the cached
+ * response instead of creating a second Stripe object.
+ */
+async function stripe(path: string, params?: Record<string, string>, idempotencyKey?: string) {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     method: params ? 'POST' : 'GET',
-    headers: {
-      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: params ? new URLSearchParams(params).toString() : undefined,
   });
   const body = await res.json();
@@ -50,6 +65,14 @@ async function stripe(path: string, params?: Record<string, string>) {
 serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
+  // `Deno.env.get(...)!` only asserts a type at compile time — at runtime a
+  // missing secret is `undefined` and every Stripe call below would fail with
+  // a confusing 401 from Stripe instead of a clear error here.
+  if (!STRIPE_SECRET_KEY) {
+    console.error('[stripe-connect-onboard] STRIPE_SECRET_KEY is not set');
+    return json({ error: 'Stripe is not configured' }, 500);
+  }
+
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -60,7 +83,13 @@ serve(async req => {
     if (userErr || !userData?.user) return json({ error: 'Not signed in' }, 401);
     const userId = userData.user.id;
 
-    const { action, returnUrl } = await req.json();
+    let body: { action?: string; returnUrl?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    const { action, returnUrl } = body;
 
     const { data: payoutRow } = await supabase
       .from('operator_payout_accounts')
@@ -76,16 +105,39 @@ serve(async req => {
       if (!accountId) return json({ chargesEnabled: false, accountId: null });
       const acct = await stripe(`accounts/${accountId}`);
       const chargesEnabled = !!acct.charges_enabled;
-      await supabase
+      const { error: updateErr } = await supabase
         .from('operator_payout_accounts')
         .update({ charges_enabled: chargesEnabled })
         .eq('user_id', userId);
+      if (updateErr) {
+        // Stripe stays the source of truth either way, and the response below
+        // is still correct — this is only our local cache falling behind, so
+        // log it and keep going rather than fail the whole request.
+        console.error('[stripe-connect-onboard] failed to cache charges_enabled', updateErr.message);
+      }
       return json({ chargesEnabled, accountId });
     }
 
     if (action !== 'onboard') return json({ error: 'Unknown action' }, 400);
     if (typeof returnUrl !== 'string' || !returnUrl.startsWith('https://')) {
       return json({ error: 'returnUrl must be an https URL' }, 400);
+    }
+
+    // I8: unbounded Express account creation under our platform account is
+    // something Stripe itself flags, and — more importantly — it's the
+    // precondition for the Connect-event forgery guarded against in
+    // stripe-webhook (event.account). Only someone who actually hosts an
+    // operator trip (hosting_style = 'C') may connect a payout account.
+    const { data: hostedTrip } = await supabase
+      .from('group_trips')
+      .select('id')
+      .eq('host_id', userId)
+      .eq('hosting_style', 'C')
+      .limit(1)
+      .maybeSingle();
+
+    if (!hostedTrip) {
+      return json({ error: 'Only operator trip hosts can connect a payout account' }, 403);
     }
 
     // ── onboard: create the account once, then always hand back a fresh link.
@@ -98,26 +150,62 @@ serve(async req => {
         .eq('id', userId)
         .single();
 
-      const acct = await stripe('accounts', {
-        type: 'express',
-        email: userRow?.email ?? '',
-        'capabilities[card_payments][requested]': 'true',
-        'capabilities[transfers][requested]': 'true',
-      });
+      // Deterministic and stable: only ONE Express account should ever exist
+      // per operator. A retried request must land on the same account, not
+      // create a second one.
+      const acct = await stripe(
+        'accounts',
+        {
+          type: 'express',
+          email: userRow?.email ?? '',
+          'capabilities[card_payments][requested]': 'true',
+          'capabilities[transfers][requested]': 'true',
+        },
+        `connect-account:${userId}`,
+      );
       accountId = acct.id as string;
-      await supabase
+
+      const { error: upsertErr } = await supabase
         .from('operator_payout_accounts')
         .upsert({ user_id: userId, stripe_account_id: accountId }, { onConflict: 'user_id' });
+
+      if (upsertErr) {
+        // I7: the Stripe account now exists but is not recorded anywhere.
+        // Continuing on to mint a link would let onboarding finish against an
+        // account we can no longer find, AND a retry of this whole request
+        // would create a SECOND Express account (the lookup above still sees
+        // nothing). Fail loudly instead of quietly orphaning it.
+        console.error(
+          '[stripe-connect-onboard] failed to persist stripe_account_id',
+          upsertErr.message,
+        );
+        return json({ error: 'Could not start Stripe onboarding' }, 500);
+      }
     }
 
-    const link = await stripe('account_links', {
-      account: accountId,
-      refresh_url: returnUrl,
-      return_url: returnUrl,
-      type: 'account_onboarding',
-    });
+    // Time-bucketed, not permanently stable: account links deliberately stay
+    // fresh (they expire in minutes and the brief calls out that they are
+    // never stored), but a request retried within the same minute — a
+    // network blip, a double tap — should not mint two live links.
+    const linkIdempotencyKey = `account-link:${userId}:${accountId}:${Math.floor(Date.now() / 60000)}`;
+    const link = await stripe(
+      'account_links',
+      {
+        account: accountId,
+        refresh_url: returnUrl,
+        return_url: returnUrl,
+        type: 'account_onboarding',
+      },
+      linkIdempotencyKey,
+    );
 
-    return json({ accountId, chargesEnabled: false, onboardingUrl: link.url });
+    return json({
+      accountId,
+      // The real cached value, not a hardcoded false — an operator revisiting
+      // onboarding (e.g. to update bank details) may already be enabled.
+      chargesEnabled: payoutRow?.charges_enabled ?? false,
+      onboardingUrl: link.url,
+    });
   } catch (e) {
     console.error('[stripe-connect-onboard]', e instanceof Error ? e.message : e);
     return json({ error: 'Could not start Stripe onboarding' }, 500);
