@@ -40,7 +40,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { FadeInView } from '../FadeInView';
 import { TripIcon } from './tripIcons';
-import { DOC_ICON } from './plan/PlanSections';
+import { DOC_ICON, formatExactUsd } from './plan/PlanSections';
 import { ff } from '../../theme/fonts';
 import { showErrorAlert } from '../../utils/friendlyError';
 import { formatFileSize } from '../../utils/videoValidation';
@@ -59,6 +59,16 @@ import {
   type RequirementKind,
   type RequirementTiming,
 } from '../../services/trips/tripDocumentsService';
+import { amountDue, type PayStep } from '../../services/trips/tripPaymentsService';
+
+// The wizard's copy for `deposit` (`REQUIREMENT_CATALOG.deposit.operatorSub`)
+// tells the operator to "leave the amount blank for one single payment" — an
+// instruction about a field on the budget step that does not exist in this
+// sheet. This editor only ever shows a pay row once it already has an amount
+// (see the `kinds` filter below), so that sentence is never actionable here.
+const PAY_KIND_EDITOR_SUB: Partial<Record<RequirementKind, string>> = {
+  deposit: 'A first payment, collected when they join.',
+};
 
 type Draft = Record<string, RequirementTiming>;
 
@@ -99,6 +109,12 @@ export const ManageRequirementsSheet: React.FC<{
    *  operator to "turn one on" through a sheet that deliberately has no
    *  on/off toggle for them. See `isPayKind`. */
   paymentMode: 'offline' | 'managed';
+  /** `trip?.cost_per_person ?? null`, `trip?.deposit_amount ?? null`. The
+   *  TRIP's default price, not any one traveler's — this sheet has no
+   *  traveler in view, so it is the only figure it can honestly show next to
+   *  a pay row's deadline. */
+  costPerPersonUsd: number | null;
+  depositAmountUsd: number | null;
   /** Fires after a successful save, so the caller can invalidate its queries. */
   onSaved: () => void;
 }> = ({
@@ -109,6 +125,8 @@ export const ManageRequirementsSheet: React.FC<{
   requirements,
   isOperatorTrip,
   paymentMode,
+  costPerPersonUsd,
+  depositAmountUsd,
   onSaved,
 }) => {
   const insets = useSafeAreaInsets();
@@ -213,11 +231,26 @@ export const ManageRequirementsSheet: React.FC<{
   // Money rows are not toggled here. Turning off collection is a trip-level
   // decision (payment_mode), and deleting a pay row with payments against it
   // would strand ledger history pointing at nothing. So they only belong in
-  // this list at all when the trip is actually collecting money — an offline
-  // trip has no active pay rows to edit.
+  // this list at all when the trip is actually collecting money.
+  //
+  // `paymentMode === 'managed'` alone is NOT enough: the wizard publishes
+  // `deposit` only when an amount was entered, `balance` alone otherwise (the
+  // "leave the amount blank for one single payment" flow deposit's own copy
+  // advertises). Gating on mode only would show a working Deposit card — with
+  // real timing pills and a stepper — on a managed trip that never created a
+  // deposit row, and Save would silently no-op: `saveRequirementChanges`'s pay
+  // branch bails on `!row`. Requiring a real, ACTIVE row closes that, and
+  // closes the same gap for a row a `payment_mode` trigger has deactivated —
+  // unreachable today (nothing switches offline back to managed), but this
+  // guard does not depend on that staying true.
   const kinds = useMemo(
-    () => REQUIREMENT_ORDER.filter(k => !isPayKind(k) || paymentMode === 'managed'),
-    [paymentMode],
+    () =>
+      REQUIREMENT_ORDER.filter(
+        k =>
+          !isPayKind(k) ||
+          (paymentMode === 'managed' && requirements.some(r => r.kind === k && r.isActive)),
+      ),
+    [paymentMode, requirements],
   );
 
   const setKindTiming = useCallback(
@@ -319,11 +352,15 @@ export const ManageRequirementsSheet: React.FC<{
       // would ever clean it up.
       if (waiverFile && wantsWaiver) await publishWaiverPdf(tripId, waiverFile.uri);
 
-      // Pay kinds carry no toggle, so they are never in `on` — but a timing
-      // edit on one still has to reach `saveRequirementChanges`, or the
-      // stepper the operator just touched would silently not save. Every
-      // visible pay kind is included unconditionally; `kinds` already hid
-      // them entirely when the trip is offline.
+      // `on` already contains every pay kind visible here: `seedFrom` pushes
+      // any ACTIVE row it finds regardless of whether that kind has a toggle,
+      // and a pay kind only ever appears in `kinds` (so only ever gets
+      // rendered, so only ever gets edited) when its row is active — see the
+      // `kinds` guard above. This union is a defensive backstop, not the
+      // primary path: it makes a timing edit on a pay row reach
+      // `saveRequirementChanges` even if that "active row implies present in
+      // `on`" assumption ever stops holding. `!on.includes(k)` just avoids
+      // listing an already-present kind twice.
       const draftKinds = [...on, ...kinds.filter(k => isPayKind(k) && !on.includes(k))];
 
       await saveRequirementChanges(
@@ -356,6 +393,18 @@ export const ManageRequirementsSheet: React.FC<{
     });
   };
 
+  // The trip's DEFAULT price — never a traveler's, since no traveler is in
+  // view here. Mirrors `TravelerPrices` so `amountDue` can be reused as-is.
+  const payDefaults = useMemo(
+    () => ({ totalUsd: costPerPersonUsd, depositUsd: depositAmountUsd }),
+    [costPerPersonUsd, depositAmountUsd],
+  );
+
+  // Pay rows sort first (REQUIREMENT_ORDER), so on a paid trip they are the
+  // first thing an operator sees under this header — "Documents" reads like a
+  // mislabeled screen at that point.
+  const hasPayRows = kinds.some(isPayKind);
+
   return (
     <BottomSheetShell visible={visible} onClose={onClose}>
       {({ panHandlers }) => (
@@ -367,8 +416,12 @@ export const ManageRequirementsSheet: React.FC<{
         >
           <View {...panHandlers} style={styles.grabWrap}>
             <View style={styles.grabber} />
-            <Text style={styles.title}>Documents</Text>
-            <Text style={styles.sub}>What you ask travelers to send you</Text>
+            <Text style={styles.title}>{hasPayRows ? 'Documents & payments' : 'Documents'}</Text>
+            <Text style={styles.sub}>
+              {hasPayRows
+                ? 'What you ask travelers to send — and pay'
+                : 'What you ask travelers to send you'}
+            </Text>
           </View>
 
           <ScrollView
@@ -407,8 +460,12 @@ export const ManageRequirementsSheet: React.FC<{
                         !noToggle &&
                         (isOn ? styles.reqHeaderPressedOn : styles.reqHeaderPressed),
                     ]}
+                    // A pay row's header is not disabled — its timing controls
+                    // below still work — only the toggle press is a no-op, and
+                    // there is no toggle state left to announce once the role
+                    // is 'text' rather than 'checkbox'.
                     accessibilityRole={noToggle ? 'text' : 'checkbox'}
-                    accessibilityState={{ checked: isOn, disabled: locked || noToggle }}
+                    accessibilityState={noToggle ? undefined : { checked: isOn, disabled: locked }}
                   >
                     <View style={styles.reqIconWrap}>
                       {kind === 'passport' ? (
@@ -422,8 +479,22 @@ export const ManageRequirementsSheet: React.FC<{
                       <Text style={styles.reqSub}>
                         {locked
                           ? 'Only on operator trips. Change this trip to an organised trip to ask for it.'
-                          : c.operatorSub}
+                          : (noToggle && PAY_KIND_EDITOR_SUB[kind]) || c.operatorSub}
                       </Text>
+                      {/* The trip's DEFAULT amount — every other card here
+                          describes itself; a pay row asking to set a deadline
+                          with no figure in sight does not. Never a traveler's
+                          own amount: no traveler is in view on this sheet. */}
+                      {noToggle ? (
+                        <Text style={styles.reqAmount}>
+                          {(() => {
+                            const due = amountDue(kind as PayStep, payDefaults);
+                            return due != null
+                              ? formatExactUsd(due)
+                              : 'Set a price on the budget step to see the amount';
+                          })()}
+                        </Text>
+                      ) : null}
                     </View>
                     {locked ? (
                       <Ionicons name="lock-closed" size={16} color="#9A9A9A" style={styles.reqLock} />
@@ -684,6 +755,13 @@ const styles = StyleSheet.create({
     color: '#212121',
   },
   reqSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 17, color: '#7B7B7B' },
+  reqAmount: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0788B0',
+    marginTop: 2,
+  },
   reqCheck: {
     width: 22,
     height: 22,

@@ -86,6 +86,7 @@ import {
   resolveDeadlineDate,
   stepDeadline,
   isDeadlineAtEnd,
+  isPayKind,
   DEFAULT_TIMING,
   REQUIREMENT_CATALOG,
   REQUIREMENT_ORDER,
@@ -481,9 +482,7 @@ const REQ_ICON: Record<Exclude<RequirementKind, 'passport'>, any> = {
 // uq_group_trip_req_kind_per_trip). Either way createRequirements does one
 // insert of the whole batch, so the failure would silently drop every other
 // requirement too.
-const DOCUMENT_REQUIREMENT_ORDER = REQUIREMENT_ORDER.filter(
-  k => REQUIREMENT_CATALOG[k].reqType !== 'pay',
-);
+const DOCUMENT_REQUIREMENT_ORDER = REQUIREMENT_ORDER.filter(k => !isPayKind(k));
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const COLORS = {

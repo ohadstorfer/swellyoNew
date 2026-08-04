@@ -27,6 +27,7 @@ import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../../assets/images';
 import { formatPrice, isIsraeli } from '../../../utils/currency';
+import { isPayKind } from '../../../services/trips/tripDocumentsService';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -787,7 +788,7 @@ function formatDue(iso: string): string | null {
  * on a bill it can put a different number in front of the traveler than the
  * one on the Checkout page, off by up to ₪50 either way.
  */
-function formatExactUsd(usd: number): string {
+export function formatExactUsd(usd: number): string {
   const cents = Math.round(usd * 100);
   const whole = cents % 100 === 0;
   return `$${(cents / 100).toLocaleString('en-US', {
@@ -839,7 +840,7 @@ function statusFor(row: DocumentRow): { label: string; tone: 'accent' | 'muted' 
   }
   // "Add" is the wrong verb for money, and a pay row is never "in review" —
   // it is paid or it is not.
-  if (row.kind === 'deposit' || row.kind === 'balance') {
+  if (isPayKind(row.kind)) {
     return row.state === 'overdue'
       ? { label: 'Pay — late', tone: 'bad' }
       : { label: 'Pay', tone: 'accent' };

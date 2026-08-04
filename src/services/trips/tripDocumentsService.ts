@@ -621,6 +621,15 @@ export async function saveRequirementChanges(
       const timing = wanted.get(kind);
       const row = existing.find(r => r.kind === kind);
       if (!timing || !row) continue;
+      // Same short-circuit as the generic branch below: every save round
+      // trips every visible pay kind's current timing through `draftKinds`
+      // (see ManageRequirementsSheet), so without this an edit to ONE
+      // document toggle would still fire an UPDATE for both `deposit` and
+      // `balance` on every Save.
+      const unchanged =
+        row.skippable === timing.skippable &&
+        (!timing.skippable || row.daysBefore === Math.max(0, Math.round(timing.daysBefore)));
+      if (unchanged) continue;
       const { error } = await supabase
         .from('organized_trip_requirements')
         .update(timingColumns(timing))
