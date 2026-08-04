@@ -81,6 +81,17 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
   return a.every((x) => setB.has(x));
 }
 
+/** Drop any "Add your own" item with no title and no description before
+ *  writing — same predicate CreateTripFlowA's closeCustomSheet uses
+ *  (CreateTripFlowA.tsx:3126-3134) so tapping "Add an inclusion" and never
+ *  filling it in doesn't leave a blank object in price_inclusions.custom
+ *  forever (fix round 1, Finding 2). */
+function pruneBlankCustomInclusions(inc: PriceInclusions): PriceInclusions {
+  const custom = Array.isArray(inc.custom) ? inc.custom : [];
+  const pruned = custom.filter((c) => c.title.trim() || c.description?.trim());
+  return { ...inc, custom: pruned };
+}
+
 type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
 
 /**
@@ -309,10 +320,29 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   // Rows Tasks 6–12 haven't wired yet.
   const noop = () => {};
 
-  /** One place every row's save goes through: write, then refresh what the rest
-   *  of the app is showing. Alerts on failure and rethrows — EditFieldSheet and
-   *  the TripEditSheets both keep themselves open when onSave rejects, so the
-   *  operator's draft survives a failed write. */
+  /**
+   * Two helpers, two families — fix round 1, Finding 1.
+   *
+   * `EditFieldSheet.write()` (EditFieldSheet.tsx:76-86) already shows an error
+   * alert itself when its `onSave` throws. The `TripEditSheets` family
+   * (EditCoverSheet, EditTextSheet, EditDatesSheet, EditAccommodationSheet)
+   * does the opposite — their own onSave catch blocks are deliberately empty
+   * with the comment "onSave surfaces its own error alert"
+   * (TripEditSheets.tsx:184-185,274,415,517), so THEY depend on whatever they
+   * call to alert on failure.
+   *
+   * One shared write-and-rethrow helper used by both families would either
+   * alert twice (EditFieldSheet rows, if the helper alerts) or alert zero
+   * times (TripEditSheets rows, if it doesn't) — there's no single behavior
+   * that's correct for both. So there are two helpers, named for the family
+   * each is for, and every call site below picks the one that matches its
+   * sheet.
+   */
+
+  /** For the TripEditSheets family ONLY (Cover, Trip name, Description, About
+   *  you, When, Your stay). Alerts once on failure, then rethrows so the sheet
+   *  stays open with the draft intact. Do NOT wire an EditFieldSheet row to
+   *  this — see `saveField` below, which is what those need instead. */
   const save = useCallback(
     async (patch: UpdateGroupTripInput) => {
       try {
@@ -323,6 +353,20 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         showErrorAlert('Could not save', e, 'Please try again.');
         throw e;
       }
+    },
+    [tripId, queryClient],
+  );
+
+  /** For EditFieldSheet rows ONLY (Spots, Surf level, Boards, The wave, Age,
+   *  How it works, Vibe, Stay type, What's included). Writes, refreshes the
+   *  caches, and rethrows on failure with NO alert of its own —
+   *  EditFieldSheet.write() already shows one. Calling `save` above from one
+   *  of these rows would show that alert AND this one, stacked. */
+  const saveField = useCallback(
+    async (patch: UpdateGroupTripInput) => {
+      await updateOperatorTrip(tripId, patch);
+      await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+      queryClient.invalidateQueries({ queryKey: tripsKeys.all });
     },
     [tripId, queryClient],
   );
@@ -677,7 +721,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         // is dirty-gated (EditFieldSheet's default JSON compare) and writes
         // max_participants alone, so a re-save of an untouched value never
         // reaches the trigger in the first place.
-        onSave={(next) => save({ max_participants: next })}
+        onSave={(next) => saveField({ max_participants: next })}
         validate={(next) => validateSpots(next, participantCount)}
       >
         {(draft, setDraft) => (
@@ -726,7 +770,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Surf level"
         initial={trip.target_surf_levels}
         onClose={close}
-        onSave={(next) => save({ target_surf_levels: next })}
+        onSave={(next) => saveField({ target_surf_levels: next })}
         validate={(next) => (next.length === 0 ? 'Pick at least one surf level.' : null)}
         isDirty={(draft, initial) => !sameStringSet(draft, initial)}
       >
@@ -746,7 +790,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Boards"
         initial={trip.target_surf_styles}
         onClose={close}
-        onSave={(next) => save({ target_surf_styles: next.length ? next : ['all'] })}
+        onSave={(next) => saveField({ target_surf_styles: next.length ? next : ['all'] })}
         isDirty={(draft, initial) => !sameStringSet(draft, initial)}
       >
         {(draft, setDraft) => (
@@ -774,7 +818,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           sizeMax: trip.wave_size_max ?? 8,
         }}
         onClose={close}
-        onSave={(next) => save({
+        onSave={(next) => saveField({
           wave_shapes: next.shape ? [next.shape] : null,
           wave_size_min: next.sizeMin,
           wave_size_max: next.sizeMax,
@@ -797,7 +841,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Age"
         initial={{ ageMin: trip.age_min, ageMax: trip.age_max }}
         onClose={close}
-        onSave={(next) => save({ age_min: next.ageMin, age_max: next.ageMax })}
+        onSave={(next) => saveField({ age_min: next.ageMin, age_max: next.ageMax })}
         validate={(next) =>
           validateAgeRange(next.ageMin, next.ageMax, AGE_WINDOW_BY_STYLE[trip.hosting_style])
         }
@@ -831,7 +875,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="How it works"
         initial={(trip.trip_structure ?? []) as TripStructureSlug[]}
         onClose={close}
-        onSave={(next) => save({ trip_structure: next.length ? next : null })}
+        onSave={(next) => saveField({ trip_structure: next.length ? next : null })}
         isDirty={(draft, initial) => !sameStringSet(draft, initial)}
       >
         {(draft, setDraft) => (
@@ -848,7 +892,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Vibe"
         initial={(trip.trip_vibes ?? []) as TripVibeSlug[]}
         onClose={close}
-        onSave={(next) => save({ trip_vibes: next.length ? next : null })}
+        onSave={(next) => saveField({ trip_vibes: next.length ? next : null })}
       >
         {(draft, setDraft) => (
           <VibeSheetContent selected={draft} onChange={setDraft} />
@@ -864,7 +908,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Stay type"
         initial={(trip.accommodation_type?.[0] ?? null) as AccommodationKind | null}
         onClose={close}
-        onSave={(next) => save({ accommodation_type: next ? [next] : null })}
+        onSave={(next) => saveField({ accommodation_type: next ? [next] : null })}
         validate={(next) => (next === null ? 'Pick an accommodation type.' : null)}
       >
         {(draft, setDraft) => (
@@ -919,16 +963,21 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
       {/* price_inclusions has nothing to do with the price number — its own
           sheet, own row. Empty inclusions is a legitimate answer, so no
-          `validate` here. normalizePriceInclusions collapses an
-          all-untouched `{}` back to null so an operator who opens and closes
-          this sheet without picking anything doesn't leave a stray `{}` in
-          the column. */}
+          `validate` here. pruneBlankCustomInclusions drops any never-filled-in
+          "Add your own" item (fix round 1, Finding 2) before
+          normalizePriceInclusions collapses an all-untouched `{}` back to
+          null, so an operator who opens and closes this sheet without picking
+          anything — or adds a blank custom row and saves anyway — doesn't
+          leave junk behind in the column. Uses saveField, not save — this is
+          an EditFieldSheet row (see the two-helper note above `save`). */}
       <EditFieldSheet<PriceInclusions>
         visible={sheet === 'includes'}
         title="What's included"
         initial={includesInitial}
         onClose={close}
-        onSave={(next) => save({ price_inclusions: normalizePriceInclusions(next) })}
+        onSave={(next) => saveField({
+          price_inclusions: normalizePriceInclusions(pruneBlankCustomInclusions(next)),
+        })}
       >
         {(draft, setDraft) => (
           <IncludesEditorContent value={draft} onChange={setDraft} />
