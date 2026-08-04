@@ -2197,6 +2197,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           startDateISO={trip?.start_date ?? null}
           requirements={requirementsQuery.data ?? NO_REQUIREMENTS}
           isOperatorTrip={!!isOperatorTrip}
+          paymentMode={trip?.payment_mode ?? 'offline'}
           onSaved={handleRequirementsSaved}
         />
       )}

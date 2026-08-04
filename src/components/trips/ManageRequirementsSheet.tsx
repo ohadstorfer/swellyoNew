@@ -50,6 +50,7 @@ import {
   REQUIREMENT_ORDER,
   fetchWaiver,
   isDeadlineAtEnd,
+  isPayKind,
   publishWaiverPdf,
   resolveDeadlineDate,
   saveRequirementChanges,
@@ -92,6 +93,12 @@ export const ManageRequirementsSheet: React.FC<{
   /** `hosting_style === 'C'`. Only an operator trip may CREATE a passport
    *  requirement — see `passportBlocked`. */
   isOperatorTrip: boolean;
+  /** `trip?.payment_mode ?? 'offline'`. Pay rows (`deposit`, `balance`) only
+   *  show here when the trip actually collects money — an offline trip has no
+   *  active pay rows to edit, and showing the cards anyway would invite an
+   *  operator to "turn one on" through a sheet that deliberately has no
+   *  on/off toggle for them. See `isPayKind`. */
+  paymentMode: 'offline' | 'managed';
   /** Fires after a successful save, so the caller can invalidate its queries. */
   onSaved: () => void;
 }> = ({
@@ -101,6 +108,7 @@ export const ManageRequirementsSheet: React.FC<{
   startDateISO,
   requirements,
   isOperatorTrip,
+  paymentMode,
   onSaved,
 }) => {
   const insets = useSafeAreaInsets();
@@ -202,6 +210,16 @@ export const ManageRequirementsSheet: React.FC<{
   const passportBlocked =
     !isOperatorTrip && !requirements.some(r => r.kind === 'passport');
 
+  // Money rows are not toggled here. Turning off collection is a trip-level
+  // decision (payment_mode), and deleting a pay row with payments against it
+  // would strand ledger history pointing at nothing. So they only belong in
+  // this list at all when the trip is actually collecting money — an offline
+  // trip has no active pay rows to edit.
+  const kinds = useMemo(
+    () => REQUIREMENT_ORDER.filter(k => !isPayKind(k) || paymentMode === 'managed'),
+    [paymentMode],
+  );
+
   const setKindTiming = useCallback(
     (kind: RequirementKind, patch: Partial<RequirementTiming>) => {
       setDirty(true);
@@ -301,10 +319,17 @@ export const ManageRequirementsSheet: React.FC<{
       // would ever clean it up.
       if (waiverFile && wantsWaiver) await publishWaiverPdf(tripId, waiverFile.uri);
 
+      // Pay kinds carry no toggle, so they are never in `on` — but a timing
+      // edit on one still has to reach `saveRequirementChanges`, or the
+      // stepper the operator just touched would silently not save. Every
+      // visible pay kind is included unconditionally; `kinds` already hid
+      // them entirely when the trip is offline.
+      const draftKinds = [...on, ...kinds.filter(k => isPayKind(k) && !on.includes(k))];
+
       await saveRequirementChanges(
         tripId,
         requirements,
-        on.map(kind => ({
+        draftKinds.map(kind => ({
           kind,
           timing: timing[kind] ?? DEFAULT_TIMING[kind],
         })),
@@ -317,7 +342,7 @@ export const ManageRequirementsSheet: React.FC<{
     } finally {
       setSaving(false);
     }
-  }, [saving, on, timing, waiverFile, waiverOnFile, tripId, requirements, onSaved, onClose]);
+  }, [saving, on, kinds, timing, waiverFile, waiverOnFile, tripId, requirements, onSaved, onClose]);
 
   // The real date a deadline lands on. Months-only trips have no exact start
   // date, so there is nothing honest to show — say so instead of inventing one.
@@ -355,9 +380,13 @@ export const ManageRequirementsSheet: React.FC<{
             // three exist — an operator would conclude visa and flights are not
             // offered. Cosmetics lose to discoverability here.
           >
-            {REQUIREMENT_ORDER.map(kind => {
+            {kinds.map(kind => {
               const c = REQUIREMENT_CATALOG[kind];
-              const isOn = on.includes(kind);
+              // Pay rows have no toggle to switch off, so they read as
+              // permanently "on" — their card always shows the timing
+              // controls, there is just nothing to tap in the header.
+              const noToggle = isPayKind(kind);
+              const isOn = noToggle || on.includes(kind);
               const t = timing[kind] ?? DEFAULT_TIMING[kind];
               const locked = kind === 'passport' && passportBlocked;
               return (
@@ -367,7 +396,7 @@ export const ManageRequirementsSheet: React.FC<{
                 >
                   <Pressable
                     onPress={() => toggle(kind)}
-                    disabled={locked}
+                    disabled={locked || noToggle}
                     // Tint on press, not scale: the border belongs to the parent
                     // card, so scaling this row would read as the content
                     // shrinking inside a fixed frame.
@@ -375,10 +404,11 @@ export const ManageRequirementsSheet: React.FC<{
                       styles.reqHeader,
                       pressed &&
                         !locked &&
+                        !noToggle &&
                         (isOn ? styles.reqHeaderPressedOn : styles.reqHeaderPressed),
                     ]}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: isOn, disabled: locked }}
+                    accessibilityRole={noToggle ? 'text' : 'checkbox'}
+                    accessibilityState={{ checked: isOn, disabled: locked || noToggle }}
                   >
                     <View style={styles.reqIconWrap}>
                       {kind === 'passport' ? (
@@ -397,7 +427,7 @@ export const ManageRequirementsSheet: React.FC<{
                     </View>
                     {locked ? (
                       <Ionicons name="lock-closed" size={16} color="#9A9A9A" style={styles.reqLock} />
-                    ) : (
+                    ) : noToggle ? null : (
                       <View style={[styles.reqCheck, isOn && styles.reqCheckOn]}>
                         {isOn ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
                       </View>

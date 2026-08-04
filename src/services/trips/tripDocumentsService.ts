@@ -177,6 +177,14 @@ export const REQUIREMENT_ORDER: RequirementKind[] = [
   'flights',
 ];
 
+/** The reliable test for "is this a money row" — reads the catalog rather than
+ *  hardcoding `deposit`/`balance` strings, so there is exactly one place that
+ *  knows which kinds are pay kinds. `deposit` and `balance` are created only at
+ *  publish and never through this editor: no insert, no on/off toggle, no
+ *  delete — see `saveRequirementChanges`. */
+export const isPayKind = (kind: string): boolean =>
+  REQUIREMENT_CATALOG[kind as RequirementKind]?.reqType === 'pay';
+
 /** What the traveler must do for a requirement row, or null for kinds we do not
  *  handle (a `custom` item, or a `pay` requirement once payments land). */
 export function actionForRequirement(r: {
@@ -576,6 +584,10 @@ export type RequirementDraft = {
  *
  * Kinds outside `REQUIREMENT_CATALOG` (a hand-written `custom` row) are left
  * completely alone — the editor cannot show them, so it must not delete them.
+ *
+ * Pay rows (`deposit`, `balance`) are a fourth case, handled entirely outside
+ * the three above: they are created once, at publish, and this function may
+ * only UPDATE their timing — never insert, never remove. See the guards below.
  */
 export async function saveRequirementChanges(
   tripId: string,
@@ -584,6 +596,10 @@ export async function saveRequirementChanges(
 ): Promise<void> {
   const byKind = new Map<string, EditableRequirement>();
   for (const r of existing) {
+    // Pay rows are created at publish; only their TIMING is editable here, and
+    // they never appear in the draft's on/off list. Without this `continue`,
+    // the diff below reads them as "turned off" and deletes them on every save.
+    if (isPayKind(r.kind)) continue;
     if (!REQUIREMENT_CATALOG[r.kind as RequirementKind]) continue;
     // Two rows of the same kind should not exist, but if one ever does, the
     // active one is the one the travelers are looking at.
@@ -595,6 +611,24 @@ export async function saveRequirementChanges(
   const inserts: any[] = [];
 
   for (const kind of REQUIREMENT_ORDER) {
+    if (isPayKind(kind)) {
+      // Timing only. The row already exists (created at publish) and must
+      // never be re-created: `byKind` excludes it above, so falling through to
+      // the generic insert/update/remove logic below would either try to
+      // INSERT a duplicate — 23505 on `uq_organized_trip_req_kind_per_trip` —
+      // or, if `wanted` had no entry, silently do nothing. This is the only
+      // path that may touch a pay row, and it is always an UPDATE.
+      const timing = wanted.get(kind);
+      const row = existing.find(r => r.kind === kind);
+      if (!timing || !row) continue;
+      const { error } = await supabase
+        .from('organized_trip_requirements')
+        .update(timingColumns(timing))
+        .eq('id', row.id);
+      if (error) throw error;
+      continue;
+    }
+
     const row = byKind.get(kind);
     const timing = wanted.get(kind);
 
