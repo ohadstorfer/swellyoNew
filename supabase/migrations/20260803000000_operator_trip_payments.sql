@@ -9,7 +9,9 @@
 --   C1 — freeze_traveler_price() made authoritative against non-host writes.
 --   C2 — payout identity moved off `users` into operator_payout_accounts.
 --   I1 — ledger amount sign now matches event_type; pay_state ignores 'failed'.
---   I2 — dedup index on (provider, provider_object_id, event_type).
+--   I2 — dedup index on (provider, provider_object_id, event_type) --
+--        scope corrected in round 4, see below; it originally also covered
+--        'refunded' rows and blocked legitimate second partial refunds.
 --   I4 — authenticated no longer has execute on either new/replaced RPC.
 --   I5 — trip-level deposit cannot exceed price; a balance that would go
 --        negative returns NULL (unknown), not a floored 0 -- see round 2 below.
@@ -29,6 +31,12 @@
 -- Round 3 (2026-08-03): comment-only reconciliation -- two comments below
 -- still described the round-1 "floored at zero" behaviour after round 2
 -- deleted it. No SQL changed in this round.
+--
+-- Round 4 (2026-08-03): uq_otpe_object (section 5) rescoped to
+-- event_type = 'paid' only. It previously also covered 'refunded' rows,
+-- which blocked a legitimate second partial refund against the same
+-- payment_intent and turned it into a permanent-ish webhook retry storm.
+-- See the comment at the index itself for the full reasoning.
 
 -- ══════════════════════════════════════════════════════════════════
 -- 1. Operator payout identity — its own table, not columns on `users`
@@ -238,9 +246,33 @@ create unique index if not exists uq_otpe_provider_event
 -- not stop two different Stripe event ids describing the same underlying
 -- charge/refund object, which would double-count. Table is still empty, so
 -- this is free to add now.
-create unique index if not exists uq_otpe_object
+--
+-- Round 4 correction: scoped to event_type = 'paid' only. 'paid' and
+-- 'refunded' are NOT the same shape of risk here and must not share this
+-- index. A charge/payment_intent is charged once, so a second 'paid' row
+-- against the same provider_object_id really is a duplicate (two Stripe
+-- event ids describing the same charge) and must be refused.
+-- charge.refunded is different: it fires once per refund and carries a
+-- CUMULATIVE amount_refunded, so the webhook records each refund as a
+-- DELTA against what is already stored -- meaning every partial refund
+-- against the same payment_intent legitimately shares
+-- (provider, provider_object_id, event_type = 'refunded'). Under the
+-- original unscoped predicate, a second partial refund's key collided with
+-- the first, the insert raised 23505 (not a redelivery -- a real, distinct
+-- row), the webhook does not swallow 23505 (it isn't in the permanent-error
+-- list, correctly, since this is not the redelivery case
+-- uq_otpe_provider_event exists for), and Stripe retried the same doomed
+-- delta on backoff for about three days. Net effect: the refund never
+-- reached the ledger AND produced a retry storm. Refunds don't need this
+-- index for correctness anyway -- uq_otpe_provider_event already makes a
+-- redelivered refund event a no-op, and the delta arithmetic sums correctly
+-- across any number of legitimate partial refunds. Drop + recreate, not
+-- `if not exists`: this migration is re-runnable, and an existing index
+-- with the old (wrong) predicate would otherwise silently survive a rerun.
+drop index if exists public.uq_otpe_object;
+create unique index uq_otpe_object
   on public.organized_trip_payment_events (provider, provider_object_id, event_type)
-  where provider_object_id is not null;
+  where event_type = 'paid' and provider_object_id is not null;
 
 create index if not exists idx_otpe_lookup
   on public.organized_trip_payment_events (trip_id, user_id, requirement_id);

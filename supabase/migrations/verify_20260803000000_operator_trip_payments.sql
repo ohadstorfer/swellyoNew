@@ -56,6 +56,15 @@
 --     are real rows in prod (currently exactly 2 `hosting_style = 'C'`
 --     trips); an unordered v_trip and an `order by id offset 1` v_trip2
 --     could otherwise land on the same row.
+--
+-- Round-4 fix (2026-08-03): uq_otpe_object rescoped to `event_type = 'paid'`
+-- only (was unscoped, so it also covered 'refunded' rows and blocked a
+-- legitimate second partial refund against the same payment_intent -- see
+-- the comment at the index below and in the real migration for the full
+-- webhook-retry-storm reasoning). New assertions: a paid row, then two
+-- distinct partial refunds against the same provider_object_id, both must
+-- insert (the second is exactly what the old predicate blocked), and the
+-- summed ledger balance must be correct.
 
 begin;
 
@@ -203,9 +212,18 @@ create table if not exists public.organized_trip_payment_events (
 create unique index if not exists uq_otpe_provider_event
   on public.organized_trip_payment_events (provider, provider_event_id);
 
-create unique index if not exists uq_otpe_object
+-- Round 4: scoped to event_type = 'paid' only -- see the matching comment
+-- in the real migration for why 'refunded' must not share this index
+-- (cumulative charge.refunded amounts are recorded as deltas, so a
+-- legitimate second partial refund shares the same
+-- (provider, provider_object_id, event_type = 'refunded') key on purpose).
+-- `drop index if exists` + unconditional `create` (not `if not exists`),
+-- matching the real migration: this file is re-runnable and an index left
+-- over from an earlier run with the old predicate would otherwise survive.
+drop index if exists public.uq_otpe_object;
+create unique index uq_otpe_object
   on public.organized_trip_payment_events (provider, provider_object_id, event_type)
-  where provider_object_id is not null;
+  where event_type = 'paid' and provider_object_id is not null;
 
 create index if not exists idx_otpe_lookup
   on public.organized_trip_payment_events (trip_id, user_id, requirement_id);
@@ -477,6 +495,62 @@ begin
   step := 'state after refund (expect not_started)';
   if v_state = 'not_started' then value := 'OK: ' || v_state;
   else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
+
+  -- ── Round 4: uq_otpe_object must not block a second partial refund ────
+  -- charge.refunded fires once per Stripe refund and carries a CUMULATIVE
+  -- amount_refunded, so the webhook records each one as a DELTA -- every
+  -- partial refund against the same payment_intent legitimately shares
+  -- (provider, provider_object_id, event_type = 'refunded'). Under the
+  -- round-1 predicate (no event_type restriction) the second partial
+  -- refund's key collided with the first and the insert raised 23505: a
+  -- real row, not a Stripe redelivery, permanently unwritable, and (since
+  -- 23505 isn't in the webhook's permanent-error list) a ~3-day retry
+  -- storm recomputing the same doomed delta. This is the regression this
+  -- round exists to prevent: a paid row, then two distinct partial refunds
+  -- against the same payment_intent -- both must insert, and the summed
+  -- ledger balance must be correct.
+  insert into public.organized_trip_payment_events
+    (trip_id, user_id, requirement_id, provider_event_id, provider_object_id, event_type, amount_usd)
+  values (v_trip, v_user, v_req, 'evt_test_3', 'pi_test_1', 'paid', 1000);
+
+  begin
+    insert into public.organized_trip_payment_events
+      (trip_id, user_id, requirement_id, provider_event_id, provider_object_id, event_type, amount_usd)
+    values (v_trip, v_user, v_req, 'evt_test_4', 'pi_test_1', 'refunded', -300);
+    step := 'I2: first partial refund against pi_test_1 inserted';
+    value := 'OK: inserted';
+  exception when unique_violation then
+    step := 'I2: first partial refund against pi_test_1 inserted';
+    value := 'FAIL: hit unique_violation (' || sqlerrm || ')';
+  end;
+  return next;
+
+  begin
+    insert into public.organized_trip_payment_events
+      (trip_id, user_id, requirement_id, provider_event_id, provider_object_id, event_type, amount_usd)
+    values (v_trip, v_user, v_req, 'evt_test_5', 'pi_test_1', 'refunded', -200);
+    -- This is the exact insert the round-1 predicate blocked: same
+    -- (provider, provider_object_id='pi_test_1', event_type='refunded') as
+    -- evt_test_4 above, distinct provider_event_id, distinct amount.
+    step := 'I2: second partial refund, same pi_test_1, distinct event id (old predicate blocked this)';
+    value := 'OK: inserted';
+  exception when unique_violation then
+    step := 'I2: second partial refund, same pi_test_1, distinct event id (old predicate blocked this)';
+    value := 'FAIL: hit unique_violation (' || sqlerrm || ')';
+  end;
+  return next;
+
+  -- Raw ledger sum for (v_trip, v_user, v_req): +500 (evt_test_1 paid)
+  -- -500 (evt_test_2 refund) +1000 (evt_test_3 paid) -300 (evt_test_4)
+  -- -200 (evt_test_5) = 500.
+  select coalesce(sum(amount_usd), 0) into v_due
+    from public.organized_trip_payment_events
+   where trip_id = v_trip and user_id = v_user and requirement_id = v_req;
+
+  step := 'I2: summed ledger balance after paid 1000 + 2 partial refunds (expect 500)';
+  if v_due = 500 then value := 'OK: ' || v_due;
+  else value := 'FAIL: ' || coalesce(v_due::text, 'null'); end if;
   return next;
 
   -- ── Guard rails ──────────────────────────────────────────────────────
