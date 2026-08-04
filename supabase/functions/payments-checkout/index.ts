@@ -27,14 +27,31 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function stripe(path: string, params: Record<string, string>) {
+/**
+ * `idempotencyKey`, when given, is sent as Stripe's `Idempotency-Key` header —
+ * a retried POST (network blip, double tap on "pay") replays the cached
+ * response instead of minting a second Checkout Session.
+ */
+async function stripe(path: string, params: Record<string, string>, idempotencyKey?: string) {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: new URLSearchParams(params).toString(),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body?.error?.message ?? `Stripe ${path} failed`);
+  return body;
+}
+
+async function stripeGet(path: string) {
+  const res = await fetch(`https://api.stripe.com/v1/${path}`, {
+    headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
   });
   const body = await res.json();
   if (!res.ok) throw new Error(body?.error?.message ?? `Stripe ${path} failed`);
@@ -50,6 +67,14 @@ const feeCents = (total: number, bps: number) =>
 serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
+  // `Deno.env.get(...)!` only asserts a type at compile time — at runtime a
+  // missing secret is `undefined` and every Stripe call below would fail with
+  // a confusing 401 from Stripe instead of a clear error here.
+  if (!STRIPE_SECRET_KEY) {
+    console.error('[payments-checkout] STRIPE_SECRET_KEY is not set');
+    return json({ error: 'Stripe is not configured' }, 500);
+  }
+
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -60,7 +85,13 @@ serve(async req => {
     if (userErr || !userData?.user) return json({ error: 'Not signed in' }, 401);
     const userId = userData.user.id;
 
-    const { requirementId, returnUrl } = await req.json();
+    let body: { requirementId?: string; returnUrl?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return json({ error: 'Invalid JSON body' }, 400);
+    }
+    const { requirementId, returnUrl } = body;
     if (typeof requirementId !== 'string') return json({ error: 'requirementId required' }, 400);
     if (typeof returnUrl !== 'string' || !returnUrl.startsWith('https://')) {
       return json({ error: 'returnUrl must be an https URL' }, 400);
@@ -133,29 +164,54 @@ serve(async req => {
     const outstanding = Math.max(0, due - paid);
     if (outstanding <= 0) return json({ error: 'Already paid' }, 400);
 
+    // I9: the ledger only moves once the webhook fires, so two checkouts
+    // opened back to back both compute the full outstanding amount and both
+    // could be paid. Stripe's list endpoint has no server-side metadata
+    // filter, so list recent OPEN sessions (not completed, not expired) and
+    // match client-side — cheap at today's volume. If that stops being true,
+    // track in-flight sessions in our own table instead of Stripe's.
+    const openSessions = await stripeGet('checkout/sessions?status=open&limit=100');
+    const existing = (openSessions.data ?? []).find(
+      (sess: { metadata?: Record<string, string>; url?: string }) =>
+        sess.metadata?.trip_id === req_.trip_id &&
+        sess.metadata?.user_id === userId &&
+        sess.metadata?.requirement_id === requirementId,
+    );
+    if (existing?.url) return json({ url: existing.url });
+
     const amountCents = toCents(outstanding);
-    const commission = feeCents(amountCents, host.commission_bps ?? 1200);
+    // commission_bps is `not null default 1200` in the database — the ?? 1200
+    // fallback this used to have was dead code, and if it had ever fired it
+    // would have applied a fee the database itself disagrees with.
+    const commission = feeCents(amountCents, host.commission_bps);
 
     // ── 5. Destination charge: the operator is paid, our fee is split off.
-    const session = await stripe('checkout/sessions', {
-      mode: 'payment',
-      'line_items[0][quantity]': '1',
-      'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][unit_amount]': String(amountCents),
-      'line_items[0][price_data][product_data][name]': `${trip.title} — ${req_.title}`,
-      'payment_intent_data[application_fee_amount]': String(commission),
-      'payment_intent_data[transfer_data][destination]': host.stripe_account_id,
-      // The webhook reads these back. They are the only link from a Stripe
-      // event to a row in our database.
-      'payment_intent_data[metadata][trip_id]': req_.trip_id,
-      'payment_intent_data[metadata][user_id]': userId,
-      'payment_intent_data[metadata][requirement_id]': requirementId,
-      'metadata[trip_id]': req_.trip_id,
-      'metadata[user_id]': userId,
-      'metadata[requirement_id]': requirementId,
-      success_url: returnUrl,
-      cancel_url: returnUrl,
-    });
+    //      Idempotency key covers a retried request for the same requirement
+    //      at the same amount; the openSessions lookup above covers a second,
+    //      independent request (no shared retry) racing the first.
+    const session = await stripe(
+      'checkout/sessions',
+      {
+        mode: 'payment',
+        'line_items[0][quantity]': '1',
+        'line_items[0][price_data][currency]': 'usd',
+        'line_items[0][price_data][unit_amount]': String(amountCents),
+        'line_items[0][price_data][product_data][name]': `${trip.title} — ${req_.title}`,
+        'payment_intent_data[application_fee_amount]': String(commission),
+        'payment_intent_data[transfer_data][destination]': host.stripe_account_id,
+        // The webhook reads these back. They are the only link from a Stripe
+        // event to a row in our database.
+        'payment_intent_data[metadata][trip_id]': req_.trip_id,
+        'payment_intent_data[metadata][user_id]': userId,
+        'payment_intent_data[metadata][requirement_id]': requirementId,
+        'metadata[trip_id]': req_.trip_id,
+        'metadata[user_id]': userId,
+        'metadata[requirement_id]': requirementId,
+        success_url: returnUrl,
+        cancel_url: returnUrl,
+      },
+      `checkout:${userId}:${requirementId}:${amountCents}`,
+    );
 
     return json({ url: session.url });
   } catch (e) {
