@@ -470,6 +470,20 @@ const REQ_ICON: Record<Exclude<RequirementKind, 'passport'>, any> = {
   deposit: 'cash-outline',
   balance: 'card-outline',
 };
+
+// Requirement step toggles are documents/acknowledgements only. `deposit` and
+// `balance` are configured on the budget step (payment mode + deposit amount),
+// never here — REQUIREMENT_ORDER includes them for the catalog/timing/sort_order
+// machinery, but rendering them as a togglable card here would let an operator
+// create a `req_type = 'pay'` row with no payment_mode backing it
+// (trg_pay_requires_managed_trip raises), or a duplicate 'deposit'/'balance'
+// kind alongside the one the budget step already adds (23505 on
+// uq_group_trip_req_kind_per_trip). Either way createRequirements does one
+// insert of the whole batch, so the failure would silently drop every other
+// requirement too.
+const DOCUMENT_REQUIREMENT_ORDER = REQUIREMENT_ORDER.filter(
+  k => REQUIREMENT_CATALOG[k].reqType !== 'pay',
+);
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 
 const COLORS = {
@@ -1747,9 +1761,18 @@ export default function CreateTripFlowA({
               return false;
             }
             const depositPrice = state.costPerPerson ? parseInt(state.costPerPerson, 10) : 0;
-            const dep = state.depositAmount ? parseInt(state.depositAmount, 10) : 0;
-            if (dep > depositPrice) {
-              setError('deposit', 'The deposit cannot be more than the price.');
+            // "0" (or anything <= 0) is not a real deposit — it means "no
+            // deposit," same as leaving the field blank — so it never reaches
+            // the >= check below. Mirrors the rawDeposit >0 filter used at
+            // save time; a value that passes validation here but gets
+            // silently nulled out at save would be a confusing round trip.
+            const rawDep = state.depositAmount ? parseInt(state.depositAmount, 10) : 0;
+            const dep = rawDep > 0 ? rawDep : 0;
+            // >= , not just >: a deposit equal to the full price would still
+            // create a real 'balance' row worth exactly 0, which is the same
+            // "reads as already paid" trap as a negative balance.
+            if (dep > 0 && dep >= depositPrice) {
+              setError('deposit', 'The deposit must be less than the price.');
               return false;
             }
           }
@@ -1804,6 +1827,7 @@ export default function CreateTripFlowA({
     audienceDone,
     clearErrors,
     setError,
+    stripeReady,
   ]);
 
   // -----------------------------------------------------------------------
@@ -1932,10 +1956,17 @@ export default function CreateTripFlowA({
       // Same USD-canonical rule as cost_per_person above — deposit_amount is
       // never stored in the operator's input currency, or a ₪ deposit would be
       // charged through Stripe (USD-only) as if it were dollars.
-      const rawDeposit =
+      //
+      // "0" (or anything <= 0) is treated exactly like blank: no deposit row,
+      // just a single balance row for the full price. A typed "0" is not a
+      // deliberate zero-value deposit — the field's own catalog copy says
+      // "leave blank for one single payment," so a stray zero must resolve to
+      // that same outcome, not to a real (zero-value) deposit row.
+      const rawDepositInput =
         isFixedFlow && state.paymentMode === 'managed' && state.depositAmount
           ? parseInt(state.depositAmount, 10)
           : null;
+      const rawDeposit = rawDepositInput != null && rawDepositInput > 0 ? rawDepositInput : null;
       const depositAmountUsd =
         rawDeposit == null
           ? null
@@ -1955,6 +1986,18 @@ export default function CreateTripFlowA({
         : null;
 
       if (editMode && initialTrip) {
+        // Edit mode cannot turn payment collection ON. The Requirements step
+        // (where the deposit/balance rows get created) is create-only, so a
+        // switch from 'offline' to 'managed' here would write a trip that
+        // claims to collect money with no pay requirement rows behind it —
+        // latent today because onEditTrip is never invoked, but a real trap
+        // the moment edit mode ships. Turning it back OFF is always safe:
+        // trg_deactivate_pay_rows_when_offline deactivates the existing rows.
+        // "Already managed" (rows already exist) is the only case allowed to
+        // pass the operator's current toggle through unchanged.
+        const editPaymentMode: 'offline' | 'managed' =
+          isFixedFlow && initialTrip.payment_mode === 'managed' ? state.paymentMode : 'offline';
+        const editDepositAmount = editPaymentMode === 'managed' ? depositAmountUsd : null;
         const editable: UpdateGroupTripInput = {
           title: state.title.trim() || null,
           description: descriptionText,
@@ -1987,9 +2030,8 @@ export default function CreateTripFlowA({
           budget_tier: state.manualBudget ? null : state.budgetTier,
           cost_per_person: fixedPrice,
           price_inclusions: priceInclusions,
-          payment_mode: isFixedFlow ? state.paymentMode : 'offline',
-          deposit_amount:
-            isFixedFlow && state.paymentMode === 'managed' ? depositAmountUsd : null,
+          payment_mode: editPaymentMode,
+          deposit_amount: editDepositAmount,
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           wave_shapes: waveShapesArray,
@@ -2071,29 +2113,43 @@ export default function CreateTripFlowA({
         // throwing.
         //
         // Money rows are added to whatever documents the operator picked. The
-        // deposit row only exists when there is a deposit — a trip taking one
-        // single payment gets a balance row for the full price, never a
-        // zero-value deposit row.
+        // deposit row only exists when there is a real (> 0) deposit — a trip
+        // taking one single payment, or one with a "0" typed and cleared by
+        // the rawDeposit >0 filter above, gets a balance row for the full
+        // price, never a zero-value deposit row.
         const payKinds: RequirementKind[] =
           state.paymentMode === 'managed'
-            ? state.depositAmount
+            ? rawDeposit != null
               ? ['deposit', 'balance']
               : ['balance']
             : [];
-        if (isFixedFlow && (payKinds.length > 0 || state.requirementKinds.length > 0)) {
+        // Belt-and-suspenders: DOCUMENT_REQUIREMENT_ORDER already keeps
+        // 'deposit'/'balance' out of state.requirementKinds (they're not
+        // offered as toggles), but a duplicate kind in one insert batch is a
+        // 23505 that silently drops every OTHER requirement in the same
+        // batch — not worth trusting a single upstream filter to prevent.
+        const allKinds = Array.from(new Set([...payKinds, ...state.requirementKinds]));
+        if (isFixedFlow && allKinds.length > 0) {
           try {
             // The waiver DOCUMENT goes first. A waiver requirement whose
             // document does not exist can never be satisfied.
             if (state.requirementKinds.includes('waiver') && state.waiverFile) {
               await publishWaiverPdf(trip.id, state.waiverFile.uri);
             }
-            await createRequirements(
-              trip.id,
-              [...payKinds, ...state.requirementKinds],
-              state.requirementTiming,
-            );
+            await createRequirements(trip.id, allKinds, state.requirementTiming);
           } catch (reqErr) {
             console.warn('[CreateTripFlowA] requirement insert failed:', reqErr);
+            // A single insert — the DB rejects the WHOLE batch on any one bad
+            // row. Silence here used to be tolerable when the worst case was
+            // a missing insurance checkbox; now the same batch can carry the
+            // deposit/balance rows, so a swallowed failure can mean a
+            // "managed" trip published with literally no way to collect
+            // payment. The trip itself is already published — surface this
+            // rather than let the operator believe everything saved.
+            Alert.alert(
+              'Requirements not saved',
+              "Your trip published, but the traveler requirements — including payment collection, if you turned it on — could not be saved. Open the trip and add them from Edit.",
+            );
           }
         }
 
@@ -2294,7 +2350,7 @@ export default function CreateTripFlowA({
 
     return (
       <View style={localStyles.reqStack}>
-        {REQUIREMENT_ORDER.map(kind => {
+        {DOCUMENT_REQUIREMENT_ORDER.map(kind => {
           const c = REQUIREMENT_CATALOG[kind];
           const on = state.requirementKinds.includes(kind);
           const timing = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
@@ -3138,12 +3194,16 @@ export default function CreateTripFlowA({
                   state.paymentMode === 'offline' && localStyles.payModeRowOn,
                   pressed && { transform: [{ scale: 0.97 }] },
                 ]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: state.paymentMode === 'offline' }}
               >
                 <Text style={localStyles.payModeTitle}>I'll handle payment myself</Text>
                 <Text style={localStyles.payModeSub}>
                   Travelers pay you outside the app, however you do it today.
                 </Text>
               </Pressable>
+
+              <View style={localStyles.payModeDivider} />
 
               <Pressable
                 onPress={() => update('paymentMode', 'managed')}
@@ -3152,6 +3212,8 @@ export default function CreateTripFlowA({
                   state.paymentMode === 'managed' && localStyles.payModeRowOn,
                   pressed && { transform: [{ scale: 0.97 }] },
                 ]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: state.paymentMode === 'managed' }}
               >
                 <Text style={localStyles.payModeTitle}>Collect payment in Swellyo</Text>
                 <Text style={localStyles.payModeSub}>
@@ -3171,10 +3233,20 @@ export default function CreateTripFlowA({
                   Leave this blank to take one single payment.
                 </Text>
                 <View style={localStyles.priceRow}>
+                  <View style={localStyles.priceIconBubble}>
+                    <TripIcon name="currency-dollar-circle" size={22} color={COLORS.inkBody} />
+                  </View>
                   <TextInput
-                    style={[localStyles.input, { flex: 1 }]}
+                    style={[
+                      localStyles.input,
+                      { flex: 1 },
+                      !!errors.deposit && localStyles.inputError,
+                    ]}
                     value={state.depositAmount}
-                    onChangeText={t => update('depositAmount', t.replace(/[^0-9]/g, ''))}
+                    onChangeText={t => {
+                      update('depositAmount', t.replace(/[^0-9]/g, ''));
+                      if (errors.deposit) setError('deposit', null);
+                    }}
                     placeholder="500"
                     placeholderTextColor={COLORS.textPlaceholder}
                     keyboardType="number-pad"
@@ -4717,17 +4789,33 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // Flow C — "Getting paid" choice rows (offline vs managed).
+  // Flow C — "Getting paid" choice rows (offline vs managed). Borderless,
+  // like every other row inside summaryGroup — summaryGroup already draws
+  // the one outer border; a border on the row too would double-box it.
   payModeRow: {
-    borderWidth: 1,
-    borderColor: '#EAECF0',
-    borderRadius: 14,
+    borderRadius: 10,
     padding: 14,
-    marginBottom: 8,
   },
-  payModeRowOn: { borderColor: '#0788B0', backgroundColor: '#F0F7FA' },
-  payModeTitle: { fontSize: 15, fontWeight: '600', color: '#181D27' },
-  payModeSub: { fontSize: 13, color: '#535862', marginTop: 2, lineHeight: 18 },
+  payModeRowOn: { backgroundColor: COLORS.brandTealTint },
+  // Hairline between the two rows — same convention as SummaryRow's divider.
+  payModeDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: COLORS.borderHairline,
+    marginHorizontal: 4,
+  },
+  payModeTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.inkBody,
+  },
+  payModeSub: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    lineHeight: 18,
+  },
 
   // Trip title preview line
   titlePreview: {

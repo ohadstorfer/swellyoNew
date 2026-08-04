@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { fetchConnectStatus, startConnectOnboarding } from '../../services/trips/tripPaymentsService';
 // showErrorAlert(title, error, fallback) — three arguments. It exists to keep a
 // raw `e.message` off the screen; never pass one through by hand.
 import { showErrorAlert } from '../../utils/friendlyError';
+
+const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
 /**
  * The gate on managed mode. Until Stripe says this operator can accept charges,
@@ -24,7 +26,12 @@ export const ConnectStripeCard: React.FC<{
       const s = await fetchConnectStatus();
       setConnected(s.chargesEnabled);
       onStatusChange(s.chargesEnabled);
-    } catch {
+    } catch (e) {
+      // Expected today: the Stripe edge functions aren't deployed yet, so
+      // every call lands here. Logged (not surfaced to the operator) so a
+      // real failure later than that isn't silently invisible — the caller
+      // still reads this as "not connected," never a crash.
+      console.warn('[ConnectStripeCard] fetchConnectStatus failed:', e);
       setConnected(false);
       onStatusChange(false);
     } finally {
@@ -90,6 +97,6 @@ const styles = StyleSheet.create({
   cardDone: { borderColor: '#0788B0', backgroundColor: '#F0F7FA' },
   // Instant feedback on press. 0.97 is the app-wide value for pressables.
   pressed: { transform: [{ scale: 0.97 }] },
-  title: { fontSize: 15, fontWeight: '600', color: '#181D27' },
-  sub: { fontSize: 13, color: '#535862', marginTop: 4, lineHeight: 18 },
+  title: { fontFamily: FONT_INTER, fontSize: 15, fontWeight: '600', color: '#181D27' },
+  sub: { fontFamily: FONT_INTER, fontSize: 13, color: '#535862', marginTop: 4, lineHeight: 18 },
 });
