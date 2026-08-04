@@ -23,7 +23,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
-import { useTripCore, useTripRequests } from '../../hooks/trips/useTripDetail';
+import { useTripCore, useTripRequests, useTripRequirements } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { removeParticipant, promoteTripHost, demoteTripHost } from '../../services/trips/groupTripsService';
 import type { EnrichedParticipant } from '../../services/trips/groupTripsService';
@@ -79,6 +79,11 @@ const timeAgo = (iso: string): string => {
 };
 const formatJoined = (iso: string | null): string => (iso ? `Joined ${timeAgo(iso)}` : '');
 
+/** Stable empty list for the price sheet's requirements prop. An inline
+ *  `?? []` would be a new array identity on every render, defeating the
+ *  memo that reads it. Same convention as TripDetailScreen's NO_REQUIREMENTS. */
+const NO_REQUIREMENTS: { kind: string; isActive: boolean }[] = [];
+
 interface Props {
   tripId: string;
   onBack: () => void;
@@ -122,10 +127,23 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
     [participants]
   );
 
+  // Only the operator of record may set a traveler's price —
+  // `operator_set_traveler_price` authorises on `group_trips.host_id`, not on
+  // `is_trip_host()` (which is every promoted admin too), because host_id is
+  // the only identity that gets paid. `isHost` above is the flat multi-host
+  // check and is deliberately NOT reused for this.
+  const isOperator = !!currentUserId && trip?.host_id === currentUserId;
+
   // Pending join requests — host only. Tapping a request opens the requester's
   // profile to review; Approve / Decline live inside that profile.
   const requestsQuery = useTripRequests(tripId, isHost);
   const pendingRequests = requestsQuery.data?.pending ?? [];
+
+  // Only needed by the per-traveler price sheet, to tell a trip that has a
+  // real deposit STEP from one taking a single payment. Shares
+  // `tripsKeys.detailRequirements` with TripDetail's own requirements query,
+  // so arriving here via "View all" usually hits a warm cache.
+  const requirementsQuery = useTripRequirements(tripId, isOperator);
 
   const [sheetMember, setSheetMember] = useState<EnrichedParticipant | null>(null);
   const [inviteSheetOpen, setInviteSheetOpen] = useState(false);
@@ -388,8 +406,10 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         viewerIsHost={isHost}
         isSelf={sheetMember?.user_id === currentUserId}
         tripId={tripId}
+        viewerIsOperator={isOperator}
         paymentMode={trip?.payment_mode ?? null}
         budgetFxRate={trip?.budget_fx_rate ?? null}
+        requirements={requirementsQuery.data ?? NO_REQUIREMENTS}
         onClose={() => setSheetMember(null)}
         onViewProfile={userId => onViewUserProfile?.(userId)}
         onMessage={(userId, name, avatar) => onMessage?.(userId, name, avatar)}

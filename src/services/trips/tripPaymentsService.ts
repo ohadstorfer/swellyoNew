@@ -108,6 +108,20 @@ export async function fetchTravelerPrices(
   };
 }
 
+/**
+ * Which Stripe mode this build treats as real money.
+ *
+ * ⚠️ Mirrors the database's `app.stripe_livemode` setting, which
+ * `operator_requirement_pay_state()` reads in
+ * `20260803000000_operator_trip_payments.sql`. Both default to test mode, and
+ * BOTH must be flipped together when the live Stripe key is installed —
+ * setting one without the other makes this screen's "paid so far" disagree
+ * with what the server will actually accept. The server is the authority
+ * either way (nothing here gates a payment); the cost of drift is a
+ * misleading number, not a wrong charge.
+ */
+export const STRIPE_LIVEMODE = process.env.EXPO_PUBLIC_STRIPE_LIVEMODE === 'true';
+
 /** How much has been paid against each pay requirement, keyed by requirement id. */
 export async function fetchPaidByRequirement(
   tripId: string,
@@ -123,7 +137,12 @@ export async function fetchPaidByRequirement(
     // 0, so this filter is belt-and-suspenders, not load-bearing — but the
     // file header promises an exact mirror of the SQL, so it stays explicit
     // rather than relying on that CHECK holding.
-    .neq('event_type', 'failed');
+    .neq('event_type', 'failed')
+    // Same mirror, for the mode filter the SQL applies. Without it a Stripe
+    // TEST-mode row — and the device test writes those straight into the
+    // production database — reads as real money here while the server
+    // (correctly) ignores it.
+    .eq('is_livemode', STRIPE_LIVEMODE);
 
   if (error) throw error;
 
@@ -201,9 +220,16 @@ export async function startConnectOnboarding(): Promise<void> {
  *  `operator_set_traveler_price` RPC, not a direct table update — the only
  *  UPDATE policy on `group_trip_participants` is self-only
  *  (`auth.uid() = user_id`), so a host has no RLS path to write another
- *  traveler's row. The RPC is SECURITY DEFINER and re-checks
- *  `is_trip_host()` itself before writing. See
- *  20260803000100_operator_set_traveler_price.sql. */
+ *  traveler's row. The RPC is SECURITY DEFINER and re-checks authority
+ *  itself before writing.
+ *
+ *  ⚠️ That check is `group_trips.host_id = auth.uid()` — the single operator
+ *  of record — NOT `is_trip_host()`, which is every promoted "admin" as
+ *  well. Only host_id is paid (payments-checkout reads the payout account
+ *  for that user alone), so anyone else setting prices is a payment bypass.
+ *  The RPC also refuses `p_user_id = auth.uid()`: nobody prices themselves.
+ *  The UI must gate the affordance the same way or it offers a button that
+ *  always errors. See 20260803000100_operator_set_traveler_price.sql. */
 export async function saveTravelerPrice(
   tripId: string,
   userId: string,

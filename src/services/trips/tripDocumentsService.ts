@@ -514,6 +514,20 @@ function timingColumns(t: RequirementTiming) {
  * private bucket forever. It would also erase a waiver agreement, which is a
  * legal record of who agreed to what.
  *
+ * The evidence tables are documents, acknowledgements AND
+ * `organized_trip_payment_events` — the money ledger. That last one is not
+ * counted the way the other two are, and cannot be: its FK is ON DELETE SET
+ * NULL, not CASCADE, precisely so deleting a requirement can never erase the
+ * record that someone paid. But a NULLed `requirement_id` is exactly what
+ * `fetchPaidByRequirement` and `operator_requirement_pay_state` key on, so
+ * the payment survives while becoming invisible — the traveler is asked to
+ * pay a second time for something they already paid.
+ *
+ * A pay row always has zero documents and zero acknowledgements, so counting
+ * only those two would send EVERY pay row down the hard-delete branch. Hence
+ * the kind check below rather than a third count: pay rows are never deleted,
+ * whatever the ledger currently holds.
+ *
  * Once there IS evidence, `is_active = false` is the delete: the resolved view,
  * the traveler RPC and the review screen all filter on it, so the requirement
  * disappears from every screen while the evidence and its purge clock survive.
@@ -523,7 +537,12 @@ function timingColumns(t: RequirementTiming) {
 export async function removeRequirement(
   requirementId: string,
 ): Promise<'deleted' | 'deactivated'> {
-  const [docs, acks] = await Promise.all([
+  const [row, docs, acks] = await Promise.all([
+    supabase
+      .from('organized_trip_requirements')
+      .select('kind, req_type')
+      .eq('id', requirementId)
+      .maybeSingle(),
     supabase
       .from('organized_trip_travelers_documents')
       .select('id', { count: 'exact', head: true })
@@ -533,13 +552,23 @@ export async function removeRequirement(
       .select('user_id', { count: 'exact', head: true })
       .eq('requirement_id', requirementId),
   ]);
+  if (row.error) throw row.error;
   if (docs.error) throw docs.error;
   if (acks.error) throw acks.error;
+
+  // Read `req_type` first and only fall back to the kind catalog: `req_type`
+  // is what the database itself constrains a pay row on
+  // (organized_trip_requirements_pay_kind_match pins the two together), and
+  // it stays correct for a kind this build's catalog does not know about.
+  // A row that vanished between the caller reading it and this call is not a
+  // pay row we can prove anything about — leave it to the delete below, which
+  // is a no-op on a missing id.
+  const isPayRow = row.data?.req_type === 'pay' || isPayKind(row.data?.kind ?? '');
 
   // A failed count reads as null. Treat "we don't know" as "there is evidence" —
   // deactivating something empty is recoverable, cascading a real passport away
   // is not.
-  const untouched = docs.count === 0 && acks.count === 0;
+  const untouched = !isPayRow && docs.count === 0 && acks.count === 0;
 
   if (untouched) {
     const { error } = await supabase

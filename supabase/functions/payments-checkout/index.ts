@@ -167,9 +167,15 @@ serve(async req => {
       return json({ error: 'Nothing to pay' }, 400);
     }
 
+    // Deliberately UNFILTERED — the filtering happens in JS below. `events`
+    // has two jobs with two different correct scopes: the money sum (which
+    // must exclude 'failed' rows and wrong-mode rows) and the row COUNT used
+    // as an idempotency-key discriminator (which must count every row that
+    // has ever landed here, or the key stops changing when it should). A
+    // `.neq(...)` here would silently narrow both.
     const { data: events, error: eventsErr } = await supabase
       .from('organized_trip_payment_events')
-      .select('amount_usd')
+      .select('amount_usd, event_type, is_livemode')
       .eq('trip_id', req_.trip_id)
       .eq('user_id', userId)
       .eq('requirement_id', requirementId);
@@ -181,7 +187,26 @@ serve(async req => {
     // pre-refund key too. Throw so this 500s and the caller retries.
     if (eventsErr) throw eventsErr;
 
-    const paid = (events ?? []).reduce((s, e) => s + Number(e.amount_usd), 0);
+    // I4: exclude 'failed' rows, mirroring operator_requirement_pay_state and
+    // fetchPaidByRequirement. otpe_amount_sign_matches_type already pins a
+    // 'failed' row's amount to exactly 0, so this is belt-and-suspenders —
+    // both mirrors carry the same filter with the same comment, deliberately
+    // refusing to let the money arithmetic depend on that CHECK holding, and
+    // this call site was the only one of the three missing it.
+    //
+    // I1: and only money from the Stripe mode this function's own key is
+    // operating in. Test-mode rows written during a device test against the
+    // production database would otherwise be treated as real payments here,
+    // making `outstanding` 0 and refusing a genuine live checkout with
+    // "Already paid". The key prefix — not a config flag — is the honest
+    // discriminator: it is by definition the mode any charge this function
+    // creates would land in. Mirrors the database's `app.stripe_livemode`
+    // switch documented in 20260803000000, which must be set to match the
+    // key that is installed.
+    const isLivemode = STRIPE_SECRET_KEY.startsWith('sk_live_');
+    const paid = (events ?? [])
+      .filter(e => e.event_type !== 'failed' && e.is_livemode === isLivemode)
+      .reduce((s, e) => s + Number(e.amount_usd), 0);
     const outstanding = Math.max(0, due - paid);
     if (outstanding <= 0) return json({ error: 'Already paid' }, 400);
 

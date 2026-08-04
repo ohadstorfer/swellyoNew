@@ -123,23 +123,25 @@ serve(async req => {
       return json({ error: 'returnUrl must be an https URL' }, 400);
     }
 
-    // I8: unbounded Express account creation under our platform account is
-    // something Stripe itself flags, and — more importantly — it's the
-    // precondition for the Connect-event forgery guarded against in
-    // stripe-webhook (event.account). Only someone who actually hosts an
-    // operator trip (hosting_style = 'C') may connect a payout account.
-    const { data: hostedTrip } = await supabase
-      .from('group_trips')
-      .select('id')
-      .eq('host_id', userId)
-      .eq('hosting_style', 'C')
-      .limit(1)
-      .maybeSingle();
-
-    if (!hostedTrip) {
-      return json({ error: 'Only operator trip hosts can connect a payout account' }, 403);
-    }
-
+    // Authentication (above) is the only gate on onboarding. There is
+    // deliberately NO "you must already host a published operator trip"
+    // check here — an earlier version had one and it was a hard deadlock:
+    // ConnectStripeCard renders inside the CREATE wizard's budget step,
+    // before any trip row exists, and the wizard blocks Next until Stripe
+    // says charges are enabled. A first-time operator could therefore never
+    // turn payments on at all, and edit mode could not rescue them (the
+    // wizard forces payment_mode to 'offline' unless the trip is already
+    // managed). Do not re-add it.
+    //
+    // The abuse that check was meant to prevent — unbounded Express account
+    // creation under our platform account, which is both something Stripe
+    // flags and the precondition for the Connect-event forgery guarded
+    // against in stripe-webhook (event.account) — is already STRUCTURALLY
+    // bounded and does not need a policy check: `operator_payout_accounts`
+    // has `user_id` as its PRIMARY KEY, so one user can hold at most one
+    // payout account no matter how many times they call this. A repeat call
+    // finds the existing `accountId` above and only mints a fresh link.
+    //
     // ── onboard: create the account once, then always hand back a fresh link.
     //    Account links expire in minutes, so they are never stored.
     if (!accountId) {

@@ -127,9 +127,25 @@ function safeMessage(e: unknown): string {
 // EVERY lookup 404s; that needs to keep 500-retrying for the ~3 days Stripe
 // allows, because that retry window is the only signal a human gets to
 // notice and fix the key.
+//
+// I6 (round 5): '23503' (foreign key violation) was in this set and has been
+// removed. It is NOT safe to acknowledge. By the time this insert runs the
+// money has already moved on Stripe's side; a 200 here tells Stripe to stop
+// retrying, and the ledger row that records the payment is never written.
+// Nothing else ever writes it, so that payment is unrecoverable — the
+// traveler is charged, `operator_requirement_pay_state` still reads
+// `not_started`, and they get asked to pay again. The FK targets are also
+// exactly the things a concurrent operator action can transiently remove or
+// recreate (a requirement row, a payout account), so "can never succeed on
+// retry" was not even true of it.
+//
+// The cost of getting this wrong the other way is bounded and deliberate: a
+// genuinely deleted trip now 500-loops for the ~3 days Stripe retries. That
+// is the same alerting mechanism the 23505 branch further down already
+// relies on ("that retry storm is DELIBERATE here") — a noisy retry storm a
+// human notices, rather than a silent loss of money nobody ever sees.
 const PERMANENT_PG_ERROR_CODES = new Set([
   '23514', // check violation — the row can never satisfy the constraint
-  '23503', // foreign key violation — e.g. the trip no longer exists
   '22P02', // invalid text representation — e.g. a non-UUID trip_id in metadata
   '23502', // not null violation
 ]);

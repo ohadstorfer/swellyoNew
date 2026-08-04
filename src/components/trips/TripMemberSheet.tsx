@@ -22,11 +22,21 @@ interface Props {
   member: EnrichedParticipant | null;
   viewerIsHost: boolean;
   isSelf: boolean;
-  /** Needed to open the per-traveler price sheet — host + managed-trip only. */
+  /** Needed to open the per-traveler price sheet — operator + managed-trip only. */
   tripId: string;
+  /** `group_trips.host_id === currentUserId`. NOT `viewerIsHost`: that is flat
+   *  multi-host (every promoted admin), and `operator_set_traveler_price`
+   *  authorises on `host_id` alone — only the operator of record is paid, so
+   *  only they may price anyone. Showing this row to an admin would be a
+   *  button that always errors. */
+  viewerIsOperator: boolean;
   paymentMode: string | null;
   /** `group_trips.budget_fx_rate` — passed straight through to the price sheet. */
   budgetFxRate: number | null;
+  /** Every requirement row on the trip, active or not — passed straight
+   *  through to the price sheet, which reads the pay rows out of it to decide
+   *  whether a Deposit field may be shown. */
+  requirements: { kind: string; isActive: boolean }[];
   onClose: () => void;
   onViewProfile: (userId: string) => void;
   onMessage: (userId: string, name?: string, avatar?: string | null) => void;
@@ -47,7 +57,8 @@ const joinedAgo = (iso: string | null): string => {
 };
 
 export function TripMemberSheet({
-  visible, member, viewerIsHost, isSelf, tripId, paymentMode, budgetFxRate, onClose,
+  visible, member, viewerIsHost, isSelf, tripId, viewerIsOperator, paymentMode, budgetFxRate,
+  requirements, onClose,
   onViewProfile, onMessage, onSetAdmin, onRemoveAdmin, onRemove,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -56,7 +67,10 @@ export function TripMemberSheet({
   // Close first, then run the action, so the confirm Alert sits above nothing.
   const wrap = (fn: () => void) => () => { onClose(); fn(); };
   const canManage = viewerIsHost && !isSelf && !!m;
-  const canSetPrice = canManage && paymentMode === 'managed';
+  // `viewerIsOperator`, not `viewerIsHost` — see the prop's own comment. The
+  // `!isSelf` inside canManage also mirrors the RPC's refusal to let anyone
+  // set their own price.
+  const canSetPrice = canManage && viewerIsOperator && paymentMode === 'managed';
 
   const [priceOpen, setPriceOpen] = useState(false);
   // Don't let a stale "open" carry forward to the next member this sheet is
@@ -107,22 +121,25 @@ export function TripMemberSheet({
           touch on the screen underneath. Nesting here means the two sheets'
           native lifecycles are coupled through this component's own state
           instead of racing each other.
-          Mounted on `viewerIsHost && m` — `viewerIsHost` IS derived from
-          useTripCore's query data (via isTripHost), same as everything else
-          here, so "never on query data" isn't the reason this is safe. It's
-          safe because saving a price never changes who is host: nothing this
-          sheet does can flip that boolean while it's presenting, even after
-          the `tripsKeys.detail` invalidation below triggers a refetch. `m`
+          Mounted on `viewerIsOperator && m` — `viewerIsOperator` IS derived
+          from useTripCore's query data (`trip.host_id`), same as everything
+          else here, so "never on query data" isn't the reason this is safe.
+          It's safe because saving a price never changes who the operator is:
+          nothing this sheet does can flip that boolean while it's presenting,
+          even after the `tripsKeys.detail` invalidation below triggers a
+          refetch. (host_id is stabler still than the old `viewerIsHost`
+          mount: it does not move when someone is promoted or demoted.) `m`
           (the selected member) is likewise never nulled by that refetch — it
           is independent local state on the parent screen, only ever changed
           by an explicit tap on a different row. */}
-      {viewerIsHost && m ? (
+      {viewerIsOperator && m ? (
         <TravelerPriceSheet
           visible={priceOpen}
           tripId={tripId}
           userId={m.user_id}
           travelerName={m.name ?? 'This traveler'}
           budgetFxRate={budgetFxRate}
+          requirements={requirements}
           onClose={() => setPriceOpen(false)}
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: tripsKeys.payments(tripId, m.user_id) });

@@ -4,8 +4,11 @@ import { fetchConnectStatus, startConnectOnboarding } from '../../services/trips
 // showErrorAlert(title, error, fallback) — three arguments. It exists to keep a
 // raw `e.message` off the screen; never pass one through by hand.
 import { showErrorAlert } from '../../utils/friendlyError';
-
-const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
+// ff() picks the real weighted family file ('Inter-SemiBold'). A bare
+// `fontFamily: 'Inter'` plus `fontWeight: '600'` renders Regular on iOS —
+// iOS does not synthesise a weight for a named family. `fontWeight` is kept
+// alongside it for web, where the family is one variable face.
+import { ff } from '../../theme/fonts';
 
 /**
  * The gate on managed mode. Until Stripe says this operator can accept charges,
@@ -13,6 +16,12 @@ const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
  *
  * Status is re-read on every mount because onboarding finishes on Stripe's own
  * site — nothing tells us it happened except asking.
+ *
+ * This renders in the CREATE wizard's budget step, BEFORE any trip row exists.
+ * `stripe-connect-onboard` must therefore never require the caller to already
+ * host an operator trip — it did once, and the wizard's hard block on
+ * `!stripeReady` turned that into a deadlock no first-time operator could
+ * escape. See the comment in that function.
  */
 export const ConnectStripeCard: React.FC<{
   onStatusChange: (chargesEnabled: boolean) => void;
@@ -97,6 +106,13 @@ const styles = StyleSheet.create({
   cardDone: { borderColor: '#0788B0', backgroundColor: '#F0F7FA' },
   // Instant feedback on press. 0.97 is the app-wide value for pressables.
   pressed: { transform: [{ scale: 0.97 }] },
-  title: { fontFamily: FONT_INTER, fontSize: 15, fontWeight: '600', color: '#181D27' },
-  sub: { fontFamily: FONT_INTER, fontSize: 13, color: '#535862', marginTop: 4, lineHeight: 18 },
+  title: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 15,
+    // Web only — on native this would re-trigger the synthetic-bold path ff()
+    // exists to avoid.
+    ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),
+    color: '#181D27',
+  },
+  sub: { fontFamily: ff('Inter', '400'), fontSize: 13, color: '#535862', marginTop: 4, lineHeight: 18 },
 });

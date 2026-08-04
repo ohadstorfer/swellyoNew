@@ -37,6 +37,21 @@
 -- which blocked a legitimate second partial refund against the same
 -- payment_intent and turned it into a permanent-ish webhook retry storm.
 -- See the comment at the index itself for the full reasoning.
+--
+-- Round 5 (2026-08-03), whole-branch review -- seams between tasks that each
+-- reviewed clean on their own:
+--   C3 — price attribution. `group_trip_participants` gains price_set_by /
+--        price_set_at (section 3), stamped by operator_set_traveler_price
+--        (20260803000100). Motivated by the same finding that moved that
+--        RPC's authorisation off is_trip_host() and onto
+--        group_trips.host_id: "host" is flat multi-host (every promoted
+--        admin), "operator who gets paid" is host_id alone, and the branch
+--        was mixing the two. freeze_traveler_price below now also pins the
+--        two new columns against a non-host self-PATCH, so the attribution
+--        cannot be forged by the person whose price it records.
+--   I1 — is_livemode was written and never read. operator_requirement_pay_state
+--        (section 7) now counts only rows matching the expected Stripe mode.
+--        See the comment there for the app.stripe_livemode switch.
 
 -- ══════════════════════════════════════════════════════════════════
 -- 1. Operator payout identity — its own table, not columns on `users`
@@ -127,6 +142,20 @@ alter table public.group_trips
 alter table public.group_trip_participants
   add column if not exists price_total_usd numeric,
   add column if not exists deposit_usd     numeric;
+
+-- C3 (round 5): who set this price, and when. Prices are neither versioned
+-- nor logged anywhere else, so without these a price change is invisible
+-- after the fact — the exact reason the "a promoted admin zeroes their own
+-- price" finding was undiscoverable rather than merely possible. Stamped by
+-- operator_set_traveler_price (20260803000100), which is the only authorised
+-- producer of a price write; freeze_traveler_price (section 8) pins both
+-- columns against a non-host PATCH so the record cannot be forged by the
+-- traveler it describes. Nullable: every row that predates this feature, and
+-- every price frozen automatically at join time by the trigger rather than
+-- set by a human, legitimately has no setter.
+alter table public.group_trip_participants
+  add column if not exists price_set_by uuid references auth.users(id) on delete set null,
+  add column if not exists price_set_at timestamptz;
 
 alter table public.group_trip_participants
   drop constraint if exists gtp_price_non_negative;
@@ -363,6 +392,32 @@ revoke execute on function public.operator_traveler_amount_due(uuid, uuid, text)
 -- The stub's comment promised: "the payments spec replaces the body with a read
 -- of the ledger. The signature never changes." This is that. Every caller of
 -- operator_trip_my_requirements keeps working untouched.
+--
+-- I1 (round 5): `is_livemode` was written by the webhook and read by nothing,
+-- so a Stripe TEST-mode payment counted as real money everywhere. That is not
+-- hypothetical: the device test for this feature runs test keys against the
+-- PRODUCTION database, writing permanent `paid` rows that would flip real
+-- must_have requirements to `approved` and survive into live operation.
+--
+-- The sum below now only counts rows whose mode matches
+-- `app.stripe_livemode`. That setting is deliberately UNSET today, and the
+-- `coalesce(..., false)` default means test-mode rows are what counts — so
+-- the device test behaves exactly as intended. When the live Stripe key is
+-- installed, run:
+--
+--   alter database postgres set app.stripe_livemode = 'true';
+--
+-- (new sessions pick it up; `select pg_reload_conf()` is not needed for a
+-- database-level SET, but existing pooled sessions must turn over). From that
+-- moment every test-mode row stops counting instantly, with no data deleted
+-- and nothing to migrate — and flipping it back is equally instant if the
+-- go-live is aborted. Deleting the test rows instead would destroy the only
+-- record that the test payments happened.
+--
+-- `current_setting(..., true)` (missing_ok) is required: an unset GUC raises
+-- 42704 otherwise, and this function is STABLE and called per-requirement
+-- from operator_trip_my_requirements — one raise would break the traveler's
+-- whole plan tab, not just the pay row.
 create or replace function public.operator_requirement_pay_state(
   p_trip_id uuid, p_user_id uuid, p_requirement_id uuid
 ) returns text
@@ -387,6 +442,14 @@ as $$
        -- already pins a 'failed' row's amount to 0. Excluding the event
        -- type outright means this sum never depends on that CHECK holding.
        and event_type     <> 'failed'
+       -- I1 (round 5): only money from the Stripe mode we currently treat as
+       -- real. See the header comment above this function for the switch.
+       -- nullif(..., '') as well as missing_ok: an unset GUC reads as NULL,
+       -- but one that was set and then cleared reads as the empty string, and
+       -- ''::boolean raises 22P02 rather than defaulting.
+       and is_livemode    = coalesce(
+                              nullif(current_setting('app.stripe_livemode', true), '')::boolean,
+                              false)
   )
   select case
     -- No price set for this traveler yet: nothing can be owed, so nothing is due.
@@ -427,15 +490,29 @@ begin
   -- same as a host, rather than assuming a JWT is always present.
   if auth.uid() is not null and not public.is_trip_host(new.trip_id) then
     if TG_OP = 'UPDATE' then
-      -- A traveler's PATCH succeeds (other columns still apply); these two
+      -- A traveler's PATCH succeeds (other columns still apply); these four
       -- silently do not move.
       new.price_total_usd := old.price_total_usd;
       new.deposit_usd     := old.deposit_usd;
+      -- C3 (round 5): the attribution columns are pinned for the same reason
+      -- as the amounts. `group_trip_participants` grants `authenticated`
+      -- full UPDATE with a self-only policy and no column scope, so without
+      -- this a traveler could PATCH price_set_by to point at the operator —
+      -- forging the record of who set their price. A record the subject can
+      -- rewrite is not a record.
+      new.price_set_by    := old.price_set_by;
+      new.price_set_at    := old.price_set_at;
       return new;
     end if;
 
     -- INSERT, non-host: always the trip defaults, never a caller-supplied
     -- value. No "explicit price wins" escape hatch for anyone but a host.
+    -- A price frozen automatically at join time was set by nobody, so the
+    -- attribution stays null whichever branch below runs — and a joiner
+    -- cannot seed it with a value of their own choosing either.
+    new.price_set_by := null;
+    new.price_set_at := null;
+
     select payment_mode, cost_per_person, deposit_amount
       into v_mode, v_price, v_dep
       from public.group_trips

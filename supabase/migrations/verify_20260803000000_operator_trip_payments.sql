@@ -65,6 +65,24 @@
 -- distinct partial refunds against the same provider_object_id, both must
 -- insert (the second is exactly what the old predicate blocked), and the
 -- summed ledger balance must be correct.
+--
+-- Round-5 fixes (2026-08-03), whole-branch review. This file now also
+-- carries the DDL of 20260803000100_operator_set_traveler_price.sql, because
+-- the round-5 findings are precisely about how the two migrations interact:
+--   C3 — operator_set_traveler_price authorises on group_trips.host_id, not
+--        is_trip_host() (flat multi-host = every promoted admin, and only
+--        host_id is ever paid). New assertions: a promoted admin who is NOT
+--        host_id must be refused; the operator of record must still succeed;
+--        nobody may price themselves; and the accepted write must stamp
+--        price_set_by / price_set_at (new columns in section 3).
+--        Also asserted: a non-host cannot forge price_set_by on their own
+--        row (freeze_traveler_price pins it, like the amounts).
+--   C2 — the same RPC refuses a non-null deposit on a trip with no ACTIVE
+--        `deposit` requirement (the wizard's "one single payment" shape),
+--        where the deposit would otherwise be silently uncollectable.
+--   I1 — operator_requirement_pay_state now counts only ledger rows whose
+--        is_livemode matches `app.stripe_livemode` (default false). New
+--        assertions cover both settings against the same fixture rows.
 
 begin;
 
@@ -125,6 +143,11 @@ alter table public.group_trips
 alter table public.group_trip_participants
   add column if not exists price_total_usd numeric,
   add column if not exists deposit_usd     numeric;
+
+-- Round 5, C3: price attribution.
+alter table public.group_trip_participants
+  add column if not exists price_set_by uuid references auth.users(id) on delete set null,
+  add column if not exists price_set_at timestamptz;
 
 alter table public.group_trip_participants
   drop constraint if exists gtp_price_non_negative;
@@ -293,6 +316,12 @@ as $$
        and user_id        = p_user_id
        and requirement_id = p_requirement_id
        and event_type     <> 'failed'
+       -- Round 5, I1: only rows from the Stripe mode currently treated as
+       -- real money. Unset (the state today) reads as false, so test-mode
+       -- rows are what counts during the device test.
+       and is_livemode    = coalesce(
+                              nullif(current_setting('app.stripe_livemode', true), '')::boolean,
+                              false)
   )
   select case
     when (select amount from due) is null then 'not_started'
@@ -316,8 +345,15 @@ begin
     if TG_OP = 'UPDATE' then
       new.price_total_usd := old.price_total_usd;
       new.deposit_usd     := old.deposit_usd;
+      -- Round 5, C3: the attribution columns are pinned for the same reason
+      -- as the amounts -- a record its subject can rewrite is not a record.
+      new.price_set_by    := old.price_set_by;
+      new.price_set_at    := old.price_set_at;
       return new;
     end if;
+
+    new.price_set_by := null;
+    new.price_set_at := null;
 
     select payment_mode, cost_per_person, deposit_amount
       into v_mode, v_price, v_dep
@@ -390,6 +426,82 @@ create trigger trg_deactivate_pay_rows_when_offline
   for each row execute function public.deactivate_pay_rows_when_offline();
 
 -- ══════════════════════════════════════════════════════════════════
+-- Migration DDL, part 2 -- identical to
+-- 20260803000100_operator_set_traveler_price.sql
+-- ══════════════════════════════════════════════════════════════════
+-- Added in round 5: the C3 and C2 findings are about how this RPC interacts
+-- with the schema above, so it cannot be verified from the other file alone.
+-- Same hand-maintained-copy rule as the block above -- any edit to
+-- 20260803000100 must be mirrored here.
+create or replace function public.operator_set_traveler_price(
+  p_trip_id     uuid,
+  p_user_id     uuid,
+  p_total_usd   numeric,
+  p_deposit_usd numeric
+) returns void
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_count integer; v_has_deposit_req boolean;
+begin
+  if not exists (
+    select 1 from public.group_trips
+     where id = p_trip_id and host_id = auth.uid()
+  ) then
+    raise exception 'not your trip';
+  end if;
+
+  if p_user_id = auth.uid() then
+    raise exception 'you cannot set your own price';
+  end if;
+
+  if p_total_usd is null then
+    raise exception 'a price is required';
+  end if;
+
+  if p_total_usd < 0 then
+    raise exception 'price cannot be negative';
+  end if;
+
+  if p_deposit_usd is not null and p_deposit_usd < 0 then
+    raise exception 'deposit cannot be negative';
+  end if;
+
+  if p_deposit_usd is not null and p_deposit_usd > p_total_usd then
+    raise exception 'deposit cannot exceed the total price';
+  end if;
+
+  select exists (
+    select 1 from public.organized_trip_requirements
+     where trip_id = p_trip_id and kind = 'deposit' and is_active
+  ) into v_has_deposit_req;
+
+  if p_deposit_usd is not null and not v_has_deposit_req then
+    raise exception
+      'this trip takes one single payment — it has no deposit step to collect a deposit against';
+  end if;
+
+  update public.group_trip_participants
+     set price_total_usd = p_total_usd,
+         deposit_usd     = p_deposit_usd,
+         price_set_by    = auth.uid(),
+         price_set_at    = now()
+   where trip_id = p_trip_id
+     and user_id = p_user_id;
+
+  get diagnostics v_count = row_count;
+  if v_count = 0 then
+    raise exception 'no participant row for trip % / user %', p_trip_id, p_user_id;
+  end if;
+end $$;
+
+revoke execute on function public.operator_set_traveler_price(uuid, uuid, numeric, numeric)
+  from public, anon;
+grant  execute on function public.operator_set_traveler_price(uuid, uuid, numeric, numeric)
+  to authenticated;
+
+-- ══════════════════════════════════════════════════════════════════
 -- Assertions -- returns rows instead of RAISE NOTICE (see header)
 -- ══════════════════════════════════════════════════════════════════
 create or replace function pg_temp.__verify_payments()
@@ -401,6 +513,8 @@ declare
   v_trip2 uuid; v_user2 uuid; v_user3 uuid; v_req2 uuid;
   v_state text; v_due numeric; v_price numeric; v_dep numeric;
   v_rows  integer;
+  -- Round 5
+  v_operator uuid; v_setby uuid; v_setat timestamptz;
 begin
   -- Round 3: `order by id` pins which of the (currently 2) operator trips
   -- this is -- an unordered `limit 1` is not guaranteed to return the same
@@ -772,6 +886,235 @@ begin
   else
     step := 'I5: mixed-coalesce balance, frozen total 1000 vs. trip deposit 5000 (expect NULL)'; value := 'FAIL: ' || v_due::text;
   end if;
+  return next;
+
+  -- ══════════════════════════════════════════════════════════════════
+  -- Round 5
+  -- ══════════════════════════════════════════════════════════════════
+
+  -- ── I1: is_livemode is actually read ──────────────────────────────────
+  -- Fixture on (v_trip, v_user, v_req): every ledger row inserted above took
+  -- the is_livemode default of false, and they sum to +500. v_user's frozen
+  -- deposit is 500, so the deposit step reads 'approved' while test mode is
+  -- what counts. The whole point of the fix is that flipping the switch makes
+  -- those same rows stop counting, with nothing deleted.
+  select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
+  step := 'I1: pay state with app.stripe_livemode unset, test rows sum 500 vs 500 due (expect approved)';
+  if v_state = 'approved' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
+
+  perform set_config('app.stripe_livemode', 'true', true);
+
+  select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
+  step := 'I1: same rows with app.stripe_livemode = true (expect not_started -- test money stops counting)';
+  if v_state = 'not_started' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
+
+  insert into public.organized_trip_payment_events
+    (trip_id, user_id, requirement_id, provider_event_id, event_type, amount_usd, is_livemode)
+  values (v_trip, v_user, v_req, 'evt_test_live_1', 'paid', 500, true);
+
+  select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
+  step := 'I1: a real live-mode payment of 500 with the switch on (expect approved)';
+  if v_state = 'approved' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
+
+  -- Back to the default. nullif('' , '') is why the function uses missing_ok
+  -- AND nullif: a GUC that was set and then cleared reads as '' , not NULL,
+  -- and ''::boolean raises rather than defaulting. This line is the live test
+  -- of that branch -- without the nullif the next call would error, not
+  -- return a state.
+  perform set_config('app.stripe_livemode', '', true);
+
+  select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
+  step := 'I1: switch cleared to the empty string (expect approved, NOT a 22P02 raise)';
+  if v_state = 'approved' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
+
+  -- ── C3: nobody may forge the attribution on their own row ─────────────
+  -- Run BEFORE the promotion below, while v_user is still a plain member, so
+  -- freeze_traveler_price takes its non-host branch. price_set_by is null on
+  -- this row (nothing has set a price through the RPC yet), so "unchanged"
+  -- here means "still null".
+  perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
+  set local role authenticated;
+  update public.group_trip_participants
+     set price_set_by = v_user, price_set_at = now()
+   where trip_id = v_trip and user_id = v_user;
+  get diagnostics v_rows = row_count;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+
+  select price_set_by into v_setby
+    from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_user;
+
+  step := 'C3: non-host PATCH of price_set_by on own row (expect row_count=1 and still null)';
+  if v_rows = 1 and v_setby is null then
+    value := 'OK: reverted';
+  else
+    value := 'FAIL: row_count=' || v_rows || ', price_set_by=' || coalesce(v_setby::text, 'null');
+  end if;
+  return next;
+
+  -- ── C3 fixture: a promoted admin who is NOT the operator of record ────
+  -- This is exactly what "Set as admin" does: role = 'host' on the
+  -- participant row, which is the whole of what is_trip_host() reads. It does
+  -- NOT touch group_trips.host_id, which is the only identity
+  -- payments-checkout ever pays.
+  update public.group_trip_participants
+     set role = 'host'
+   where trip_id = v_trip and user_id = v_user;
+
+  -- Read host_id AFTER the promotion, not before: sync_primary_trip_host is
+  -- an AFTER UPDATE trigger on this table that can reassign group_trips.
+  -- host_id. It is a no-op here (it only moves when the current host_id
+  -- STOPS being a host participant, and promoting someone demotes nobody),
+  -- but reading afterwards means this fixture does not depend on that
+  -- staying true.
+  select host_id into v_operator from public.group_trips where id = v_trip;
+
+  select role into v_state
+    from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_user;
+
+  step := 'C3 fixture: promoted admin has role=host but is not group_trips.host_id';
+  if v_state = 'host' and v_operator is not null and v_operator <> v_user then
+    value := 'OK: admin=' || v_user::text || ', host_id=' || v_operator::text;
+    return next;
+  else
+    value := 'FAIL: role=' || coalesce(v_state, 'null')
+             || ', host_id=' || coalesce(v_operator::text, 'null')
+             || ', admin=' || v_user::text;
+    return next;
+    return;
+  end if;
+
+  -- The attack the finding describes, verbatim: a traveler promoted to admin
+  -- calls the RPC on THEMSELVES with a price of zero and travels free.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
+  begin
+    set local role authenticated;
+    perform public.operator_set_traveler_price(v_trip, v_user, 0, null);
+    step := 'C3: promoted admin zeroes their OWN price';
+    value := 'FAIL: was allowed';
+  exception when others then
+    step := 'C3: promoted admin zeroes their OWN price';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  -- Same admin, someone else's row -- isolates the host_id check from the
+  -- "nobody prices themselves" check, which the case above trips as well.
+  begin
+    set local role authenticated;
+    perform public.operator_set_traveler_price(v_trip, v_host, 1, null);
+    step := 'C3: promoted admin sets ANOTHER traveler''s price';
+    value := 'FAIL: was allowed';
+  exception when others then
+    step := 'C3: promoted admin sets ANOTHER traveler''s price';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+
+  select price_total_usd into v_price
+    from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_user;
+  if v_price = 2000 then
+    value := value || ' [own price still 2000]';
+  else
+    value := 'FAIL: price moved to ' || coalesce(v_price::text, 'null');
+  end if;
+  return next;
+
+  -- ── C3: the operator of record must still be able to price a traveler ──
+  -- The load-bearing positive case. If this fails the feature is dead, not
+  -- merely tightened.
+  --
+  -- C2 first, on the same call: v_req (the trip's only pay row) was
+  -- deactivated by trg_deactivate_pay_rows_when_offline during the guard
+  -- tests above and never revived, which is exactly the "one single payment"
+  -- shape -- no ACTIVE deposit step. Pin it explicitly rather than lean on
+  -- that side effect.
+  update public.organized_trip_requirements set is_active = false where id = v_req;
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_operator)::text, true);
+  begin
+    set local role authenticated;
+    perform public.operator_set_traveler_price(v_trip, v_user, 2000, 500);
+    step := 'C2: operator sets a deposit on a trip with no ACTIVE deposit step';
+    value := 'FAIL: was allowed -- that deposit would be uncollectable';
+  exception when others then
+    step := 'C2: operator sets a deposit on a trip with no ACTIVE deposit step';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  -- A total with a NULL deposit is the correct shape for that trip, and must
+  -- go through.
+  begin
+    set local role authenticated;
+    perform public.operator_set_traveler_price(v_trip, v_user, 1800, null);
+    step := 'C2: operator sets total only (null deposit) on a single-payment trip';
+    value := 'OK: accepted';
+  exception when others then
+    step := 'C2: operator sets total only (null deposit) on a single-payment trip';
+    value := 'FAIL: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  select price_total_usd, deposit_usd, price_set_by, price_set_at
+    into v_price, v_dep, v_setby, v_setat
+    from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_user;
+
+  step := 'C3: operator''s write stuck AND is attributed (expect 1800/null, set_by=host_id, set_at set)';
+  if v_price = 1800 and v_dep is null and v_setby = v_operator and v_setat is not null then
+    value := 'OK: 1800/null by ' || v_setby::text;
+  else
+    value := 'FAIL: ' || coalesce(v_price::text, 'null') || '/' || coalesce(v_dep::text, 'null')
+             || ' set_by=' || coalesce(v_setby::text, 'null')
+             || ' set_at=' || coalesce(v_setat::text, 'null');
+  end if;
+  return next;
+
+  -- Revive the deposit step: a real deposit is now collectable, so the same
+  -- call must be accepted. Proves the C2 guard is scoped to the actual
+  -- absence of a deposit row and is not just refusing every deposit.
+  update public.organized_trip_requirements set is_active = true where id = v_req;
+
+  begin
+    set local role authenticated;
+    perform public.operator_set_traveler_price(v_trip, v_user, 2000, 500);
+    step := 'C2: same deposit, once an ACTIVE deposit step exists';
+    value := 'OK: accepted';
+  exception when others then
+    step := 'C2: same deposit, once an ACTIVE deposit step exists';
+    value := 'FAIL: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  -- Nobody prices themselves -- not even the operator of record.
+  begin
+    set local role authenticated;
+    perform public.operator_set_traveler_price(v_trip, v_operator, 0, null);
+    step := 'C3: operator of record sets their OWN price';
+    value := 'FAIL: was allowed';
+  exception when others then
+    step := 'C3: operator of record sets their OWN price';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
   return next;
 
   return;
