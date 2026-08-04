@@ -142,6 +142,7 @@ import {
   actionForRequirement,
   type EditableRequirement,
   type RequirementKind,
+  type TripRequirement,
 } from '../../services/trips/tripDocumentsService';
 import {
   amountDue,
@@ -431,10 +432,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // This traveler's own price + what they've already paid, per requirement.
   // Only fetched on a `managed` trip — an `offline` trip has no Stripe amounts
-  // to show. staleTime 0: money must never be read from a stale cache.
+  // to show — and never for the host: they're a participant too, but the host
+  // card never renders amounts, so this would just be a wasted round trip on
+  // every operator trip open. staleTime 0: money must never be read from a
+  // stale cache.
   const paymentsQuery = useQuery({
     queryKey: tripsKeys.payments(tripId, currentUserId ?? ''),
-    enabled: !!tripId && !!currentUserId && trip?.payment_mode === 'managed',
+    enabled: !!tripId && !!currentUserId && !isHostDerived && trip?.payment_mode === 'managed',
     queryFn: async () => {
       const [prices, paid] = await Promise.all([
         fetchTravelerPrices(tripId, currentUserId as string),
@@ -445,19 +449,31 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     staleTime: 0,
   });
 
+  // Checkout just closed and we're polling for the webhook to land (see
+  // `handlePressDocumentRow`). Set only for the row being confirmed, cleared
+  // once the poll gives up or the row flips to `approved`.
+  const [confirmingRequirementId, setConfirmingRequirementId] = useState<string | null>(null);
+
   const documentRows: DocumentRow[] = useMemo(
     () =>
       (documentsQuery.data ?? []).map(r => {
         let amountUsd: number | null = null;
-        if (r.reqType === 'pay' && paymentsQuery.data) {
-          const step = r.kind as PayStep;
-          const due = amountDue(step, paymentsQuery.data.prices);
-          // Null means no price is set anywhere for this traveler — never show
-          // "$0" next to a Pay button; that reads as "this is free."
-          amountUsd =
-            due == null
-              ? null
-              : amountOutstanding(step, paymentsQuery.data.prices, paymentsQuery.data.paid[r.requirementId] ?? 0);
+        let amountError = false;
+        if (r.reqType === 'pay') {
+          if (paymentsQuery.isError) {
+            // Distinct from "no price set yet" — a fetch failure shouldn't
+            // read as "this is free."
+            amountError = true;
+          } else if (paymentsQuery.data) {
+            const step = r.kind as PayStep;
+            const due = amountDue(step, paymentsQuery.data.prices);
+            // Null means no price is set anywhere for this traveler — never
+            // show "$0" next to a Pay button; that reads as "this is free."
+            amountUsd =
+              due == null
+                ? null
+                : amountOutstanding(step, paymentsQuery.data.prices, paymentsQuery.data.paid[r.requirementId] ?? 0);
+          }
         }
         return {
           requirementId: r.requirementId,
@@ -468,9 +484,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           dueDate: r.dueDate,
           note: r.note,
           amountUsd,
+          amountError,
+          confirming: r.requirementId === confirmingRequirementId,
         };
       }),
-    [documentsQuery.data, paymentsQuery.data],
+    [documentsQuery.data, paymentsQuery.data, paymentsQuery.isError, confirmingRequirementId],
   );
 
   // ── Host review ───────────────────────────────────────────────────────────
@@ -1359,6 +1377,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const handlePressDocumentRow = useCallback(
     async (row: DocumentRow) => {
       if (row.reqType === 'pay') {
+        // Already paid — don't round-trip to the edge function just to be
+        // told "Already paid". Also skips a re-tap while we're already
+        // polling this exact row.
+        if (row.state === 'approved' || row.confirming) return;
         try {
           await startCheckout(row.requirementId);
         } catch (e) {
@@ -1367,14 +1389,34 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         }
         // The browser closing is NOT proof of payment — Stripe rejects custom URL
         // schemes so there is no trustworthy redirect back. The webhook is the
-        // only truth. Refetch, and give it a moment to land.
+        // only truth, and it hasn't necessarily landed the instant the browser
+        // sheet closes. Poll for it: a short delay, then a couple of retries,
+        // with a transient "Confirming…" state on the row so the traveler sees
+        // something happening rather than an unchanged screen. Stop as soon as
+        // the row flips to approved; if it never does within this window,
+        // leave the row exactly as "Pay" — never assert success the server
+        // hasn't confirmed.
         //
         // `detailDocuments` is the traveler's own requirement list (it wraps
         // fetchMyRequirements). There is no `myRequirements` key — do not invent one.
-        if (currentUserId) {
-          await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
+        setConfirmingRequirementId(row.requirementId);
+        try {
+          const retryDelaysMs = [1500, 2500, 4000];
+          for (const delayMs of retryDelaysMs) {
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            if (currentUserId) {
+              await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
+            }
+            await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+            const freshRows = queryClient.getQueryData<TripRequirement[]>(
+              tripsKeys.detailDocuments(tripId),
+            );
+            const updated = freshRows?.find(r => r.requirementId === row.requirementId);
+            if (updated?.state === 'approved') break;
+          }
+        } finally {
+          setConfirmingRequirementId(null);
         }
-        await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
         return;
       }
 

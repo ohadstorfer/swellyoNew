@@ -762,6 +762,15 @@ export type DocumentRow = {
   /** Pay rows only — what is still owed, in canonical USD. Null when the
    *  traveler has no price set yet. */
   amountUsd?: number | null;
+  /** Pay rows only — the payments query failed, so `amountUsd` is null for a
+   *  reason other than "no price set yet". Rendered distinctly so a traveler
+   *  doesn't read a transient fetch error as "this is free." */
+  amountError?: boolean;
+  /** Pay rows only — Checkout just closed and we're polling for the webhook to
+   *  land. Overrides the normal "Pay" pill with a transient, non-actionable
+   *  state so the traveler sees something happening instead of an unchanged
+   *  screen. */
+  confirming?: boolean;
 };
 
 /** "12 Oct" — deadlines are always shown as a real date, never as
@@ -770,6 +779,21 @@ function formatDue(iso: string): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+/**
+ * The literal USD figure Stripe will charge — never `formatPrice`'s
+ * nearest-₪100 approximation. That rounding is right for browsing trip cards;
+ * on a bill it can put a different number in front of the traveler than the
+ * one on the Checkout page, off by up to ₪50 either way.
+ */
+function formatExactUsd(usd: number): string {
+  const cents = Math.round(usd * 100);
+  const whole = cents % 100 === 0;
+  return `$${(cents / 100).toLocaleString('en-US', {
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 // Row icons. Only `passport` exists as a TripIcon — an unknown TripIcon name
@@ -798,6 +822,9 @@ const DOC_STATUS: Record<DocumentRowState, { label: string; tone: 'accent' | 'mu
 // A waiver is agreed to and a medical form is filled in — neither is reviewed,
 // so "In review" would be a lie and "Add" is the wrong verb.
 function statusFor(row: DocumentRow): { label: string; tone: 'accent' | 'muted' | 'bad' | 'done' } {
+  // Checkout just closed — the webhook hasn't confirmed yet, so this is
+  // neither "Pay" (misleading — they just paid) nor "Done" (unconfirmed).
+  if (row.confirming) return { label: 'Confirming…', tone: 'muted' };
   const base = DOC_STATUS[row.state];
   if (row.state === 'approved') return base;
   if (row.kind === 'waiver') {
@@ -991,10 +1018,25 @@ export const TripDocumentsCard: React.FC<{
           // shows the work without reading a single word.
           const quiet = status.tone === 'muted' || status.tone === 'done';
 
+          // Pay rows only (amountUsd is never set otherwise). A `0` here means
+          // fully paid — that's a "Done" state, not a figure worth printing
+          // next to it, so it's treated the same as "nothing to show" below.
+          const exactUsd =
+            row.amountUsd != null && row.amountUsd > 0 ? formatExactUsd(row.amountUsd) : null;
+          // Secondary, explicitly-approximate local-currency hint — reuses
+          // `formatPrice`'s ₪-rounding on purpose, since THAT rounding is
+          // exactly right for a parenthetical "about ₪X", just never for the
+          // primary figure. Suppressed when it would just repeat the dollar
+          // amount (non-Israeli viewers, or no fx rate on this trip).
+          const approxLocal =
+            exactUsd && formatPrice(row.amountUsd!, budgetFxRate, viewerCountry);
+          const showApprox = !!approxLocal && approxLocal !== exactUsd;
+
           return (
             <Pressable
               key={row.requirementId}
               onPress={() => onPressRow(row)}
+              disabled={!!row.confirming}
               // A rejection needs two lines, so the fixed row height is dropped
               // for that case only — every other row keeps the gear-row rhythm.
               style={({ pressed }) => [
@@ -1010,11 +1052,16 @@ export const TripDocumentsCard: React.FC<{
                 <Text style={styles.ygItem} numberOfLines={1}>
                   {row.title}
                 </Text>
-                {row.amountUsd != null && (
+                {row.amountError ? (
+                  <Text style={styles.docAmountError}>Couldn't load amount</Text>
+                ) : exactUsd ? (
                   <Text style={styles.docAmount}>
-                    {formatPrice(row.amountUsd, budgetFxRate, viewerCountry) ?? ''}
+                    {exactUsd}
+                    {showApprox ? (
+                      <Text style={styles.docAmountApprox}>{` (about ${approxLocal})`}</Text>
+                    ) : null}
                   </Text>
-                )}
+                ) : null}
                 {showNote ? (
                   <Text style={styles.docNote} numberOfLines={2}>
                     {row.note}
@@ -1376,7 +1423,15 @@ const styles = StyleSheet.create({
   // away from the divider). A background wash gives the same "heard you" without
   // breaking the card.
   docRowPressed: { backgroundColor: '#F4F4F2' },
-  docAmount: { fontSize: 13, color: '#535862', marginTop: 2 },
+  // The exact USD figure Stripe will charge — bolder than the plain-text due
+  // date/note siblings, since this is the one line on the card that's a
+  // number a traveler needs to trust. No marginTop: `docRowText` already
+  // gives every line a 2px gap.
+  docAmount: { fontFamily: ff('Inter', '600'), fontSize: 13, lineHeight: 18, color: '#535862' },
+  // Nested inside `docAmount` — inherits its size/weight/color unless
+  // overridden, so only the parts that differ (regular weight, muted) are set.
+  docAmountApprox: { fontFamily: ff('Inter', '400'), fontWeight: '400', color: T.muted },
+  docAmountError: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: T.muted },
   docNote: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: '#C4361E' },
   docDue: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: T.muted },
   docDueLate: { color: '#C4361E' },
