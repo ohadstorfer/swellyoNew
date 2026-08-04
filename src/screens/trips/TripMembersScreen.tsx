@@ -422,6 +422,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         isSelf={sheetMember?.user_id === currentUserId}
         tripId={tripId}
         viewerIsOperator={isOperator}
+        ownerUserId={trip?.host_id ?? null}
         paymentMode={trip?.payment_mode ?? null}
         budgetFxRate={trip?.budget_fx_rate ?? null}
         requirements={knownRequirements}

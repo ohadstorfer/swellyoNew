@@ -462,6 +462,92 @@ end $$;
 revoke execute on function public.guard_primary_trip_host()
   from public, anon, authenticated;
 
+-- Round 7, C3 route 2 part 2: nobody can remove the owner, and the owner
+-- cannot leave. Section 10 alone does not close route 2 -- demote_trip_host
+-- and a raw participant DELETE both reach sync_primary_trip_host, whose
+-- reassignment section 10 waves through at trigger depth 2.
+create or replace function public.protect_trip_owner_membership()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_owner uuid;
+begin
+  if auth.uid() is null then
+    return case when TG_OP = 'DELETE' then old else new end;
+  end if;
+
+  select host_id into v_owner from public.group_trips where id = old.trip_id;
+
+  if not found then
+    return case when TG_OP = 'DELETE' then old else new end;
+  end if;
+
+  if v_owner is distinct from old.user_id then
+    return case when TG_OP = 'DELETE' then old else new end;
+  end if;
+
+  if TG_OP = 'DELETE' then
+    raise exception 'The trip owner cannot be removed from their own trip'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  if old.role = 'host'
+     and (new.role is distinct from 'host' or new.user_id is distinct from old.user_id) then
+    raise exception 'The trip owner cannot be removed as host of their own trip'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return new;
+end $$;
+
+revoke execute on function public.protect_trip_owner_membership()
+  from public, anon, authenticated;
+
+drop trigger if exists trg_protect_trip_owner_membership on public.group_trip_participants;
+create trigger trg_protect_trip_owner_membership
+  before update or delete on public.group_trip_participants
+  for each row execute function public.protect_trip_owner_membership();
+
+-- Section 12: PRE-EXISTING bug, not a payments change. enforce_min_one_trip_host
+-- (20260708000000, live) has no exemption for the trip's own ON DELETE CASCADE,
+-- so deleting a trip is currently impossible. Same missing exemption, same
+-- existence test.
+create or replace function public.enforce_min_one_trip_host()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_trip_id uuid := old.trip_id;
+  v_was_host boolean := (old.role = 'host');
+  v_still_host boolean := (tg_op = 'UPDATE' and new.role = 'host');
+  v_remaining int;
+begin
+  if not v_was_host or v_still_host then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  if not exists (select 1 from public.group_trips where id = v_trip_id) then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  perform 1 from public.group_trips where id = v_trip_id for update;
+  select count(*) into v_remaining
+  from public.group_trip_participants
+  where trip_id = v_trip_id and role = 'host' and user_id <> old.user_id;
+  if v_remaining = 0 then
+    raise exception 'A trip must have at least one host'
+      using errcode = 'check_violation';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $$;
+
+revoke execute on function public.enforce_min_one_trip_host()
+  from public, anon, authenticated;
+
 -- ══════════════════════════════════════════════════════════════════
 -- Migration DDL, part 2 -- identical to
 -- 20260803000100_operator_set_traveler_price.sql
@@ -730,10 +816,14 @@ begin
   update public.group_trips set payment_mode = 'managed' where id = v_trip;
 
   -- ── C1: freeze trigger is authoritative on UPDATE ──────────────────────
-  select user_id into v_host
-    from public.group_trip_participants
-   where trip_id = v_trip and role = 'host'
-   limit 1;
+  -- Round 7: read the OPERATOR OF RECORD explicitly. This used to be an
+  -- unordered `select user_id from group_trip_participants where role='host'
+  -- limit 1`, which passes today only because this trip happens to have
+  -- exactly one host -- the day it gains an admin, that pick can return the
+  -- ADMIN and every assertion below fails for a reason that has nothing to do
+  -- with what they test. group_trips.host_id is the identity these assertions
+  -- actually mean, and it is single by construction.
+  select host_id into v_host from public.group_trips where id = v_trip;
 
   -- Round 2: pin distinctness explicitly rather than trust `limit 1`
   -- ordering not to collide with v_user (it wouldn't silently pass either
@@ -1218,33 +1308,182 @@ begin
   perform set_config('request.jwt.claims', '', true);
   return next;
 
-  -- ── C3 route 2, the other half: the LEGITIMATE reassignment still works ──
-  -- Deliberately last: it moves host_id, so it would break the fixture for
-  -- every operator-impersonating assertion above.
+  -- ══════════════════════════════════════════════════════════════════
+  -- Round 7 -- "nobody can remove the owner, and the owner cannot leave"
+  -- ══════════════════════════════════════════════════════════════════
+  -- Deliberately last: these move real membership, so they would break the
+  -- fixture for every operator-impersonating assertion above.
   --
-  -- Demoting the current operator fires sync_primary_trip_host
-  -- (20260708000000), whose inner UPDATE of group_trips.host_id reaches
-  -- guard_primary_trip_host at trigger depth 2. That depth is the ONLY thing
-  -- separating it from the PATCH refused above -- it runs as the ordinary
-  -- caller, so auth.uid() cannot tell the two apart. If the
-  -- pg_trigger_depth() escape were wrong this would raise, and demoting a
-  -- host would become impossible on every trip in the app, payments or not.
+  -- ⚠️ The assertion that stood here in round 6 PERFORMED this seizure and
+  -- labelled it the legitimate depth-2 escape -- the suite green-lit the
+  -- bypass as expected behaviour. It is replaced, not moved: the same
+  -- statement must now be REFUSED.
+  --
+  -- v_user is the promoted admin; v_operator is group_trips.host_id.
+
+  -- 1. demote_trip_host is SECURITY DEFINER, granted to `authenticated`, and
+  --    gated only on is_trip_host -- which the admin passes.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
   begin
-    update public.group_trip_participants
-       set role = 'member'
+    set local role authenticated;
+    perform public.demote_trip_host(v_trip, v_operator);
+    step := 'R7-1: promoted admin demotes the OPERATOR via demote_trip_host';
+    value := 'FAIL: was allowed -- host_id would fall to the attacker';
+  exception when others then
+    step := 'R7-1: promoted admin demotes the OPERATOR via demote_trip_host';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  select host_id into v_setby from public.group_trips where id = v_trip;
+  select role    into v_state from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_operator;
+  step := 'R7-1 state: host_id unmoved and the operator is still a host';
+  if v_setby = v_operator and v_state = 'host' then
+    value := 'OK: host_id=' || v_setby::text || ', role=' || v_state;
+  else
+    value := 'FAIL: host_id=' || coalesce(v_setby::text, 'null')
+             || ', operator role=' || coalesce(v_state, 'null');
+  end if;
+  return next;
+
+  -- 2. The raw DELETE reaches the same place: the participants DELETE policy
+  --    is `auth.uid() = user_id or is_trip_host(trip_id)`.
+  begin
+    set local role authenticated;
+    delete from public.group_trip_participants
      where trip_id = v_trip and user_id = v_operator;
+    step := 'R7-2: promoted admin DELETEs the OPERATOR''s participant row';
+    value := 'FAIL: was allowed -- host_id would fall to the attacker';
+  exception when others then
+    step := 'R7-2: promoted admin DELETEs the OPERATOR''s participant row';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+  return next;
+
+  select host_id into v_setby from public.group_trips where id = v_trip;
+  select role    into v_state from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_operator;
+  step := 'R7-2 state: host_id unmoved and the operator''s row survives';
+  if v_setby = v_operator and v_state = 'host' then
+    value := 'OK: host_id=' || v_setby::text || ', role=' || v_state;
+  else
+    value := 'FAIL: host_id=' || coalesce(v_setby::text, 'null')
+             || ', operator role=' || coalesce(v_state, 'null');
+  end if;
+  return next;
+
+  -- 3. The owner cannot leave either. This is the half that makes the rule an
+  --    absolute rather than "only the owner may remove themselves" -- with
+  --    the weaker rule, an operator could still walk out and drop host_id on
+  --    whoever happened to be next in line.
+  perform set_config('request.jwt.claims', json_build_object('sub', v_operator)::text, true);
+  begin
+    set local role authenticated;
+    delete from public.group_trip_participants
+     where trip_id = v_trip and user_id = v_operator;
+    step := 'R7-3: the OPERATOR deletes their own participant row (leaves)';
+    value := 'FAIL: was allowed';
+  exception when others then
+    step := 'R7-3: the OPERATOR deletes their own participant row (leaves)';
+    value := 'OK: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  -- 4. REGRESSION: a non-owner admin must still be demotable and removable,
+  --    or this guard has simply broken co-hosting. Uses a THIRD user, so
+  --    v_user stays a host and assertion 5 below is not left removing the
+  --    last one (enforce_min_one_trip_host would then raise for an unrelated
+  --    reason and the result would be meaningless).
+  update public.group_trips set max_participants = 100 where id = v_trip;
+  insert into public.group_trip_participants (trip_id, user_id, role)
+  values (v_trip, v_user2, 'member')
+  on conflict (trip_id, user_id) do update set role = 'member';
+
+  begin
+    set local role authenticated;
+    perform public.promote_trip_host(v_trip, v_user2);
+    perform public.demote_trip_host(v_trip, v_user2);
+    select role into v_state from public.group_trip_participants
+     where trip_id = v_trip and user_id = v_user2;
+    step := 'R7-4a: the operator can still demote a NON-owner admin';
+    if v_state = 'member' then value := 'OK: back to member';
+    else value := 'FAIL: role is ' || coalesce(v_state, 'null'); end if;
+  exception when others then
+    step := 'R7-4a: the operator can still demote a NON-owner admin';
+    value := 'FAIL: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  return next;
+
+  begin
+    set local role authenticated;
+    delete from public.group_trip_participants
+     where trip_id = v_trip and user_id = v_user2;
+    get diagnostics v_rows = row_count;
+    step := 'R7-4b: the operator can still remove a NON-owner participant';
+    if v_rows = 1 then value := 'OK: removed';
+    else value := 'FAIL: row_count=' || v_rows; end if;
+  exception when others then
+    step := 'R7-4b: the operator can still remove a NON-owner participant';
+    value := 'FAIL: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+  return next;
+
+  -- 5. The service-role path (auth.uid() is null) must still be able to
+  --    remove the owner, because the auth.users ON DELETE CASCADE runs in
+  --    exactly that context. If this were blocked, deleting an account would
+  --    start failing for every trip that account owns.
+  --    v_user is still a host here, so enforce_min_one_trip_host is satisfied
+  --    and a failure below can only mean the new guard.
+  begin
+    delete from public.group_trip_participants
+     where trip_id = v_trip and user_id = v_operator;
+    get diagnostics v_rows = row_count;
     select host_id into v_setby from public.group_trips where id = v_trip;
-    step := 'C3 route 2: sync_primary_trip_host may still reassign (depth > 1 escape)';
-    if v_setby = v_user then
-      value := 'OK: reassigned to the remaining host ' || v_setby::text;
+    step := 'R7-5: service role (no JWT) may still remove the owner -- account deletion';
+    if v_rows = 1 and v_setby = v_user then
+      value := 'OK: removed, host_id reassigned to the remaining host';
     else
-      value := 'FAIL: host_id is ' || coalesce(v_setby::text, 'null')
-               || ', expected the remaining host ' || v_user::text;
+      value := 'FAIL: row_count=' || v_rows
+               || ', host_id=' || coalesce(v_setby::text, 'null');
     end if;
   exception when others then
-    step := 'C3 route 2: sync_primary_trip_host may still reassign (depth > 1 escape)';
-    value := 'FAIL: the internal reassignment was blocked (' || sqlerrm || ')';
+    step := 'R7-5: service role (no JWT) may still remove the owner -- account deletion';
+    value := 'FAIL: blocked (' || sqlerrm || ')';
   end;
+  return next;
+
+  -- 6. Deleting the whole trip must still cascade. The FK from
+  --    group_trip_participants is ON DELETE CASCADE and deleteGroupTrip()
+  --    deletes the group_trips row directly, so the parent is already gone
+  --    when the child trigger fires -- which is exactly the `not found`
+  --    exemption. Run on v_trip2 (untouched by 1-5) as its own operator.
+  select host_id into v_setby from public.group_trips where id = v_trip2;
+  insert into public.group_trip_participants (trip_id, user_id, role)
+  values (v_trip2, v_setby, 'host')
+  on conflict (trip_id, user_id) do update set role = 'host';
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_setby)::text, true);
+  begin
+    set local role authenticated;
+    delete from public.group_trips where id = v_trip2;
+    get diagnostics v_rows = row_count;
+    step := 'R7-6: deleting the whole trip still cascades past the owner guard';
+    if v_rows = 1 then value := 'OK: trip deleted, participants cascaded';
+    else value := 'FAIL: row_count=' || v_rows; end if;
+  exception when others then
+    step := 'R7-6: deleting the whole trip still cascades past the owner guard';
+    value := 'FAIL: blocked (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
   return next;
 
   return;

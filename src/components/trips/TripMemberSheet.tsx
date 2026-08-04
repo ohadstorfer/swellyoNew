@@ -30,6 +30,14 @@ interface Props {
    *  only they may price anyone. Showing this row to an admin would be a
    *  button that always errors. */
   viewerIsOperator: boolean;
+  /** `group_trips.host_id` — the trip's owner. Their row gets no "Remove as
+   *  admin" and no "Remove from trip", for anyone, including themselves:
+   *  `protect_trip_owner_membership` (20260803000000 §11) refuses both at the
+   *  database, so offering them would turn an ordinary tap into an error
+   *  alert. The rule is absolute — nobody can remove the owner, and the owner
+   *  cannot leave — because either one hands `host_id`, and with it every
+   *  future traveler payment, to whoever is next in line. */
+  ownerUserId: string | null;
   paymentMode: string | null;
   /** `group_trips.budget_fx_rate` — passed straight through to the price sheet. */
   budgetFxRate: number | null;
@@ -59,8 +67,8 @@ const joinedAgo = (iso: string | null): string => {
 };
 
 export function TripMemberSheet({
-  visible, member, viewerIsHost, isSelf, tripId, viewerIsOperator, paymentMode, budgetFxRate,
-  requirements, onClose,
+  visible, member, viewerIsHost, isSelf, tripId, viewerIsOperator, ownerUserId, paymentMode,
+  budgetFxRate, requirements, onClose,
   onViewProfile, onMessage, onSetAdmin, onRemoveAdmin, onRemove,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -69,6 +77,11 @@ export function TripMemberSheet({
   // Close first, then run the action, so the confirm Alert sits above nothing.
   const wrap = (fn: () => void) => () => { onClose(); fn(); };
   const canManage = viewerIsHost && !isSelf && !!m;
+  // The owner's row. `!isSelf` already hides everything below from the owner
+  // viewing themselves, but this does not lean on that: the row must be
+  // unmanageable when a PROMOTED ADMIN is looking at it, which is exactly the
+  // case `!isSelf` does not cover and the case the attack used.
+  const isOwnerRow = !!m && !!ownerUserId && m.user_id === ownerUserId;
   // `viewerIsOperator`, not `viewerIsHost` — see the prop's own comment. The
   // `!isSelf` inside canManage also mirrors the RPC's refusal to let anyone
   // set their own price.
@@ -102,13 +115,13 @@ export function TripMemberSheet({
               {canManage && m.role === 'member' ? (
                 <SheetOptionRow icon="shield-checkmark-outline" label="Set as admin" onPress={wrap(() => onSetAdmin(m))} />
               ) : null}
-              {canManage && m.role === 'host' ? (
+              {canManage && m.role === 'host' && !isOwnerRow ? (
                 <SheetOptionRow icon="shield-outline" label="Remove as admin" onPress={wrap(() => onRemoveAdmin(m))} />
               ) : null}
               {canSetPrice ? (
                 <SheetOptionRow icon="cash-outline" label="Price" onPress={() => setPriceOpen(true)} pressScale />
               ) : null}
-              {canManage ? (
+              {canManage && !isOwnerRow ? (
                 <SheetOptionRow icon="person-remove-outline" label="Remove from trip" danger onPress={wrap(() => onRemove(m))} />
               ) : null}
             </View>

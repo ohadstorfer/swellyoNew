@@ -63,6 +63,17 @@
 --   C3 route 2 — a promoted admin could PATCH group_trips.host_id to
 --        themselves and redirect every future payment to their own connected
 --        account. guard_primary_trip_host is replaced in section 10 below.
+--
+-- Round 7 (2026-08-03): route 2 was still open, and section 10's
+-- `pg_trigger_depth() > 1` escape was what kept it open — it whitelists the
+-- exact path the attacker uses. demote_trip_host (granted to `authenticated`,
+-- gated only on is_trip_host) or a raw participant DELETE makes the operator
+-- stop being a host; sync_primary_trip_host then hands host_id to the
+-- attacker from depth 2. Closed in section 11 by Ohad's rule — nobody can
+-- remove the owner, and the owner cannot leave — enforced on
+-- group_trip_participants, which is the only place that covers both vectors.
+-- Section 10 is kept: it closes the direct host_id PATCH that section 11
+-- never sees.
 
 -- ══════════════════════════════════════════════════════════════════
 -- 1. Operator payout identity — its own table, not columns on `users`
@@ -700,4 +711,183 @@ begin
 end $$;
 
 revoke execute on function public.guard_primary_trip_host()
+  from public, anon, authenticated;
+
+-- ══════════════════════════════════════════════════════════════════
+-- 11. Nobody can remove the owner. And the owner cannot leave.
+-- ══════════════════════════════════════════════════════════════════
+-- C3 route 2, part 2 (round 7). Section 10 alone does NOT close route 2, and
+-- the `pg_trigger_depth() > 1` escape it uses actively whitelists the path an
+-- attacker takes. All verified against production:
+--
+--   • `demote_trip_host(trip, user)` is SECURITY DEFINER, granted to
+--     `authenticated`, and gated only on `is_trip_host(p_trip_id)` — nothing
+--     exempts the primary host from being demoted.
+--   • The DELETE policy on this table is
+--     `auth.uid() = user_id or is_trip_host(trip_id)`, so a raw
+--     `DELETE group_trip_participants` reaches the same place.
+--   • Either one makes the operator stop being a host, which fires
+--     `sync_primary_trip_host`, which reassigns `group_trips.host_id` to the
+--     longest-tenured remaining host — the attacker. Its inner UPDATE arrives
+--     at trigger depth 2, which section 10's guard waves through by design.
+--
+-- So a promoted admin taps "Remove as admin" (or "Remove from trip") on the
+-- operator — buttons the app already renders on every row for any host — and
+-- from that moment payments-checkout resolves the payout account to theirs.
+-- Every traveler payment on the trip lands in the attacker's Stripe balance.
+--
+-- Ohad's rule, implemented as an absolute: NOBODY can remove the owner, and
+-- the owner cannot leave. Not "only the owner may remove themselves" — the
+-- owner cannot exit the host set from any client, including their own. There
+-- is no ownership-transfer feature today; if one is wanted later it will be a
+-- deliberate, separately-designed thing rather than a side effect of a
+-- "Remove as admin" tap.
+--
+-- The guard lives on `group_trip_participants`, not on `group_trips`, because
+-- that is the only place that closes demote_trip_host AND the raw DELETE
+-- together. Section 10's guard is KEPT as well: it closes the direct
+-- `PATCH group_trips {"host_id": …}`, which this trigger never sees. Neither
+-- is sufficient alone.
+--
+-- Exactly two exemptions, and deliberately no others:
+--   1. `auth.uid() is null` — the service role. The `auth.users` ON DELETE
+--      CASCADE runs in that context, so account deletion keeps working.
+--   2. The `group_trips` row is already gone — i.e. the trip itself is being
+--      deleted and this is its ON DELETE CASCADE. Deleting your own trip is
+--      legitimate and must keep cascading. Tested by EXISTENCE (`found`),
+--      never by pg_trigger_depth(): depth is what failed in round 6, because
+--      it cannot tell a legitimate internal reassignment from an attacker
+--      standing behind one. Existence is a fact about what is happening, not
+--      a guess about who asked. `deleteGroupTrip` deletes the group_trips row
+--      directly and lets the FK cascade, so by the time this fires the parent
+--      row is genuinely gone.
+create or replace function public.protect_trip_owner_membership()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare v_owner uuid;
+begin
+  -- Exemption 1: service role.
+  if auth.uid() is null then
+    return case when TG_OP = 'DELETE' then old else new end;
+  end if;
+
+  select host_id into v_owner from public.group_trips where id = old.trip_id;
+
+  -- Exemption 2: the trip row itself is gone. `found` rather than
+  -- `v_owner is null` so this stays correct however host_id is constrained.
+  if not found then
+    return case when TG_OP = 'DELETE' then old else new end;
+  end if;
+
+  -- Not the owner's row: ordinary member/admin management, untouched.
+  if v_owner is distinct from old.user_id then
+    return case when TG_OP = 'DELETE' then old else new end;
+  end if;
+
+  if TG_OP = 'DELETE' then
+    raise exception 'The trip owner cannot be removed from their own trip'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  -- UPDATE: only the change that takes the owner OUT of the host set is
+  -- refused. Everything else on their row (committed flag, prices, gear)
+  -- still writes normally. The user_id test covers re-pointing the row at
+  -- someone else, which removes the owner's host row just as surely as
+  -- demoting it.
+  if old.role = 'host'
+     and (new.role is distinct from 'host' or new.user_id is distinct from old.user_id) then
+    raise exception 'The trip owner cannot be removed as host of their own trip'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  return new;
+end $$;
+
+revoke execute on function public.protect_trip_owner_membership()
+  from public, anon, authenticated;
+
+drop trigger if exists trg_protect_trip_owner_membership on public.group_trip_participants;
+create trigger trg_protect_trip_owner_membership
+  before update or delete on public.group_trip_participants
+  for each row execute function public.protect_trip_owner_membership();
+
+-- ══════════════════════════════════════════════════════════════════
+-- 12. PRE-EXISTING BUG, found while verifying section 11: you cannot
+--     currently delete a trip at all
+-- ══════════════════════════════════════════════════════════════════
+-- ⚠️ NOT a payments change, and NOT caused by this branch. Flagged for Ohad
+-- to veto if he would rather ship it separately — it is included here only
+-- because it BLOCKS section 11's own acceptance criterion ("deleting the
+-- whole trip must still cascade"), which cannot be demonstrated while an
+-- earlier trigger on the same table refuses the same statement.
+--
+-- `enforce_min_one_trip_host()` (defined in 20260708000000, live) is a BEFORE
+-- UPDATE OR DELETE trigger that refuses to let the last `role = 'host'` row
+-- leave the host set. It has no exemption for the trip's own ON DELETE
+-- CASCADE — so when `deleteGroupTrip()` deletes a `group_trips` row and the
+-- cascade reaches that trip's last host participant, it raises
+-- 'A trip must have at least one host' and the whole delete rolls back.
+--
+-- Confirmed empirically against production, on the CURRENT function bodies
+-- with none of this migration applied: an owner deleting their own trip is
+-- refused. Nearly every trip in the database has exactly one host row, so
+-- this is not an edge case — trip deletion is broken outright.
+--
+-- The fix is the same missing exemption section 11 was careful to include,
+-- and by the same existence test rather than trigger depth: "at least one
+-- host" is a meaningless invariant to enforce on a trip that no longer
+-- exists. It cannot weaken anything — there is no trip left to be hostless.
+--
+-- Replacement lives here, in the unapplied migration, for the same reason as
+-- section 10: 20260708000000 is already applied to production and must not be
+-- edited. The existing trg_enforce_min_one_trip_host trigger already points
+-- at this function by name.
+--
+-- DELIBERATELY NOT FIXED HERE — a separate, related bug this exemption does
+-- NOT cover: deleting an ACCOUNT that is the sole host of a surviving trip
+-- hits the same raise (the trip still exists, so the exemption does not
+-- apply, and the cascade from auth.users removes its only host). Whether that
+-- should cascade-delete the trip, reassign it, or allow a hostless trip is a
+-- product decision, not a security fix. Today's account deletion is a request
+-- email handled manually within 30 days (DeleteAccountScreen), so nothing
+-- automated is currently failing on it.
+create or replace function public.enforce_min_one_trip_host()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions, pg_temp
+as $$
+declare
+  v_trip_id uuid := old.trip_id;
+  v_was_host boolean := (old.role = 'host');
+  v_still_host boolean := (tg_op = 'UPDATE' and new.role = 'host');
+  v_remaining int;
+begin
+  -- Only relevant when a host row is leaving the host set.
+  if not v_was_host or v_still_host then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  -- Added 2026-08-03: the trip row is already gone, so this is the trip's own
+  -- ON DELETE CASCADE. Without this, deleting a trip is impossible.
+  if not exists (select 1 from public.group_trips where id = v_trip_id) then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  -- Lock the trip so two concurrent demotions can't both pass this count.
+  perform 1 from public.group_trips where id = v_trip_id for update;
+  select count(*) into v_remaining
+  from public.group_trip_participants
+  where trip_id = v_trip_id and role = 'host' and user_id <> old.user_id;
+  if v_remaining = 0 then
+    raise exception 'A trip must have at least one host'
+      using errcode = 'check_violation';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $$;
+
+revoke execute on function public.enforce_min_one_trip_host()
   from public, anon, authenticated;
