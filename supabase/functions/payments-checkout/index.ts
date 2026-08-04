@@ -167,12 +167,19 @@ serve(async req => {
       return json({ error: 'Nothing to pay' }, 400);
     }
 
-    const { data: events } = await supabase
+    const { data: events, error: eventsErr } = await supabase
       .from('organized_trip_payment_events')
       .select('amount_usd')
       .eq('trip_id', req_.trip_id)
       .eq('user_id', userId)
       .eq('requirement_id', requirementId);
+    // A transient read failure must not be treated as "no payment history" —
+    // that would make `paid` fall back to 0 and `outstanding` become the FULL
+    // amount, sending a traveler who already part-paid to checkout for
+    // everything. `events` is also the idempotency-key discriminator below;
+    // silently resetting it to an empty array could collide with a
+    // pre-refund key too. Throw so this 500s and the caller retries.
+    if (eventsErr) throw eventsErr;
 
     const paid = (events ?? []).reduce((s, e) => s + Number(e.amount_usd), 0);
     const outstanding = Math.max(0, due - paid);
@@ -195,12 +202,17 @@ serve(async req => {
     // creates, both see nothing, and it is the deterministic Idempotency-Key
     // below — not this lookup — that collapses those into one session.
     //
-    // Known limits: `limit=100` returns the most recent open sessions
-    // PLATFORM-WIDE, not per user — past ~100 concurrent open sessions across
-    // ALL operators the target can fall off the page with no signal beyond
-    // the log line below. A small `operator_checkout_sessions` table keyed on
-    // (user_id, requirement_id) would be simpler and exact, and should
-    // replace this before volume gets anywhere near that.
+    // Known limit, escalated rather than fixed here: `has_more` below only
+    // means "there could be more sessions we didn't see" — it is a LOG LINE,
+    // not a control. If the target session falls off this page (past ~100
+    // concurrently OPEN sessions PLATFORM-WIDE, across every operator, not
+    // just this one), price-freshness enforcement below silently stops
+    // applying to it — a stale-priced session stays payable with no way for
+    // this function to notice. A small `operator_checkout_sessions` table
+    // keyed on (user_id, requirement_id) is the exact, exact-cardinality fix
+    // and should replace this before real traffic volume arrives; that is a
+    // schema change and a deploy-gating decision, not something to make
+    // inside a fix round.
     const openSessions = await stripeGet('checkout/sessions?status=open&limit=100');
     const sessionsData: Array<{
       id: string;
@@ -208,32 +220,58 @@ serve(async req => {
       amount_total?: number;
       metadata?: Record<string, string>;
     }> = openSessions.data ?? [];
-    if (sessionsData.length >= 100) {
+    if (openSessions.has_more) {
       console.error(
-        '[payments-checkout] open Stripe session list hit its page limit; dedup can silently miss the target session',
+        '[payments-checkout] open Stripe session list has more pages than fetched; dedup/price-freshness enforcement is unactionable past this point for this request',
       );
     }
-    const existing = sessionsData.find(
+
+    // There can be more than one open session for this requirement (e.g. a
+    // previous request's expire attempt failed and it was left behind) — a
+    // single .find would leave the others live and payable at stale prices.
+    const matches = sessionsData.filter(
       sess =>
         sess.metadata?.trip_id === req_.trip_id &&
         sess.metadata?.user_id === userId &&
         sess.metadata?.requirement_id === requirementId,
     );
 
-    if (existing) {
-      if (existing.amount_total === amountCents && existing.url) {
-        return json({ url: existing.url });
+    const freshMatch = matches.find(sess => sess.amount_total === amountCents && sess.url);
+    if (freshMatch) return json({ url: freshMatch.url });
+
+    let idempotencySuffix = '';
+    if (matches.length > 0) {
+      // None of them are priced correctly, or freshMatch would have returned
+      // above — e.g. the host edited this traveler's price, the headline
+      // feature of this whole project. Expire every one so none of them can
+      // ever be paid at a stale amount. Fail CLOSED: if an expire fails, stop
+      // and ask the caller to retry rather than silently leaving that stale
+      // session live and minting a fresh one on top of it. One realistic
+      // reason expire can fail is that the session just COMPLETED — the
+      // status=open list is seconds stale — in which case minting a new
+      // session for the full outstanding amount would charge a payment that
+      // already succeeded a second time.
+      for (const stale of matches) {
+        try {
+          await stripe(`checkout/sessions/${stale.id}/expire`, {});
+        } catch (expireErr) {
+          console.error(
+            '[payments-checkout] failed to expire a stale session, refusing to mint a new one',
+            safeMessage(expireErr),
+          );
+          return json({ error: 'Could not start the payment' }, 500);
+        }
       }
-      // The amount owed changed since this session was opened — e.g. the
-      // host edited this traveler's price, the headline feature of this
-      // whole project. Reusing it would over- or under-charge. Expire it so
-      // it can never be paid at the stale amount, then fall through to mint
-      // a fresh one below.
-      try {
-        await stripe(`checkout/sessions/${existing.id}/expire`, {});
-      } catch (expireErr) {
-        console.error('[payments-checkout] failed to expire stale session', safeMessage(expireErr));
-      }
+      // The idempotency key below must change once a session for this exact
+      // (user, requirement, amount) has already existed and been expired —
+      // otherwise, if the amount ever returns to a previously-used value
+      // inside Stripe's 24h idempotency window (an operator raising then
+      // correcting a price back down is an entirely ordinary sequence for
+      // per-traveler pricing), the key would be byte-identical to the one
+      // that minted the session just expired above. Stripe would replay
+      // that CACHED response — the dead, just-expired session — and hard-
+      // block the traveler from paying for up to 24 hours.
+      idempotencySuffix = `:after=${matches.map(s => s.id).join(',')}`;
     }
 
     // ── 5. Destination charge: the operator is paid, our fee is split off.
@@ -243,8 +281,9 @@ serve(async req => {
     //      idempotency window would replay the CACHED response — the
     //      original, already-completed session, a dead URL the traveler
     //      cannot pay through. The refund adds a ledger row, which changes
-    //      the count and forces a fresh key.
-    const idempotencyKey = `checkout:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}`;
+    //      the count and forces a fresh key. idempotencySuffix does the same
+    //      job for an expired-and-replaced session (see above).
+    const idempotencyKey = `checkout:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
     const session = await stripe(
       'checkout/sessions',
       {
