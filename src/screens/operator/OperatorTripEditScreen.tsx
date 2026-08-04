@@ -25,6 +25,7 @@ import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpotsSheetContent } from '../../components/trips/sheets/SpotsSheetContent';
 import { PriceSheetContent } from '../../components/trips/sheets/PriceSheetContent';
+import { VisibilitySheetContent } from '../../components/trips/sheets/VisibilitySheetContent';
 import {
   ActivitiesSheetContent,
   SurfFilmSheetContent,
@@ -105,6 +106,7 @@ type SheetKey =
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
   | 'price' | 'includes'
+  | 'visibility'
   | null;
 
 /** Flat multi-select categories inside price_inclusions — rendered with
@@ -629,7 +631,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         </EditSection>
 
         <EditSection title="Visibility">
-          <EditRow label="Listed in explore" onPress={noop} />
+          <EditRow label="Listed in explore" onPress={() => setSheet('visibility')} />
         </EditSection>
 
         <EditSection title="Manage">
@@ -981,6 +983,23 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       >
         {(draft, setDraft) => (
           <IncludesEditorContent value={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
+
+      {/* visibility is a plain text column with no CHECK (see
+          VisibilitySheetContent's own doc comment) — both options are always
+          valid, so no `validate` here. Null (legacy rows written before this
+          column existed a default) seeds the same as explore_feed treats it:
+          as 'public', so the sheet never opens with neither card selected. */}
+      <EditFieldSheet<string>
+        visible={sheet === 'visibility'}
+        title="Visibility"
+        initial={trip.visibility ?? 'public'}
+        onClose={close}
+        onSave={(next) => saveField({ visibility: next })}
+      >
+        {(draft, setDraft) => (
+          <VisibilitySheetContent value={draft} onChange={setDraft} />
         )}
       </EditFieldSheet>
     </SafeAreaView>
