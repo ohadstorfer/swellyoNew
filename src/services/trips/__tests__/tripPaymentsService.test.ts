@@ -38,8 +38,10 @@ describe('amountDue', () => {
   // Stored rows can't reach this (a DB CHECK blocks deposit > total), but a
   // live price-sheet form building this struct from two text fields mid-typing
   // can — e.g. a 5000 deposit entered before the 2000 total is corrected.
-  it('floors the balance at zero rather than going negative', () => {
-    expect(amountDue('balance', { totalUsd: 2000, depositUsd: 5000 })).toBe(0);
+  // A negative raw figure is a contradictory configuration, not a real zero
+  // balance, so it reads as "unknown" (null) — 0 would look like fully paid.
+  it('returns null for a contradictory balance (deposit larger than total)', () => {
+    expect(amountDue('balance', { totalUsd: 2000, depositUsd: 5000 })).toBeNull();
   });
 });
 
@@ -56,6 +58,13 @@ describe('amountOutstanding', () => {
 
   it('is zero when nothing is due', () => {
     expect(amountOutstanding('deposit', { totalUsd: 2000, depositUsd: null }, 0)).toBe(0);
+  });
+
+  // A contradictory configuration makes amountDue return null ("unknown"),
+  // not zero. We still cannot ask for a negative amount, so outstanding
+  // reads as 0 — never a negative number — even though nothing was paid.
+  it('is zero (not negative) when the balance is contradictory', () => {
+    expect(amountOutstanding('balance', { totalUsd: 2000, depositUsd: 5000 }, 0)).toBe(0);
   });
 
   // The operator raised this traveler's price after they paid. Their balance

@@ -30,14 +30,22 @@ export type TravelerPrices = {
   depositUsd: number | null;
 };
 
-/** What this step costs, or null when nothing is owed for it. Floors the
- *  balance at zero — stored rows can't produce a negative balance (a DB
- *  CHECK blocks deposit > total), but a live form building this struct from
- *  unvalidated, mid-typing input can. */
+/** What this step costs, or null when it cannot be determined: either the
+ *  price is unknown, or the balance works out negative (deposit > total —
+ *  a contradictory configuration; a DB CHECK blocks it in stored rows, but a
+ *  live form building this struct from unvalidated, mid-typing input can hit
+ *  it). Null, not zero, because zero reads as "fully paid" to every
+ *  consumer — mirrors `operator_traveler_amount_due()` in
+ *  `20260803000000_operator_trip_payments.sql`, which returns NULL instead
+ *  of `greatest(..., 0)` for the same reason (`GREATEST` silently ignores
+ *  NULL inputs in Postgres, which used to make an unpriced traveler read as
+ *  paid in full). A genuine balance of exactly `0` — deposit equals total —
+ *  still returns `0`. */
 export function amountDue(step: PayStep, p: TravelerPrices): number | null {
   if (p.totalUsd == null) return null;
   if (step === 'deposit') return p.depositUsd;
-  return Math.max(0, p.totalUsd - (p.depositUsd ?? 0));
+  const balance = p.totalUsd - (p.depositUsd ?? 0);
+  return balance < 0 ? null : balance;
 }
 
 /** What is still owed after everything already paid against this step. */
