@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -153,6 +153,13 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
    * that fabricated number into `resolveDeadlineDate` would report a deadline
    * moving that never existed, so must-have rows are excluded.
    *
+   * `requirementsQuery.data === undefined` (still loading, or errored with no
+   * cached data) is reported as such rather than silently folded into "no
+   * deadlines move" — those two are not the same claim, and an operator who
+   * confirms quickly, before the fetch lands, deserves to know which one is
+   * true. Does not block or await the fetch; the confirm popup opens either
+   * way.
+   *
    * It only reports; it does not change anything. Whether a deadline that has
    * already passed re-opens when the trip moves later is still an OPEN
    * question (spec §11 #3) — do not decide it here.
@@ -161,7 +168,8 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     (patch: { start_date?: string | null }): string => {
       const nextStart = patch.start_date ?? null;
       if (!nextStart || !trip?.start_date || nextStart === trip.start_date) return '';
-      const rows = (requirementsQuery.data ?? []).filter(r => r.isActive && r.skippable);
+      if (requirementsQuery.data === undefined) return 'Deadline changes are still loading.';
+      const rows = requirementsQuery.data.filter(r => r.isActive && r.skippable);
       if (rows.length === 0) return '';
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -180,6 +188,64 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     },
     [requirementsQuery.data, trip?.start_date],
   );
+
+  /**
+   * EditDatesSheet's own reset effect (TripEditSheets.tsx:365-370) resets its
+   * local draft on every render where `initial` has a new reference — unlike
+   * EditFieldSheet, it has no closed->open edge guard (no `prevVisible` ref).
+   * Building this object with an inline IIFE in the JSX below gave it a new
+   * identity on EVERY render of this screen, for ANY reason — including
+   * `requirementsQuery` (a wholly separate hook) resolving in the background
+   * while the operator has the sheet open. That reseeds the sheet's local
+   * `startDate`/`endDate` state back to the trip's stored dates, silently
+   * discarding an in-progress pick with no error and no cue.
+   *
+   * Memoized and keyed on the trip's actual date fields, NOT on `trip` itself
+   * — keying on the whole object would still churn identity on every refetch
+   * that returns an equivalent-but-new `trip`, defeating the point.
+   */
+  const datesInitial = useMemo(() => {
+    const months = [...(trip?.date_months ?? [])].sort();
+    return {
+      datesMode: trip?.start_date ? ('exact' as const) : ('months' as const),
+      startDateISO: trip?.start_date ?? null,
+      endDateISO: trip?.end_date ?? null,
+      monthFrom: months[0] ?? '',
+      monthTo: months[months.length - 1] ?? '',
+      durationDays: trip?.duration_days ?? null,
+    };
+  }, [
+    trip?.start_date,
+    trip?.end_date,
+    trip?.dates_set_in_stone,
+    trip?.date_months,
+    trip?.duration_days,
+  ]);
+
+  /**
+   * Same class of bug as `datesInitial` above, and the same fix: audited
+   * every other sheet on this screen (see Task 7 fix-round-1 report) and
+   * `EditAccommodationSheet` is the only other one whose own reset effect
+   * (TripEditSheets.tsx, its `useEffect(() => { if (visible) {...} },
+   * [visible, initial])`) lacks a closed->open guard. Every `EditFieldSheet`
+   * row below is safe as-is — EditFieldSheet's own effect is guarded by a
+   * `prevVisible` ref (EditFieldSheet.tsx:57-63), so a churned `initial`
+   * reference while it stays open does not reseed the draft. EditCoverSheet's
+   * `currentUri` and every `EditTextSheet`'s `initialValue` are plain strings
+   * (value-compared, not reference-compared), so they cannot churn identity
+   * on an unrelated re-render either way.
+   */
+  const accommodationInitial = useMemo<AccommodationInitial>(() => ({
+    kind: (trip?.accommodation_type?.[0] ?? null) as AccommodationInitial['kind'],
+    name: trip?.accommodation_name ?? '',
+    url: trip?.accommodation_url ?? '',
+    photoUri: trip?.accommodation_image_url ?? null,
+  }), [
+    trip?.accommodation_type,
+    trip?.accommodation_name,
+    trip?.accommodation_url,
+    trip?.accommodation_image_url,
+  ]);
 
   /**
    * Spec §3.5. Ask before writing a field people joined on the basis of.
@@ -365,20 +431,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
       <EditDatesSheet
         visible={sheet === 'when'}
-        initial={(() => {
-          // Same derivation TripDetailScreen uses for the A/B inline pill
-          // (TripDetailScreen.tsx:2415-2425) — DatesInitial's field names do
-          // not match the trip row's column names 1:1.
-          const months = [...(trip.date_months ?? [])].sort();
-          return {
-            datesMode: trip.start_date ? ('exact' as const) : ('months' as const),
-            startDateISO: trip.start_date ?? null,
-            endDateISO: trip.end_date ?? null,
-            monthFrom: months[0] ?? '',
-            monthTo: months[months.length - 1] ?? '',
-            durationDays: trip.duration_days ?? null,
-          };
-        })()}
+        initial={datesInitial}
         onClose={close}
         onSave={(patch: DatesPatch) => confirmMaterialChange(
           'Change the dates?',
@@ -393,12 +446,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
       <EditAccommodationSheet
         visible={sheet === 'stay'}
-        initial={{
-          kind: (trip.accommodation_type?.[0] ?? null) as AccommodationInitial['kind'],
-          name: trip.accommodation_name ?? '',
-          url: trip.accommodation_url ?? '',
-          photoUri: trip.accommodation_image_url ?? null,
-        }}
+        initial={accommodationInitial}
         onClose={close}
         onSave={async (next) => {
           // photoUri is either a freshly-picked local uri (needs uploading) or
