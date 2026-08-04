@@ -387,6 +387,8 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         member={sheetMember}
         viewerIsHost={isHost}
         isSelf={sheetMember?.user_id === currentUserId}
+        tripId={tripId}
+        paymentMode={trip?.payment_mode ?? null}
         onClose={() => setSheetMember(null)}
         onViewProfile={userId => onViewUserProfile?.(userId)}
         onMessage={(userId, name, avatar) => onMessage?.(userId, name, avatar)}
