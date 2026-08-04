@@ -18,6 +18,11 @@ export type RootStackParamList = {
   TripDetail: { tripId: string; focus?: TripDetailFocus | null };
   /** Host edit wizard, card above the trip detail. */
   EditTrip: { trip: GroupTrip };
+  /** Operator-only flat edit screen for a hosting_style='C' trip. Distinct from
+   *  EditTrip, which reopens the create wizard and is peer-trip only. */
+  OperatorEditTrip: { tripId: string };
+  /** Full-screen place picker pushed from the Edit trip screen's "Where" row. */
+  OperatorEditDestination: { tripId: string };
   /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
   TripUpdates: { tripId: string };
   /** Full "Members" list — "View all" target of the Overview Participants row and

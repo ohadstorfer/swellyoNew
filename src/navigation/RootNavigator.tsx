@@ -28,6 +28,7 @@ import ManageSuggestedGearScreen from '../screens/trips/ManageSuggestedGearScree
 import ManageGearScreen from '../screens/trips/ManageGearScreen';
 import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
+import OperatorTripEditScreen from '../screens/operator/OperatorTripEditScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ShareToChatScreen } from '../screens/ShareToChatScreen';
@@ -117,6 +118,7 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       onBack={() => navigation.goBack()}
       onOpenGroupChat={tripCard.onOpenGroupChat}
       onEditTrip={trip => navigation.dispatch(StackActions.push('EditTrip', { trip }))}
+      onEditOperatorTrip={editTripId => navigation.dispatch(StackActions.push('OperatorEditTrip', { tripId: editTripId }))}
       onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
       onViewAllUpdates={() => navigation.dispatch(StackActions.push('TripUpdates', { tripId }))}
       onViewAllMembers={() => navigation.dispatch(StackActions.push('TripMembers', { tripId }))}
@@ -782,6 +784,11 @@ export default function RootNavigator() {
       <RootStack.Screen name="HomeTabs" component={HomeTabs} />
       <RootStack.Screen name="TripDetail" component={TripDetailCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="EditTrip" component={EditTripCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen
+        name="OperatorEditTrip"
+        component={OperatorTripEditScreen}
+        options={{ presentation: 'card' }}
+      />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripMembers" component={TripMembersCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="PackingAndGear" component={PackingAndGearCardScreen} options={{ presentation: 'card' }} />

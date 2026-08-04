@@ -160,6 +160,10 @@ interface TripDetailScreenProps {
   onBack: () => void;
   onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
   onEditTrip?: (trip: GroupTrip) => void;
+  /** Operator (host_id owner) tap on the "Edit trip" menu entry — pushes the
+   *  flat OperatorEditTrip screen. Distinct from onEditTrip, which reopens the
+   *  wizard and is for peer (A/B) hosts only. */
+  onEditOperatorTrip?: (tripId: string) => void;
   /** Tap on a participant opens their profile. Back from the profile returns here. */
   onViewUserProfile?: (userId: string) => void;
   /** Optional — wires the header notification bell (Figma). Bell is hidden when
@@ -364,7 +368,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
@@ -540,6 +544,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // same rows, but this reads directly off the query so it never depends on
   // whatever `documentRows` happens to derive.
   const isOperatorTrip = trip?.hosting_style === 'C';
+  // The operator of record — the one operator_payout_accounts pays. NOT
+  // isHost, which is flat multi-host (every promoted co-admin). group_trips'
+  // UPDATE policy is is_trip_host(id), so gating the operator edit screen on
+  // isHost would let any promoted co-host change cost_per_person for
+  // everyone — this screen is the first UI anywhere that edits a published
+  // trip's price. Same reasoning as operator_set_traveler_price's C3 fix
+  // (supabase/migrations/20260803000100_operator_set_traveler_price.sql:14-44).
+  const isTripOwner = !!currentUserId && trip?.host_id === currentUserId;
   const canManageRequirements =
     isHostDerived && ((documentsQuery.data?.length ?? 0) > 0 || isOperatorTrip);
   // Enabled on `isHost`, matching where the sheet is mounted. Tying it to
@@ -1712,6 +1724,20 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         label: 'Complete trip',
         group: 2,
         onPress: handleCompleteTrip,
+      },
+      // Edit trip — the operator OF RECORD only, on a hosting_style 'C' trip.
+      // Deliberately trip.host_id and not isHost: isHost is flat multi-host
+      // (every promoted admin), and this screen edits cost_per_person, which
+      // group_trips' own UPDATE policy would otherwise let any co-host change.
+      // Same reasoning as operator_set_traveler_price's C3 fix. Peer A/B hosts
+      // keep the inline Overview pills; the wizard's edit mode stays
+      // unreachable for them, exactly as it is today.
+      (isTripOwner && isOperatorTrip && !isLocked) && {
+        key: 'edit',
+        icon: 'create-outline' as const,
+        label: 'Edit trip',
+        group: 2,
+        onPress: () => onEditOperatorTrip?.(trip.id),
       },
       // Cancel — host only, while the trip is still live.
       (isHost && !isLocked) && {
