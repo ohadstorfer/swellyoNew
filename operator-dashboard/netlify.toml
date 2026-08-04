@@ -1,0 +1,20 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Single-page app: every route must serve index.html or a deep link 404s.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# This tool shows passports and medical notes. It should never be indexed,
+# framed, or leak its URLs to another site.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
