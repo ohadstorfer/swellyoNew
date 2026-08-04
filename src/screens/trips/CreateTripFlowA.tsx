@@ -51,6 +51,13 @@ import {
   BudgetEstimate,
 } from '../../services/trips/groupTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
+import {
+  validateAgeRange,
+  validateDates,
+  validateStay,
+  validatePrice,
+  validateDeposit,
+} from '../../services/trips/tripValidation';
 import { FadeInView } from '../../components/FadeInView';
 import { HomeBreakSearchSheet, HomeBreakSelection } from '../../components/HomeBreakSearchSheet';
 import { InlineMapView } from '../../components/MapPickerModal';
@@ -1682,20 +1689,8 @@ export default function CreateTripFlowA({
         // upper limit" / "no lower limit". Both empty is also valid ("Any").
         const minRaw = state.ageMin ? parseInt(state.ageMin, 10) : null;
         const maxRaw = state.ageMax ? parseInt(state.ageMax, 10) : null;
-        const minOk = minRaw == null || (minRaw >= 16 && minRaw <= 99);
-        const maxOk = maxRaw == null || (maxRaw >= 16 && maxRaw <= 99);
-        if (!minOk || !maxOk) {
-          fail('age', 'Ages must be 16-99');
-        } else if (minRaw != null && maxRaw != null) {
-          if (maxRaw < minRaw) {
-            fail('age', 'Maximum age must be at least the minimum');
-          } else if (maxRaw - minRaw < ageWindow) {
-            fail(
-              'age',
-              `Age range must span at least ${ageWindow} years (currently ${maxRaw - minRaw}).`,
-            );
-          }
-        }
+        const ageError = validateAgeRange(minRaw, maxRaw, ageWindow);
+        if (ageError) fail('age', ageError);
         if (state.skillLevels.length === 0) fail('skill', 'Pick at least one skill level');
         if (state.waveShape === null) fail('waveShape', 'Pick a wave shape');
         return ok;
@@ -1704,21 +1699,14 @@ export default function CreateTripFlowA({
         if (!editMode && !state.destination.trim())
           fail('destination', 'Pick a destination for your trip');
 
-        if (state.datesMode === 'months') {
-          if (!state.monthFrom) fail('when', 'Pick at least one month for your trip');
-          else if (!state.durationDays || state.durationDays < 1)
-            fail('when', 'Pick a trip length');
-        } else {
-          if (!state.startDateISO) fail('when', 'Pick a start date');
-          else if (
-            state.endDateISO &&
-            startDateObj &&
-            endDateObj &&
-            startOfDay(endDateObj) < startOfDay(startDateObj)
-          ) {
-            fail('when', 'End date must be on or after the start date');
-          }
-        }
+        const datesError = validateDates({
+          mode: state.datesMode,
+          startDate: state.startDateISO,
+          endDate: state.endDateISO,
+          months: state.monthFrom ? [state.monthFrom] : [],
+          durationDays: state.durationDays,
+        });
+        if (datesError) fail('when', datesError);
 
         if (!state.title.trim()) fail('title', 'Your trip needs a name');
         if (!state.heroImageUri) fail('heroImage', 'Add a cover photo to publish your trip');
@@ -1728,30 +1716,26 @@ export default function CreateTripFlowA({
       }
       case 'vibez': {
         if (!state.accommodationKind) fail('accommodationKind', 'Pick an accommodation type');
-        const stayDetailsMissing =
-          !state.accommodationName.trim() ||
-          !state.accommodationUrl.trim() ||
-          !state.accommodationImageUri;
-        if (requiresSpecificStay) {
-          // Flow B & C always have a specific stay — details required, no gate.
-          if (stayDetailsMissing) fail('specificStay', 'Add the stay name, link, and a photo');
-        } else {
-          if (state.accommodationLocked === null)
-            fail('accommodationGate', 'Choose yes or no');
-          // All three details required when the gate is Yes.
-          if (state.accommodationLocked === true && stayDetailsMissing) {
-            fail('specificStay', 'Add the stay name, link, and a photo');
-          }
+        // Flow B & C always have a specific stay — details required, no gate.
+        if (!requiresSpecificStay && state.accommodationLocked === null) {
+          fail('accommodationGate', 'Choose yes or no');
         }
+        const stayError = validateStay({
+          specificStaySelected: requiresSpecificStay || state.accommodationLocked === true,
+          name: state.accommodationName,
+          url: state.accommodationUrl,
+          imageUrl: state.accommodationImageUri,
+        });
+        if (stayError) fail('specificStay', stayError);
         return ok;
       }
       case 'budget': {
         if (isFixedFlow) {
           // Flow C — a single fixed per-person price is required.
-          const price = state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
-          if (price == null || Number.isNaN(price) || price <= 0) {
-            fail('price', 'Enter a price per person');
-          }
+          const rawPrice = state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
+          const price = rawPrice != null && Number.isNaN(rawPrice) ? null : rawPrice;
+          const priceError = validatePrice(price);
+          if (priceError) fail('price', priceError);
           if (isFixedFlow && state.paymentMode === 'managed') {
             // Publishing a trip that asks for money it cannot receive is the one
             // failure with no recovery for the traveler.
@@ -1759,19 +1743,17 @@ export default function CreateTripFlowA({
               setError('deposit', 'Connect Stripe before collecting payment in the app.');
               return false;
             }
-            const depositPrice = state.costPerPerson ? parseInt(state.costPerPerson, 10) : 0;
+            const depositPrice = state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
             // "0" (or anything <= 0) is not a real deposit — it means "no
-            // deposit," same as leaving the field blank — so it never reaches
-            // the >= check below. Mirrors the rawDeposit >0 filter used at
-            // save time; a value that passes validation here but gets
-            // silently nulled out at save would be a confusing round trip.
-            const rawDep = state.depositAmount ? parseInt(state.depositAmount, 10) : 0;
-            const dep = rawDep > 0 ? rawDep : 0;
-            // >= , not just >: a deposit equal to the full price would still
-            // create a real 'balance' row worth exactly 0, which is the same
-            // "reads as already paid" trap as a negative balance.
-            if (dep > 0 && dep >= depositPrice) {
-              setError('deposit', 'The deposit must be less than the price.');
+            // deposit," same as leaving the field blank. Mirrors the
+            // rawDeposit >0 filter used at save time; a value that passes
+            // validation here but gets silently nulled out at save would be
+            // a confusing round trip.
+            const rawDep = state.depositAmount ? parseInt(state.depositAmount, 10) : null;
+            const dep = rawDep != null && rawDep > 0 ? rawDep : null;
+            const depositError = validateDeposit(dep, depositPrice);
+            if (depositError) {
+              setError('deposit', depositError);
               return false;
             }
           }
