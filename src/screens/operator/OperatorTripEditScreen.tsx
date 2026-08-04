@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -7,12 +7,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { RootStackParamList } from '../../navigation/navigationRef';
 import { EditSection } from '../../components/trips/edit/EditSection';
 import { EditRow } from '../../components/trips/edit/EditRow';
-import { EditFieldSheet } from '../../components/trips/edit/EditFieldSheet';
+import { EditFieldSheet, CANCELLED } from '../../components/trips/edit/EditFieldSheet';
 import {
   EditTextSheet,
   EditCoverSheet,
   EditAccommodationSheet,
+  EditDatesSheet,
   type AccommodationInitial,
+  type DatesPatch,
 } from '../../components/trips/TripEditSheets';
 import { LevelsSheetContent } from '../../components/trips/sheets/LevelsSheetContent';
 import { StyleSheetContent } from '../../components/trips/sheets/StyleSheetContent';
@@ -22,7 +24,7 @@ import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorks
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import type { AccommodationKind } from '../../components/trips/AccommodationTypeGrid';
-import { useTripCore } from '../../hooks/trips/useTripDetail';
+import { useTripCore, useTripRequirements } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { updateOperatorTrip } from '../../services/operator/operatorTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
@@ -34,6 +36,7 @@ import {
   type TripStructureSlug,
   type TripVibeSlug,
 } from '../../services/trips/groupTripsService';
+import { resolveDeadlineDate } from '../../services/trips/tripDocumentsService';
 import { validateAgeRange } from '../../services/trips/tripValidation';
 import { AGE_WINDOW_BY_STYLE } from '../trips/CreateTripFlowA';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -65,6 +68,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
  */
 type SheetKey =
   | 'cover' | 'title' | 'description' | 'stay' | 'aboutYou'
+  | 'when'
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
   | null;
@@ -118,6 +122,99 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       }
     },
     [tripId, queryClient],
+  );
+
+  // This screen is only reachable from TripDetailScreen's "Edit trip" menu
+  // entry, itself gated on `isTripOwner` (TripDetailScreen.tsx:554,1735) — so
+  // the current user is always the host here. Recomputed the same way rather
+  // than assumed `true`, since `trip` can still be null pre-load.
+  const isHost = !!currentUserId && trip?.host_id === currentUserId;
+
+  // participant_count includes the host. It is what max_participants is
+  // compared against everywhere else (isFull, the join trigger), so the spots
+  // floor has to use this exact number — see spec §7.1.
+  const participantCount = trip?.participant_count ?? 0;
+  // Everyone who is not the host: the people a material change needs telling.
+  const joinedCount = Math.max(0, participantCount - 1);
+
+  // Host-only: the stored requirement rows, so a date change can report what
+  // it does to their deadlines. Same query TripDetailScreen's own requirements
+  // editor uses (useTripDetail.ts:211) — no new fetch shape invented here.
+  const requirementsQuery = useTripRequirements(tripId, isHost);
+
+  /**
+   * One sentence about what a new start date does to the requirement
+   * deadlines, or '' when there is nothing to say. Spec §9.
+   *
+   * Only counts ACTIVE, SKIPPABLE requirements. A must-have row (passport,
+   * waiver, deposit) has `deadline_days_before = null` in the DB — no real due
+   * date — the `daysBefore` `fetchTripRequirements` fills in for it is a UI
+   * stepper default, not a deadline (tripDocumentsService.ts:485-491). Feeding
+   * that fabricated number into `resolveDeadlineDate` would report a deadline
+   * moving that never existed, so must-have rows are excluded.
+   *
+   * It only reports; it does not change anything. Whether a deadline that has
+   * already passed re-opens when the trip moves later is still an OPEN
+   * question (spec §11 #3) — do not decide it here.
+   */
+  const describeDeadlineShift = useCallback(
+    (patch: { start_date?: string | null }): string => {
+      const nextStart = patch.start_date ?? null;
+      if (!nextStart || !trip?.start_date || nextStart === trip.start_date) return '';
+      const rows = (requirementsQuery.data ?? []).filter(r => r.isActive && r.skippable);
+      if (rows.length === 0) return '';
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let moved = 0;
+      let inThePast = 0;
+      for (const row of rows) {
+        const next = resolveDeadlineDate(nextStart, row.daysBefore);
+        if (!next) continue;
+        moved += 1;
+        if (next.getTime() < today.getTime()) inThePast += 1;
+      }
+      if (moved === 0) return '';
+      const head = `${moved} ${moved === 1 ? 'deadline moves' : 'deadlines move'}.`;
+      if (inThePast === 0) return head;
+      return `${head} ${inThePast} ${inThePast === 1 ? 'lands' : 'land'} in the past.`;
+    },
+    [requirementsQuery.data, trip?.start_date],
+  );
+
+  /**
+   * Spec §3.5. Ask before writing a field people joined on the basis of.
+   *
+   * Returns a promise that REJECTS on Cancel, because every sheet in this
+   * screen treats a rejected onSave as "stay open, keep the draft" — which is
+   * exactly what Cancel should do. The rejection carries a marker (CANCELLED)
+   * so the error alert can be skipped; a cancel is not a failure.
+   *
+   * `{ cancelable: false }` is load-bearing, not decorative: it is what makes
+   * every dismissal path settle the promise. On Android it disables both the
+   * back button and tap-outside-to-dismiss, so the alert can only close via
+   * one of the two buttons below, each of which resolves or rejects. On iOS
+   * `cancelable` is a no-op — Alert.alert there has no back-button or
+   * tap-outside dismissal to begin with. Without this flag, an Android back
+   * press would close the dialog without firing either onPress and leave the
+   * promise — and the sheet's `saving` spinner — hanging forever.
+   *
+   * Skips the popup entirely when the operator is the only person on the trip.
+   */
+  const confirmMaterialChange = useCallback(
+    (title: string, message: string, confirmLabel: string, run: () => Promise<void>) => {
+      if (joinedCount === 0) return run();
+      return new Promise<void>((resolve, reject) => {
+        Alert.alert(title, message, [
+          { text: 'Cancel', style: 'cancel', onPress: () => reject(CANCELLED) },
+          {
+            text: confirmLabel,
+            style: 'destructive',
+            onPress: () => { run().then(resolve, reject); },
+          },
+        ], { cancelable: false });
+      });
+    },
+    [joinedCount],
   );
 
   // Every row below reads `trip` to seed its sheet, and EditAccommodationSheet
@@ -174,7 +271,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <EditRow label="Trip name" onPress={() => setSheet('title')} />
           <EditRow label="Description" onPress={() => setSheet('description')} />
           <EditRow label="Where" onPress={noop} />
-          <EditRow label="When" onPress={noop} />
+          <EditRow label="When" onPress={() => setSheet('when')} />
           <EditRow label="Spots" onPress={noop} />
         </EditSection>
 
@@ -264,6 +361,34 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         maxLength={1000}
         onClose={close}
         onSave={(value) => save({ host_lead_note: value.trim() || null })}
+      />
+
+      <EditDatesSheet
+        visible={sheet === 'when'}
+        initial={(() => {
+          // Same derivation TripDetailScreen uses for the A/B inline pill
+          // (TripDetailScreen.tsx:2415-2425) — DatesInitial's field names do
+          // not match the trip row's column names 1:1.
+          const months = [...(trip.date_months ?? [])].sort();
+          return {
+            datesMode: trip.start_date ? ('exact' as const) : ('months' as const),
+            startDateISO: trip.start_date ?? null,
+            endDateISO: trip.end_date ?? null,
+            monthFrom: months[0] ?? '',
+            monthTo: months[months.length - 1] ?? '',
+            durationDays: trip.duration_days ?? null,
+          };
+        })()}
+        onClose={close}
+        onSave={(patch: DatesPatch) => confirmMaterialChange(
+          'Change the dates?',
+          [
+            `${joinedCount} ${joinedCount === 1 ? 'traveler' : 'travelers'} joined on the old dates. Make sure you tell them about this change.`,
+            describeDeadlineShift(patch),
+          ].filter(Boolean).join('\n\n'),
+          'Change it',
+          () => save(patch),
+        )}
       />
 
       <EditAccommodationSheet

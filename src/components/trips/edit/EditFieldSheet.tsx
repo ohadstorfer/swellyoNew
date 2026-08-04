@@ -7,6 +7,12 @@ import { showErrorAlert } from '../../../utils/friendlyError';
 
 export type ConfirmCopy = { title: string; message: string; confirmLabel: string };
 
+/** Marker for "the operator backed out of a confirm popup". A cancel is not a
+ *  failure, so it must not raise an error alert. Checked by identity, never
+ *  shown to anyone. Lives here because EditFieldSheet is the only place that
+ *  has to tell the two apart. */
+export const CANCELLED = Symbol('cancelled');
+
 export type EditFieldSheetProps<T> = {
   visible: boolean;
   title: string;
@@ -73,7 +79,7 @@ export function EditFieldSheet<T>({
       await onSave(draft);
       onClose();
     } catch (e) {
-      showErrorAlert('Could not save', e, 'Your changes were not saved. Please try again.');
+      if (e !== CANCELLED) showErrorAlert('Could not save', e, 'Your changes were not saved. Please try again.');
     } finally {
       setSaving(false);
     }
