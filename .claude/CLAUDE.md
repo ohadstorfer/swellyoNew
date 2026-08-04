@@ -200,6 +200,35 @@ When a session is winding down (Eyal says things like "ok good", "let's stop her
 - Don't lecture. One sentence, specific, actionable. Then execute.
 - Track what was discussed in the session so the end-of-session review is accurate.
 
+## Icons — always use `edit-02` for edit affordances
+
+Any "edit" icon anywhere in the app is `TripIcon name="edit-02"` from
+`src/components/trips/tripIcons.tsx`. Never `Ionicons create-outline`, never
+`pencil` / `pencil-outline`, never a new pencil SVG.
+
+```tsx
+import { TripIcon } from '../../components/trips/tripIcons';
+
+<TripIcon name="edit-02" size={14} color={C.ink} />
+```
+
+- **Why:** it is the Figma pencil the "Edit cover" pill uses
+  (`TripDetailViewRedesigned.tsx`, `EditPill`), and Ionicons has no matching
+  glyph — mixing the two makes edit buttons look like they came from different
+  apps. `edit-02` is a traced `rn-svg` path, so it scales and takes `color` /
+  `strokeWidth` like any other `TripIcon`.
+- If a component's icon prop is typed to Ionicons, add an optional `tripIcon`
+  alongside it and render `TripIcon` when set, rather than swapping the icon set
+  wholesale. See `TripMenuEntry` in `TripDetailScreen.tsx` for the pattern.
+- **`strokeWidth` is in the icon's OWN viewBox units, not pixels.** `edit-02`'s
+  viewBox is 12.27 where most `TripIcon`s are ~16, so the same `strokeWidth`
+  renders visibly heavier on it. Rendered px ≈ `strokeWidth / viewBox * size`.
+  When placing `edit-02` next to other icons, scale it: at `size={22}` use
+  `strokeWidth={0.85}` to match the ~1.5px weight `IconCell` gets from `1.1`,
+  and the ~1.38px Ionicons outline draws at the same size.
+- Known holdout, not yet migrated: `ProfileEditLifestyleScreen.tsx` still uses
+  `create-outline`.
+
 ## Common Gotchas
 
 - `destinations_array` is JSONB — can't be filtered in SQL, must filter in-memory after query

@@ -1,12 +1,15 @@
 ---
 name: rendercallback-deps-pattern
-description: TripDeck renderItem useCallback misses userId in deps — found during explore-infinite review
+description: Recurring bug in this repo — a useCallback gains a new closure variable but its deps array is not updated (TripDeck renderItem, CreateTripFlowA validateStep)
 metadata:
   type: project
 ---
 
-In `TripsScreen.tsx`, the `TripDeck` `renderItem` `useCallback` at line 666 captures `userId` from the closure (passed to `ExploreTripCard`) but its deps array is `[scrollX, meta, onOpenTrip]` — `userId` is missing. If `userId` changes after first render (session restore mid-mount) the prefetch closure inside the card sees the stale value.
+Stale-closure bugs from un-updated `useCallback` deps keep recurring in this repo. Two confirmed instances:
 
-**Why:** `userId` was added to the card prop (Task 9) after the `renderItem` callback was already written, and the deps were not updated.
+- `TripsScreen.tsx` `TripDeck` `renderItem` (~line 666) captures `userId` but deps are `[scrollX, meta, onOpenTrip]`.
+- `CreateTripFlowA.tsx` `validateStep` (deps ~line 1794) reads `stripeReady` (added in the Stripe-payments task) but `stripeReady` is not in the deps. `state` is in the deps and changes on every keystroke, which masks it — the bug only bites when the async value flips *after* the last state change and the user taps Next without typing anything.
 
-**How to apply:** When a prop is added to a component rendered inside a `useCallback`, always check that the callback's deps array includes the new prop.
+**Why:** the variable is added to the callback body in a later task; nobody re-reads the deps array at the bottom of a 100-line `useCallback`. There is no `react-hooks/exhaustive-deps` enforcement failing the build.
+
+**How to apply:** on any diff that adds a read of component state/props inside an existing `useCallback`/`useMemo`, scroll to the deps array and confirm it was updated. Pay special attention to async-set state (fetch results, subscription callbacks) — those flip without a re-render of the deps.
