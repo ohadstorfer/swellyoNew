@@ -145,6 +145,13 @@ export interface GroupTrip {
   cost_per_person: number | null;
   price_inclusions: PriceInclusions | null; // rich "What's included" — see priceInclusions.ts
 
+  // Flow C payments. 'offline' = money never touches the app (every A/B trip,
+  // and every existing C trip until an operator opts in). DB default is
+  // 'offline' and NOT NULL — see 20260803000000_operator_trip_payments.sql.
+  payment_mode: 'offline' | 'managed';
+  // Deposit amount, USD. Null = one single payment, no deposit row.
+  deposit_amount: number | null;
+
   // Step-3 Yes/No gate: did the host select a specific stay, or none yet?
   // (Renamed from accommodation_status — May 2026. See migration
   // 20260531000001_rename_accommodation_status_to_specific_stay_selected.sql)

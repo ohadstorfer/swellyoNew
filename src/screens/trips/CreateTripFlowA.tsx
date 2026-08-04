@@ -94,6 +94,7 @@ import {
 } from '../../services/trips/tripDocumentsService';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from '../../components/trips/sheets/SpecificStaySheetContent';
+import { ConnectStripeCard } from '../../components/trips/ConnectStripeCard';
 
 // Existing dependencies still used (preview card)
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
@@ -165,7 +166,8 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 // useTripWizardDraft's `looksLikeShape` refuses to restore a draft missing any
 // key of the initial state, so without it TripsScreen would still OFFER to
 // resume a v6 draft and then silently restore nothing.
-export const WIZARD_STATE_VERSION = 7;
+// v7 -> v8: Flow C payment mode — paymentMode + depositAmount, in the budget step.
+export const WIZARD_STATE_VERSION = 8;
 
 // Step KEYS — flat step list. Preview is the final step (publishes directly).
 type StepKey =
@@ -283,6 +285,7 @@ type FieldKey =
   | 'specificStay'
   | 'budget'
   | 'price'
+  | 'deposit'
   | 'hostDestFamiliarity'
   | 'hostStayFamiliarity';
 
@@ -374,6 +377,11 @@ interface WizardState extends Record<string, unknown> {
   costPerPerson: string;
   priceInclusions: PriceInclusions;
 
+  /** Flow C only. 'offline' = the app as it is today, no money in it. */
+  paymentMode: 'offline' | 'managed';
+  /** Blank means one single payment — no deposit row is created at all. */
+  depositAmount: string;
+
   // Step 5 (Flow C only) — traveler requirements. Written as
   // `organized_trip_requirements` rows on publish, never before; the wizard
   // keeps them in the draft like every other answer.
@@ -435,6 +443,8 @@ const INITIAL_STATE: WizardState = {
   budgetManualMax: '',
   costPerPerson: '',
   priceInclusions: {},
+  paymentMode: 'offline',
+  depositAmount: '',
   // Passport is on by default — it is the reason the operator can book
   // anything. Everything else is opt-in.
   requirementKinds: ['passport'],
@@ -669,6 +679,11 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: 'ILS' | 'USD'): Wizard
     costPerPerson:
       trip.cost_per_person != null ? String(toEditCurrency(trip.cost_per_person)) : '',
     priceInclusions: trip.price_inclusions ?? {},
+    paymentMode: (trip.payment_mode as 'offline' | 'managed') ?? 'offline',
+    // Same USD -> operator-currency conversion as costPerPerson above — the
+    // stored column is always canonical USD.
+    depositAmount:
+      trip.deposit_amount != null ? String(toEditCurrency(trip.deposit_amount)) : '',
     visibility: (trip.visibility as Visibility) ?? 'public',
   };
 };
@@ -1469,6 +1484,11 @@ export default function CreateTripFlowA({
     };
   }, []);
 
+  // Flow C, managed payments — whether the operator's Stripe account can
+  // accept charges right now. Gates publish (see validateStep, 'budget' case);
+  // set by ConnectStripeCard, which re-asks Stripe on every mount.
+  const [stripeReady, setStripeReady] = useState(false);
+
   // Budget estimate (transient — not persisted)
   const [budgetEstimate, setBudgetEstimate] = useState<BudgetEstimate | null>(null);
   const [budgetLoading, setBudgetLoading] = useState(false);
@@ -1719,6 +1739,20 @@ export default function CreateTripFlowA({
           if (price == null || Number.isNaN(price) || price <= 0) {
             fail('price', 'Enter a price per person');
           }
+          if (isFixedFlow && state.paymentMode === 'managed') {
+            // Publishing a trip that asks for money it cannot receive is the one
+            // failure with no recovery for the traveler.
+            if (!stripeReady) {
+              setError('deposit', 'Connect Stripe before collecting payment in the app.');
+              return false;
+            }
+            const depositPrice = state.costPerPerson ? parseInt(state.costPerPerson, 10) : 0;
+            const dep = state.depositAmount ? parseInt(state.depositAmount, 10) : 0;
+            if (dep > depositPrice) {
+              setError('deposit', 'The deposit cannot be more than the price.');
+              return false;
+            }
+          }
           return ok;
         }
         const usingManual = state.manualBudget || !budgetEstimate;
@@ -1895,6 +1929,19 @@ export default function CreateTripFlowA({
           : operatorCurrency === 'ILS'
             ? ilsToUsd(rawFixed, saveRate)
             : rawFixed;
+      // Same USD-canonical rule as cost_per_person above — deposit_amount is
+      // never stored in the operator's input currency, or a ₪ deposit would be
+      // charged through Stripe (USD-only) as if it were dollars.
+      const rawDeposit =
+        isFixedFlow && state.paymentMode === 'managed' && state.depositAmount
+          ? parseInt(state.depositAmount, 10)
+          : null;
+      const depositAmountUsd =
+        rawDeposit == null
+          ? null
+          : operatorCurrency === 'ILS'
+            ? ilsToUsd(rawDeposit, saveRate)
+            : rawDeposit;
       const priceInclusions = isFixedFlow
         ? normalizePriceInclusions(state.priceInclusions)
         : null;
@@ -1940,6 +1987,9 @@ export default function CreateTripFlowA({
           budget_tier: state.manualBudget ? null : state.budgetTier,
           cost_per_person: fixedPrice,
           price_inclusions: priceInclusions,
+          payment_mode: isFixedFlow ? state.paymentMode : 'offline',
+          deposit_amount:
+            isFixedFlow && state.paymentMode === 'managed' ? depositAmountUsd : null,
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           wave_shapes: waveShapesArray,
@@ -1997,6 +2047,9 @@ export default function CreateTripFlowA({
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           cost_per_person: fixedPrice,
           price_inclusions: priceInclusions,
+          payment_mode: isFixedFlow ? state.paymentMode : 'offline',
+          deposit_amount:
+            isFixedFlow && state.paymentMode === 'managed' ? depositAmountUsd : null,
 
           // Whether the host picked a specific stay (the step-3 Yes/No gate).
           // Guaranteed non-null by the time this saves (vibez-step validation).
@@ -2010,17 +2063,35 @@ export default function CreateTripFlowA({
         const trip = await createGroupTrip(hostId, input);
 
         // Traveler requirements (Flow C only). Written AFTER the trip row
-        // exists because they point at trip_id. A failure here must not lose a
-        // published trip — the operator can add requirements later — so this
-        // warns and carries on rather than throwing.
-        if (isFixedFlow && state.requirementKinds.length > 0) {
+        // exists because they point at trip_id — the pay rows specifically
+        // need it to already carry payment_mode, since
+        // trg_pay_requires_managed_trip reads that off the trip row. A
+        // failure here must not lose a published trip — the operator can add
+        // requirements later — so this warns and carries on rather than
+        // throwing.
+        //
+        // Money rows are added to whatever documents the operator picked. The
+        // deposit row only exists when there is a deposit — a trip taking one
+        // single payment gets a balance row for the full price, never a
+        // zero-value deposit row.
+        const payKinds: RequirementKind[] =
+          state.paymentMode === 'managed'
+            ? state.depositAmount
+              ? ['deposit', 'balance']
+              : ['balance']
+            : [];
+        if (isFixedFlow && (payKinds.length > 0 || state.requirementKinds.length > 0)) {
           try {
             // The waiver DOCUMENT goes first. A waiver requirement whose
             // document does not exist can never be satisfied.
             if (state.requirementKinds.includes('waiver') && state.waiverFile) {
               await publishWaiverPdf(trip.id, state.waiverFile.uri);
             }
-            await createRequirements(trip.id, state.requirementKinds, state.requirementTiming);
+            await createRequirements(
+              trip.id,
+              [...payKinds, ...state.requirementKinds],
+              state.requirementTiming,
+            );
           } catch (reqErr) {
             console.warn('[CreateTripFlowA] requirement insert failed:', reqErr);
           }
@@ -3053,6 +3124,70 @@ export default function CreateTripFlowA({
           />
         </View>
         {errors.price ? <Text style={localStyles.errorText}>{errors.price}</Text> : null}
+
+        {isFixedFlow && (
+          <>
+            <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
+              Getting paid
+            </Text>
+            <View style={localStyles.summaryGroup}>
+              <Pressable
+                onPress={() => update('paymentMode', 'offline')}
+                style={({ pressed }) => [
+                  localStyles.payModeRow,
+                  state.paymentMode === 'offline' && localStyles.payModeRowOn,
+                  pressed && { transform: [{ scale: 0.97 }] },
+                ]}
+              >
+                <Text style={localStyles.payModeTitle}>I'll handle payment myself</Text>
+                <Text style={localStyles.payModeSub}>
+                  Travelers pay you outside the app, however you do it today.
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => update('paymentMode', 'managed')}
+                style={({ pressed }) => [
+                  localStyles.payModeRow,
+                  state.paymentMode === 'managed' && localStyles.payModeRowOn,
+                  pressed && { transform: [{ scale: 0.97 }] },
+                ]}
+              >
+                <Text style={localStyles.payModeTitle}>Collect payment in Swellyo</Text>
+                <Text style={localStyles.payModeSub}>
+                  Travelers pay by card. A deposit now, the rest before the trip.
+                </Text>
+              </Pressable>
+            </View>
+
+            {state.paymentMode === 'managed' && (
+              <>
+                <ConnectStripeCard onStatusChange={setStripeReady} />
+
+                <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
+                  Deposit · {operatorCurrency === 'ILS' ? '₪' : 'USD'}
+                </Text>
+                <Text style={localStyles.helper}>
+                  Leave this blank to take one single payment.
+                </Text>
+                <View style={localStyles.priceRow}>
+                  <TextInput
+                    style={[localStyles.input, { flex: 1 }]}
+                    value={state.depositAmount}
+                    onChangeText={t => update('depositAmount', t.replace(/[^0-9]/g, ''))}
+                    placeholder="500"
+                    placeholderTextColor={COLORS.textPlaceholder}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                  />
+                </View>
+                {errors.deposit ? (
+                  <Text style={localStyles.errorText}>{errors.deposit}</Text>
+                ) : null}
+              </>
+            )}
+          </>
+        )}
 
         <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>What's included</Text>
         <Text style={localStyles.helper}>
@@ -4581,6 +4716,18 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+  // Flow C — "Getting paid" choice rows (offline vs managed).
+  payModeRow: {
+    borderWidth: 1,
+    borderColor: '#EAECF0',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 8,
+  },
+  payModeRowOn: { borderColor: '#0788B0', backgroundColor: '#F0F7FA' },
+  payModeTitle: { fontSize: 15, fontWeight: '600', color: '#181D27' },
+  payModeSub: { fontSize: 13, color: '#535862', marginTop: 2, lineHeight: 18 },
 
   // Trip title preview line
   titlePreview: {
