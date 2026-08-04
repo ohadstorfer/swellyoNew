@@ -4,10 +4,9 @@
 //   Host viewer, other row:  + Set as admin / Remove as admin, + Remove from trip
 // "host" in the DB is shown as "admin" to users (matches AdminBadgeIcon).
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
-import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { SheetOptionRow } from '../sheets/SheetOptionRow';
 import Thumb from '../Thumb';
@@ -26,6 +25,8 @@ interface Props {
   /** Needed to open the per-traveler price sheet — host + managed-trip only. */
   tripId: string;
   paymentMode: string | null;
+  /** `group_trips.budget_fx_rate` — passed straight through to the price sheet. */
+  budgetFxRate: number | null;
   onClose: () => void;
   onViewProfile: (userId: string) => void;
   onMessage: (userId: string, name?: string, avatar?: string | null) => void;
@@ -46,7 +47,7 @@ const joinedAgo = (iso: string | null): string => {
 };
 
 export function TripMemberSheet({
-  visible, member, viewerIsHost, isSelf, tripId, paymentMode, onClose,
+  visible, member, viewerIsHost, isSelf, tripId, paymentMode, budgetFxRate, onClose,
   onViewProfile, onMessage, onSetAdmin, onRemoveAdmin, onRemove,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -89,15 +90,7 @@ export function TripMemberSheet({
                 <SheetOptionRow icon="shield-outline" label="Remove as admin" onPress={wrap(() => onRemoveAdmin(m))} />
               ) : null}
               {canSetPrice ? (
-                <Pressable
-                  onPress={() => setPriceOpen(true)}
-                  style={({ pressed }) => [styles.priceRow, pressed && styles.priceRowPressed]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Set ${m.name ?? 'this traveler'}'s price`}
-                >
-                  <Ionicons name="cash-outline" size={20} color="#222B30" />
-                  <Text style={styles.priceRowLabel}>Price</Text>
-                </Pressable>
+                <SheetOptionRow icon="cash-outline" label="Price" onPress={() => setPriceOpen(true)} pressScale />
               ) : null}
               {canManage ? (
                 <SheetOptionRow icon="person-remove-outline" label="Remove from trip" danger onPress={wrap(() => onRemove(m))} />
@@ -113,19 +106,27 @@ export function TripMemberSheet({
           strand an invisible view controller on iOS that silently eats every
           touch on the screen underneath. Nesting here means the two sheets'
           native lifecycles are coupled through this component's own state
-          instead of racing each other. Mounted on `viewerIsHost` — a prop, not
-          data this sheet's own save invalidates — never on query data. */}
-      {viewerIsHost ? (
+          instead of racing each other.
+          Mounted on `viewerIsHost && m` — `viewerIsHost` IS derived from
+          useTripCore's query data (via isTripHost), same as everything else
+          here, so "never on query data" isn't the reason this is safe. It's
+          safe because saving a price never changes who is host: nothing this
+          sheet does can flip that boolean while it's presenting, even after
+          the `tripsKeys.detail` invalidation below triggers a refetch. `m`
+          (the selected member) is likewise never nulled by that refetch — it
+          is independent local state on the parent screen, only ever changed
+          by an explicit tap on a different row. */}
+      {viewerIsHost && m ? (
         <TravelerPriceSheet
           visible={priceOpen}
           tripId={tripId}
-          userId={m?.user_id ?? ''}
-          travelerName={m?.name ?? 'This traveler'}
+          userId={m.user_id}
+          travelerName={m.name ?? 'This traveler'}
+          budgetFxRate={budgetFxRate}
           onClose={() => setPriceOpen(false)}
           onSaved={() => {
-            if (m) {
-              queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, m.user_id) });
-            }
+            queryClient.invalidateQueries({ queryKey: tripsKeys.payments(tripId, m.user_id) });
+            queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
           }}
         />
       ) : null}
@@ -140,7 +141,4 @@ const styles = StyleSheet.create({
   name: { fontFamily: ff('Montserrat', '700'), fontSize: 18, color: '#212121', marginTop: 12, includeFontPadding: false },
   sub: { fontFamily: ff('Inter', '400'), fontSize: 13, color: '#7B7B7B', marginTop: 4, includeFontPadding: false },
   group: { marginTop: 4 },
-  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 16, paddingHorizontal: 20 },
-  priceRowPressed: { transform: [{ scale: 0.97 }] },
-  priceRowLabel: { fontFamily: ff('Inter', '400'), fontSize: 16, color: '#222B30', includeFontPadding: false },
 });
