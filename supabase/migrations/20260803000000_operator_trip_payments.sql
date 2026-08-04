@@ -738,10 +738,10 @@ revoke execute on function public.guard_primary_trip_host()
 --
 -- Ohad's rule, implemented as an absolute: NOBODY can remove the owner, and
 -- the owner cannot leave. Not "only the owner may remove themselves" — the
--- owner cannot exit the host set from any client, including their own. There
--- is no ownership-transfer feature today; if one is wanted later it will be a
--- deliberate, separately-designed thing rather than a side effect of a
--- "Remove as admin" tap.
+-- owner cannot exit the host set from any client, including their own.
+-- Ownership must never change as a side effect of a "Remove as admin" tap;
+-- the one deliberate, owner-only way it can still change is spelled out
+-- below.
 --
 -- The guard lives on `group_trip_participants`, not on `group_trips`, because
 -- that is the only place that closes demote_trip_host AND the raw DELETE
@@ -749,9 +749,31 @@ revoke execute on function public.guard_primary_trip_host()
 -- `PATCH group_trips {"host_id": …}`, which this trigger never sees. Neither
 -- is sufficient alone.
 --
+-- ── The one ownership move that remains, accepted deliberately ─────────
+-- Section 10 lets the CURRENT owner `PATCH group_trips {"host_id": …}`, and
+-- that is kept on purpose. Said plainly, because an earlier draft of this
+-- comment claimed "there is no ownership-transfer feature today" while
+-- section 10's comment said the opposite: there IS one, it is owner-only, it
+-- has no UI, and it silently redirects every future payout to a different
+-- Stripe account with no confirmation and no notification to anyone. It
+-- requires the owner's own session, so it is not privilege escalation — it is
+-- the last client-reachable way payouts can change account, and it is
+-- accepted as an owner-only capability rather than closed. If a real
+-- ownership-transfer feature is ever built, it should replace this, not sit
+-- beside it.
+--
 -- Exactly two exemptions, and deliberately no others:
 --   1. `auth.uid() is null` — the service role. The `auth.users` ON DELETE
 --      CASCADE runs in that context, so account deletion keeps working.
+--      ⚠️ STRUCTURAL: this is safe only IN COMBINATION with the policies on
+--      this table, not on its own. Both of them independently deny every
+--      JWT-less caller — UPDATE is `auth.uid() = user_id` and DELETE is
+--      `auth.uid() = user_id or is_trip_host(trip_id)`, and with a null
+--      auth.uid() each evaluates to NULL, never true. So the only callers
+--      that can reach this exemption are ones that bypass RLS entirely (the
+--      service role and the table owner). Loosening either policy to admit
+--      an anonymous or JWT-less caller would silently turn this exemption
+--      into an open door. Anyone editing those policies needs to see this.
 --   2. The `group_trips` row is already gone — i.e. the trip itself is being
 --      deleted and this is its ON DELETE CASCADE. Deleting your own trip is
 --      legitimate and must keep cascading. Tested by EXISTENCE (`found`),
@@ -794,11 +816,20 @@ begin
 
   -- UPDATE: only the change that takes the owner OUT of the host set is
   -- refused. Everything else on their row (committed flag, prices, gear)
-  -- still writes normally. The user_id test covers re-pointing the row at
-  -- someone else, which removes the owner's host row just as surely as
-  -- demoting it.
+  -- still writes normally.
+  --
+  -- Three ways a row can leave the host set, not one: demoting `role`,
+  -- re-pointing `user_id` at somebody else, or moving `trip_id` to a
+  -- different trip. All three end with this trip having no owner row, so all
+  -- three are tested. The last two are defence in depth rather than live
+  -- holes — the RLS WITH CHECK subselect and the (trip_id, user_id) unique
+  -- index block them today — but an earlier version of this comment claimed
+  -- completeness while only checking two, which is the kind of gap that
+  -- outlives the constraint that was quietly covering it.
   if old.role = 'host'
-     and (new.role is distinct from 'host' or new.user_id is distinct from old.user_id) then
+     and (new.role is distinct from 'host'
+          or new.user_id is distinct from old.user_id
+          or new.trip_id is distinct from old.trip_id) then
     raise exception 'The trip owner cannot be removed as host of their own trip'
       using errcode = 'insufficient_privilege';
   end if;
@@ -813,81 +844,3 @@ drop trigger if exists trg_protect_trip_owner_membership on public.group_trip_pa
 create trigger trg_protect_trip_owner_membership
   before update or delete on public.group_trip_participants
   for each row execute function public.protect_trip_owner_membership();
-
--- ══════════════════════════════════════════════════════════════════
--- 12. PRE-EXISTING BUG, found while verifying section 11: you cannot
---     currently delete a trip at all
--- ══════════════════════════════════════════════════════════════════
--- ⚠️ NOT a payments change, and NOT caused by this branch. Flagged for Ohad
--- to veto if he would rather ship it separately — it is included here only
--- because it BLOCKS section 11's own acceptance criterion ("deleting the
--- whole trip must still cascade"), which cannot be demonstrated while an
--- earlier trigger on the same table refuses the same statement.
---
--- `enforce_min_one_trip_host()` (defined in 20260708000000, live) is a BEFORE
--- UPDATE OR DELETE trigger that refuses to let the last `role = 'host'` row
--- leave the host set. It has no exemption for the trip's own ON DELETE
--- CASCADE — so when `deleteGroupTrip()` deletes a `group_trips` row and the
--- cascade reaches that trip's last host participant, it raises
--- 'A trip must have at least one host' and the whole delete rolls back.
---
--- Confirmed empirically against production, on the CURRENT function bodies
--- with none of this migration applied: an owner deleting their own trip is
--- refused. Nearly every trip in the database has exactly one host row, so
--- this is not an edge case — trip deletion is broken outright.
---
--- The fix is the same missing exemption section 11 was careful to include,
--- and by the same existence test rather than trigger depth: "at least one
--- host" is a meaningless invariant to enforce on a trip that no longer
--- exists. It cannot weaken anything — there is no trip left to be hostless.
---
--- Replacement lives here, in the unapplied migration, for the same reason as
--- section 10: 20260708000000 is already applied to production and must not be
--- edited. The existing trg_enforce_min_one_trip_host trigger already points
--- at this function by name.
---
--- DELIBERATELY NOT FIXED HERE — a separate, related bug this exemption does
--- NOT cover: deleting an ACCOUNT that is the sole host of a surviving trip
--- hits the same raise (the trip still exists, so the exemption does not
--- apply, and the cascade from auth.users removes its only host). Whether that
--- should cascade-delete the trip, reassign it, or allow a hostless trip is a
--- product decision, not a security fix. Today's account deletion is a request
--- email handled manually within 30 days (DeleteAccountScreen), so nothing
--- automated is currently failing on it.
-create or replace function public.enforce_min_one_trip_host()
-returns trigger
-language plpgsql
-security definer
-set search_path = public, extensions, pg_temp
-as $$
-declare
-  v_trip_id uuid := old.trip_id;
-  v_was_host boolean := (old.role = 'host');
-  v_still_host boolean := (tg_op = 'UPDATE' and new.role = 'host');
-  v_remaining int;
-begin
-  -- Only relevant when a host row is leaving the host set.
-  if not v_was_host or v_still_host then
-    return case when tg_op = 'DELETE' then old else new end;
-  end if;
-
-  -- Added 2026-08-03: the trip row is already gone, so this is the trip's own
-  -- ON DELETE CASCADE. Without this, deleting a trip is impossible.
-  if not exists (select 1 from public.group_trips where id = v_trip_id) then
-    return case when tg_op = 'DELETE' then old else new end;
-  end if;
-
-  -- Lock the trip so two concurrent demotions can't both pass this count.
-  perform 1 from public.group_trips where id = v_trip_id for update;
-  select count(*) into v_remaining
-  from public.group_trip_participants
-  where trip_id = v_trip_id and role = 'host' and user_id <> old.user_id;
-  if v_remaining = 0 then
-    raise exception 'A trip must have at least one host'
-      using errcode = 'check_violation';
-  end if;
-  return case when tg_op = 'DELETE' then old else new end;
-end $$;
-
-revoke execute on function public.enforce_min_one_trip_host()
-  from public, anon, authenticated;

@@ -493,8 +493,11 @@ begin
       using errcode = 'insufficient_privilege';
   end if;
 
+  -- Round 8: trip_id too. Three ways a row leaves the host set, not two.
   if old.role = 'host'
-     and (new.role is distinct from 'host' or new.user_id is distinct from old.user_id) then
+     and (new.role is distinct from 'host'
+          or new.user_id is distinct from old.user_id
+          or new.trip_id is distinct from old.trip_id) then
     raise exception 'The trip owner cannot be removed as host of their own trip'
       using errcode = 'insufficient_privilege';
   end if;
@@ -510,10 +513,22 @@ create trigger trg_protect_trip_owner_membership
   before update or delete on public.group_trip_participants
   for each row execute function public.protect_trip_owner_membership();
 
--- Section 12: PRE-EXISTING bug, not a payments change. enforce_min_one_trip_host
--- (20260708000000, live) has no exemption for the trip's own ON DELETE CASCADE,
--- so deleting a trip is currently impossible. Same missing exemption, same
--- existence test.
+-- ⚠️ NOT part of 20260803000000. This is a copy of
+-- 20260803000200_trip_deletion_and_account_cascade.sql's function, kept here
+-- ONLY so that R7-6 below can demonstrate §11's `not found` exemption at all.
+--
+-- Without it, deleting a trip raises 'A trip must have at least one host'
+-- from this trigger before §11's trigger ever runs (BEFORE row triggers fire
+-- in alphabetical name order, and trg_enforce_min_one_trip_host sorts before
+-- trg_protect_trip_owner_membership), so R7-6 would report a failure that
+-- says nothing about the code under test.
+--
+-- It does NOT ship with the payments migration, deliberately: unblocking trip
+-- deletion while `group_trips`' DELETE policy is still is_trip_host() would
+-- let any promoted admin cascade away organized_trip_payment_events — the
+-- money ledger. See that migration's header. This sandbox rolls back, so
+-- applying it here is free; applying it to production is a separate,
+-- deliberate step that must land together with the policy narrowing.
 create or replace function public.enforce_min_one_trip_host()
 returns trigger
 language plpgsql
@@ -531,6 +546,10 @@ begin
   end if;
 
   if not exists (select 1 from public.group_trips where id = v_trip_id) then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  if not exists (select 1 from auth.users where id = old.user_id) then
     return case when tg_op = 'DELETE' then old else new end;
   end if;
 
@@ -1323,15 +1342,26 @@ begin
 
   -- 1. demote_trip_host is SECURITY DEFINER, granted to `authenticated`, and
   --    gated only on is_trip_host -- which the admin passes.
+  -- ⚠️ Every one of these asserts on SQLSTATE, not `when others`. 42501
+  -- (insufficient_privilege) is section 11's errcode; 23514 (check_violation)
+  -- is enforce_min_one_trip_host's. BEFORE row triggers fire in alphabetical
+  -- name order, so trg_enforce_min_one_trip_host runs FIRST and on a
+  -- single-host trip it is the raiser. A `when others` handler cannot tell
+  -- the two apart, and would report "refused" for a fixture that never
+  -- reached the code under test at all.
   perform set_config('request.jwt.claims', json_build_object('sub', v_user)::text, true);
   begin
     set local role authenticated;
     perform public.demote_trip_host(v_trip, v_operator);
     step := 'R7-1: promoted admin demotes the OPERATOR via demote_trip_host';
     value := 'FAIL: was allowed -- host_id would fall to the attacker';
-  exception when others then
-    step := 'R7-1: promoted admin demotes the OPERATOR via demote_trip_host';
-    value := 'OK: refused (' || sqlerrm || ')';
+  exception
+    when sqlstate '42501' then
+      step := 'R7-1: promoted admin demotes the OPERATOR via demote_trip_host';
+      value := 'OK: refused by the owner guard (' || sqlerrm || ')';
+    when others then
+      step := 'R7-1: promoted admin demotes the OPERATOR via demote_trip_host';
+      value := 'FAIL: refused, but by something else (' || sqlstate || ': ' || sqlerrm || ')';
   end;
   reset role;
   return next;
@@ -1354,11 +1384,20 @@ begin
     set local role authenticated;
     delete from public.group_trip_participants
      where trip_id = v_trip and user_id = v_operator;
+    get diagnostics v_rows = row_count;
     step := 'R7-2: promoted admin DELETEs the OPERATOR''s participant row';
-    value := 'FAIL: was allowed -- host_id would fall to the attacker';
-  exception when others then
-    step := 'R7-2: promoted admin DELETEs the OPERATOR''s participant row';
-    value := 'OK: refused (' || sqlerrm || ')';
+    if v_rows = 0 then
+      value := 'FAIL: matched no row -- the owner row was already gone, so this asserted nothing';
+    else
+      value := 'FAIL: was allowed (row_count=' || v_rows || ') -- host_id would fall to the attacker';
+    end if;
+  exception
+    when sqlstate '42501' then
+      step := 'R7-2: promoted admin DELETEs the OPERATOR''s participant row';
+      value := 'OK: refused by the owner guard (' || sqlerrm || ')';
+    when others then
+      step := 'R7-2: promoted admin DELETEs the OPERATOR''s participant row';
+      value := 'FAIL: refused, but by something else (' || sqlstate || ': ' || sqlerrm || ')';
   end;
   reset role;
   perform set_config('request.jwt.claims', '', true);
@@ -1380,18 +1419,42 @@ begin
   --    absolute rather than "only the owner may remove themselves" -- with
   --    the weaker rule, an operator could still walk out and drop host_id on
   --    whoever happened to be next in line.
+  --    Exception-only was not enough here, and this is the exact failure mode
+  --    that let rounds 5 and 6 read clean. Under the OLD bodies this reported
+  --    'FAIL: was allowed' only because R7-1 and R7-2 had already removed the
+  --    row, so the DELETE matched zero rows and raised nothing — the right
+  --    verdict for entirely the wrong reason, never exercising the attack it
+  --    names. So: row_count is checked (zero rows is its own distinct
+  --    failure), the errcode is pinned to 42501, and the row is read back
+  --    afterwards.
   perform set_config('request.jwt.claims', json_build_object('sub', v_operator)::text, true);
   begin
     set local role authenticated;
     delete from public.group_trip_participants
      where trip_id = v_trip and user_id = v_operator;
+    get diagnostics v_rows = row_count;
     step := 'R7-3: the OPERATOR deletes their own participant row (leaves)';
-    value := 'FAIL: was allowed';
-  exception when others then
-    step := 'R7-3: the OPERATOR deletes their own participant row (leaves)';
-    value := 'OK: refused (' || sqlerrm || ')';
+    if v_rows = 0 then
+      value := 'FAIL: matched no row -- the owner row was already gone, so this asserted nothing';
+    else
+      value := 'FAIL: was allowed (row_count=' || v_rows || ')';
+    end if;
+  exception
+    when sqlstate '42501' then
+      step := 'R7-3: the OPERATOR deletes their own participant row (leaves)';
+      value := 'OK: refused by the owner guard (' || sqlerrm || ')';
+    when others then
+      step := 'R7-3: the OPERATOR deletes their own participant row (leaves)';
+      value := 'FAIL: refused, but by something else (' || sqlstate || ': ' || sqlerrm || ')';
   end;
   reset role;
+  return next;
+
+  select role into v_state from public.group_trip_participants
+   where trip_id = v_trip and user_id = v_operator;
+  step := 'R7-3 state: the operator''s row survives their own leave attempt';
+  if v_state = 'host' then value := 'OK: role=' || v_state;
+  else value := 'FAIL: operator role=' || coalesce(v_state, 'ROW GONE'); end if;
   return next;
 
   -- 4. REGRESSION: a non-owner admin must still be demotable and removable,
@@ -1431,6 +1494,33 @@ begin
   exception when others then
     step := 'R7-4b: the operator can still remove a NON-owner participant';
     value := 'FAIL: refused (' || sqlerrm || ')';
+  end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+  return next;
+
+  -- 4c. REGRESSION, the most common participant DELETE in the whole app and
+  --     asserted nowhere until now: an ordinary member leaving a trip under
+  --     their own steam (leaveTrip -> `delete ... where user_id = self`,
+  --     allowed by the policy's `auth.uid() = user_id` arm). If §11 were too
+  --     broad this is what would break, for every user on every trip, and no
+  --     other assertion here would notice.
+  insert into public.group_trip_participants (trip_id, user_id, role)
+  values (v_trip, v_user2, 'member')
+  on conflict (trip_id, user_id) do update set role = 'member';
+
+  perform set_config('request.jwt.claims', json_build_object('sub', v_user2)::text, true);
+  begin
+    set local role authenticated;
+    delete from public.group_trip_participants
+     where trip_id = v_trip and user_id = v_user2;
+    get diagnostics v_rows = row_count;
+    step := 'R7-4c: an ordinary MEMBER can still leave a trip themselves';
+    if v_rows = 1 then value := 'OK: left';
+    else value := 'FAIL: row_count=' || v_rows; end if;
+  exception when others then
+    step := 'R7-4c: an ordinary MEMBER can still leave a trip themselves';
+    value := 'FAIL: refused (' || sqlstate || ': ' || sqlerrm || ')';
   end;
   reset role;
   perform set_config('request.jwt.claims', '', true);
@@ -1476,11 +1566,20 @@ begin
     delete from public.group_trips where id = v_trip2;
     get diagnostics v_rows = row_count;
     step := 'R7-6: deleting the whole trip still cascades past the owner guard';
-    if v_rows = 1 then value := 'OK: trip deleted, participants cascaded';
-    else value := 'FAIL: row_count=' || v_rows; end if;
+    -- "cascaded" was previously CLAIMED and never checked. Assert the child
+    -- rows are actually gone: the guard sits on the child table, so a
+    -- deleted parent with surviving children is the precise shape of a
+    -- half-applied exemption.
+    if v_rows <> 1 then
+      value := 'FAIL: row_count=' || v_rows;
+    elsif exists (select 1 from public.group_trip_participants where trip_id = v_trip2) then
+      value := 'FAIL: trip deleted but participant rows survived the cascade';
+    else
+      value := 'OK: trip deleted, participants verified gone';
+    end if;
   exception when others then
     step := 'R7-6: deleting the whole trip still cascades past the owner guard';
-    value := 'FAIL: blocked (' || sqlerrm || ')';
+    value := 'FAIL: blocked (' || sqlstate || ': ' || sqlerrm || ')';
   end;
   reset role;
   perform set_config('request.jwt.claims', '', true);
