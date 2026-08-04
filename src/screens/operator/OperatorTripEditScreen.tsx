@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -31,13 +31,32 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
  */
 type SheetKey = 'cover' | 'title' | 'description' | 'stay' | 'aboutYou' | null;
 
+/** Extracted so the loading / not-found / loaded branches below can all show
+ *  the same back button + title without repeating the JSX three times —
+ *  mirrors TripDetailScreen's own `Header` subcomponent. */
+const Header: React.FC<{ onBack: () => void }> = ({ onBack }) => (
+  <View style={styles.header}>
+    <TouchableOpacity
+      onPress={onBack}
+      style={styles.backBtn}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+    >
+      <Ionicons name="chevron-back" size={28} color="#222B30" />
+    </TouchableOpacity>
+    <Text style={styles.headerTitle}>Edit trip</Text>
+    <View style={{ width: 28 }} />
+  </View>
+);
+
 export default function OperatorTripEditScreen({ route, navigation }: Props) {
   const { tripId } = route.params;
   const { user: contextUser } = useOnboarding();
   const currentUserId = contextUser?.id?.toString() ?? null;
   const queryClient = useQueryClient();
 
-  const { data } = useTripCore(tripId, currentUserId);
+  const { data, isLoading, isPlaceholderData } = useTripCore(tripId, currentUserId);
   const trip = data?.trip ?? null;
 
   const [sheet, setSheet] = useState<SheetKey>(null);
@@ -63,21 +82,50 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     [tripId, queryClient],
   );
 
+  // Every row below reads `trip` to seed its sheet, and EditAccommodationSheet
+  // in particular has no `dirty` check — an operator filling in a kind + name
+  // on a null-seeded sheet would silently overwrite the real stay fields with
+  // a half-empty patch. So, same as TripDetailScreen (:1597-1627), no row or
+  // sheet renders until `trip` is confirmed non-null.
+  if (isLoading && !data) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <Header onBack={() => navigation.goBack()} />
+        <View style={styles.centered}>
+          <ActivityIndicator color="#0788B0" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Core query has actually resolved (not loading, not placeholder-seeded) and
+  // trip is still null — deleted/not found. Minimal fallback, no sheets mounted.
+  if (!trip && !isLoading && !isPlaceholderData) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <Header onBack={() => navigation.goBack()} />
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>This trip is no longer available.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Still in-flight but no placeholder seed available yet.
+  if (!trip) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <Header onBack={() => navigation.goBack()} />
+        <View style={styles.centered}>
+          <ActivityIndicator color="#0788B0" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Ionicons name="chevron-back" size={28} color="#222B30" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit trip</Text>
-        <View style={{ width: 28 }} />
-      </View>
+      <Header onBack={() => navigation.goBack()} />
 
       <ScrollView contentContainerStyle={styles.scroll}>
         <EditSection title="Photos">
@@ -129,7 +177,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
       <EditCoverSheet
         visible={sheet === 'cover'}
-        currentUri={trip?.hero_image_url ?? null}
+        currentUri={trip.hero_image_url ?? null}
         onClose={close}
         onSave={async (localUri) => {
           // Upload first, then write the row — same order as the wizard
@@ -154,7 +202,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         visible={sheet === 'title'}
         title="Trip name"
         label="Trip name"
-        initialValue={trip?.title ?? ''}
+        initialValue={trip.title ?? ''}
         maxLength={80}
         onClose={close}
         onSave={(value) => save({ title: value.trim() })}
@@ -164,7 +212,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         visible={sheet === 'description'}
         title="Description"
         label="Description"
-        initialValue={trip?.description ?? ''}
+        initialValue={trip.description ?? ''}
         maxLength={2000}
         onClose={close}
         onSave={(value) => save({ description: value.trim() })}
@@ -174,7 +222,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         visible={sheet === 'aboutYou'}
         title="About you"
         label="About you"
-        initialValue={trip?.host_lead_note ?? ''}
+        initialValue={trip.host_lead_note ?? ''}
         maxLength={1000}
         onClose={close}
         onSave={(value) => save({ host_lead_note: value.trim() || null })}
@@ -183,10 +231,10 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       <EditAccommodationSheet
         visible={sheet === 'stay'}
         initial={{
-          kind: (trip?.accommodation_type?.[0] ?? null) as AccommodationInitial['kind'],
-          name: trip?.accommodation_name ?? '',
-          url: trip?.accommodation_url ?? '',
-          photoUri: trip?.accommodation_image_url ?? null,
+          kind: (trip.accommodation_type?.[0] ?? null) as AccommodationInitial['kind'],
+          name: trip.accommodation_name ?? '',
+          url: trip.accommodation_url ?? '',
+          photoUri: trip.accommodation_image_url ?? null,
         }}
         onClose={close}
         onSave={async (next) => {
@@ -238,4 +286,16 @@ const styles = StyleSheet.create({
     color: '#222B30',
   },
   scroll: { paddingBottom: 24 },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  errorText: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 15,
+    color: '#7B7B7B',
+    textAlign: 'center',
+  },
 });
