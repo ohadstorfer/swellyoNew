@@ -16,3 +16,16 @@ verify_jwt = true
 # gates itself on x-internal-secret / the service-role bearer.
 [functions.purge-group-documents]
 verify_jwt = false
+
+# Operator connects their Stripe account. Always a logged-in caller.
+[functions.stripe-connect-onboard]
+verify_jwt = true
+
+# Traveler starts a payment. Always a logged-in caller.
+[functions.payments-checkout]
+verify_jwt = true
+
+# Stripe calls this; it cannot present a Supabase JWT. The function gates itself
+# on Stripe's signature, which is stronger. Deploy with --no-verify-jwt.
+[functions.stripe-webhook]
+verify_jwt = false
