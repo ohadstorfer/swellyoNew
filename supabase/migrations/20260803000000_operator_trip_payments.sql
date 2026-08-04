@@ -1,24 +1,54 @@
 -- Stripe payments for operator trips.
 -- Spec: docs/superpowers/specs/2026-08-03-stripe-payments-operator-trips-design.md
 --
--- Nothing here modifies an existing column or policy. Every A and B trip, and
--- every existing C trip, behaves exactly as before until an operator opts in.
+-- Nothing here modifies an existing column or policy on group_trip_participants
+-- or users beyond what section 3 adds. Every A and B trip, and every existing
+-- C trip, behaves exactly as before until an operator opts in.
+--
+-- Fix round 1 (2026-08-03) folded in here, against the brief's original SQL:
+--   C1 — freeze_traveler_price() made authoritative against non-host writes.
+--   C2 — payout identity moved off `users` into operator_payout_accounts.
+--   I1 — ledger amount sign now matches event_type; pay_state ignores 'failed'.
+--   I2 — dedup index on (provider, provider_object_id, event_type).
+--   I4 — authenticated no longer has execute on either new/replaced RPC.
+--   I5 — trip-level deposit cannot exceed price; balance floor is 0.
+--   I6 — req_type = 'pay' now implies kind in ('deposit', 'balance') and vice versa.
+--   minor — ledger + trigger-function revokes now cover authenticated too
+--           (default ACL grants it write/execute, matching 20260729000200);
+--           ledger gets is_livemode.
 
 -- ══════════════════════════════════════════════════════════════════
--- 1. Operator payout identity
+-- 1. Operator payout identity — its own table, not columns on `users`
 -- ══════════════════════════════════════════════════════════════════
-alter table public.users
-  add column if not exists stripe_account_id      text,
-  add column if not exists stripe_charges_enabled boolean not null default false,
-  add column if not exists commission_bps         integer not null default 1200;
+-- NOT on public.users. `users_update_own` has no column scope and
+-- `users_select_authenticated` is `using (true)`, so any column added to
+-- `users` here would be self-writable by every traveler and world-readable.
+-- A separate table with its own RLS (no write policy at all) is the only
+-- way to keep this operator-only and private without touching users' grants
+-- — six unrelated features already write to that table.
+create table if not exists public.operator_payout_accounts (
+  user_id            uuid primary key references auth.users(id) on delete cascade,
+  provider           text not null default 'stripe',
+  stripe_account_id  text,
+  charges_enabled    boolean not null default false,
+  -- Basis points, so 1200 = 12%. An integer avoids the float-rounding
+  -- argument entirely when the fee is computed in cents.
+  commission_bps     integer not null default 1200 check (commission_bps between 0 and 10000),
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
 
--- Basis points, so 1200 = 12%. An integer avoids the float-rounding argument
--- entirely when the fee is computed in cents.
-alter table public.users
-  drop constraint if exists users_commission_bps_range;
-alter table public.users
-  add constraint users_commission_bps_range
-  check (commission_bps between 0 and 10000);
+alter table public.operator_payout_accounts enable row level security;
+
+revoke all    on public.operator_payout_accounts from anon, authenticated, public;
+grant  select on public.operator_payout_accounts to   authenticated;
+
+-- Read only, and only your own row. No insert/update/delete policy at all:
+-- only the service role (the Stripe onboarding edge functions) writes.
+drop policy if exists opa_read_own on public.operator_payout_accounts;
+create policy opa_read_own on public.operator_payout_accounts
+  for select to authenticated
+  using (user_id = auth.uid());
 
 -- ══════════════════════════════════════════════════════════════════
 -- 2. Trip-level payment config
@@ -47,6 +77,17 @@ alter table public.group_trips
 alter table public.group_trips
   add constraint group_trips_deposit_non_negative
   check (deposit_amount is null or deposit_amount >= 0);
+
+-- I5: a deposit larger than the price would make `balance` negative, which
+-- reads as "already paid" once floored at zero below. Mirrors the identical
+-- per-traveler check in section 3.
+alter table public.group_trips
+  drop constraint if exists group_trips_deposit_not_over_price;
+alter table public.group_trips
+  add constraint group_trips_deposit_not_over_price
+  check (deposit_amount is null
+      or cost_per_person is null
+      or deposit_amount <= cost_per_person);
 
 -- ══════════════════════════════════════════════════════════════════
 -- 3. Per-traveler price — the order line
@@ -88,6 +129,16 @@ alter table public.organized_trip_requirements
   check (kind in ('passport', 'waiver', 'medical', 'insurance',
                   'visa', 'flights', 'custom', 'deposit', 'balance'));
 
+-- I6: req_type = 'pay' and kind in ('deposit', 'balance') were previously
+-- independent. A kind = 'custom', req_type = 'pay' row was constructible and
+-- permanently unsatisfiable — on a must_have item that would block onboarding
+-- with no way through.
+alter table public.organized_trip_requirements
+  drop constraint if exists organized_trip_requirements_pay_kind_match;
+alter table public.organized_trip_requirements
+  add constraint organized_trip_requirements_pay_kind_match
+  check ((req_type = 'pay') = (kind in ('deposit', 'balance')));
+
 -- A pay row may only exist on an operator trip that is actually collecting.
 -- Mirrors trg_passport_requires_operator_trip. A CHECK cannot do this because
 -- it may not read another table.
@@ -115,9 +166,11 @@ begin
   return new;
 end $$;
 
--- SECURITY DEFINER keeps the default PUBLIC execute grant. Without this,
--- anon can call it over /rest/v1/rpc/.
-revoke execute on function public.enforce_pay_requires_managed_trip() from public, anon;
+-- SECURITY DEFINER keeps the default PUBLIC execute grant, which also
+-- reaches anon and authenticated by default. Revoke all three, matching
+-- 20260729000200 — only the trigger ever needs to run this.
+revoke execute on function public.enforce_pay_requires_managed_trip()
+  from public, anon, authenticated;
 
 drop trigger if exists trg_pay_requires_managed_trip on public.organized_trip_requirements;
 create trigger trg_pay_requires_managed_trip
@@ -144,7 +197,18 @@ create table if not exists public.organized_trip_payment_events (
   amount_charged      numeric,
   currency_charged    text,
   application_fee_usd numeric,
-  created_at          timestamptz not null default now()
+  -- Stripe test-mode events must never be mistaken for real money.
+  is_livemode         boolean not null default false,
+  created_at          timestamptz not null default now(),
+  -- I1: a 'failed' row carrying the attempted amount would still count
+  -- toward the paid sum if the sign were left to convention instead of
+  -- enforced. Pinning the sign to the type here means the CHECK is the
+  -- single source of truth, not the webhook handler's discipline.
+  constraint otpe_amount_sign_matches_type check (
+    (event_type = 'paid'     and amount_usd > 0) or
+    (event_type = 'refunded' and amount_usd < 0) or
+    (event_type = 'failed'   and amount_usd = 0)
+  )
 );
 
 -- What makes the webhook safe to retry. Stripe redelivers events; the second
@@ -152,12 +216,24 @@ create table if not exists public.organized_trip_payment_events (
 create unique index if not exists uq_otpe_provider_event
   on public.organized_trip_payment_events (provider, provider_event_id);
 
+-- I2: uq_otpe_provider_event stops REdelivery of the same event id. It does
+-- not stop two different Stripe event ids describing the same underlying
+-- charge/refund object, which would double-count. Table is still empty, so
+-- this is free to add now.
+create unique index if not exists uq_otpe_object
+  on public.organized_trip_payment_events (provider, provider_object_id, event_type)
+  where provider_object_id is not null;
+
 create index if not exists idx_otpe_lookup
   on public.organized_trip_payment_events (trip_id, user_id, requirement_id);
 
 alter table public.organized_trip_payment_events enable row level security;
 
-revoke all    on public.organized_trip_payment_events from anon, public;
+-- Default ACL on this project grants `anon` AND `authenticated` write
+-- privileges on new tables; revoking only `anon, public` would leave
+-- `authenticated` holding them (RLS blocks writes today, but TRUNCATE is not
+-- RLS-gated). Revoke all three, then grant back only what's intended.
+revoke all    on public.organized_trip_payment_events from anon, authenticated, public;
 grant  select on public.organized_trip_payment_events to   authenticated;
 
 -- Read only. There is deliberately NO insert/update/delete policy: only the
@@ -183,8 +259,15 @@ set search_path = public, extensions, pg_temp
 as $$
   select case p_kind
     when 'deposit' then coalesce(p.deposit_usd, t.deposit_amount)
-    when 'balance' then coalesce(p.price_total_usd, t.cost_per_person)
-                      - coalesce(p.deposit_usd, t.deposit_amount, 0)
+    -- I5: floored at zero. group_trips_deposit_not_over_price and
+    -- gtp_deposit_not_over_total should already prevent a negative balance,
+    -- but the two constraints protect different columns (trip default vs.
+    -- frozen per-traveler value) and can still combine to go negative across
+    -- a mixed coalesce; the floor is the actual guarantee.
+    when 'balance' then greatest(
+                           coalesce(p.price_total_usd, t.cost_per_person)
+                         - coalesce(p.deposit_usd, t.deposit_amount, 0),
+                           0)
     else null
   end
   from public.group_trips t
@@ -193,8 +276,13 @@ as $$
   where t.id = p_trip_id;
 $$;
 
-revoke execute on function public.operator_traveler_amount_due(uuid, uuid, text) from public, anon;
-grant  execute on function public.operator_traveler_amount_due(uuid, uuid, text) to authenticated;
+-- I4: no grant to authenticated. Nothing needs it — this is only ever
+-- called from inside another SECURITY DEFINER function (which runs as
+-- owner) or from the service role, neither of which is gated by this grant.
+-- Leaving `authenticated` able to call it directly would let any trip member
+-- read what a different traveler on the same trip owes.
+revoke execute on function public.operator_traveler_amount_due(uuid, uuid, text)
+  from public, anon, authenticated;
 
 -- ══════════════════════════════════════════════════════════════════
 -- 7. Pay state — replaces the v1 stub
@@ -222,6 +310,10 @@ as $$
      where trip_id        = p_trip_id
        and user_id        = p_user_id
        and requirement_id = p_requirement_id
+       -- I1: belt-and-suspenders with otpe_amount_sign_matches_type, which
+       -- already pins a 'failed' row's amount to 0. Excluding the event
+       -- type outright means this sum never depends on that CHECK holding.
+       and event_type     <> 'failed'
   )
   select case
     -- No price set for this traveler yet: nothing can be owed, so nothing is due.
@@ -231,15 +323,25 @@ as $$
   end;
 $$;
 
-revoke execute on function public.operator_requirement_pay_state(uuid, uuid, uuid) from public, anon;
-grant  execute on function public.operator_requirement_pay_state(uuid, uuid, uuid) to authenticated;
+-- I4: no grant to authenticated, same reasoning as operator_traveler_amount_due
+-- above — without it, a trip member cannot read another traveler's pay state.
+revoke execute on function public.operator_requirement_pay_state(uuid, uuid, uuid)
+  from public, anon, authenticated;
 
 -- ══════════════════════════════════════════════════════════════════
--- 8. Freeze the price when a traveler joins
+-- 8. Freeze the price when a traveler joins — and pin it against tampering
 -- ══════════════════════════════════════════════════════════════════
 -- Copying the trip price onto the participant row at join time is what makes a
 -- later price edit harmless to people already on the trip — the same reason an
 -- order line stores its own amount instead of pointing at the product.
+--
+-- C1: `group_trip_participants` grants `authenticated` full UPDATE, and its
+-- policy is `using (auth.uid() = user_id)` with a WITH CHECK that pins only
+-- `role`. RLS cannot scope columns, so without this trigger a traveler could
+-- PATCH their own row to `price_total_usd = 0, deposit_usd = 0` and read as
+-- paid. Per Ohad's ruling: fix it here, not by touching grants on a live
+-- table six other features write to. This trigger is now the sole authority
+-- on these two columns for anyone who isn't a host or the service role.
 create or replace function public.freeze_traveler_price()
 returns trigger
 language plpgsql
@@ -248,7 +350,42 @@ set search_path = public, extensions, pg_temp
 as $$
 declare v_mode text; v_price numeric; v_dep numeric;
 begin
-  -- An explicit price passed in wins; never overwrite a deliberate value.
+  -- auth.uid() is null under the service role -- treat that as trusted the
+  -- same as a host, rather than assuming a JWT is always present.
+  if auth.uid() is not null and not public.is_trip_host(new.trip_id) then
+    if TG_OP = 'UPDATE' then
+      -- A traveler's PATCH succeeds (other columns still apply); these two
+      -- silently do not move.
+      new.price_total_usd := old.price_total_usd;
+      new.deposit_usd     := old.deposit_usd;
+      return new;
+    end if;
+
+    -- INSERT, non-host: always the trip defaults, never a caller-supplied
+    -- value. No "explicit price wins" escape hatch for anyone but a host.
+    select payment_mode, cost_per_person, deposit_amount
+      into v_mode, v_price, v_dep
+      from public.group_trips
+     where id = new.trip_id;
+
+    if v_mode is distinct from 'managed' then
+      new.price_total_usd := null;
+      new.deposit_usd     := null;
+      return new;
+    end if;
+
+    new.price_total_usd := v_price;
+    new.deposit_usd     := v_dep;
+    return new;
+  end if;
+
+  -- Host or service role: may set both freely.
+  if TG_OP = 'UPDATE' then
+    return new;
+  end if;
+
+  -- INSERT, host or service role: an explicit price passed in wins; never
+  -- overwrite a deliberate value.
   if new.price_total_usd is not null then
     return new;
   end if;
@@ -268,11 +405,12 @@ begin
   return new;
 end $$;
 
-revoke execute on function public.freeze_traveler_price() from public, anon;
+revoke execute on function public.freeze_traveler_price()
+  from public, anon, authenticated;
 
 drop trigger if exists trg_freeze_traveler_price on public.group_trip_participants;
 create trigger trg_freeze_traveler_price
-  before insert on public.group_trip_participants
+  before insert or update on public.group_trip_participants
   for each row execute function public.freeze_traveler_price();
 
 -- ══════════════════════════════════════════════════════════════════
@@ -298,7 +436,8 @@ begin
   return new;
 end $$;
 
-revoke execute on function public.deactivate_pay_rows_when_offline() from public, anon;
+revoke execute on function public.deactivate_pay_rows_when_offline()
+  from public, anon, authenticated;
 
 drop trigger if exists trg_deactivate_pay_rows_when_offline on public.group_trips;
 create trigger trg_deactivate_pay_rows_when_offline
