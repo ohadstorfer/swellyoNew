@@ -189,7 +189,7 @@ const STEPS_BASE: StepKey[] = ['audience', 'basics', 'vibez', 'budget', 'preview
 // (migration 20260701000000_uniform_age_window_4.sql). These values drifted
 // once (client said A:4 while the DB required A:7) and hosts saw a raw
 // Postgres error on publish — keep both sides identical.
-const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 4, C: 4 };
+export const AGE_WINDOW_BY_STYLE: Record<HostingStyle, number> = { A: 4, B: 4, C: 4 };
 
 // Step heading + subtitle copy.
 const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {

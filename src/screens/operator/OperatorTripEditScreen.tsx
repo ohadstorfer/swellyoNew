@@ -7,20 +7,54 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { RootStackParamList } from '../../navigation/navigationRef';
 import { EditSection } from '../../components/trips/edit/EditSection';
 import { EditRow } from '../../components/trips/edit/EditRow';
+import { EditFieldSheet } from '../../components/trips/edit/EditFieldSheet';
 import {
   EditTextSheet,
   EditCoverSheet,
   EditAccommodationSheet,
   type AccommodationInitial,
 } from '../../components/trips/TripEditSheets';
+import { LevelsSheetContent } from '../../components/trips/sheets/LevelsSheetContent';
+import { StyleSheetContent } from '../../components/trips/sheets/StyleSheetContent';
+import { WaveSheetContent } from '../../components/trips/sheets/WaveSheetContent';
+import { AgeSheetContent } from '../../components/trips/sheets/AgeSheetContent';
+import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
+import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
+import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
+import type { AccommodationKind } from '../../components/trips/AccommodationTypeGrid';
 import { useTripCore } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { updateOperatorTrip } from '../../services/operator/operatorTripsService';
 import { uploadTripImage } from '../../services/storage/storageService';
-import type { UpdateGroupTripInput } from '../../services/trips/groupTripsService';
+import {
+  type UpdateGroupTripInput,
+  type SurfLevel,
+  type SurfStyle,
+  type WaveShapeKind,
+  type TripStructureSlug,
+  type TripVibeSlug,
+} from '../../services/trips/groupTripsService';
+import { validateAgeRange } from '../../services/trips/tripValidation';
+import { AGE_WINDOW_BY_STYLE } from '../trips/CreateTripFlowA';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { showErrorAlert } from '../../utils/friendlyError';
 import { ff } from '../../theme/fonts';
+
+/**
+ * Order-insensitive equality for the multi-select array fields below
+ * (target_surf_levels, target_surf_styles, trip_structure). Their sheet
+ * bodies (SheetOptionCard lists, TripTagPicker) append a newly-picked value
+ * to the END of the array — toggling the same set off and back on in a
+ * different order changes array order without changing the content.
+ * EditFieldSheet's default dirty check is `JSON.stringify(draft) !==
+ * JSON.stringify(initial)`, which is order-sensitive, so without this the
+ * Save button would light up on a no-op edit.
+ */
+function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((x) => setB.has(x));
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
 
@@ -29,7 +63,11 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
  * this union as they wire their rows — if a `setSheet('x')` does not compile,
  * the key is missing from here.
  */
-type SheetKey = 'cover' | 'title' | 'description' | 'stay' | 'aboutYou' | null;
+type SheetKey =
+  | 'cover' | 'title' | 'description' | 'stay' | 'aboutYou'
+  | 'levels' | 'boards' | 'wave' | 'age'
+  | 'howItWorks' | 'vibe' | 'stayType'
+  | null;
 
 /** Extracted so the loading / not-found / loaded branches below can all show
  *  the same back button + title without repeating the JSX three times —
@@ -141,16 +179,16 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         </EditSection>
 
         <EditSection title="Who it's for">
-          <EditRow label="Surf level" onPress={noop} />
-          <EditRow label="Boards" onPress={noop} />
-          <EditRow label="The wave" onPress={noop} />
-          <EditRow label="Age" onPress={noop} />
+          <EditRow label="Surf level" onPress={() => setSheet('levels')} />
+          <EditRow label="Boards" onPress={() => setSheet('boards')} />
+          <EditRow label="The wave" onPress={() => setSheet('wave')} />
+          <EditRow label="Age" onPress={() => setSheet('age')} />
         </EditSection>
 
         <EditSection title="The trip">
-          <EditRow label="How it works" onPress={noop} />
-          <EditRow label="Vibe" onPress={noop} />
-          <EditRow label="Stay type" onPress={noop} />
+          <EditRow label="How it works" onPress={() => setSheet('howItWorks')} />
+          <EditRow label="Vibe" onPress={() => setSheet('vibe')} />
+          <EditRow label="Stay type" onPress={() => setSheet('stayType')} />
           <EditRow label="Your stay" onPress={() => setSheet('stay')} />
           <EditRow label="About you" onPress={() => setSheet('aboutYou')} />
         </EditSection>
@@ -264,6 +302,157 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           });
         }}
       />
+
+      <EditFieldSheet<SurfLevel[]>
+        visible={sheet === 'levels'}
+        title="Surf level"
+        initial={trip.target_surf_levels}
+        onClose={close}
+        onSave={(next) => save({ target_surf_levels: next })}
+        validate={(next) => (next.length === 0 ? 'Pick at least one surf level.' : null)}
+        isDirty={(draft, initial) => !sameStringSet(draft, initial)}
+      >
+        {(draft, setDraft) => (
+          <LevelsSheetContent selected={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
+
+      {/* target_surf_styles is NOT required to publish (CreateTripFlowA has no
+          `fail()` for it) — an empty pick is a valid "any board" state. The
+          wizard writes ['all'] rather than [] for that state (both write
+          sites: CreateTripFlowA.tsx:2039,2076), so this mirrors that instead
+          of introducing a second "empty means what?" answer for the same
+          column. */}
+      <EditFieldSheet<SurfStyle[]>
+        visible={sheet === 'boards'}
+        title="Boards"
+        initial={trip.target_surf_styles}
+        onClose={close}
+        onSave={(next) => save({ target_surf_styles: next.length ? next : ['all'] })}
+        isDirty={(draft, initial) => !sameStringSet(draft, initial)}
+      >
+        {(draft, setDraft) => (
+          <StyleSheetContent selected={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
+
+      {/* WaveSheetContent renders BOTH the shape slider and the size range
+          slider itself (see the component's own "Shape card" / "Size card") —
+          there is no separate mount needed for size. WaveSizeSheetContent
+          exists as a sibling file but CreateTripFlowA imports it and never
+          renders it (dead import there too), so it is not used here either.
+          `wave_shapes` is a DB array column but every write site (this one and
+          CreateTripFlowA) treats it as a single value wrapped in a 0/1-length
+          array — WaveSheetContent's own prop is `shape: WaveShapeKind | null`. */}
+      <EditFieldSheet<{ shape: WaveShapeKind | null; sizeMin: number; sizeMax: number }>
+        visible={sheet === 'wave'}
+        title="The wave"
+        initial={{
+          shape: trip.wave_shapes?.[0] ?? null,
+          // Same fallback CreateTripFlowA uses when resuming an edit
+          // (CreateTripFlowA.tsx:655-656) — wave_size_min/max are nullable
+          // columns but the slider needs concrete numbers to render.
+          sizeMin: trip.wave_size_min ?? 4,
+          sizeMax: trip.wave_size_max ?? 8,
+        }}
+        onClose={close}
+        onSave={(next) => save({
+          wave_shapes: next.shape ? [next.shape] : null,
+          wave_size_min: next.sizeMin,
+          wave_size_max: next.sizeMax,
+        })}
+        validate={(next) => (next.shape === null ? 'Pick a wave shape.' : null)}
+      >
+        {(draft, setDraft) => (
+          <WaveSheetContent
+            shape={draft.shape}
+            onShapeChange={(shape) => setDraft({ ...draft, shape })}
+            sizeMin={draft.sizeMin}
+            sizeMax={draft.sizeMax}
+            onSizeChange={({ min, max }) => setDraft({ ...draft, sizeMin: min, sizeMax: max })}
+          />
+        )}
+      </EditFieldSheet>
+
+      <EditFieldSheet<{ ageMin: number | null; ageMax: number | null }>
+        visible={sheet === 'age'}
+        title="Age"
+        initial={{ ageMin: trip.age_min, ageMax: trip.age_max }}
+        onClose={close}
+        onSave={(next) => save({ age_min: next.ageMin, age_max: next.ageMax })}
+        validate={(next) =>
+          validateAgeRange(next.ageMin, next.ageMax, AGE_WINDOW_BY_STYLE[trip.hosting_style])
+        }
+      >
+        {(draft, setDraft) => (
+          <AgeSheetContent
+            ageMin={draft.ageMin}
+            ageMax={draft.ageMax}
+            ageWindow={AGE_WINDOW_BY_STYLE[trip.hosting_style]}
+            onChange={setDraft}
+            // Deliberately no `onClose` here. AgeSheetContent's onClose is an
+            // auto-dismiss-when-both-fields-filled convenience the create
+            // wizard's own step-level sheet chrome uses — wiring it to this
+            // screen's `close` would dismiss EditFieldSheet the moment both
+            // digits are typed, discarding the draft instead of going through
+            // the Save button every other row here requires.
+            error={validateAgeRange(
+              draft.ageMin,
+              draft.ageMax,
+              AGE_WINDOW_BY_STYLE[trip.hosting_style],
+            ) ?? undefined}
+          />
+        )}
+      </EditFieldSheet>
+
+      {/* trip_structure is NOT required to publish either — same reasoning as
+          boards above, mirroring CreateTripFlowA.tsx:2034,2087 (empty -> null,
+          not []). */}
+      <EditFieldSheet<TripStructureSlug[]>
+        visible={sheet === 'howItWorks'}
+        title="How it works"
+        initial={(trip.trip_structure ?? []) as TripStructureSlug[]}
+        onClose={close}
+        onSave={(next) => save({ trip_structure: next.length ? next : null })}
+        isDirty={(draft, initial) => !sameStringSet(draft, initial)}
+      >
+        {(draft, setDraft) => (
+          <HowItWorksSheetContent selected={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
+
+      {/* trip_vibes is single-select (VibeSheetContent picks 0 or 1 slug) and
+          NOT required to publish (CreateTripFlowA.tsx:2035,2088: empty ->
+          null). A 0/1-length array has only one possible order, so the
+          default JSON-compare dirty check is fine here — no isDirty needed. */}
+      <EditFieldSheet<TripVibeSlug[]>
+        visible={sheet === 'vibe'}
+        title="Vibe"
+        initial={(trip.trip_vibes ?? []) as TripVibeSlug[]}
+        onClose={close}
+        onSave={(next) => save({ trip_vibes: next.length ? next : null })}
+      >
+        {(draft, setDraft) => (
+          <VibeSheetContent selected={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
+
+      {/* accommodation_type IS required to publish (CreateTripFlowA.tsx:1730:
+          `fail('accommodationKind', 'Pick an accommodation type')`), unlike
+          the two rows above. Single value (AccommodationKind | null), not an
+          array, so no order-sensitivity concern either. */}
+      <EditFieldSheet<AccommodationKind | null>
+        visible={sheet === 'stayType'}
+        title="Stay type"
+        initial={(trip.accommodation_type?.[0] ?? null) as AccommodationKind | null}
+        onClose={close}
+        onSave={(next) => save({ accommodation_type: next ? [next] : null })}
+        validate={(next) => (next === null ? 'Pick an accommodation type.' : null)}
+      >
+        {(draft, setDraft) => (
+          <StayTypeSheetContent selected={draft} onChange={setDraft} />
+        )}
+      </EditFieldSheet>
     </SafeAreaView>
   );
 }
