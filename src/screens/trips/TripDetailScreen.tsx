@@ -122,7 +122,7 @@ import { ManageRequirementsSheet } from '../../components/trips/ManageRequiremen
 import { ff } from '../../theme/fonts';
 import { supabase } from '../../config/supabase';
 import { messagingService } from '../../services/messaging/messagingService';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import {
   useTripCore,
@@ -143,7 +143,16 @@ import {
   type EditableRequirement,
   type RequirementKind,
 } from '../../services/trips/tripDocumentsService';
+import {
+  amountDue,
+  amountOutstanding,
+  startCheckout,
+  fetchTravelerPrices,
+  fetchPaidByRequirement,
+  type PayStep,
+} from '../../services/trips/tripPaymentsService';
 import { isTripHost } from '../../utils/tripRole';
+import { useUserProfile } from '../../context/UserProfileContext';
 
 interface TripDetailScreenProps {
   tripId: string;
@@ -356,8 +365,10 @@ const DangerRow: React.FC<{
 // ---------------------------------------------------------------------------
 export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
+  const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
+  const viewerCountry = profile?.country_from ?? null;
   const queryClient = useQueryClient();
 
   // Data from react-query cache (survives screen unmount → instant reopen).
@@ -417,12 +428,38 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     !!currentUserId &&
     (isHostDerived || participants.some(p => p.user_id === currentUserId));
   const documentsQuery = useTripDocuments(tripId, isTripMember);
+
+  // This traveler's own price + what they've already paid, per requirement.
+  // Only fetched on a `managed` trip — an `offline` trip has no Stripe amounts
+  // to show. staleTime 0: money must never be read from a stale cache.
+  const paymentsQuery = useQuery({
+    queryKey: tripsKeys.payments(tripId, currentUserId ?? ''),
+    enabled: !!tripId && !!currentUserId && trip?.payment_mode === 'managed',
+    queryFn: async () => {
+      const [prices, paid] = await Promise.all([
+        fetchTravelerPrices(tripId, currentUserId as string),
+        fetchPaidByRequirement(tripId, currentUserId as string),
+      ]);
+      return { prices, paid };
+    },
+    staleTime: 0,
+  });
+
   const documentRows: DocumentRow[] = useMemo(
     () =>
-      (documentsQuery.data ?? [])
-        // Everything except `pay`, which has no traveler UI until payments land.
-        .filter(r => r.reqType !== 'pay')
-        .map(r => ({
+      (documentsQuery.data ?? []).map(r => {
+        let amountUsd: number | null = null;
+        if (r.reqType === 'pay' && paymentsQuery.data) {
+          const step = r.kind as PayStep;
+          const due = amountDue(step, paymentsQuery.data.prices);
+          // Null means no price is set anywhere for this traveler — never show
+          // "$0" next to a Pay button; that reads as "this is free."
+          amountUsd =
+            due == null
+              ? null
+              : amountOutstanding(step, paymentsQuery.data.prices, paymentsQuery.data.paid[r.requirementId] ?? 0);
+        }
+        return {
           requirementId: r.requirementId,
           kind: r.kind,
           reqType: r.reqType,
@@ -430,8 +467,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           state: r.state as DocumentRow['state'],
           dueDate: r.dueDate,
           note: r.note,
-        })),
-    [documentsQuery.data],
+          amountUsd,
+        };
+      }),
+    [documentsQuery.data, paymentsQuery.data],
   );
 
   // ── Host review ───────────────────────────────────────────────────────────
@@ -479,9 +518,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // The second way in is for a `C` trip that asks for nothing yet, which needs
   // an empty state to add its first requirement.
   //
-  // `documentsQuery.data` rather than `documentRows`, which drops `pay` rows —
-  // a trip whose only requirement is a payment is still a trip with a
-  // requirement to edit.
+  // `documentsQuery.data` rather than `documentRows` — the two now carry the
+  // same rows, but this reads directly off the query so it never depends on
+  // whatever `documentRows` happens to derive.
   const isOperatorTrip = trip?.hosting_style === 'C';
   const canManageRequirements =
     isHostDerived && ((documentsQuery.data?.length ?? 0) > 0 || isOperatorTrip);
@@ -1319,13 +1358,32 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // requirement wants: a file, an agreement, or a form.
   const handlePressDocumentRow = useCallback(
     async (row: DocumentRow) => {
+      if (row.reqType === 'pay') {
+        try {
+          await startCheckout(row.requirementId);
+        } catch (e) {
+          showErrorAlert('Payment', e, 'Could not start the payment. Try again.');
+          return;
+        }
+        // The browser closing is NOT proof of payment — Stripe rejects custom URL
+        // schemes so there is no trustworthy redirect back. The webhook is the
+        // only truth. Refetch, and give it a moment to land.
+        //
+        // `detailDocuments` is the traveler's own requirement list (it wraps
+        // fetchMyRequirements). There is no `myRequirements` key — do not invent one.
+        if (currentUserId) {
+          await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
+        }
+        await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+        return;
+      }
+
       const action = actionForRequirement({ kind: row.kind, reqType: row.reqType });
       if (!action) return; // custom — no traveler UI yet
-      // `documentRows` already drops `pay` rows before they reach this handler,
-      // but the return type of `actionForRequirement` still allows 'pay' now
-      // that deposit/balance are catalog kinds. Guard it explicitly rather than
-      // widen this screen's local action type — there is still no payment UI
-      // wired up here.
+      // Pay rows already returned above via `row.reqType === 'pay'`, but
+      // `actionForRequirement`'s return type still allows 'pay' — narrow it
+      // explicitly so `open()` below can hand a non-pay action to
+      // `setOpenRequirement`, which never learned about payment sheets.
       if (action === 'pay') return;
 
       const open = () =>
@@ -1367,7 +1425,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         showErrorAlert('Something went wrong', e, 'Could not open this document.');
       }
     },
-    [currentUserId, tripId],
+    [currentUserId, tripId, queryClient],
   );
 
   const handleRequirementDone = useCallback(() => {
@@ -1923,6 +1981,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               onPressRow={handlePressDocumentRow}
               onReviewAll={() => setReviewOpen(true)}
               onManage={canManageRequirements ? openManageRequirements : undefined}
+              budgetFxRate={trip?.budget_fx_rate}
+              viewerCountry={viewerCountry}
             />
           </View>
         )}

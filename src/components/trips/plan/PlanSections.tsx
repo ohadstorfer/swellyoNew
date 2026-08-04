@@ -26,6 +26,7 @@ import { ff } from '../../../theme/fonts';
 import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../../assets/images';
+import { formatPrice } from '../../../utils/currency';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -758,6 +759,9 @@ export type DocumentRow = {
   dueDate?: string | null;
   /** The operator's note. On a rejection, this is the reason. */
   note?: string | null;
+  /** Pay rows only — what is still owed, in canonical USD. Null when the
+   *  traveler has no price set yet. */
+  amountUsd?: number | null;
 };
 
 /** "12 Oct" — deadlines are always shown as a real date, never as
@@ -777,6 +781,8 @@ export const DOC_ICON: Record<string, any> = {
   visa: 'earth-outline',
   flights: 'airplane-outline',
   custom: 'ellipse-outline',
+  deposit: 'card-outline',
+  balance: 'card-outline',
 };
 
 // One place decides what each state looks like, so the traveler card and the
@@ -803,6 +809,13 @@ function statusFor(row: DocumentRow): { label: string; tone: 'accent' | 'muted' 
     return row.state === 'overdue'
       ? { label: 'Fill in — late', tone: 'bad' }
       : { label: 'Fill in', tone: 'accent' };
+  }
+  // "Add" is the wrong verb for money, and a pay row is never "in review" —
+  // it is paid or it is not.
+  if (row.kind === 'deposit' || row.kind === 'balance') {
+    return row.state === 'overdue'
+      ? { label: 'Pay — late', tone: 'bad' }
+      : { label: 'Pay', tone: 'accent' };
   }
   return base;
 }
@@ -840,6 +853,11 @@ export const TripDocumentsCard: React.FC<{
   /** host mode only — open the editor for what this trip asks for. Its presence
    *  is also what keeps the card alive on a trip that asks for nothing yet. */
   onManage?: () => void;
+  /** member mode only — the trip's frozen USD→₪ rate, for `formatPrice`. Read
+   *  from screen state, not fetched here — this file stays pure presentation. */
+  budgetFxRate?: number | null;
+  /** member mode only — the viewer's own country, for `formatPrice`'s ₪/$ switch. */
+  viewerCountry?: string | null;
 }> = ({
   rows,
   mode,
@@ -849,6 +867,8 @@ export const TripDocumentsCard: React.FC<{
   onPressRow,
   onReviewAll,
   onManage,
+  budgetFxRate,
+  viewerCountry,
 }) => {
   const canManage = mode === 'host' && !!onManage;
   // Nothing asked for = nothing to show. Keeps peer trips completely untouched.
@@ -990,6 +1010,11 @@ export const TripDocumentsCard: React.FC<{
                 <Text style={styles.ygItem} numberOfLines={1}>
                   {row.title}
                 </Text>
+                {row.amountUsd != null && (
+                  <Text style={styles.docAmount}>
+                    {formatPrice(row.amountUsd, budgetFxRate, viewerCountry) ?? ''}
+                  </Text>
+                )}
                 {showNote ? (
                   <Text style={styles.docNote} numberOfLines={2}>
                     {row.note}
@@ -1351,6 +1376,7 @@ const styles = StyleSheet.create({
   // away from the divider). A background wash gives the same "heard you" without
   // breaking the card.
   docRowPressed: { backgroundColor: '#F4F4F2' },
+  docAmount: { fontSize: 13, color: '#535862', marginTop: 2 },
   docNote: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: '#C4361E' },
   docDue: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: T.muted },
   docDueLate: { color: '#C4361E' },
