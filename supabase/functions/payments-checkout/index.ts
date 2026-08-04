@@ -209,10 +209,12 @@ serve(async req => {
     // just this one), price-freshness enforcement below silently stops
     // applying to it — a stale-priced session stays payable with no way for
     // this function to notice. A small `operator_checkout_sessions` table
-    // keyed on (user_id, requirement_id) is the exact, exact-cardinality fix
-    // and should replace this before real traffic volume arrives; that is a
-    // schema change and a deploy-gating decision, not something to make
-    // inside a fix round.
+    // keyed on (user_id, requirement_id) is the correct, exact-cardinality
+    // fix and should replace this before real traffic volume arrives; that
+    // is a schema change and a deploy-gating decision, not something to make
+    // inside a fix round. It is also not just a dedup nicety at this point —
+    // see the note on idempotencySuffix below for the second, independent
+    // hole the same missing table leaves open.
     const openSessions = await stripeGet('checkout/sessions?status=open&limit=100');
     const sessionsData: Array<{
       id: string;
@@ -236,43 +238,84 @@ serve(async req => {
         sess.metadata?.requirement_id === requirementId,
     );
 
+    // Partition rather than early-return on freshMatch: if `matches` holds
+    // BOTH a correctly-priced session and a stale one (reachable — two
+    // concurrent requests straddling a price edit each list before either
+    // creates, each see nothing, each mint at a different amount with
+    // different idempotency keys, so Stripe never collapses them, and the
+    // next request sees both), returning freshMatch.url immediately would
+    // skip expiring the stale one, leaving it live and payable at the old
+    // amount — exactly what expiring is here to prevent. Every non-fresh
+    // match is expired FIRST, unconditionally, and only then does a fresh
+    // match (if any) get returned.
     const freshMatch = matches.find(sess => sess.amount_total === amountCents && sess.url);
-    if (freshMatch) return json({ url: freshMatch.url });
+    const staleMatches = matches.filter(sess => sess.id !== freshMatch?.id);
 
-    let idempotencySuffix = '';
-    if (matches.length > 0) {
-      // None of them are priced correctly, or freshMatch would have returned
-      // above — e.g. the host edited this traveler's price, the headline
-      // feature of this whole project. Expire every one so none of them can
-      // ever be paid at a stale amount. Fail CLOSED: if an expire fails, stop
-      // and ask the caller to retry rather than silently leaving that stale
-      // session live and minting a fresh one on top of it. One realistic
-      // reason expire can fail is that the session just COMPLETED — the
-      // status=open list is seconds stale — in which case minting a new
-      // session for the full outstanding amount would charge a payment that
-      // already succeeded a second time.
-      for (const stale of matches) {
+    if (staleMatches.length > 0) {
+      // e.g. the host edited this traveler's price, the headline feature of
+      // this whole project. Expire every stale one so none of them can ever
+      // be paid at a stale amount. Fail CLOSED on a REAL failure: if a
+      // session turns out to be 'complete' (one realistic reason expire can
+      // fail is that it just completed — the status=open list is seconds
+      // stale — and minting a new session would double-charge an already-
+      // succeeded payment), stop and ask the caller to retry. But tolerate
+      // an already-'expired' session without failing: two concurrent
+      // requests can both try to expire the same stale session, and the
+      // loser seeing Stripe's "already expired" error is not a real problem
+      // — re-check status before treating it as one, so an ordinary double
+      // tap doesn't hard-fail with a 500.
+      for (const stale of staleMatches) {
         try {
           await stripe(`checkout/sessions/${stale.id}/expire`, {});
         } catch (expireErr) {
-          console.error(
-            '[payments-checkout] failed to expire a stale session, refusing to mint a new one',
-            safeMessage(expireErr),
-          );
-          return json({ error: 'Could not start the payment' }, 500);
+          let alreadyExpired = false;
+          try {
+            const refetched = await stripeGet(`checkout/sessions/${stale.id}`);
+            alreadyExpired = refetched.status === 'expired';
+          } catch {
+            // couldn't even re-check — treat conservatively, same as below.
+          }
+          if (!alreadyExpired) {
+            console.error(
+              '[payments-checkout] failed to expire a stale session, refusing to mint a new one',
+              safeMessage(expireErr),
+            );
+            return json({ error: 'Could not start the payment' }, 500);
+          }
         }
       }
-      // The idempotency key below must change once a session for this exact
-      // (user, requirement, amount) has already existed and been expired —
-      // otherwise, if the amount ever returns to a previously-used value
-      // inside Stripe's 24h idempotency window (an operator raising then
-      // correcting a price back down is an entirely ordinary sequence for
-      // per-traveler pricing), the key would be byte-identical to the one
-      // that minted the session just expired above. Stripe would replay
-      // that CACHED response — the dead, just-expired session — and hard-
-      // block the traveler from paying for up to 24 hours.
-      idempotencySuffix = `:after=${matches.map(s => s.id).join(',')}`;
     }
+
+    if (freshMatch) return json({ url: freshMatch.url });
+
+    // The idempotency key below must change once a session for this exact
+    // (user, requirement, amount) has already existed and been expired —
+    // otherwise, if the amount ever returns to a previously-used value
+    // inside Stripe's 24h idempotency window (an operator raising then
+    // correcting a price back down is an entirely ordinary sequence for
+    // per-traveler pricing), the key would be byte-identical to the one
+    // that minted the session just expired above. Stripe would replay that
+    // CACHED response — the dead, just-expired session — and hard-block the
+    // traveler from paying for up to 24 hours. Bounded, not the full joined
+    // id list: Stripe caps Idempotency-Key at 255 characters, the base key
+    // is already ~90, and each `cs_…` id is ~66 — three or more stale
+    // sessions would overflow the cap and Stripe would reject the create
+    // outright. Count + one id is enough to change the key deterministically
+    // without risking that.
+    //
+    // NOT durable: this suffix is derived from the live open-session list
+    // above, not from any record this function keeps itself. If the expire
+    // loop above succeeds but the create call below then fails (network,
+    // Stripe outage), the NEXT request sees an empty list, computes an empty
+    // suffix, and sends the byte-identical key that minted the session just
+    // expired — replaying a dead URL for up to 24 hours. This is the same
+    // root cause as the has_more cliff noted above: this function has no
+    // durable record of the sessions it has minted. A real
+    // operator_checkout_sessions table would close both holes, plus the
+    // early-return bypass just fixed above, at once — not something to
+    // patch around here.
+    const idempotencySuffix =
+      staleMatches.length > 0 ? `:after=${staleMatches.length}:${staleMatches[0].id}` : '';
 
     // ── 5. Destination charge: the operator is paid, our fee is split off.
     //      The idempotency key includes the ledger row count for this

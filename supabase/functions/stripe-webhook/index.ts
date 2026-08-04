@@ -82,11 +82,19 @@ async function verify(payload: string, header: string | null): Promise<boolean> 
   return signatures.some(matchesOne);
 }
 
-async function stripeGet(path: string) {
+/**
+ * `label`, when given, replaces `path` in the thrown error's message.
+ * `stripeGet`'s default error embeds the full request path — including
+ * whatever id it was fetching (e.g. `payment_intents/pi_…`) — which is meant
+ * to be caught by a caller that already knows the id, not logged. A caller
+ * that logs the error on failure (see the application_fee_usd enrichment
+ * below) should pass a redacted label instead.
+ */
+async function stripeGet(path: string, label = path) {
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
   });
-  if (!res.ok) throw new Error(`Stripe ${path} failed`);
+  if (!res.ok) throw new Error(`Stripe ${label} failed`);
   return res.json();
 }
 
@@ -209,7 +217,13 @@ serve(async req => {
       // the outer handler would have returned 200).
       let applicationFeeUsd: number | null = null;
       try {
-        const pi = await stripeGet(`payment_intents/${s.payment_intent}`);
+        // Redacted label: this catch logs on failure, and safeMessage(feeErr)
+        // would otherwise read back `Stripe payment_intents/pi_… failed` —
+        // exactly the identifier safeMessage exists to keep out of logs. If
+        // STRIPE_SECRET_KEY is pointing at the wrong mode/account (the
+        // current pre-deploy state), this fires on EVERY event, so it isn't
+        // a one-off.
+        const pi = await stripeGet(`payment_intents/${s.payment_intent}`, 'payment_intents/<redacted>');
         applicationFeeUsd =
           pi.application_fee_amount != null ? Number(pi.application_fee_amount) / 100 : null;
       } catch (feeErr) {
