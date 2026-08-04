@@ -82,21 +82,11 @@ async function verify(payload: string, header: string | null): Promise<boolean> 
   return signatures.some(matchesOne);
 }
 
-/**
- * A plain-object thrown error carries a Stripe HTTP status when the failure
- * came from `stripeGet` — used below to treat a Stripe 404 (e.g. the
- * PaymentIntent this webhook needs no longer exists) as permanent instead of
- * retried forever.
- */
 async function stripeGet(path: string) {
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
   });
-  if (!res.ok) {
-    const err = new Error(`Stripe ${path} failed`) as Error & { stripeStatus?: number };
-    err.stripeStatus = res.status;
-    throw err;
-  }
+  if (!res.ok) throw new Error(`Stripe ${path} failed`);
   return res.json();
 }
 
@@ -118,6 +108,17 @@ function safeMessage(e: unknown): string {
 // Postgres error codes that can NEVER succeed on retry. Acknowledge them
 // (after logging loudly) so Stripe stops resending for days; anything not in
 // this set is treated as transient and gets a 500, which asks Stripe to retry.
+//
+// Deliberately does NOT include a Stripe-side status like "404 from
+// stripeGet". A prior version of this file treated any Stripe 404 as
+// permanent, which was right for enrichment lookups but wrong for the
+// refund path below, where the PaymentIntent fetch supplies the metadata
+// the row cannot be built without — a 404 there means a lost, unrecoverable
+// refund if swallowed as "ok". The realistic trigger for a Stripe 404 here
+// is STRIPE_SECRET_KEY pointing at the wrong mode/account, in which case
+// EVERY lookup 404s; that needs to keep 500-retrying for the ~3 days Stripe
+// allows, because that retry window is the only signal a human gets to
+// notice and fix the key.
 const PERMANENT_PG_ERROR_CODES = new Set([
   '23514', // check violation — the row can never satisfy the constraint
   '23503', // foreign key violation — e.g. the trip no longer exists
@@ -197,7 +198,26 @@ serve(async req => {
       // Read the fee Stripe actually applied to this PaymentIntent, so
       // Swellyo's own revenue can be reconciled straight from the ledger
       // instead of being computed-and-discarded at checkout time.
-      const pi = await stripeGet(`payment_intents/${s.payment_intent}`);
+      //
+      // This is deliberately NON-FATAL: application_fee_usd is optional and
+      // nullable, and this lookup must never be able to block recording that
+      // the money actually arrived. If it fails — most realistically because
+      // STRIPE_SECRET_KEY points at the wrong mode/account, in which case
+      // this 404s on every single event — the row still gets written with a
+      // null fee instead of the traveler's payment silently never being
+      // recorded at all (with no Stripe redelivery to ever recover it, since
+      // the outer handler would have returned 200).
+      let applicationFeeUsd: number | null = null;
+      try {
+        const pi = await stripeGet(`payment_intents/${s.payment_intent}`);
+        applicationFeeUsd =
+          pi.application_fee_amount != null ? Number(pi.application_fee_amount) / 100 : null;
+      } catch (feeErr) {
+        console.error(
+          '[stripe-webhook] could not enrich application_fee_usd, recording the payment without it',
+          safeMessage(feeErr),
+        );
+      }
 
       row = {
         trip_id: m.trip_id,
@@ -210,8 +230,7 @@ serve(async req => {
         amount_usd: Number(s.amount_total) / 100,
         amount_charged: Number(s.amount_total) / 100,
         currency_charged: currency.toUpperCase(),
-        application_fee_usd:
-          pi.application_fee_amount != null ? Number(pi.application_fee_amount) / 100 : null,
+        application_fee_usd: applicationFeeUsd,
         // Stripe test-mode events must never be mistaken for real money.
         is_livemode: !!event.livemode,
       };
@@ -233,7 +252,11 @@ serve(async req => {
         return new Response('ok');
       }
 
-      // A charge carries no metadata of ours — the PaymentIntent does.
+      // A charge carries no metadata of ours — the PaymentIntent does. Unlike
+      // the enrichment fetch above, this one is NOT optional: without it
+      // there is no trip_id/user_id/requirement_id to build the row from, so
+      // a failure here (including a 404) is left to throw and 500 — a lost
+      // refund row is exactly as unrecoverable as a lost paid row.
       const pi = await stripeGet(`payment_intents/${c.payment_intent}`);
       const m = pi.metadata ?? {};
 
@@ -282,15 +305,25 @@ serve(async req => {
         amount_charged: -deltaUsd,
         currency_charged: currency.toUpperCase(),
         is_livemode: !!event.livemode,
-        // application_fee_usd intentionally left out here: this IS
-        // reconstructable — for a destination charge the `application_fee`
-        // object carries a cumulative `amount_refunded` too, readable via
-        // `/v1/application_fees/{id}` when the refund was created with
-        // `refund_application_fee: true`, and the same delta technique above
-        // would work on it. Deferred because nothing in this codebase issues
-        // refunds yet. Known gap, not a limitation: until this is wired up,
-        // sum(application_fee_usd) OVERSTATES Swellyo's net revenue by the
-        // full fee on any refunded charge.
+        // application_fee_usd intentionally left out here. This is a KNOWN,
+        // DEFERRED reconciliation gap, not a Stripe limitation: for a
+        // destination charge, the application_fee object carries a
+        // cumulative amount_refunded too, readable via
+        // GET /v1/application_fees/{id} — the object id is on the CHARGE as
+        // `c.application_fee` (already available above; the PaymentIntent
+        // only carries application_fee_amount, not the fee object's id).
+        // The same integer-cents delta technique used above for amount_usd
+        // would apply to it. Deferred because nothing in this codebase
+        // issues refunds yet.
+        //
+        // What "deferred" actually costs: `refund_application_fee` defaults
+        // to FALSE, so on an ordinary refund the platform keeps the fee and
+        // the application_fee_usd already recorded on the 'paid' row stays
+        // correct — sum(application_fee_usd) is NOT overstated by a plain
+        // refund. It is only overstated when the fee was actually reversed
+        // (refund created with refund_application_fee: true), and for a
+        // partial refund the reversal is proportional, so the error is
+        // bounded by the reversed portion, not the whole fee.
       };
     } else {
       // Everything else is acknowledged and ignored, so Stripe stops retrying.
@@ -324,8 +357,12 @@ serve(async req => {
           .eq('provider_event_id', event.id)
           .maybeSingle();
         if (!lookupErr && already) return new Response('ok'); // genuine redelivery
-        // Otherwise: the other collision, or the lookup itself failed —
-        // surface it rather than silently discarding a legitimate event.
+        // Otherwise: the other collision, or the lookup itself failed — fall
+        // through and throw below. That 500s and Stripe retries this event
+        // on its normal backoff schedule for ~3 days; that retry storm is
+        // DELIBERATE here, not an oversight — it is the alerting mechanism
+        // for a genuine uq_otpe_object collision, which should never happen
+        // in normal operation and needs a human to look at it.
       }
       throw error;
     }
@@ -333,17 +370,10 @@ serve(async req => {
     return new Response('ok');
   } catch (e) {
     const code = (e as { code?: string } | null)?.code;
-    const stripeStatus = (e as { stripeStatus?: number } | null)?.stripeStatus;
-    if ((code && PERMANENT_PG_ERROR_CODES.has(code)) || stripeStatus === 404) {
-      // Retrying cannot fix a constraint violation, and a 404 from Stripe
-      // (e.g. the PaymentIntent this event points at no longer exists) will
-      // not resolve itself either. Acknowledge so Stripe stops, but log
-      // loudly so a human notices instead of it going quiet.
-      console.error(
-        '[stripe-webhook] permanent failure, not retrying',
-        code ?? `stripe ${stripeStatus}`,
-        safeMessage(e),
-      );
+    if (code && PERMANENT_PG_ERROR_CODES.has(code)) {
+      // Retrying cannot fix a constraint violation. Acknowledge so Stripe
+      // stops, but log loudly so a human notices instead of it going quiet.
+      console.error('[stripe-webhook] permanent failure, not retrying', code, safeMessage(e));
       return new Response('ok');
     }
     console.error('[stripe-webhook]', safeMessage(e));
