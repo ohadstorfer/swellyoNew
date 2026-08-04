@@ -21,8 +21,20 @@ security invoker
 set search_path = public, extensions, pg_temp
 as $$
 begin
+  -- No comparison against `old` here, on purpose. The trigger already fires
+  -- only when max_participants is in the SET list, so "did they touch the cap"
+  -- is answered by the trigger definition, not by the condition. Comparing
+  -- against old is also actively wrong: max_participants is nullable ("no cap"),
+  -- and `coalesce(old.max_participants, new.max_participants)` collapses to
+  -- `new < new` — always false — so an uncapped trip with 9 people could be
+  -- capped at 4 and the guard would never fire. That is the exact case this
+  -- trigger exists to block.
+  --
+  -- The rule that survives: any cap below the live count leaves the trip over
+  -- capacity, whichever direction it came from. A host digging a trip out of an
+  -- already-bad state must go to at least participant_count — anything less is
+  -- still over capacity.
   if new.max_participants is not null
-     and new.max_participants < coalesce(old.max_participants, new.max_participants)
      and new.max_participants < coalesce(new.participant_count, 0)
   then
     raise exception
@@ -36,7 +48,8 @@ $$;
 
 -- SECURITY INVOKER keeps this off the PostgREST RPC surface for anon, but
 -- `create or replace` still hands PUBLIC an execute grant every time.
-revoke execute on function public.tg_group_trips_capacity_floor() from public, anon;
+revoke execute on function public.tg_group_trips_capacity_floor()
+  from public, anon, authenticated;
 
 drop trigger if exists trg_group_trips_capacity_floor on public.group_trips;
 create trigger trg_group_trips_capacity_floor
