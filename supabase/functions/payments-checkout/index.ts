@@ -58,6 +58,20 @@ async function stripeGet(path: string) {
   return body;
 }
 
+/**
+ * supabase-js v2's `PostgrestError` is a plain object, not an `Error`
+ * subclass. `e instanceof Error ? e.message : e` therefore logs the WHOLE
+ * object for one — including `.details`, which can embed identifiers.
+ * `.message` alone (present on both real Errors and Postgrest-shaped
+ * objects) doesn't carry that — log only that, never the raw object.
+ */
+function safeMessage(e: unknown): string {
+  if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
+    return (e as { message: string }).message;
+  }
+  return 'unknown error';
+}
+
 // Mirrors usdToStripeCents / commissionCents in tripPaymentsService.ts.
 // Round, never truncate: 19.99 * 100 is 1998.9999999999998 in floating point.
 const toCents = (usd: number) => Math.round(usd * 100);
@@ -164,31 +178,73 @@ serve(async req => {
     const outstanding = Math.max(0, due - paid);
     if (outstanding <= 0) return json({ error: 'Already paid' }, 400);
 
-    // I9: the ledger only moves once the webhook fires, so two checkouts
-    // opened back to back both compute the full outstanding amount and both
-    // could be paid. Stripe's list endpoint has no server-side metadata
-    // filter, so list recent OPEN sessions (not completed, not expired) and
-    // match client-side — cheap at today's volume. If that stops being true,
-    // track in-flight sessions in our own table instead of Stripe's.
-    const openSessions = await stripeGet('checkout/sessions?status=open&limit=100');
-    const existing = (openSessions.data ?? []).find(
-      (sess: { metadata?: Record<string, string>; url?: string }) =>
-        sess.metadata?.trip_id === req_.trip_id &&
-        sess.metadata?.user_id === userId &&
-        sess.metadata?.requirement_id === requirementId,
-    );
-    if (existing?.url) return json({ url: existing.url });
-
     const amountCents = toCents(outstanding);
     // commission_bps is `not null default 1200` in the database — the ?? 1200
     // fallback this used to have was dead code, and if it had ever fired it
     // would have applied a fee the database itself disagrees with.
     const commission = feeCents(amountCents, host.commission_bps);
 
+    // I9: the ledger only moves once the webhook fires, so two checkouts
+    // opened back to back both compute the full outstanding amount and both
+    // could be paid. Stripe's list endpoint has no server-side metadata
+    // filter, so list recent OPEN sessions (not completed, not expired) and
+    // match client-side — cheap at today's volume.
+    //
+    // This only closes the SEQUENTIAL race ("came back later after opening a
+    // session"): two genuinely concurrent requests both list before either
+    // creates, both see nothing, and it is the deterministic Idempotency-Key
+    // below — not this lookup — that collapses those into one session.
+    //
+    // Known limits: `limit=100` returns the most recent open sessions
+    // PLATFORM-WIDE, not per user — past ~100 concurrent open sessions across
+    // ALL operators the target can fall off the page with no signal beyond
+    // the log line below. A small `operator_checkout_sessions` table keyed on
+    // (user_id, requirement_id) would be simpler and exact, and should
+    // replace this before volume gets anywhere near that.
+    const openSessions = await stripeGet('checkout/sessions?status=open&limit=100');
+    const sessionsData: Array<{
+      id: string;
+      url?: string;
+      amount_total?: number;
+      metadata?: Record<string, string>;
+    }> = openSessions.data ?? [];
+    if (sessionsData.length >= 100) {
+      console.error(
+        '[payments-checkout] open Stripe session list hit its page limit; dedup can silently miss the target session',
+      );
+    }
+    const existing = sessionsData.find(
+      sess =>
+        sess.metadata?.trip_id === req_.trip_id &&
+        sess.metadata?.user_id === userId &&
+        sess.metadata?.requirement_id === requirementId,
+    );
+
+    if (existing) {
+      if (existing.amount_total === amountCents && existing.url) {
+        return json({ url: existing.url });
+      }
+      // The amount owed changed since this session was opened — e.g. the
+      // host edited this traveler's price, the headline feature of this
+      // whole project. Reusing it would over- or under-charge. Expire it so
+      // it can never be paid at the stale amount, then fall through to mint
+      // a fresh one below.
+      try {
+        await stripe(`checkout/sessions/${existing.id}/expire`, {});
+      } catch (expireErr) {
+        console.error('[payments-checkout] failed to expire stale session', safeMessage(expireErr));
+      }
+    }
+
     // ── 5. Destination charge: the operator is paid, our fee is split off.
-    //      Idempotency key covers a retried request for the same requirement
-    //      at the same amount; the openSessions lookup above covers a second,
-    //      independent request (no shared retry) racing the first.
+    //      The idempotency key includes the ledger row count for this
+    //      requirement, not just user/requirement/amount: without it, a
+    //      pay -> refund -> re-pay at the same amount within Stripe's 24h
+    //      idempotency window would replay the CACHED response — the
+    //      original, already-completed session, a dead URL the traveler
+    //      cannot pay through. The refund adds a ledger row, which changes
+    //      the count and forces a fresh key.
+    const idempotencyKey = `checkout:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}`;
     const session = await stripe(
       'checkout/sessions',
       {
@@ -210,12 +266,12 @@ serve(async req => {
         success_url: returnUrl,
         cancel_url: returnUrl,
       },
-      `checkout:${userId}:${requirementId}:${amountCents}`,
+      idempotencyKey,
     );
 
     return json({ url: session.url });
   } catch (e) {
-    console.error('[payments-checkout]', e instanceof Error ? e.message : e);
+    console.error('[payments-checkout]', safeMessage(e));
     return json({ error: 'Could not start the payment' }, 500);
   }
 });
