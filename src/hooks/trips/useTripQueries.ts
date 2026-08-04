@@ -61,6 +61,9 @@ export const tripsKeys = {
    *  apart from `detailDocuments` because that one is the caller's own derived
    *  state and hides inactive rows — the editor needs neither. */
   detailRequirements: (id: string) => ['trips', 'detail-requirements', id] as const,
+  /** One traveler's price + what they've paid, per requirement. */
+  payments: (tripId: string, userId: string) =>
+    ['trips', 'payments', tripId, userId] as const,
 };
 
 export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };
