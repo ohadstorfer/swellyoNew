@@ -82,12 +82,37 @@ async function verify(payload: string, header: string | null): Promise<boolean> 
   return signatures.some(matchesOne);
 }
 
+/**
+ * A plain-object thrown error carries a Stripe HTTP status when the failure
+ * came from `stripeGet` — used below to treat a Stripe 404 (e.g. the
+ * PaymentIntent this webhook needs no longer exists) as permanent instead of
+ * retried forever.
+ */
 async function stripeGet(path: string) {
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     headers: { Authorization: `Bearer ${STRIPE_SECRET_KEY}` },
   });
-  if (!res.ok) throw new Error(`Stripe ${path} failed`);
+  if (!res.ok) {
+    const err = new Error(`Stripe ${path} failed`) as Error & { stripeStatus?: number };
+    err.stripeStatus = res.status;
+    throw err;
+  }
   return res.json();
+}
+
+/**
+ * supabase-js v2's `PostgrestError` is a plain object, not an `Error`
+ * subclass. `e instanceof Error ? e.message : e` therefore logs the WHOLE
+ * object for one — including `.details`, which for a unique-violation embeds
+ * the full constraint key (e.g. the Stripe PaymentIntent id). `.message`
+ * alone (present on both real Errors and Postgrest-shaped objects) never
+ * carries that — log only that, never the raw object.
+ */
+function safeMessage(e: unknown): string {
+  if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
+    return (e as { message: string }).message;
+  }
+  return 'unknown error';
 }
 
 // Postgres error codes that can NEVER succeed on retry. Acknowledge them
@@ -96,6 +121,8 @@ async function stripeGet(path: string) {
 const PERMANENT_PG_ERROR_CODES = new Set([
   '23514', // check violation — the row can never satisfy the constraint
   '23503', // foreign key violation — e.g. the trip no longer exists
+  '22P02', // invalid text representation — e.g. a non-UUID trip_id in metadata
+  '23502', // not null violation
 ]);
 
 serve(async req => {
@@ -130,7 +157,13 @@ serve(async req => {
     // A valid signature proves the event came from Stripe. It does NOT prove
     // it describes OUR platform account — see the file-header warning. Any
     // event carrying `account` is a Connect-account event and is ignored.
-    if (event.account) return new Response('ok');
+    // Logged, not silent: silently dropping it would hide the exact
+    // misconfiguration the header warns about, with zero signal that it
+    // happened.
+    if (event.account) {
+      console.error('[stripe-webhook] ignoring Connect-account event; this endpoint must be platform-account only', event.account);
+      return new Response('ok');
+    }
 
     let row: Record<string, unknown> | null = null;
 
@@ -205,22 +238,36 @@ serve(async req => {
       const m = pi.metadata ?? {};
 
       // `amount_refunded` on a charge is CUMULATIVE across every refund ever
-      // issued against it, not the delta for this event. Writing it as-is
-      // would double count on a second partial refund. Record only what has
-      // not already been recorded for this PaymentIntent.
-      const cumulativeRefundedUsd = Number(c.amount_refunded) / 100;
-      const { data: priorRefunds } = await supabase
+      // issued against it, not the delta for this event — write it as-is and
+      // a second partial refund double-counts. Compute the delta in INTEGER
+      // CENTS, not dollars: summing already-divided `amount_usd` doubles
+      // accumulates float residue (e.g. prior rows of $0.01 and $0.06 against
+      // a $0.07 cumulative can yield a "delta" of 1.39e-17 — a positive
+      // number, so it would insert a garbage near-zero row). Stripe's
+      // `amount_refunded` is already an integer number of cents; stay in
+      // cents until the very last step.
+      const cumulativeRefundedCents = Number(c.amount_refunded);
+
+      const { data: priorRefunds, error: priorErr } = await supabase
         .from('organized_trip_payment_events')
         .select('amount_usd')
         .eq('provider', 'stripe')
         .eq('provider_object_id', c.payment_intent)
         .eq('event_type', 'refunded');
-      const alreadyRefundedUsd = (priorRefunds ?? []).reduce(
-        (sum, e) => sum + Math.abs(Number(e.amount_usd)),
+      // A transient read failure must not be treated as "nothing recorded
+      // yet" — that would make alreadyRefundedCents fall back to 0 and the
+      // delta become the FULL cumulative refund, double-recording it. Throw
+      // so this 500s and Stripe retries instead.
+      if (priorErr) throw priorErr;
+
+      const alreadyRefundedCents = (priorRefunds ?? []).reduce(
+        (sum, e) => sum + Math.round(Math.abs(Number(e.amount_usd)) * 100),
         0,
       );
-      const deltaUsd = cumulativeRefundedUsd - alreadyRefundedUsd;
-      if (deltaUsd <= 0) return new Response('ok'); // nothing new to record
+      const deltaCents = cumulativeRefundedCents - alreadyRefundedCents;
+      if (deltaCents <= 0) return new Response('ok'); // nothing new to record
+
+      const deltaUsd = deltaCents / 100;
 
       row = {
         trip_id: m.trip_id,
@@ -235,12 +282,15 @@ serve(async req => {
         amount_charged: -deltaUsd,
         currency_charged: currency.toUpperCase(),
         is_livemode: !!event.livemode,
-        // application_fee_usd intentionally omitted here: Stripe does not
-        // tell us how much (if any) of the application fee was reversed by
-        // THIS particular refund, and the PaymentIntent's
-        // application_fee_amount is the ORIGINAL total, not a remainder —
-        // writing it again per refund would overstate fee reversal. Revenue
-        // reconciliation reads it off the 'paid' row.
+        // application_fee_usd intentionally left out here: this IS
+        // reconstructable — for a destination charge the `application_fee`
+        // object carries a cumulative `amount_refunded` too, readable via
+        // `/v1/application_fees/{id}` when the refund was created with
+        // `refund_application_fee: true`, and the same delta technique above
+        // would work on it. Deferred because nothing in this codebase issues
+        // refunds yet. Known gap, not a limitation: until this is wired up,
+        // sum(application_fee_usd) OVERSTATES Swellyo's net revenue by the
+        // full fee on any refunded charge.
       };
     } else {
       // Everything else is acknowledged and ignored, so Stripe stops retrying.
@@ -256,33 +306,47 @@ serve(async req => {
     const { error } = await supabase.from('organized_trip_payment_events').insert(row);
 
     if (error) {
-      // uq_otpe_provider_event = Stripe redelivered the same event id — the
-      // only 23505 that genuinely means "already recorded, nothing lost."
-      if (error.code === '23505' && error.message?.includes('uq_otpe_provider_event')) {
-        return new Response('ok');
+      if (error.code === '23505') {
+        // Two different unique indexes can raise 23505 here: a genuine
+        // Stripe redelivery of the same event id (uq_otpe_provider_event),
+        // or — for a 'paid' row — a second event describing the same
+        // PaymentIntent (uq_otpe_object, scoped to event_type = 'paid').
+        // Matching by constraint NAME would assume Postgres reports
+        // uq_otpe_provider_event first when both are violated — true today
+        // because index checks run in OID order, but a dump/restore that
+        // reverses the OIDs would turn ordinary redeliveries into 500 loops.
+        // Ask the table directly instead: this event id already having a row
+        // IS what "redelivery" means, independent of index internals.
+        const { data: already, error: lookupErr } = await supabase
+          .from('organized_trip_payment_events')
+          .select('id')
+          .eq('provider', 'stripe')
+          .eq('provider_event_id', event.id)
+          .maybeSingle();
+        if (!lookupErr && already) return new Response('ok'); // genuine redelivery
+        // Otherwise: the other collision, or the lookup itself failed —
+        // surface it rather than silently discarding a legitimate event.
       }
-      // Anything else — including a uq_otpe_object collision, which means the
-      // ledger's per-object uniqueness rejected a legitimate second event for
-      // this (provider_object_id, event_type), e.g. a second partial refund —
-      // must surface, not be silently swallowed as if it were a harmless
-      // redelivery.
       throw error;
     }
 
     return new Response('ok');
   } catch (e) {
     const code = (e as { code?: string } | null)?.code;
-    if (code && PERMANENT_PG_ERROR_CODES.has(code)) {
-      // Retrying cannot fix a constraint violation. Acknowledge so Stripe
-      // stops, but log loudly so a human notices instead of it going quiet.
+    const stripeStatus = (e as { stripeStatus?: number } | null)?.stripeStatus;
+    if ((code && PERMANENT_PG_ERROR_CODES.has(code)) || stripeStatus === 404) {
+      // Retrying cannot fix a constraint violation, and a 404 from Stripe
+      // (e.g. the PaymentIntent this event points at no longer exists) will
+      // not resolve itself either. Acknowledge so Stripe stops, but log
+      // loudly so a human notices instead of it going quiet.
       console.error(
         '[stripe-webhook] permanent failure, not retrying',
-        code,
-        e instanceof Error ? e.message : e,
+        code ?? `stripe ${stripeStatus}`,
+        safeMessage(e),
       );
       return new Response('ok');
     }
-    console.error('[stripe-webhook]', e instanceof Error ? e.message : e);
+    console.error('[stripe-webhook]', safeMessage(e));
     // 500 so Stripe retries — better a duplicate attempt than a lost payment.
     return new Response('error', { status: 500 });
   }
