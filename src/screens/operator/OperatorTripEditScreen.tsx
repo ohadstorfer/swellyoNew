@@ -336,7 +336,10 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         <EditSection title="The basics">
           <EditRow label="Trip name" onPress={() => setSheet('title')} />
           <EditRow label="Description" onPress={() => setSheet('description')} />
-          <EditRow label="Where" onPress={noop} />
+          <EditRow
+            label="Where"
+            onPress={() => navigation.navigate('OperatorEditDestination', { tripId })}
+          />
           <EditRow label="When" onPress={() => setSheet('when')} />
           <EditRow label="Spots" onPress={noop} />
         </EditSection>

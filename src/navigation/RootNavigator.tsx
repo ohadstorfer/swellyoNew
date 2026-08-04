@@ -29,6 +29,7 @@ import ManageGearScreen from '../screens/trips/ManageGearScreen';
 import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import OperatorTripEditScreen from '../screens/operator/OperatorTripEditScreen';
+import OperatorEditDestinationScreen from '../screens/operator/OperatorEditDestinationScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ShareToChatScreen } from '../screens/ShareToChatScreen';
@@ -787,6 +788,11 @@ export default function RootNavigator() {
       <RootStack.Screen
         name="OperatorEditTrip"
         component={OperatorTripEditScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="OperatorEditDestination"
+        component={OperatorEditDestinationScreen}
         options={{ presentation: 'card' }}
       />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
