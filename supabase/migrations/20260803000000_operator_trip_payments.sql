@@ -11,11 +11,24 @@
 --   I1 — ledger amount sign now matches event_type; pay_state ignores 'failed'.
 --   I2 — dedup index on (provider, provider_object_id, event_type).
 --   I4 — authenticated no longer has execute on either new/replaced RPC.
---   I5 — trip-level deposit cannot exceed price; balance floor is 0.
+--   I5 — trip-level deposit cannot exceed price; a balance that would go
+--        negative returns NULL (unknown), not a floored 0 -- see round 2 below.
 --   I6 — req_type = 'pay' now implies kind in ('deposit', 'balance') and vice versa.
 --   minor — ledger + trigger-function revokes now cover authenticated too
 --           (default ACL grants it write/execute, matching 20260729000200);
 --           ledger gets is_livemode.
+--
+-- Round 2 (2026-08-03): the balance branch of operator_traveler_amount_due
+-- originally floored at `greatest(..., 0)`. GREATEST ignores NULL
+-- arguments, so a managed trip with no price configured anywhere silently
+-- read as 0 owed (approved) instead of NULL (not_started). Replaced with
+-- explicit NULL semantics: no price anywhere, or a negative raw balance
+-- (deposit exceeds price), both return NULL and refuse to guess. A genuine
+-- balance of exactly 0 still returns 0 and still correctly approves.
+--
+-- Round 3 (2026-08-03): comment-only reconciliation -- two comments below
+-- still described the round-1 "floored at zero" behaviour after round 2
+-- deleted it. No SQL changed in this round.
 
 -- ══════════════════════════════════════════════════════════════════
 -- 1. Operator payout identity — its own table, not columns on `users`
@@ -78,9 +91,14 @@ alter table public.group_trips
   add constraint group_trips_deposit_non_negative
   check (deposit_amount is null or deposit_amount >= 0);
 
--- I5: a deposit larger than the price would make `balance` negative, which
--- reads as "already paid" once floored at zero below. Mirrors the identical
--- per-traveler check in section 3.
+-- I5: a deposit larger than the price would make `balance` negative.
+-- operator_traveler_amount_due (section 6) treats a negative raw balance as
+-- an unknown/contradictory configuration and returns NULL rather than
+-- guessing -- this CHECK stops the trip-level half of that combination at
+-- the source. Mirrors the identical per-traveler check in section 3, which
+-- covers the frozen-participant half; operator_traveler_amount_due's NULL
+-- branch is still what closes the mixed-coalesce case neither CHECK alone
+-- can see (a frozen price_total_usd against this trip's own deposit_amount).
 alter table public.group_trips
   drop constraint if exists group_trips_deposit_not_over_price;
 alter table public.group_trips

@@ -41,6 +41,21 @@
 --     no longer possible.
 --   - v_host is asserted distinct from v_user explicitly, instead of
 --     relying on `limit 1` ordering happening not to collide.
+--
+-- Round-3 fixes (2026-08-03):
+--   - Every print-only row (a bare `value := v_state; return next;` with no
+--     pass/fail check) has been converted to a real `if ... then 'OK: ...'
+--     else 'FAIL: ...' end if` assertion. Previously several rows -- most
+--     importantly the pay-state check on the no-price-anywhere fixture,
+--     which is the ONLY coverage of operator_requirement_pay_state's
+--     `amount is null -> not_started` guard -- could not fail: a regression
+--     would print 'approved' and the run would still read all-green ("no
+--     FAIL: anywhere"). Every row below now can genuinely fail.
+--   - v_trip is now selected with `order by id` (was unordered `limit 1`),
+--     and v_trip2 is asserted distinct from v_trip explicitly. Both trips
+--     are real rows in prod (currently exactly 2 `hosting_style = 'C'`
+--     trips); an unordered v_trip and an `order by id offset 1` v_trip2
+--     could otherwise land on the same row.
 
 begin;
 
@@ -369,7 +384,11 @@ declare
   v_state text; v_due numeric; v_price numeric; v_dep numeric;
   v_rows  integer;
 begin
-  select id into v_trip from public.group_trips where hosting_style = 'C' limit 1;
+  -- Round 3: `order by id` pins which of the (currently 2) operator trips
+  -- this is -- an unordered `limit 1` is not guaranteed to return the same
+  -- row as v_trip2's `order by id offset 1 limit 1` below, and without a
+  -- pin they could collide.
+  select id into v_trip from public.group_trips where hosting_style = 'C' order by id limit 1;
   select id into v_user from auth.users limit 1;
 
   update public.group_trips
@@ -394,42 +413,71 @@ begin
   select price_total_usd, deposit_usd into v_price, v_dep
     from public.group_trip_participants
    where trip_id = v_trip and user_id = v_user;
-  step := 'participant.price_total_usd after insert (expect 2000)'; value := v_price::text; return next;
-  step := 'participant.deposit_usd after insert (expect 500)';      value := v_dep::text;   return next;
+
+  step := 'participant.price_total_usd after insert (expect 2000)';
+  if v_price = 2000 then value := 'OK: ' || v_price;
+  else value := 'FAIL: ' || coalesce(v_price::text, 'null'); end if;
+  return next;
+
+  step := 'participant.deposit_usd after insert (expect 500)';
+  if v_dep = 500 then value := 'OK: ' || v_dep;
+  else value := 'FAIL: ' || coalesce(v_dep::text, 'null'); end if;
+  return next;
 
   select public.operator_traveler_amount_due(v_trip, v_user, 'deposit') into v_due;
-  step := 'deposit due (expect 500)'; value := v_due::text; return next;
+  step := 'deposit due (expect 500)';
+  if v_due = 500 then value := 'OK: ' || v_due;
+  else value := 'FAIL: ' || coalesce(v_due::text, 'null'); end if;
+  return next;
 
   select public.operator_traveler_amount_due(v_trip, v_user, 'balance') into v_due;
-  step := 'balance due (expect 1500)'; value := v_due::text; return next;
+  step := 'balance due (expect 1500)';
+  if v_due = 1500 then value := 'OK: ' || v_due;
+  else value := 'FAIL: ' || coalesce(v_due::text, 'null'); end if;
+  return next;
 
   update public.group_trips set cost_per_person = 9999 where id = v_trip;
 
   select public.operator_traveler_amount_due(v_trip, v_user, 'deposit') into v_due;
-  step := 'deposit due after trip cost_per_person changed to 9999 (expect still 500)'; value := v_due::text; return next;
+  step := 'deposit due after trip cost_per_person changed to 9999 (expect still 500)';
+  if v_due = 500 then value := 'OK: ' || v_due;
+  else value := 'FAIL: ' || coalesce(v_due::text, 'null'); end if;
+  return next;
 
   select public.operator_traveler_amount_due(v_trip, v_user, 'balance') into v_due;
-  step := 'balance due after trip cost_per_person changed to 9999 (expect still 1500)'; value := v_due::text; return next;
+  step := 'balance due after trip cost_per_person changed to 9999 (expect still 1500)';
+  if v_due = 1500 then value := 'OK: ' || v_due;
+  else value := 'FAIL: ' || coalesce(v_due::text, 'null'); end if;
+  return next;
 
   update public.group_trips set cost_per_person = 2000 where id = v_trip;
 
   -- ── Ledger / pay-state happy path (unchanged from round 0) ────────────
   select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
-  step := 'state before paying (expect not_started)'; value := v_state; return next;
+  step := 'state before paying (expect not_started)';
+  if v_state = 'not_started' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
 
   insert into public.organized_trip_payment_events
     (trip_id, user_id, requirement_id, provider_event_id, event_type, amount_usd)
   values (v_trip, v_user, v_req, 'evt_test_1', 'paid', 500);
 
   select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
-  step := 'state after paying (expect approved)'; value := v_state; return next;
+  step := 'state after paying (expect approved)';
+  if v_state = 'approved' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
 
   insert into public.organized_trip_payment_events
     (trip_id, user_id, requirement_id, provider_event_id, event_type, amount_usd)
   values (v_trip, v_user, v_req, 'evt_test_2', 'refunded', -500);
 
   select public.operator_requirement_pay_state(v_trip, v_user, v_req) into v_state;
-  step := 'state after refund (expect not_started)'; value := v_state; return next;
+  step := 'state after refund (expect not_started)';
+  if v_state = 'not_started' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
 
   -- ── Guard rails ──────────────────────────────────────────────────────
   begin
@@ -558,9 +606,14 @@ begin
   -- freeze trigger's own offline no-op) must NOT read as paid.
   select id into v_trip2 from public.group_trips where hosting_style = 'C' order by id offset 1 limit 1;
 
-  if v_trip2 is null then
+  -- Round 3: assert v_trip2 <> v_trip explicitly. Both are now pinned by
+  -- `order by id` (v_trip is row 1, v_trip2 is row 2), so a collision here
+  -- would mean there is only one operator trip in prod, not an ordering
+  -- accident -- but the report's claim that this case "doesn't disturb
+  -- v_trip's state" must be an enforced fact, not an assumption.
+  if v_trip2 is null or v_trip2 = v_trip then
     step := 'round-2 fixture';
-    value := 'FAIL: fewer than 2 operator (hosting_style = ''C'') trips in prod -- cannot isolate this case from v_trip';
+    value := 'FAIL: could not isolate a second operator trip distinct from v_trip (v_trip2=' || coalesce(v_trip2::text, 'null') || ', v_trip=' || v_trip::text || ')';
     return next;
     return;
   end if;
@@ -594,8 +647,16 @@ begin
   end if;
   return next;
 
+  -- This is the ONLY coverage of operator_requirement_pay_state's
+  -- `when amount is null then 'not_started'` guard -- the exact line whose
+  -- absence is what the round-2 critical was. Must be a real assertion, not
+  -- a print: a regression here would emit 'approved' and, print-only, the
+  -- run would still read all-green.
   select public.operator_requirement_pay_state(v_trip2, v_user2, v_req2) into v_state;
-  step := 'CRIT: pay state, managed trip with no price anywhere (expect not_started)'; value := v_state; return next;
+  step := 'CRIT: pay state, managed trip with no price anywhere (expect not_started)';
+  if v_state = 'not_started' then value := 'OK: ' || v_state;
+  else value := 'FAIL: ' || coalesce(v_state, 'null'); end if;
+  return next;
 
   -- ── I5, the case the trip-level CHECK cannot reach ─────────────────────
   -- Frozen participant total (1000) with NULL deposit_usd, falling back to
@@ -624,7 +685,11 @@ begin
     from public.group_trip_participants
    where trip_id = v_trip2 and user_id = v_user3;
   step := 'mixed-coalesce fixture: participant price/deposit after insert (expect 1000/null)';
-  value := coalesce(v_price::text, 'null') || '/' || coalesce(v_dep::text, 'null');
+  if v_price = 1000 and v_dep is null then
+    value := 'OK: ' || coalesce(v_price::text, 'null') || '/' || coalesce(v_dep::text, 'null');
+  else
+    value := 'FAIL: ' || coalesce(v_price::text, 'null') || '/' || coalesce(v_dep::text, 'null');
+  end if;
   return next;
 
   select public.operator_traveler_amount_due(v_trip2, v_user3, 'balance') into v_due;
