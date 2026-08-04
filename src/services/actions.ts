@@ -54,3 +54,34 @@ export async function rejectDocument(
     }
   }
 }
+
+/**
+ * Set one traveler's price.
+ *
+ * The only edit this site does besides approve and reject. It is owner-only:
+ * the RPC checks `group_trips.host_id = auth.uid()`, NOT "is a host", so a
+ * promoted admin gets "not your trip". Callers must hide the button from
+ * anyone who is not the operator of record — see OperatorTrip.hostId.
+ *
+ * The server also refuses: an empty total, anything negative, a deposit above
+ * the total, and a deposit on a trip that has no deposit step to collect it
+ * against. The dialog mirrors all four so the operator learns before
+ * submitting rather than after.
+ *
+ * Pass `depositUsd: null` to clear the deposit and leave it to the trip
+ * default. It must be null — not zero — on a trip with no deposit step.
+ */
+export async function setTravelerPrice(args: {
+  tripId: string;
+  userId: string;
+  totalUsd: number;
+  depositUsd: number | null;
+}): Promise<void> {
+  const { error } = await supabase.rpc('operator_set_traveler_price', {
+    p_trip_id: args.tripId,
+    p_user_id: args.userId,
+    p_total_usd: args.totalUsd,
+    p_deposit_usd: args.depositUsd,
+  });
+  if (error) throw error;
+}

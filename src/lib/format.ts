@@ -22,6 +22,26 @@ export function formatRange(start?: string | null, end?: string | null): string 
   return `${formatDate(start)} – ${formatDate(end)}`;
 }
 
+/**
+ * '$3,000' and '$1,234.50'.
+ *
+ * Cents appear only when there are cents. Every price on a surf trip is round,
+ * and a column of ".00" is noise.
+ *
+ * A null is '—', never '$0'. The difference matters here: no price set is not
+ * the same claim as costs nothing.
+ */
+export function formatUsd(usd: number | null | undefined): string {
+  if (usd === null || usd === undefined || !Number.isFinite(usd)) return '—';
+  const hasCents = Math.round(usd * 100) % 100 !== 0;
+  return usd.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+}
+
 /** 'Nothing', '1 thing', 'N things' — avoids "1 documents". */
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
