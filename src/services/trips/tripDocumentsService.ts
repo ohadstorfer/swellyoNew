@@ -47,10 +47,12 @@ export type RequirementKind =
   | 'medical'
   | 'insurance'
   | 'visa'
-  | 'flights';
+  | 'flights'
+  | 'deposit'
+  | 'balance';
 
 /** What the traveler actually does. Drives which screen opens. */
-export type RequirementAction = 'upload' | 'agree' | 'medical';
+export type RequirementAction = 'upload' | 'agree' | 'medical' | 'pay';
 
 /**
  * One catalog for all six kinds, used by the operator wizard AND the traveler
@@ -141,10 +143,32 @@ export const REQUIREMENT_CATALOG: Record<
     operatorTitle: 'Medical info',
     operatorSub: 'Allergies, diet, injuries, medication. A form, not a file.',
   },
+  deposit: {
+    title: 'Deposit',
+    helpText: 'Pay your deposit to confirm your place.',
+    // 'pay' routes state resolution straight to the ledger — see
+    // operator_requirement_pay_state(). No document, no acknowledgement.
+    reqType: 'pay',
+    action: 'pay',
+    allowPdf: false,
+    operatorTitle: 'Deposit',
+    operatorSub: 'A first payment when they join. Leave the amount blank for one single payment.',
+  },
+  balance: {
+    title: 'Final payment',
+    helpText: 'The rest of your trip cost.',
+    reqType: 'pay',
+    action: 'pay',
+    allowPdf: false,
+    operatorTitle: 'Final payment',
+    operatorSub: 'The rest of the price, due before the trip starts.',
+  },
 };
 
 /** Wizard order. Passport first because it is the reason operators can book. */
 export const REQUIREMENT_ORDER: RequirementKind[] = [
+  'deposit',
+  'balance',
   'passport',
   'waiver',
   'medical',
@@ -669,6 +693,10 @@ export const DEFAULT_TIMING: Record<RequirementKind, RequirementTiming> = {
   insurance: { skippable: true, daysBefore: 30 },
   visa: { skippable: true, daysBefore: 21 },
   flights: { skippable: true, daysBefore: 14 },
+  // must_have carries NO deadline and skippable MUST carry one —
+  // organized_trip_req_deadline_rule raises 23514 on any other pairing.
+  deposit: { skippable: false, daysBefore: 0 },
+  balance: { skippable: true, daysBefore: 30 },
 };
 
 /**
@@ -1021,8 +1049,6 @@ export async function fetchTripReview(
   if (medRes.error) throw medRes.error;
 
   const requirements = (reqRes.data ?? [])
-    // `pay` has no review UI until payments land.
-    .filter((r: any) => r.req_type !== 'pay')
     .sort(
       (a: any, b: any) =>
         // Same order the traveler sees: must-haves first, then by deadline.
@@ -1047,6 +1073,22 @@ export async function fetchTripReview(
         title: r.title,
         dueDate: r.due_date ?? null,
       };
+
+      // Pay rows resolve from the ledger, which fetchTripReview does not load.
+      // Showing them as never-started would be a lie, so they read as
+      // 'not_started' with no review action — the host sees money on the
+      // traveler price sheet instead.
+      if (r.req_type === 'pay') {
+        return {
+          ...base,
+          state: 'not_started' as RequirementState,
+          documentId: null,
+          storagePath: null,
+          submittedAt: null,
+          note: null,
+          fileDeleted: false,
+        };
+      }
 
       // Mirrors `operator_trip_my_requirements` branch for branch. The order of
       // these tests is load-bearing: `acknowledge` is checked BEFORE `medical`,

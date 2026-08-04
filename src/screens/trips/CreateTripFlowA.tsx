@@ -457,6 +457,8 @@ const REQ_ICON: Record<Exclude<RequirementKind, 'passport'>, any> = {
   insurance: 'shield-checkmark-outline',
   visa: 'earth-outline',
   flights: 'airplane-outline',
+  deposit: 'cash-outline',
+  balance: 'card-outline',
 };
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
 

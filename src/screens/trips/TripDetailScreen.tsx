@@ -1320,7 +1320,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const handlePressDocumentRow = useCallback(
     async (row: DocumentRow) => {
       const action = actionForRequirement({ kind: row.kind, reqType: row.reqType });
-      if (!action) return; // custom / pay — no traveler UI yet
+      if (!action) return; // custom — no traveler UI yet
+      // `documentRows` already drops `pay` rows before they reach this handler,
+      // but the return type of `actionForRequirement` still allows 'pay' now
+      // that deposit/balance are catalog kinds. Guard it explicitly rather than
+      // widen this screen's local action type — there is still no payment UI
+      // wired up here.
+      if (action === 'pay') return;
 
       const open = () =>
         setOpenRequirement({
