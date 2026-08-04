@@ -25,8 +25,12 @@ export function validateAgeRange(
   // age_min` and the span rule, and both of those pass when either end is null.
   // So this function is the only thing standing between a half-filled sheet
   // (min typed, max not yet) and an out-of-range age reaching the row.
-  if (ageMin != null && ageMin < MIN_AGE) return `The youngest age is ${MIN_AGE}.`;
-  if (ageMax != null && ageMax > MAX_AGE) return `The oldest age is ${MAX_AGE}.`;
+  if (ageMin != null && (ageMin < MIN_AGE || ageMin > MAX_AGE)) {
+    return `Ages must be ${MIN_AGE}-${MAX_AGE}.`;
+  }
+  if (ageMax != null && (ageMax < MIN_AGE || ageMax > MAX_AGE)) {
+    return `Ages must be ${MIN_AGE}-${MAX_AGE}.`;
+  }
   // The comparison rules need both ends. An operator who has not opened the age
   // sheet yet has two nulls, and that is not an error on its own.
   if (ageMin == null || ageMax == null) return null;

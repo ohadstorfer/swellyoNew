@@ -26,8 +26,8 @@ describe('validateAgeRange', () => {
   });
 
   it('rejects ages outside 16-99', () => {
-    expect(validateAgeRange(15, 30, 4)).toMatch(/16/);
-    expect(validateAgeRange(20, 100, 4)).toMatch(/99/);
+    expect(validateAgeRange(15, 30, 4)).toBe('Ages must be 16-99.');
+    expect(validateAgeRange(20, 100, 4)).toBe('Ages must be 16-99.');
   });
 
   // An operator who has not opened the age sheet yet has nulls. That is not an
@@ -37,13 +37,22 @@ describe('validateAgeRange', () => {
   });
 
   // Half-filled sheet. Nothing in the database enforces the 16-99 floor, so a
-  // one-sided value has to be caught here or not at all.
+  // one-sided value has to be caught here or not at all. Both bounds apply to
+  // both fields — a lone minimum can be too high, a lone maximum can be too low.
   it('still bounds a lone minimum', () => {
-    expect(validateAgeRange(5, null, 4)).toMatch(/16/);
+    expect(validateAgeRange(5, null, 4)).toBe('Ages must be 16-99.');
   });
 
   it('still bounds a lone maximum', () => {
-    expect(validateAgeRange(null, 120, 4)).toMatch(/99/);
+    expect(validateAgeRange(null, 120, 4)).toBe('Ages must be 16-99.');
+  });
+
+  it('rejects a lone minimum above the ceiling', () => {
+    expect(validateAgeRange(120, null, 4)).toBe('Ages must be 16-99.');
+  });
+
+  it('rejects a lone maximum below the floor', () => {
+    expect(validateAgeRange(null, 5, 4)).toBe('Ages must be 16-99.');
   });
 
   it('accepts an in-range lone value', () => {
