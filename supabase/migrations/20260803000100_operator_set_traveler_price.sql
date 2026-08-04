@@ -26,8 +26,22 @@ begin
     raise exception 'not your trip';
   end if;
 
+  -- `null < 0` is NULL, not true, so a null total would otherwise sail past
+  -- every guard below and get written straight to price_total_usd. From
+  -- there operator_traveler_amount_due() returns NULL and
+  -- operator_requirement_pay_state() reads 'not_started' forever, with no
+  -- way for the traveler to pay a must_have item — the same class of
+  -- permanently-unsatisfiable requirement as I6 in 20260803000000.
+  if p_total_usd is null then
+    raise exception 'a price is required';
+  end if;
+
   if p_total_usd < 0 then
     raise exception 'price cannot be negative';
+  end if;
+
+  if p_deposit_usd is not null and p_deposit_usd < 0 then
+    raise exception 'deposit cannot be negative';
   end if;
 
   if p_deposit_usd is not null and p_deposit_usd > p_total_usd then

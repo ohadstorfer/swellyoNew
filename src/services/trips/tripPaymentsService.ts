@@ -117,7 +117,13 @@ export async function fetchPaidByRequirement(
     .from('organized_trip_payment_events')
     .select('requirement_id, amount_usd')
     .eq('trip_id', tripId)
-    .eq('user_id', userId);
+    .eq('user_id', userId)
+    // Mirrors operator_requirement_pay_state's exclusion of 'failed' rows.
+    // otpe_amount_sign_matches_type already pins a 'failed' row's amount to
+    // 0, so this filter is belt-and-suspenders, not load-bearing — but the
+    // file header promises an exact mirror of the SQL, so it stays explicit
+    // rather than relying on that CHECK holding.
+    .neq('event_type', 'failed');
 
   if (error) throw error;
 
@@ -129,23 +135,37 @@ export async function fetchPaidByRequirement(
   return out;
 }
 
+/** `functions.invoke` throws on any non-2xx response with a fixed generic
+ *  message ("Edge Function returned a non-2xx status code") and `data: null`
+ *  — the real message the edge function composed ("Already paid", "You are
+ *  not on this trip", ...) only lives in the raw Response on `error.context`.
+ *  Without reading it here, every deliberate error message these functions
+ *  return is thrown away and replaced with `fallback`. */
+async function edgeFunctionErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const body = await (error as any)?.context?.json?.().catch(() => null);
+  return body?.error ?? fallback;
+}
+
 /**
  * Open Stripe Checkout and wait for the browser sheet to close.
  *
- * ⚠️ The return trip is NOT proof of payment. Stripe rejects custom URL
- * schemes, so there is no reliable deep link back, and a traveler can close the
- * sheet at any moment. The webhook is the only source of truth — the caller
- * must refetch and trust the server, never this return value's optimism.
+ * ⚠️ The return trip is NOT proof of payment, and the resolution of this
+ * promise is not either. `openAuthSessionAsync` only resolves `success` when
+ * the OS hands the redirect back via an associated domain, which
+ * swellyo.com is not, so today this always resolves the same way regardless
+ * of outcome. The webhook is the only source of truth — the caller MUST
+ * refetch and trust the server, never branch on how this call returned.
  */
-export async function startCheckout(requirementId: string): Promise<'paid' | 'cancelled'> {
+export async function startCheckout(requirementId: string): Promise<void> {
   const { data, error } = await supabase.functions.invoke('payments-checkout', {
     body: { requirementId, returnUrl: RETURN_URL },
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(await edgeFunctionErrorMessage(error, 'Could not start the payment'));
+  }
   if (!data?.url) throw new Error(data?.error ?? 'Could not start the payment');
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, RETURN_URL);
-  return result.type === 'success' ? 'paid' : 'cancelled';
+  await WebBrowser.openAuthSessionAsync(data.url, RETURN_URL);
 }
 
 export async function fetchConnectStatus(): Promise<{
@@ -155,7 +175,11 @@ export async function fetchConnectStatus(): Promise<{
   const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
     body: { action: 'status' },
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      await edgeFunctionErrorMessage(error, 'Could not check your payment account'),
+    );
+  }
   return {
     chargesEnabled: !!data?.chargesEnabled,
     accountId: data?.accountId ?? null,
@@ -166,7 +190,9 @@ export async function startConnectOnboarding(): Promise<void> {
   const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
     body: { action: 'onboard', returnUrl: RETURN_URL },
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(await edgeFunctionErrorMessage(error, 'Could not open Stripe'));
+  }
   if (!data?.onboardingUrl) throw new Error(data?.error ?? 'Could not open Stripe');
   await WebBrowser.openAuthSessionAsync(data.onboardingUrl, RETURN_URL);
 }
