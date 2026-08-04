@@ -23,6 +23,7 @@ import { AgeSheetContent } from '../../components/trips/sheets/AgeSheetContent';
 import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
+import { SpotsSheetContent } from '../../components/trips/sheets/SpotsSheetContent';
 import type { AccommodationKind } from '../../components/trips/AccommodationTypeGrid';
 import { useTripCore, useTripRequirements } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
@@ -37,7 +38,7 @@ import {
   type TripVibeSlug,
 } from '../../services/trips/groupTripsService';
 import { resolveDeadlineDate } from '../../services/trips/tripDocumentsService';
-import { validateAgeRange } from '../../services/trips/tripValidation';
+import { validateAgeRange, validateSpots } from '../../services/trips/tripValidation';
 import { AGE_WINDOW_BY_STYLE } from '../trips/CreateTripFlowA';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { showErrorAlert } from '../../utils/friendlyError';
@@ -68,7 +69,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
  */
 type SheetKey =
   | 'cover' | 'title' | 'description' | 'stay' | 'aboutYou'
-  | 'when'
+  | 'when' | 'spots'
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
   | null;
@@ -341,7 +342,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             onPress={() => navigation.navigate('OperatorEditDestination', { tripId })}
           />
           <EditRow label="When" onPress={() => setSheet('when')} />
-          <EditRow label="Spots" onPress={noop} />
+          <EditRow label="Spots" onPress={() => setSheet('spots')} />
         </EditSection>
 
         <EditSection title="Who it's for">
@@ -446,6 +447,29 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           () => save(patch),
         )}
       />
+
+      <EditFieldSheet<number | null>
+        visible={sheet === 'spots'}
+        title="Spots"
+        initial={trip.max_participants}
+        onClose={close}
+        // participant_count only — never broaden this patch. The Task 2
+        // trigger has no `old` term in its condition, so it also rejects a
+        // no-op rewrite of an already-over-capacity value; this row's Save
+        // is dirty-gated (EditFieldSheet's default JSON compare) and writes
+        // max_participants alone, so a re-save of an untouched value never
+        // reaches the trigger in the first place.
+        onSave={(next) => save({ max_participants: next })}
+        validate={(next) => validateSpots(next, participantCount)}
+      >
+        {(draft, setDraft) => (
+          <SpotsSheetContent
+            value={draft}
+            participantCount={participantCount}
+            onChange={setDraft}
+          />
+        )}
+      </EditFieldSheet>
 
       <EditAccommodationSheet
         visible={sheet === 'stay'}
