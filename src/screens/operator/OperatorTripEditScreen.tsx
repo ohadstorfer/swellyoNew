@@ -47,7 +47,8 @@ import {
   type TripStructureSlug,
   type TripVibeSlug,
 } from '../../services/trips/groupTripsService';
-import { resolveDeadlineDate } from '../../services/trips/tripDocumentsService';
+import { resolveDeadlineDate, type EditableRequirement } from '../../services/trips/tripDocumentsService';
+import { ManageRequirementsSheet } from '../../components/trips/ManageRequirementsSheet';
 import { validateAgeRange, validateSpots, validatePrice, validateDeposit } from '../../services/trips/tripValidation';
 import {
   type PriceInclusions,
@@ -107,6 +108,7 @@ type SheetKey =
   | 'howItWorks' | 'vibe' | 'stayType'
   | 'price' | 'includes'
   | 'visibility'
+  | 'requirements'
   | null;
 
 /** Flat multi-select categories inside price_inclusions — rendered with
@@ -122,6 +124,11 @@ const FLAT_INCLUDE_OPTIONS: Record<FlatIncludeKey, readonly { slug: string; labe
   surfEquipment: SURF_EQUIPMENT_OPTIONS,
 };
 const FLAT_INCLUDE_KEYS = new Set<string>(Object.keys(FLAT_INCLUDE_OPTIONS));
+
+/** Stable empty-array reference for `ManageRequirementsSheet`'s `requirements`
+ *  prop while `requirementsQuery.data` is still loading — same constant name
+ *  and purpose as `TripDetailScreen.tsx`'s own `NO_REQUIREMENTS`. */
+const NO_REQUIREMENTS: EditableRequirement[] = [];
 
 /**
  * "What's included" editor. Every category body below — ActivitiesSheetContent,
@@ -319,8 +326,6 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
   const [sheet, setSheet] = useState<SheetKey>(null);
   const close = useCallback(() => setSheet(null), []);
-  // Rows Tasks 6–12 haven't wired yet.
-  const noop = () => {};
 
   /**
    * Two helpers, two families — fix round 1, Finding 1.
@@ -378,6 +383,26 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   // the current user is always the host here. Recomputed the same way rather
   // than assumed `true`, since `trip` can still be null pre-load.
   const isHost = !!currentUserId && trip?.host_id === currentUserId;
+
+  // Same test TripDetailScreen uses to decide whether the operator may CREATE
+  // a passport requirement (TripDetailScreen.tsx:546) — `ManageRequirementsSheet`
+  // needs this to gate that one card, not a screen-level assumption that every
+  // trip reaching this route is hosting_style 'C'.
+  const isOperatorTrip = trip?.hosting_style === 'C';
+
+  // Mirrors TripDetailScreen's own `handleRequirementsSaved`
+  // (TripDetailScreen.tsx:573-579): the requirement list itself, the traveler
+  // document read, and the per-traveler review totals all move together when
+  // a requirement is switched on/off or its deadline changes. Invalidating
+  // here (rather than only `requirementsQuery`'s own key) is what makes the
+  // Plan tab's TripDetailScreen instance pick the change up next time it's
+  // focused, since these are the exact query keys it reads from.
+  const handleRequirementsSaved = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailRequirements(tripId) });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+    queryClient.invalidateQueries({ queryKey: ['trips', 'detail-review', tripId] });
+    close();
+  }, [queryClient, tripId, close]);
 
   // participant_count includes the host. It is what max_participants is
   // compared against everywhere else (isFull, the join trigger), so the spots
@@ -635,10 +660,10 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         </EditSection>
 
         <EditSection title="Manage">
-          <EditRow label="Requirements" onPress={noop} />
-          <EditRow label="Group gear" onPress={noop} />
-          <EditRow label="Packing suggestions" onPress={noop} />
-          <EditRow label="Admin updates" onPress={noop} />
+          <EditRow label="Requirements" onPress={() => setSheet('requirements')} />
+          <EditRow label="Group gear" onPress={() => navigation.navigate('ManageGear', { tripId })} />
+          <EditRow label="Packing suggestions" onPress={() => navigation.navigate('ManageSuggestedGear', { tripId })} />
+          <EditRow label="Admin updates" onPress={() => navigation.navigate('TripUpdates', { tripId })} />
         </EditSection>
 
         <View style={{ height: 40 }} />
@@ -1002,6 +1027,26 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <VisibilitySheetContent value={draft} onChange={setDraft} />
         )}
       </EditFieldSheet>
+
+      {/* Not an EditFieldSheet row — this sheet owns its own draft, its own
+          Save button, and its own delete rules (`removeRequirement` keeps a
+          requirement row as `is_active = false` instead of hard-deleting it
+          once a traveler has uploaded against it, so a passport file is never
+          stranded and a waiver record is never erased). Mounted with its real
+          props, same as TripDetailScreen's mount (TripDetailScreen.tsx:2261-2272) —
+          nothing about its write path is reimplemented here. */}
+      <ManageRequirementsSheet
+        visible={sheet === 'requirements'}
+        onClose={close}
+        tripId={tripId}
+        startDateISO={trip.start_date ?? null}
+        requirements={requirementsQuery.data ?? NO_REQUIREMENTS}
+        isOperatorTrip={isOperatorTrip}
+        paymentMode={trip.payment_mode ?? 'offline'}
+        costPerPersonUsd={trip.cost_per_person ?? null}
+        depositAmountUsd={trip.deposit_amount ?? null}
+        onSaved={handleRequirementsSaved}
+      />
     </SafeAreaView>
   );
 }
