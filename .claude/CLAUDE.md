@@ -43,6 +43,34 @@ When reading font sizes / line heights from a Figma file, **always use `mcp__fig
 - `npm run ios` / `npm run android` — native dev
 - `npm run build:netlify` — production web build
 
+## `operator-dashboard/` — a separate app in this repo
+
+`operator-dashboard/` is the desktop site operators use to run one trip:
+review documents, export files, and see the money. It is **Vite + React +
+TypeScript + Vitest**, not Expo, and it shares **no code** with the app.
+
+It lives here only so both developers have it. Treat it as its own project:
+
+```bash
+cd operator-dashboard
+npm install          # its own package.json — the root install does not cover it
+npm run dev          # port 5175
+npm test             # vitest
+```
+
+- Its spec is `operator-dashboard/docs/SPEC.md`. Read that before changing it.
+- **Rule 1 of that spec: it adds NOTHING to the database.** No tables, no
+  functions, no migrations. Every read it does is already live and permitted.
+- It is excluded from the Expo toolchain on purpose — `tsconfig.json`
+  `exclude`, and a `blockList` entry in `metro.config.js`. Without the Metro
+  block, its `node_modules` (its own react + react-dom) collides with the
+  app's haste map once anyone installs there. Do not remove either.
+- Root `npx tsc` and `npx jest` do not cover it. Verify it with its own
+  `npm run build` and `npm test`, run from inside the folder.
+- It needs its own `.env` (see `operator-dashboard/.env.example`).
+  `VITE_STRIPE_LIVEMODE` must match the database's `app.stripe_livemode` —
+  see the Stripe section of `PRE_BUILD_CHECKLIST.md`.
+
 ## Architecture
 
 ### Entry point

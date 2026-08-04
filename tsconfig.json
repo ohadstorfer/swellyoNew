@@ -11,5 +11,5 @@
     "**/*.ts",
     "**/*.tsx"
 , "src/screens/c"  ],
-  "exclude": ["swellyo-invite-redirect"]
+  "exclude": ["swellyo-invite-redirect", "operator-dashboard"]
 }
