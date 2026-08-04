@@ -34,6 +34,13 @@ describe('amountDue', () => {
     expect(amountDue('balance', { totalUsd: null, depositUsd: null })).toBeNull();
     expect(amountDue('deposit', { totalUsd: null, depositUsd: 500 })).toBeNull();
   });
+
+  // Stored rows can't reach this (a DB CHECK blocks deposit > total), but a
+  // live price-sheet form building this struct from two text fields mid-typing
+  // can — e.g. a 5000 deposit entered before the 2000 total is corrected.
+  it('floors the balance at zero rather than going negative', () => {
+    expect(amountDue('balance', { totalUsd: 2000, depositUsd: 5000 })).toBe(0);
+  });
 });
 
 describe('amountOutstanding', () => {
@@ -81,11 +88,54 @@ describe('commissionCents', () => {
   });
 
   // Must never exceed the charge, or Stripe rejects the whole session.
+  // bps = 15000 (150%) makes the raw cut bigger than the charge itself, so
+  // this is the case that actually exercises the cap — 100 bps = 100% would
+  // make raw === totalCents and never engage Math.min.
   it('never exceeds the charge', () => {
-    expect(commissionCents(100, 10000)).toBe(100);
+    expect(commissionCents(100, 15000)).toBe(100);
   });
 
   it('rounds to a whole cent', () => {
     expect(commissionCents(999, 1200)).toBe(120);
+  });
+});
+
+import {
+  REQUIREMENT_CATALOG,
+  REQUIREMENT_ORDER,
+  DEFAULT_TIMING,
+} from '../tripDocumentsService';
+
+describe('pay requirement kinds', () => {
+  it('has both pay kinds in the catalog', () => {
+    expect(REQUIREMENT_CATALOG.deposit).toBeDefined();
+    expect(REQUIREMENT_CATALOG.balance).toBeDefined();
+  });
+
+  // The req_type is what routes state resolution to the ledger. Get this wrong
+  // and the row waits forever for evidence that never arrives.
+  it('routes both through the pay branch', () => {
+    expect(REQUIREMENT_CATALOG.deposit.reqType).toBe('pay');
+    expect(REQUIREMENT_CATALOG.balance.reqType).toBe('pay');
+    expect(REQUIREMENT_CATALOG.deposit.action).toBe('pay');
+    expect(REQUIREMENT_CATALOG.balance.action).toBe('pay');
+  });
+
+  it('puts the deposit before the balance', () => {
+    expect(REQUIREMENT_ORDER.indexOf('deposit')).toBeLessThan(
+      REQUIREMENT_ORDER.indexOf('balance'),
+    );
+  });
+
+  // A deposit is due when you join, so it must be must_have with NO deadline —
+  // organized_trip_req_deadline_rule rejects any other combination with a 23514.
+  it('defaults the deposit to due on joining', () => {
+    expect(DEFAULT_TIMING.deposit.skippable).toBe(false);
+  });
+
+  // A balance is due before departure, so it must be skippable WITH a deadline.
+  it('defaults the balance to a deadline before departure', () => {
+    expect(DEFAULT_TIMING.balance.skippable).toBe(true);
+    expect(DEFAULT_TIMING.balance.daysBefore).toBeGreaterThan(0);
   });
 });

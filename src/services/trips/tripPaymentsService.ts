@@ -16,18 +16,28 @@
 export type PayStep = 'deposit' | 'balance';
 
 export type TravelerPrices = {
-  /** This traveler's total, frozen on their participant row. Null = no price
-   *  set (they joined before payments were turned on). */
+  /** This traveler's total. Callers MUST resolve the trip's default price
+   *  before constructing this object — `fetchTravelerPrices` is the function
+   *  that does that coalesce (participant row, falling back to the trip's
+   *  `cost_per_person`), matching the SQL's `coalesce(p.price_total_usd,
+   *  t.cost_per_person)`. Null here means no price exists ANYWHERE — not on
+   *  the participant row and not as a trip default — so nothing is owed
+   *  until the operator sets one. A caller that skips the coalesce and
+   *  builds this straight from a participant row will silently under-charge
+   *  travelers who never got their own price frozen. */
   totalUsd: number | null;
   /** Their deposit. Null = this trip takes one single payment. */
   depositUsd: number | null;
 };
 
-/** What this step costs, or null when nothing is owed for it. */
+/** What this step costs, or null when nothing is owed for it. Floors the
+ *  balance at zero — stored rows can't produce a negative balance (a DB
+ *  CHECK blocks deposit > total), but a live form building this struct from
+ *  unvalidated, mid-typing input can. */
 export function amountDue(step: PayStep, p: TravelerPrices): number | null {
   if (p.totalUsd == null) return null;
   if (step === 'deposit') return p.depositUsd;
-  return p.totalUsd - (p.depositUsd ?? 0);
+  return Math.max(0, p.totalUsd - (p.depositUsd ?? 0));
 }
 
 /** What is still owed after everything already paid against this step. */
