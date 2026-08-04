@@ -13,6 +13,13 @@
 -- before or after the real migration is applied -- every DDL statement is
 -- idempotent (IF NOT EXISTS / CREATE OR REPLACE / DROP ... IF EXISTS).
 --
+-- NOTE: this DDL block is a hand-maintained copy of
+-- 20260803000000_operator_trip_payments.sql, not a read of that file --
+-- `supabase db query -f` sends the file as one Postgres wire message, and
+-- psql's `\i` include directive (tested directly against this project) is
+-- not honoured over that path; it errors as a syntax error at `\`. Any edit
+-- to the migration's DDL must be mirrored here by hand.
+--
 -- Round-1 fix verification (2026-08-03) covers, beyond the original happy
 -- path:
 --   - the freeze trigger actually fired (not the coalesce fallback) --
@@ -21,6 +28,19 @@
 --   - C1 closed: a non-host's own PATCH to price_total_usd/deposit_usd is
 --     silently ignored; a host's PATCH still sticks (the load-bearing case
 --     a later task depends on).
+--
+-- Round-2 additions (2026-08-03):
+--   - operator_traveler_amount_due's balance branch rewritten: the round-1
+--     `greatest(..., 0)` floor is gone (GREATEST ignores NULL args, so it
+--     silently turned "no price configured anywhere" into an approved 0
+--     instead of NULL / not_started). New coverage below proves both the
+--     no-price-anywhere case and the mixed-coalesce case stay NULL.
+--   - C1 impersonation assertions now also assert `GET DIAGNOSTICS ...
+--     row_count = 1` on each impersonated UPDATE, so a false pass from the
+--     write matching zero rows (rather than the trigger reverting it) is
+--     no longer possible.
+--   - v_host is asserted distinct from v_user explicitly, instead of
+--     relying on `limit 1` ordering happening not to collide.
 
 begin;
 
@@ -193,18 +213,27 @@ stable
 security definer
 set search_path = public, extensions, pg_temp
 as $$
+  with base as (
+    select
+      coalesce(p.price_total_usd, t.cost_per_person) as price,
+      coalesce(p.deposit_usd, t.deposit_amount)       as deposit,
+      coalesce(p.deposit_usd, t.deposit_amount, 0)    as deposit_or_zero
+    from public.group_trips t
+    left join public.group_trip_participants p
+      on p.trip_id = t.id and p.user_id = p_user_id
+    where t.id = p_trip_id
+  )
   select case p_kind
-    when 'deposit' then coalesce(p.deposit_usd, t.deposit_amount)
-    when 'balance' then greatest(
-                           coalesce(p.price_total_usd, t.cost_per_person)
-                         - coalesce(p.deposit_usd, t.deposit_amount, 0),
-                           0)
+    when 'deposit' then deposit
+    when 'balance' then
+      case
+        when price is null then null
+        when (price - deposit_or_zero) < 0 then null
+        else price - deposit_or_zero
+      end
     else null
   end
-  from public.group_trips t
-  left join public.group_trip_participants p
-    on p.trip_id = t.id and p.user_id = p_user_id
-  where t.id = p_trip_id;
+  from base;
 $$;
 
 revoke execute on function public.operator_traveler_amount_due(uuid, uuid, text)
@@ -336,7 +365,9 @@ language plpgsql
 as $$
 declare
   v_trip  uuid; v_user uuid; v_host uuid; v_req uuid;
+  v_trip2 uuid; v_user2 uuid; v_user3 uuid; v_req2 uuid;
   v_state text; v_due numeric; v_price numeric; v_dep numeric;
+  v_rows  integer;
 begin
   select id into v_trip from public.group_trips where hosting_style = 'C' limit 1;
   select id into v_user from auth.users limit 1;
@@ -431,8 +462,14 @@ begin
    where trip_id = v_trip and role = 'host'
    limit 1;
 
-  if v_host is null then
-    step := 'C1 fixture'; value := 'FAIL: no host participant found on test trip'; return next;
+  -- Round 2: pin distinctness explicitly rather than trust `limit 1`
+  -- ordering not to collide with v_user (it wouldn't silently pass either
+  -- way -- a collision fails the assertions below -- but a named check
+  -- here is the actual guarantee, not luck).
+  if v_host is null or v_host = v_user then
+    step := 'C1 fixture';
+    value := 'FAIL: no host distinct from the traveler was found (host=' || coalesce(v_host::text, 'null') || ', user=' || v_user::text || ')';
+    return next;
     return;
   end if;
 
@@ -445,7 +482,19 @@ begin
   update public.group_trip_participants
      set price_total_usd = 0, deposit_usd = 0
    where trip_id = v_trip and user_id = v_user;
+  get diagnostics v_rows = row_count;
   reset role;
+
+  -- Round 2: assert the UPDATE actually matched a row. Without this, "price
+  -- unchanged" is equally consistent with "the trigger reverted it" and
+  -- "the UPDATE matched nothing" -- only the row_count check tells them
+  -- apart.
+  if v_rows = 1 then
+    step := 'C1: non-host UPDATE reached exactly one row'; value := 'OK: row_count=1';
+  else
+    step := 'C1: non-host UPDATE reached exactly one row'; value := 'FAIL: row_count=' || v_rows;
+  end if;
+  return next;
 
   select price_total_usd, deposit_usd into v_price, v_dep
     from public.group_trip_participants
@@ -468,7 +517,15 @@ begin
   update public.group_trip_participants
      set price_total_usd = 1234, deposit_usd = 333
    where trip_id = v_trip and user_id = v_host;
+  get diagnostics v_rows = row_count;
   reset role;
+
+  if v_rows = 1 then
+    step := 'C1: host UPDATE reached exactly one row'; value := 'OK: row_count=1';
+  else
+    step := 'C1: host UPDATE reached exactly one row'; value := 'FAIL: row_count=' || v_rows;
+  end if;
+  return next;
 
   select price_total_usd, deposit_usd into v_price, v_dep
     from public.group_trip_participants
@@ -480,6 +537,101 @@ begin
   else
     step := 'C1: host PATCH price=1234/deposit=333 on own row';
     value := 'FAIL: host write was blocked (' || coalesce(v_price::text, 'null') || '/' || coalesce(v_dep::text, 'null') || ')';
+  end if;
+  return next;
+
+  -- The impersonation above set request.jwt.claims (is_local = true, so it
+  -- otherwise lives for the rest of THIS transaction, not just the two
+  -- statements above). Clear it now so every later `select`/`insert` below
+  -- runs as the trusted/service-role branch (auth.uid() is null) rather
+  -- than silently inheriting "acting as v_host" -- which would misclassify
+  -- the v_trip2 inserts below as a non-host write the moment v_host turns
+  -- out not to be a host of v_trip2.
+  perform set_config('request.jwt.claims', '', true);
+
+  -- ── Round 2 critical regression: no price configured anywhere ─────────
+  -- greatest(..., 0) (round 1) silently turned "cost_per_person is null AND
+  -- price_total_usd is null" into a due amount of 0, which reads as
+  -- approved. This is the exact scenario: an operator flips an existing
+  -- trip to managed before filling in a price, and every traveler who
+  -- joined while it was offline (frozen columns still null, per the
+  -- freeze trigger's own offline no-op) must NOT read as paid.
+  select id into v_trip2 from public.group_trips where hosting_style = 'C' order by id offset 1 limit 1;
+
+  if v_trip2 is null then
+    step := 'round-2 fixture';
+    value := 'FAIL: fewer than 2 operator (hosting_style = ''C'') trips in prod -- cannot isolate this case from v_trip';
+    return next;
+    return;
+  end if;
+
+  update public.group_trips
+     set payment_mode = 'managed', cost_per_person = null, deposit_amount = null
+   where id = v_trip2;
+
+  insert into public.organized_trip_requirements
+    (trip_id, kind, req_type, title, skip_at_onboarding, is_active)
+  values (v_trip2, 'balance', 'pay', 'Balance', 'must_have', true)
+  returning id into v_req2;
+
+  select id into v_user2 from auth.users where id not in (v_user, v_host) order by id limit 1;
+
+  -- v_trip2 is a real live trip and may already have v_user2 as a
+  -- participant (unlikely but not impossible with an arbitrary pick from
+  -- 792 users). ON CONFLICT DO UPDATE forces the intended null/null fixture
+  -- either way, rather than silently reading whatever pre-existing row was
+  -- there -- same reasoning applies to v_user3 below.
+  insert into public.group_trip_participants (trip_id, user_id, role, price_total_usd, deposit_usd)
+  values (v_trip2, v_user2, 'member', null, null)
+  on conflict (trip_id, user_id) do update
+    set price_total_usd = null, deposit_usd = null;
+
+  select public.operator_traveler_amount_due(v_trip2, v_user2, 'balance') into v_due;
+  if v_due is null then
+    step := 'CRIT: balance due, managed trip with no price anywhere (expect NULL)'; value := 'OK: null';
+  else
+    step := 'CRIT: balance due, managed trip with no price anywhere (expect NULL)'; value := 'FAIL: ' || v_due::text;
+  end if;
+  return next;
+
+  select public.operator_requirement_pay_state(v_trip2, v_user2, v_req2) into v_state;
+  step := 'CRIT: pay state, managed trip with no price anywhere (expect not_started)'; value := v_state; return next;
+
+  -- ── I5, the case the trip-level CHECK cannot reach ─────────────────────
+  -- Frozen participant total (1000) with NULL deposit_usd, falling back to
+  -- a trip deposit_amount (5000) that is larger. group_trips_deposit_not_over_price
+  -- only compares the trip's own two columns (5000 <= 6000 here, which is
+  -- fine on its own); gtp_deposit_not_over_total only compares the
+  -- participant's own two columns (deposit_usd is null, trivially fine).
+  -- Neither CHECK sees the cross-table mismatch. Must yield NULL, not a
+  -- negative number and not 0.
+  update public.group_trips
+     set cost_per_person = 6000, deposit_amount = 5000
+   where id = v_trip2;
+
+  select id into v_user3 from auth.users where id not in (v_user, v_host, v_user2) order by id limit 1;
+
+  -- auth.uid() is null here (cleared above), so this goes through the
+  -- trusted/service-role branch of freeze_traveler_price: explicit price
+  -- wins, deposit_usd is left exactly as passed -- i.e. not provided, so
+  -- null. ON CONFLICT DO UPDATE for the same reason as v_user2 above.
+  insert into public.group_trip_participants (trip_id, user_id, role, price_total_usd, deposit_usd)
+  values (v_trip2, v_user3, 'member', 1000, null)
+  on conflict (trip_id, user_id) do update
+    set price_total_usd = 1000, deposit_usd = null;
+
+  select price_total_usd, deposit_usd into v_price, v_dep
+    from public.group_trip_participants
+   where trip_id = v_trip2 and user_id = v_user3;
+  step := 'mixed-coalesce fixture: participant price/deposit after insert (expect 1000/null)';
+  value := coalesce(v_price::text, 'null') || '/' || coalesce(v_dep::text, 'null');
+  return next;
+
+  select public.operator_traveler_amount_due(v_trip2, v_user3, 'balance') into v_due;
+  if v_due is null then
+    step := 'I5: mixed-coalesce balance, frozen total 1000 vs. trip deposit 5000 (expect NULL)'; value := 'OK: null';
+  else
+    step := 'I5: mixed-coalesce balance, frozen total 1000 vs. trip deposit 5000 (expect NULL)'; value := 'FAIL: ' || v_due::text;
   end if;
   return next;
 

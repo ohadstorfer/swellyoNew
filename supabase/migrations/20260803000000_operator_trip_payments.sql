@@ -249,6 +249,25 @@ create policy otpe_read_own on public.organized_trip_payment_events
 -- ══════════════════════════════════════════════════════════════════
 -- The single server-side home for this arithmetic. tripPaymentsService.ts
 -- mirrors it on the client; the two must agree.
+--
+-- Round 2 correction: an earlier version of this function floored the
+-- balance branch at `greatest(..., 0)`. GREATEST ignores NULL arguments, so
+-- `greatest(null - x, 0)` is `0`, not NULL -- a managed trip with no price
+-- configured anywhere (cost_per_person null, every existing participant's
+-- price_total_usd null) would read as "0 owed", and
+-- operator_requirement_pay_state's `amount is null -> not_started` guard
+-- would never fire, falling through to `0 >= 0 -> approved`. Every existing
+-- traveler on a trip an operator had just flipped to managed, before
+-- filling in a price, would read as fully paid.
+--
+-- A negative raw balance (deposit exceeds price -- the case I5 actually
+-- cares about, including the mixed-coalesce combination the trip-level
+-- CHECK cannot see: a frozen price_total_usd with a NULL deposit_usd
+-- falling back to a larger trip-level deposit_amount) is a contradictory
+-- configuration. The right answer to "how much is owed" there is unknown,
+-- not zero -- zero reads as fully paid to every consumer. A genuine
+-- balance of exactly 0 (deposit equals total) still returns 0 and still
+-- correctly reads as approved, because there really is nothing left owed.
 create or replace function public.operator_traveler_amount_due(
   p_trip_id uuid, p_user_id uuid, p_kind text
 ) returns numeric
@@ -257,23 +276,27 @@ stable
 security definer
 set search_path = public, extensions, pg_temp
 as $$
+  with base as (
+    select
+      coalesce(p.price_total_usd, t.cost_per_person) as price,
+      coalesce(p.deposit_usd, t.deposit_amount)       as deposit,
+      coalesce(p.deposit_usd, t.deposit_amount, 0)    as deposit_or_zero
+    from public.group_trips t
+    left join public.group_trip_participants p
+      on p.trip_id = t.id and p.user_id = p_user_id
+    where t.id = p_trip_id
+  )
   select case p_kind
-    when 'deposit' then coalesce(p.deposit_usd, t.deposit_amount)
-    -- I5: floored at zero. group_trips_deposit_not_over_price and
-    -- gtp_deposit_not_over_total should already prevent a negative balance,
-    -- but the two constraints protect different columns (trip default vs.
-    -- frozen per-traveler value) and can still combine to go negative across
-    -- a mixed coalesce; the floor is the actual guarantee.
-    when 'balance' then greatest(
-                           coalesce(p.price_total_usd, t.cost_per_person)
-                         - coalesce(p.deposit_usd, t.deposit_amount, 0),
-                           0)
+    when 'deposit' then deposit
+    when 'balance' then
+      case
+        when price is null then null
+        when (price - deposit_or_zero) < 0 then null
+        else price - deposit_or_zero
+      end
     else null
   end
-  from public.group_trips t
-  left join public.group_trip_participants p
-    on p.trip_id = t.id and p.user_id = p_user_id
-  where t.id = p_trip_id;
+  from base;
 $$;
 
 -- I4: no grant to authenticated. Nothing needs it — this is only ever
