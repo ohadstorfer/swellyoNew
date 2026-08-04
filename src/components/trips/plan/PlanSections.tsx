@@ -26,7 +26,7 @@ import { ff } from '../../../theme/fonts';
 import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../../assets/images';
-import { formatPrice } from '../../../utils/currency';
+import { formatPrice, isIsraeli } from '../../../utils/currency';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -1026,11 +1026,21 @@ export const TripDocumentsCard: React.FC<{
           // Secondary, explicitly-approximate local-currency hint — reuses
           // `formatPrice`'s ₪-rounding on purpose, since THAT rounding is
           // exactly right for a parenthetical "about ₪X", just never for the
-          // primary figure. Suppressed when it would just repeat the dollar
-          // amount (non-Israeli viewers, or no fx rate on this trip).
+          // primary figure. Gated on the viewer genuinely being in a
+          // DIFFERENT currency (Israeli + a valid fx rate on this trip) — NOT
+          // on the formatted strings merely differing. A USD viewer whose
+          // exact amount carries cents would otherwise see `formatPrice`'s
+          // whole-dollar rounding fire as a bogus "(about $1,393)" next to
+          // "$1,392.50": the same real-vs-rounded confusion I1 exists to kill,
+          // just smaller.
+          const hasLocalCurrency =
+            isIsraeli(viewerCountry) &&
+            typeof budgetFxRate === 'number' &&
+            Number.isFinite(budgetFxRate) &&
+            budgetFxRate > 0;
           const approxLocal =
-            exactUsd && formatPrice(row.amountUsd!, budgetFxRate, viewerCountry);
-          const showApprox = !!approxLocal && approxLocal !== exactUsd;
+            exactUsd && hasLocalCurrency ? formatPrice(row.amountUsd!, budgetFxRate, viewerCountry) : null;
+          const showApprox = !!approxLocal;
 
           return (
             <Pressable
