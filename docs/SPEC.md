@@ -2,7 +2,7 @@
 
 The desktop website operators use to run one trip: see who uploaded what, review documents, and export files.
 
-**Status:** draft, 2 August 2026. Nothing built yet.
+**Status:** built. Written 2 August 2026, money section added 4 August 2026. Not yet tested against a real trip by an operator.
 
 ---
 
@@ -13,7 +13,8 @@ A small, separate website. It is **not** part of the mobile app and does not sha
 - Operators log in with Google, the same account they use in the Swellyo app.
 - They pick a trip and see how it is going.
 - They can review documents and download files.
-- They cannot edit the trip, message anyone, or remove travelers. That stays on mobile.
+- They can see the money, and set one traveler's price.
+- They cannot otherwise edit the trip, message anyone, or remove travelers. That stays on mobile.
 
 **Why it exists:** reviewing 60 documents and sending passports to a hotel is painful on a phone. Those two jobs earn a desktop screen. Everything else does not.
 
@@ -25,13 +26,17 @@ A small, separate website. It is **not** part of the mobile app and does not sha
 | `swellyoNative/docs/operator-trips-dashboard-spec.html` | The tiles, the pages, and the 2 August decisions |
 | `swellyoNative/docs/operator-trips-workbench.html` | "Document review and exports earn the desktop view" |
 
-### One open decision for Eyal
+### Two open decisions for Eyal
 
-Eyal's spec says desktop is read-only. But his spec has **no approval step at all** — approving a document did not exist when he wrote it. So it cannot have an opinion on it.
+**1. Approve and reject.** Eyal's spec says desktop is read-only. But his spec has **no approval step at all** — approving a document did not exist when he wrote it. So it cannot have an opinion on it.
 
-This site **includes approve and reject**, because that is the review the workbench says earns desktop. Everything Eyal called "real management" (editing, messaging, removing people) stays off desktop.
+This site **includes approve and reject**, because that is the review the workbench says earns desktop.
 
-If Eyal wants desktop strictly read-only, remove two buttons. It is a subtraction, not a redesign.
+**2. Setting a traveler's price.** Decided by Ohad on 4 August, when the money section was built. Prices are per traveler and frozen at join, so an operator quoting one person a different rate has nowhere else to do it on a desktop — and a price is the one number they most often need to fix while on a call.
+
+Everything else Eyal called "real management" (editing the trip, messaging, removing people) stays off desktop.
+
+If Eyal wants desktop strictly read-only, remove three buttons. It is a subtraction, not a redesign.
 
 ---
 
@@ -59,6 +64,7 @@ If Eyal wants desktop strictly read-only, remove two buttons. It is a subtractio
 /login                        Google sign-in
 /trips                        the operator's trips
 /trips/:id                    trip snapshot
+/trips/:id/money              every traveler's price, what they paid, the ledger
 /trips/:id/d/:requirementId   one requirement, everyone, with export
 /trips/:id/t/:userId          one traveler
 ```
@@ -72,7 +78,11 @@ Trips the person hosts, `hosting_style = 'C'` only. Each row: name, dates, how m
 Top to bottom:
 
 1. **Needs review** — "12 documents waiting for you". Opens the review list, oldest first. It is a shortcut, not a queue that must be cleared. Nothing happens automatically.
-2. **Money** — **not built.** The payment ledger does not exist in the database. The tile is hidden, not shown as zero.
+2. **Money** — collected against expected, and how many have paid each step:
+   `$1,000 collected of $6,000 · 1 of 2 paid the deposit`
+   Travelers with no price set are counted in the denominator and named in a second line — someone with no price is not paid, and leaving them out would make the trip look further along than it is. Opens the money page.
+   The card is hidden only when the trip has no payment steps and no price anywhere. A trip that never charged for anything has no money story.
+   Full design: `docs/superpowers/specs/2026-08-04-operator-dashboard-money-design.md`.
 3. **Documents** — one line per requirement, showing **received** and **approved**:
    `Passports 15/15 in · 3/15 approved`
    Both numbers always. The gap is the operator's own backlog, and hiding it would make it look like a traveler problem.
@@ -99,8 +109,27 @@ Every tile opens a full page: all travelers, their state, and **export**.
 | Passport | File + name, nationality, expiry | View · export · reject |
 | Insurance / Visa / Flights | File | View · export · reject |
 | Medical | Allergies, injuries, diet, medication | View · export |
+| Money | Total, each payment step, their payments | Read · set price (owner only) |
 
-Message, remove from trip, and editing are **not here**. They stay on mobile.
+Message, remove from trip, and editing the trip are **not here**. They stay on mobile.
+
+### 4.6 Money page
+
+One row per traveler: total, each payment step with what is still owed, and paid so far. Then a totals line, then **the payment rows themselves** — date, traveler, payment or refund, amount.
+
+The raw rows are the point. Operators reconcile against their Stripe dashboard, and a single total cannot be checked against anything.
+
+**Setting a price is owner-only.** The database guards it on `group_trips.host_id` — the operator of record — while this site finds trips through `role = 'host'`, which includes every admin promoted with "Set as admin". Those admins see the money; they do not see the button.
+
+Changing a price after money has arrived follows three rules, and only one interrupts:
+
+| Situation | What happens |
+|---|---|
+| Nothing paid | Saves, no confirmation |
+| Paid, new total at or above it | Confirm, with the numbers spelled out |
+| New total below what they paid | **Blocked** |
+
+The block exists because an overpaid traveler cannot be put right from here — there is no refund on this site. Stripe refuses the same move for the same reason. **The server does not check this**, so a direct API call still gets through; that gap is logged for the next payments migration.
 
 ### 4.5 Review actions
 
@@ -137,6 +166,11 @@ Everything below is already live. **This project adds nothing to the database.**
 | Approve | `operator_approve_documents(...)` |
 | Reject | `operator_reject_document(...)` |
 | Files | private bucket `group-trip-documents`, signed links |
+| Payments | `organized_trip_payment_events` |
+| Traveler prices | `group_trip_participants.price_total_usd`, `.deposit_usd` |
+| Trip default price | `group_trips.cost_per_person`, `.deposit_amount`, `.payment_mode` |
+| Payment steps | `organized_trip_requirements_resolved` where `req_type = 'pay'` |
+| Set a price | `operator_set_traveler_price(...)` |
 
 Verified against production on 2 August: every function above grants `EXECUTE` to `authenticated`, every table has RLS on, and both views are `security_invoker` so table policies still apply.
 
@@ -150,13 +184,24 @@ That logic already exists twice in the mobile app — in the `operator_trip_my_r
 
 **The branch order is load-bearing.** `acknowledge` is checked *before* `medical`, exactly as the database does it, or the two sides disagree about what "done" means. This is why the ported function has unit tests.
 
-> **Known debt.** Three copies of one rule is a smell. The proper fix is the `operator_trip_requirement_matrix` function, which was specced but never applied. Do it next time someone is working in the database. Not now — it would mean a migration, and this project is meant to add nothing.
+### Money state
+
+Same story, same reason. `operator_traveler_amount_due` and `operator_requirement_pay_state` grant EXECUTE to `postgres` and `service_role` only, so the browser cannot call them. Granting them would not help either: both return one value for one traveler and one step, so a 15-person trip would need 30 round trips to draw one page.
+
+`src/domain/money.ts` is the **fourth** copy, and it is tested for the same reason the third one is.
+
+Two traps live in that file on purpose. Money is added in whole **cents**, because `0.1 + 0.2` is not `0.3`. And every amount goes through `toNumber()` first, because a Postgres `numeric` reaches the browser as a **string** — without it, adding two payments concatenates them into a plausible, wrong total.
+
+> **Known debt.** Four copies of one rule is a smell. The proper fix is the `operator_trip_requirement_matrix` function, which was specced but never applied. Do it next time someone is working in the database. Not now — it would mean a migration, and this project is meant to add nothing.
 
 ---
 
 ## 7. Not building
 
-- The money tile — no ledger exists.
+- **Refunds.** They are read and shown. Issuing one happens in the Stripe dashboard.
+- **Payout status** — whether Stripe has paid the operator out. A different question from "did the traveler pay", on a different Stripe object, and mixing the two on one screen is how people misread their own balance.
+- Bulk price setting. One traveler at a time.
+- Invoices and receipts. Stripe already emails them.
 - Export logging or download history.
 - Staff accounts or roles.
 - A view across several trips at once.
@@ -168,7 +213,9 @@ That logic already exists twice in the mobile app — in the `operator_trip_my_r
 ## 8. Still open
 
 1. **Custom requirements.** Operators can invent their own items, and the tiles are built around passport, visa, insurance and flights. For now they go in an "Other requirements" list with their own counts. How they should properly be counted and exported — **needs Eyal and Ohad**.
-2. **Removing a traveler who already paid.** Not on desktop anyway, so it does not block this site. Moves with the payments decision.
+2. **Removing a traveler who already paid.** Not a desktop action, so it does not block this site. The ledger is append-only, so their payment rows survive being removed from the trip — but nothing refunds them, and this site would stop showing the rows once they are no longer a member. Needs Eyal.
+
+3. **The price columns are world-readable.** `group_trip_participants` has a SELECT policy of `using(true)` for every logged-in user, and the payments work added `price_total_usd` and `deposit_usd` to that table. So any Swellyo user can read what any traveler paid for any trip. This site needs that read and did not create the hole, but it is real. Fixing it is a migration in the main project.
 
 ---
 
@@ -189,9 +236,15 @@ That logic already exists twice in the mobile app — in the `operator_trip_my_r
 ```
 VITE_SUPABASE_URL
 VITE_SUPABASE_ANON_KEY
+VITE_STRIPE_LIVEMODE          which Stripe payments count as real
+VITE_ALLOW_ALL_HOSTED_TRIPS   testing only — show non-operator trips too
 ```
 
 The anon key is public by design. RLS is what protects the data.
+
+> **`VITE_STRIPE_LIVEMODE` must match the database.** The database decides which payments are real through `app.stripe_livemode`, which reads as **false when unset** — so today, test payments count as real and the app already tells travelers their sandbox deposit is paid. If this site disagreed it would show "$0 collected" for a settled deposit.
+>
+> It is the **third** flag that has to flip with the live Stripe key, alongside the database setting and the app's `EXPO_PUBLIC_STRIPE_LIVEMODE`. It is recorded in `swellyoNative/PRE_BUILD_CHECKLIST.md` beside the other two. When the money page finds payments in the mode it is not counting, it says so — that warning is usually a flag mismatch.
 
 ---
 

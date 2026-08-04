@@ -5,14 +5,18 @@ import { fetchMembers, fetchTrip } from '../services/trips';
 import { fetchTripReview, type ReviewItem } from '../services/review';
 import { fetchMedicalForm, fetchProfiles } from '../services/travelers';
 import { isUploadRequirement } from '../domain/requirements';
-import { approveDocuments, rejectDocument } from '../services/actions';
+import { approveDocuments, rejectDocument, setTravelerPrice } from '../services/actions';
 import { downloadAll, downloadOne, safeFileName } from '../services/files';
-import { fileNameFor, formatDate, plural } from '../lib/format';
+import { useTripMoney } from '../services/useTripMoney';
+import { STEP_STATE_LABEL } from '../domain/money';
+import { useAuth } from '../lib/auth';
+import { fileNameFor, formatDate, formatUsd, plural } from '../lib/format';
 import { friendlyError } from '../lib/errors';
 import { ErrorBox, Loading, StateTag } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { RejectDialog } from '../components/RejectDialog';
+import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
 
 export function TravelerPage() {
   const { tripId = '', userId = '' } = useParams();
@@ -230,6 +234,9 @@ export function TravelerPage() {
           </div>
         </div>
 
+        {/* ── Money ─────────────────────────────────────────────────────── */}
+        <TravelerMoneyCard tripId={tripId} userId={userId} name={name} />
+
         {/* ── Medical ───────────────────────────────────────────────────── */}
         <MedicalCard
           name={name}
@@ -256,6 +263,132 @@ export function TravelerPage() {
           busy={reject.isPending}
           onCancel={() => setRejecting(null)}
           onConfirm={note => reject.mutate({ item: rejecting, note })}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * What this one person owes and has paid.
+ *
+ * Reads the same useTripMoney the trip snapshot and the money page use, so
+ * the three always agree. Setting a price is owner-only — the RPC checks
+ * `group_trips.host_id`, and "host" on this site includes promoted admins.
+ */
+function TravelerMoneyCard({
+  tripId,
+  userId,
+  name,
+}: {
+  tripId: string;
+  userId: string;
+  name: string;
+}) {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  const { money, trip, isOffline, hasDepositStep, hasMoney, isPending, isError } =
+    useTripMoney(tripId);
+
+  const [pricing, setPricing] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: (args: { totalUsd: number; depositUsd: number | null }) =>
+      setTravelerPrice({ tripId, userId, ...args }),
+    onSuccess: () => {
+      setPricing(false);
+      setSaveError(null);
+      void qc.invalidateQueries({ queryKey: ['members', tripId] });
+    },
+    onError: e => setSaveError(friendlyError(e)),
+  });
+
+  // A failed or empty money read must not blank the rest of the page.
+  if (isError || (!isPending && (!money || !hasMoney))) return null;
+
+  const me = money?.travelers.find(t => t.userId === userId) ?? null;
+  const canSetPrice = !!user && !!trip && trip.hostId === user.id;
+
+  return (
+    <>
+      <div className="card enter">
+        <div className="card-head">
+          <h2>Money</h2>
+          {canSetPrice && me && (
+            <button
+              className="btn btn-sm"
+              onClick={() => {
+                setSaveError(null);
+                setPricing(true);
+              }}
+            >
+              Set price
+            </button>
+          )}
+        </div>
+        <div className="card-body">
+          {isPending && <span className="muted small">Loading…</span>}
+          {!isPending && !me && <p className="muted small">Not on this trip.</p>}
+          {me && (
+            <div className="stack" style={{ gap: 8 }}>
+              <p className="small">
+                <span className="muted">Total: </span>
+                {me.totalUsd === null ? 'No price set' : formatUsd(me.totalUsd)}
+                <span className="muted"> · Paid: </span>
+                {formatUsd(me.paidUsd)}
+              </p>
+
+              {me.steps.map(s => (
+                <p key={s.requirementId} className="small">
+                  <span className="muted">{s.title}: </span>
+                  {STEP_STATE_LABEL[s.state]}
+                  {s.state === 'unpaid' && s.dueUsd !== null && (
+                    <span className="muted">
+                      {' '}
+                      — {s.paidUsd > 0
+                        ? `${formatUsd(s.paidUsd)} of ${formatUsd(s.dueUsd)}`
+                        : `${formatUsd(s.dueUsd)} owed`}
+                    </span>
+                  )}
+                </p>
+              ))}
+
+              {isOffline && (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Paid outside Swellyo. Swellyo does not know what has arrived.
+                </p>
+              )}
+
+              {me.events.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {me.events.map((e, i) => (
+                    <p key={`${e.createdAt}-${i}`} className="muted" style={{ fontSize: 12 }}>
+                      {formatDate(e.createdAt)} ·{' '}
+                      {e.eventType === 'refunded' ? 'Refund' : 'Payment'} {formatUsd(e.amountUsd)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {pricing && me && (
+        <TravelerPriceDialog
+          travelerName={name}
+          currentTotalUsd={me.totalUsd}
+          currentDepositUsd={me.steps.find(s => s.kind === 'deposit')?.dueUsd ?? null}
+          hasDepositStep={hasDepositStep}
+          paidUsd={me.paidUsd}
+          busy={save.isPending}
+          error={saveError}
+          onCancel={() => {
+            setPricing(false);
+            setSaveError(null);
+          }}
+          onSave={(totalUsd, depositUsd) => save.mutate({ totalUsd, depositUsd })}
         />
       )}
     </>

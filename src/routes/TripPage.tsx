@@ -7,9 +7,11 @@ import { fetchCounts, fetchMedicalFlags } from '../services/counts';
 import { fetchProfiles } from '../services/travelers';
 import { isKnownUploadKind, kindLabel } from '../domain/catalog';
 import { isUploadRequirement } from '../domain/requirements';
-import { formatRange, plural } from '../lib/format';
+import { useTripMoney } from '../services/useTripMoney';
+import { formatRange, formatUsd, plural } from '../lib/format';
 import { ErrorBox, Loading, CountPair } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
+import { ModeNotices } from './MoneyPage';
 
 export function TripPage() {
   const { tripId = '' } = useParams();
@@ -81,11 +83,8 @@ export function TripPage() {
           </div>
         )}
 
-        {/*
-          No money tile. The payment ledger does not exist in the database yet,
-          so there is nothing true to show — and a zero would be a lie.
-          See docs/SPEC.md §4.2.
-        */}
+        {/* ── Money ─────────────────────────────────────────────────────── */}
+        <MoneyCard tripId={tripId} />
 
         {/* ── Documents ─────────────────────────────────────────────────── */}
         <div className="card enter">
@@ -214,6 +213,82 @@ export function TripPage() {
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+/**
+ * Money, in one line, linking to the full page.
+ *
+ * Hidden entirely when the trip has no payment steps and no price anywhere —
+ * a peer trip that never charged for anything has no money story, and an
+ * empty card is worse than no card.
+ *
+ * Every number comes from useTripMoney, the same source the money page reads,
+ * so the two cannot disagree.
+ */
+function MoneyCard({ tripId }: { tripId: string }) {
+  const { money, steps, isOffline, hasMoney, isPending, isError } = useTripMoney(tripId);
+
+  // A failed money read must not take the rest of the snapshot down with it.
+  if (isError) return null;
+  if (isPending) {
+    return (
+      <div className="card enter">
+        <div className="card-head">
+          <h2>Money</h2>
+        </div>
+        <div className="card-body">
+          <span className="muted small">Loading…</span>
+        </div>
+      </div>
+    );
+  }
+  if (!money || !hasMoney) return null;
+
+  return (
+    <>
+      <ModeNotices hiddenCount={money.hiddenCount} showTestMode={false} />
+      <Link to={`/trips/${tripId}/money`} className="card enter card-link" style={{ display: 'block', color: 'inherit' }}>
+        <div className="card-head">
+          <h2>Money</h2>
+          <span className="muted" aria-hidden>
+            ›
+          </span>
+        </div>
+        <div className="card-body">
+          {isOffline ? (
+            <>
+              <p>
+                <strong>{formatUsd(money.expectedUsd)}</strong> expected in total
+              </p>
+              <p className="muted small" style={{ marginTop: 6 }}>
+                Paid outside Swellyo. Swellyo does not know what has arrived.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                <strong>{formatUsd(money.collectedUsd)}</strong> collected of{' '}
+                {formatUsd(money.expectedUsd)}
+              </p>
+              <p className="muted small" style={{ marginTop: 6 }}>
+                {steps
+                  .map(
+                    s =>
+                      `${money.paidCountByKind[s.kind]} of ${money.travelers.length} paid the ${s.kind === 'deposit' ? 'deposit' : 'balance'}`,
+                  )
+                  .join(' · ') || 'No payment steps on this trip.'}
+              </p>
+            </>
+          )}
+          {money.noPriceCount > 0 && (
+            <p className="muted small" style={{ marginTop: 6 }}>
+              {plural(money.noPriceCount, 'traveler has', 'travelers have')} no price set.
+            </p>
+          )}
+        </div>
+      </Link>
     </>
   );
 }

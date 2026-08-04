@@ -43,10 +43,16 @@ export function useTripMoney(tripId: string) {
   /** Does the trip have a deposit step at all? Drives the price dialog. */
   const hasDepositStep = (steps.data ?? []).some(s => s.kind === 'deposit');
 
-  /** Nothing to show a money section for: no steps and no prices anywhere. */
+  /**
+   * Nothing to show a money section for: no steps and no prices anywhere.
+   *
+   * The trip price is read through `?? null` on purpose — an unloaded trip is
+   * `undefined`, and `undefined !== null` would report money on every trip
+   * while the query is still in flight.
+   */
   const hasMoney =
     (steps.data ?? []).length > 0 ||
-    trip.data?.costPerPerson !== null ||
+    (trip.data?.costPerPerson ?? null) !== null ||
     (members.data ?? []).some(m => m.priceTotalUsd !== null);
 
   const failed = [trip, members, steps, events].find(q => q.isError);

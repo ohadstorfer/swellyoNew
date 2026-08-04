@@ -7,6 +7,7 @@ import { TripsPage } from './routes/TripsPage';
 import { TripPage } from './routes/TripPage';
 import { RequirementPage } from './routes/RequirementPage';
 import { TravelerPage } from './routes/TravelerPage';
+import { MoneyPage } from './routes/MoneyPage';
 
 export function App() {
   const { session, loading } = useAuth();
@@ -33,6 +34,7 @@ export function App() {
       <Routes>
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/trips/:tripId" element={<TripPage />} />
+        <Route path="/trips/:tripId/money" element={<MoneyPage />} />
         <Route path="/trips/:tripId/d/:requirementId" element={<RequirementPage />} />
         <Route path="/trips/:tripId/t/:userId" element={<TravelerPage />} />
         <Route path="*" element={<Navigate to="/trips" replace />} />
