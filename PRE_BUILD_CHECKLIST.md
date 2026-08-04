@@ -123,17 +123,19 @@ The bundle that ships **bakes in** all `EXPO_PUBLIC_*` variables at build time. 
 | `EXPO_PUBLIC_DEV_MODE` | `false` | Demo button visible, uses demo Edge Function |
 | `EXPO_PUBLIC_MVP_MODE` | `false` | Replaces main app with thank-you screen — total breakage |
 
-### ⚠️ Stripe live mode — TWO switches that must flip together
+### ⚠️ Stripe live mode — THREE switches that must flip together
 
-`EXPO_PUBLIC_STRIPE_LIVEMODE` (client bundle) and the database setting
-`app.stripe_livemode` are the same decision stored in two places, because a
-phone cannot read a Postgres GUC. **Installing the live Stripe key without
-flipping both is a payment-breaking bug, not a cosmetic one.**
+`EXPO_PUBLIC_STRIPE_LIVEMODE` (client bundle), `VITE_STRIPE_LIVEMODE` (the
+operator dashboard) and the database setting `app.stripe_livemode` are the same
+decision stored in three places, because neither a phone nor a browser can read
+a Postgres GUC. **Installing the live Stripe key without flipping all three is
+a payment-breaking bug, not a cosmetic one.**
 
 Every ledger row in `organized_trip_payment_events` carries `is_livemode`, and
-three readers filter on it: `operator_requirement_pay_state` (the DB, via the
-GUC), `payments-checkout` (from its own `sk_live_` key prefix), and
-`fetchPaidByRequirement` (the client, via the env var).
+four readers filter on it: `operator_requirement_pay_state` (the DB, via the
+GUC), `payments-checkout` (from its own `sk_live_` key prefix),
+`fetchPaidByRequirement` (the app, via the env var), and the operator
+dashboard's `src/domain/money.ts` (via its own env var).
 
 - [ ] **Live key installed → set the GUC**, or the traveler pays and stays stuck:
   ```sql
@@ -148,7 +150,13 @@ GUC), `payments-checkout` (from its own `sk_live_` key prefix), and
   remember this one needs a **build or OTA** to reach users — it is baked into
   the bundle. Until it ships, "Paid so far" in the app disagrees with what the
   server will accept (display only; the server gates every payment).
-- [ ] **Reverting is symmetric.** Unset the GUC and the env var together; no
+- [ ] **Set `VITE_STRIPE_LIVEMODE=true` on the operator dashboard** (separate
+  repo at `~/operatorsDashboard`, deployed to Netlify) and redeploy. It is a
+  static site, so the value is baked in at build time. Left at `false` with a
+  live key, the operator reads "$0 collected" for deposits travelers have
+  actually paid. The money page warns when it finds payments in the mode it is
+  not counting — that banner is this mistake.
+- [ ] **Reverting is symmetric.** Unset the GUC and both env vars together; no
   ledger rows are ever deleted, test rows simply stop/start counting.
 
 ---
