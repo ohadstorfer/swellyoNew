@@ -234,7 +234,19 @@ export const DocumentReviewScreen: React.FC<{
       <Modal
         visible={visible}
         animationType="slide"
-        onRequestClose={openUserId ? () => setOpenUserId(null) : close}
+        // Android back, innermost first. The viewer and the reject sheet are
+        // LAYERS inside this Modal, not Modals of their own, so this is the only
+        // handler they get — without the two extra branches, back would close the
+        // whole review screen out from under an open document.
+        onRequestClose={
+          rejecting
+            ? () => setRejecting(null)
+            : viewing
+            ? () => setViewing(null)
+            : openUserId
+            ? () => setOpenUserId(null)
+            : close
+        }
         statusBarTranslucent
         {...(Platform.OS === 'android' ? { navigationBarTranslucent: true } : {})}
       >
@@ -412,15 +424,32 @@ export const DocumentReviewScreen: React.FC<{
           isPassport={viewing?.kind === 'passport'}
           travelerName={openTraveler?.name ?? null}
         />
-      </Modal>
 
-      <RejectDocumentSheet
-        visible={!!rejecting}
-        onClose={() => setRejecting(null)}
-        title={rejecting?.title ?? 'Document'}
-        busy={busy}
-        onSend={handleReject}
-      />
+        {/* INSIDE this Modal, and as a LAYER (`inline`), for two separate
+            reasons — it used to be a sibling of the Modal below and was dead on
+            iOS in both respects.
+
+            Inside, because RN presents a Modal from the nearest view controller
+            ABOVE it in the RN tree. A sibling of this Modal resolves to the root
+            controller, which is already presenting this one, so UIKit refuses —
+            and RN marks it presented anyway and never retries. "Ask for a new
+            one" simply did nothing, with no error and no log.
+
+            A layer, because the fix for that must not be a second Modal: two of
+            them dismissing in overlapping frames strand an invisible controller
+            that swallows every touch on the screen underneath. Same rule the
+            viewer above already follows.
+
+            Last child, so it stacks over the viewer (zIndex 60 vs 50). */}
+        <RejectDocumentSheet
+          inline
+          visible={!!rejecting}
+          onClose={() => setRejecting(null)}
+          title={rejecting?.title ?? 'Document'}
+          busy={busy}
+          onSend={handleReject}
+        />
+      </Modal>
     </>
   );
 };

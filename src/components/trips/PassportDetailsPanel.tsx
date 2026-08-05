@@ -8,11 +8,14 @@
  *
  * ── Three decisions worth keeping ────────────────────────────────────────────
  *
- * 1. Every field is EDITABLE, always. A passport read is a guess about a photo
- *    someone took on their kitchen table. A screen that shows a failed read and
- *    offers no way forward sends the operator back to squinting at the image and
- *    retyping — which is the thing this replaces. A blank editable form is a
- *    worse read but a better screen.
+ * 1. A read that produced SOMETHING shows editable fields. A read that produced
+ *    NOTHING shows no fields at all. The difference matters: on a partial read
+ *    the operator is correcting a few characters, which is worth a form. On a
+ *    failed read the form is seven empty boxes asking them to retype a passport
+ *    into a screen whose only power is to copy it back out — a longer road to
+ *    the same place as reading the photo. So a failed read says plainly that we
+ *    could not read it and puts them back on the passport. Ohad, 5 August:
+ *    "esta pantalla (con inputs de texto) no sirve… lo tiene que hacer él a mano."
  *
  * 2. A field whose check digit failed is marked, not hidden. Hiding it would
  *    mean the operator copies six fields and never learns the seventh was
@@ -50,7 +53,7 @@ import {
   type PassportFieldKey,
   type PassportFields,
 } from '../../services/trips/passportMrz';
-import { scanPassport } from '../../services/trips/passportScanService';
+import { scanPassport, SCAN_UNAVAILABLE_MESSAGE } from '../../services/trips/passportScanService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 const ACCENT = '#05BCD3';
@@ -179,6 +182,8 @@ export const PassportDetailsPanel: React.FC<{
             <ActivityIndicator color="#FFFFFF" />
             <Text style={styles.centerText}>Reading the passport…</Text>
           </View>
+        ) : problem ? (
+          <CouldNotRead problem={problem} onClose={onClose} />
         ) : (
           <ScrollView
             style={styles.flex}
@@ -186,7 +191,7 @@ export const PassportDetailsPanel: React.FC<{
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
           >
-            <Banner problem={problem} trusted={trusted} suspectCount={suspect.length} />
+            <Banner trusted={trusted} suspectCount={suspect.length} />
 
             {FIELD_ORDER.map(key => (
               <Field
@@ -204,46 +209,80 @@ export const PassportDetailsPanel: React.FC<{
           </ScrollView>
         )}
 
-        <View style={[styles.actions, { paddingBottom: insets.bottom + 16 }]}>
-          <Pressable
-            onPress={handleCopy}
-            disabled={!canCopy || loading}
-            style={({ pressed }) => [
-              styles.copyBtn,
-              (!canCopy || loading) && styles.btnDisabled,
-              // Pressing must be felt. Subtle, and transform-only.
-              pressed && styles.btnPressed,
-            ]}
-          >
-            <Ionicons
-              name={copied ? 'checkmark' : 'copy-outline'}
-              size={18}
-              color="#FFFFFF"
-              style={styles.copyIcon}
-            />
-            <Text style={styles.copyText}>{copied ? 'Copied' : 'Copy details'}</Text>
-          </Pressable>
-        </View>
+        {/* No Copy on a failed read — there is nothing to copy, and its own
+            screen already gives the operator the one thing to do next. */}
+        {!problem && (
+          <View style={[styles.actions, { paddingBottom: insets.bottom + 16 }]}>
+            <Pressable
+              onPress={handleCopy}
+              disabled={!canCopy || loading}
+              style={({ pressed }) => [
+                styles.copyBtn,
+                (!canCopy || loading) && styles.btnDisabled,
+                // Pressing must be felt. Subtle, and transform-only.
+                pressed && styles.btnPressed,
+              ]}
+            >
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy-outline'}
+                size={18}
+                color="#FFFFFF"
+                style={styles.copyIcon}
+              />
+              <Text style={styles.copyText}>{copied ? 'Copied' : 'Copy details'}</Text>
+            </Pressable>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </Animated.View>
   );
 };
 
+/**
+ * Nothing was read. Say so, and hand the operator back the passport.
+ *
+ * The old version of this screen showed seven empty boxes here. That asked the
+ * operator to type a passport into a form whose only job is to copy it back
+ * out — strictly more work than reading the photo, which is what they will do
+ * anyway. See note 1 at the top of this file.
+ */
+const CouldNotRead: React.FC<{ problem: string; onClose: () => void }> = ({
+  problem,
+  onClose,
+}) => {
+  const unavailable = problem === SCAN_UNAVAILABLE_MESSAGE;
+
+  return (
+    <View style={styles.failed}>
+      <View style={styles.failedIcon}>
+        <Ionicons name={unavailable ? 'phone-portrait-outline' : 'scan-outline'} size={26} color={WARN} />
+      </View>
+
+      <Text style={styles.failedTitle}>
+        {unavailable ? 'Reading passports is off here' : 'Could not read this passport'}
+      </Text>
+      <Text style={styles.failedBody}>{problem}</Text>
+      {!unavailable && (
+        <Text style={styles.failedBody}>
+          Open the photo and take the details off it yourself.
+        </Text>
+      )}
+
+      <Pressable
+        onPress={onClose}
+        style={({ pressed }) => [styles.failedBtn, pressed && styles.btnPressed]}
+      >
+        <Text style={styles.failedBtnText}>Back to the passport</Text>
+      </Pressable>
+    </View>
+  );
+};
+
 /** One line telling the operator how much to trust what they are looking at. */
 const Banner: React.FC<{
-  problem: string | null;
   trusted: boolean;
   suspectCount: number;
-}> = ({ problem, trusted, suspectCount }) => {
-  if (problem) {
-    return (
-      <View style={[styles.banner, styles.bannerWarn]}>
-        <Text style={styles.bannerText}>{problem}</Text>
-        <Text style={styles.bannerSub}>Type the details in from the photo.</Text>
-      </View>
-    );
-  }
-
+}> = ({ trusted, suspectCount }) => {
   if (trusted) {
     return (
       <View style={[styles.banner, styles.bannerOk]}>
@@ -325,6 +364,57 @@ const styles = StyleSheet.create({
     color: '#9A9A9A',
   },
   body: { paddingHorizontal: 20, paddingTop: 4 },
+
+  // The failed read. Centred and short — it is a full stop, not a form.
+  failed: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 36,
+    paddingBottom: 40,
+  },
+  failedIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(232,163,61,0.14)',
+    marginBottom: 18,
+  },
+  failedTitle: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  failedBody: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#9A9A9A',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  failedBtn: {
+    marginTop: 26,
+    height: 44,
+    borderRadius: 22,
+    paddingHorizontal: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1A1A1A',
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  failedBtnText: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
 
   banner: { borderRadius: 12, padding: 12, marginBottom: 18 },
   bannerOk: { backgroundColor: 'rgba(5,188,211,0.14)' },

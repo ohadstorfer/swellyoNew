@@ -54,7 +54,7 @@ The screen says which of the three it is:
 
 - **"Read and checked."** — every check digit agrees. Copy it.
 - **"Check the marked fields against the photo."** — some digit disagreed. Those fields are marked; the rest are fine.
-- **"Could not find the two code lines."** — bad photo. The fields are blank and typeable.
+- **"Could not read this passport."** — bad photo. No fields at all: the screen says we could not read it and sends the operator back to the photo.
 
 ---
 
@@ -87,7 +87,7 @@ Android gets `com.google.mlkit:text-recognition` bundled, which adds a few MB to
 | `src/services/trips/passportMrz.ts` | **Pure.** OCR text → fields → the copied block. No native modules, no network. |
 | `src/services/trips/__tests__/passportMrz.test.ts` | 23 tests. Builds valid passports with real check digits, then corrupts them. |
 | `src/services/trips/passportScanService.ts` | Signed URL → download → recognise → delete → parse. |
-| `src/components/trips/PassportDetailsPanel.tsx` | The screen. Editable fields, marked doubts, Copy. |
+| `src/components/trips/PassportDetailsPanel.tsx` | The screen. Editable fields, marked doubts, Copy — or, on a failed read, a "could not read this" message and no form. |
 | `src/components/trips/DocumentViewer.tsx` | Gained `isPassport` and `travelerName`, and the button. |
 | `src/components/trips/DocumentReviewScreen.tsx` | Host side. Passes `isPassport={viewing?.kind === 'passport'}`. |
 | `src/screens/trips/TripDetailScreen.tsx` | Traveler side, on their own passport. `viewingDocPath` → `viewingDoc` so the kind travels with the path. |
@@ -107,7 +107,9 @@ The split matters: everything that can be silently wrong is in the **pure** file
 
 **Line repairs are safe only because they are checked.** OCR drops a filler character often enough that a strict reader fails on real passports. `findMrzCandidates` produces several plausible repairs and `readPassportText` keeps the one the check digits vouch for. A bad guess loses to a good one, or fails visibly. Never accept a repair without validating it.
 
-**Fields stay editable even on a perfect read.** A read is a guess about a photo taken on a kitchen table. A screen that shows a failure and offers no way forward sends the operator back to squinting and retyping, which is the thing this replaces.
+**Fields stay editable even on a perfect read.** A read is a guess about a photo taken on a kitchen table. Correcting two characters is worth a form.
+
+**A failed read shows no form.** Retyping a whole passport into a screen whose only power is to copy it back out is a longer road to the same place as reading the photo. So the failed state is a message and a way back to the passport, not seven empty boxes. Ohad, 5 August: *"esta pantalla (con inputs de texto) no sirve… lo tiene que hacer él a mano."* The line between the two is `problem`: set means nothing was read.
 
 **Two-digit years.** A birth year above this year's is last century; an expiry is always this century. The one case this gets wrong is someone aged exactly 100.
 

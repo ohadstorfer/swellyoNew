@@ -20,7 +20,7 @@
 // Keep the Modal mounted via `mounted` (not `visible`) so the exit animation can
 // play before unmount.
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Easing, LayoutChangeEvent, PanResponder } from 'react-native';
 
 const SCREEN_H = Dimensions.get('window').height;
@@ -29,6 +29,24 @@ const SCREEN_H = Dimensions.get('window').height;
 // the sheet springs back to its resting position.
 const DISMISS_DISTANCE = 100;
 const DISMISS_VELOCITY = 1.2;
+
+const ENTER_MS = 320;
+const EXIT_MS = 220;
+
+// An interrupted Animated sequence calls its completion callback with
+// `finished: false` — or, when the value is seized by another animation, not at
+// all. Both backstops below exist because a dropped callback here is not a
+// cosmetic glitch: the Modal stays mounted, fully transparent and full-screen,
+// swallowing every touch in the app. That is indistinguishable from a freeze
+// from the outside (the JS thread is fine, nothing is drawn, nothing is logged).
+// A gesture that springs the sheet back, or a re-open mid-close, is enough to
+// trigger it. See the `project_modal_onshow_touch_lock` note.
+const EXIT_FALLBACK_MS = EXIT_MS + 120;
+// onLayout lands on the first frame in practice; if it is ever missed the sheet
+// would sit parked off-screen behind that same invisible Modal, so enter anyway.
+// 250ms matches the fallback already used for SwellyTopicOverlay — long enough
+// that a slow first layout still wins the race and animates from its real height.
+const ENTER_FALLBACK_MS = 250;
 
 export function useSheetTransition(visible: boolean, onClose?: () => void) {
   const [mounted, setMounted] = useState(visible);
@@ -42,40 +60,38 @@ export function useSheetTransition(visible: boolean, onClose?: () => void) {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useEffect(() => {
-    if (visible) {
-      // Reset to hidden, then animate in once we know the sheet's height.
-      animatedIn.current = false;
-      backdropOpacity.setValue(0);
-      translateY.setValue(sheetH.current || SCREEN_H);
-      setMounted(true);
-    } else if (mounted) {
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 0,
-          duration: 180,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: sheetH.current || SCREEN_H,
-          duration: 220,
-          easing: Easing.in(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) setMounted(false);
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  // Backstops for the two animation callbacks (see the constants above).
+  const enterTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const onSheetLayout = (e: LayoutChangeEvent) => {
-    const h = e.nativeEvent.layout.height;
-    if (h <= 0) return;
-    sheetH.current = h;
-    if (!animatedIn.current && visible) {
+  const clearEnterTimer = useCallback(() => {
+    if (enterTimer.current !== null) {
+      clearTimeout(enterTimer.current);
+      enterTimer.current = null;
+    }
+  }, []);
+  const clearExitTimer = useCallback(() => {
+    if (exitTimer.current !== null) {
+      clearTimeout(exitTimer.current);
+      exitTimer.current = null;
+    }
+  }, []);
+
+  // Never leave a timer behind: firing after unmount would setState on a dead
+  // component, and a stale exit timer could unmount a sheet that just re-opened.
+  useEffect(() => {
+    return () => {
+      clearEnterTimer();
+      clearExitTimer();
+    };
+  }, [clearEnterTimer, clearExitTimer]);
+
+  // One-shot: whichever gets there first (onLayout or the fallback) wins.
+  const runEnter = useCallback(
+    (h: number) => {
+      if (animatedIn.current) return;
       animatedIn.current = true;
+      clearEnterTimer();
       translateY.setValue(h); // exact hidden position (just below the edge)
       Animated.parallel([
         Animated.timing(backdropOpacity, {
@@ -86,12 +102,68 @@ export function useSheetTransition(visible: boolean, onClose?: () => void) {
         }),
         Animated.timing(translateY, {
           toValue: 0,
-          duration: 320,
+          duration: ENTER_MS,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
       ]).start();
+    },
+    [backdropOpacity, translateY, clearEnterTimer],
+  );
+
+  // Idempotent: safe to call from both the animation callback and the fallback.
+  const finishExit = useCallback(() => {
+    clearExitTimer();
+    animatedIn.current = false;
+    setMounted(false);
+  }, [clearExitTimer]);
+
+  useEffect(() => {
+    if (visible) {
+      // A re-open cancels any pending unmount from the close we interrupted.
+      clearExitTimer();
+      // Reset to hidden, then animate in once we know the sheet's height.
+      animatedIn.current = false;
+      backdropOpacity.setValue(0);
+      translateY.setValue(sheetH.current || SCREEN_H);
+      setMounted(true);
+      clearEnterTimer();
+      enterTimer.current = setTimeout(
+        () => runEnter(sheetH.current || SCREEN_H),
+        ENTER_FALLBACK_MS,
+      );
+    } else if (mounted) {
+      clearEnterTimer();
+      Animated.parallel([
+        Animated.timing(backdropOpacity, {
+          toValue: 0,
+          duration: 180,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateY, {
+          toValue: sheetH.current || SCREEN_H,
+          duration: EXIT_MS,
+          easing: Easing.in(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        // Only the clean finish unmounts here. An interrupted exit leaves it to
+        // the timer below, which a re-open clears — so re-opening mid-close does
+        // not get torn down by a stale callback.
+        if (finished) finishExit();
+      });
+      clearExitTimer();
+      exitTimer.current = setTimeout(finishExit, EXIT_FALLBACK_MS);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const onSheetLayout = (e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h <= 0) return;
+    sheetH.current = h;
+    if (visible) runEnter(h);
   };
 
   // Swipe-to-dismiss. Spread these onto the grabber/header (the non-scrolling top

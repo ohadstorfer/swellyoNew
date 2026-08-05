@@ -34,7 +34,13 @@ export const RejectDocumentSheet: React.FC<{
   title: string;
   busy?: boolean;
   onSend: (note: string) => void;
-}> = ({ visible, onClose, title, busy = false, onSend }) => {
+  /**
+   * Render as a layer instead of a Modal — REQUIRED here, and the only reason
+   * this prop exists: this sheet is opened from DocumentReviewScreen, which is
+   * itself a presented Modal. See the note on BottomSheetShell's `inline`.
+   */
+  inline?: boolean;
+}> = ({ visible, onClose, title, busy = false, onSend, inline = false }) => {
   const insets = useSafeAreaInsets();
   const [note, setNote] = useState('');
 
@@ -47,7 +53,7 @@ export const RejectDocumentSheet: React.FC<{
   const canSend = note.trim().length >= MIN_NOTE && !busy;
 
   return (
-    <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard>
+    <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard inline={inline}>
       {({ panHandlers }) => (
         <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
           <View {...panHandlers} style={styles.grabWrap}>

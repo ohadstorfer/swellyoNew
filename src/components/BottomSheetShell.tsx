@@ -16,10 +16,13 @@
 //   scrolling body, pass `swipeToDismiss={false}` (or gate the pan to a handle) so
 //   the downward drag doesn't fight the ScrollView.
 // - Set `avoidKeyboard` for sheets with a TextInput so the sheet rises with the keyboard.
+// - Set `inline` when the sheet is opened from a screen that is ITSELF a presented
+//   Modal. See the prop's note — without it the sheet silently never appears on iOS.
 
 import React from 'react';
 import {
   Modal,
+  View,
   Pressable,
   Animated,
   StyleSheet,
@@ -58,6 +61,27 @@ interface Props {
    * PHPicker (the photo library) hangs the main thread instead of failing loudly.
    */
   onDismissed?: () => void;
+  /**
+   * Render as a LAYER over the caller's own screen instead of presenting a Modal.
+   *
+   * REQUIRED whenever the sheet is opened from a screen that is ITSELF a
+   * presented Modal. RN presents a Modal from `[self reactViewController]` — the
+   * nearest view controller ABOVE it in the RN tree. A sheet that is a sibling of
+   * a presented Modal resolves to the root controller, which is already
+   * presenting, so UIKit refuses; RN still marks it presented and never retries.
+   * The button that opened it just does nothing, with no error and no log.
+   * (Reproduced by: DocumentReviewScreen → "Ask for a new one".)
+   *
+   * Nesting a real Modal instead would work, but two RN Modals dismissing in
+   * overlapping frames strand an invisible view controller on iOS that swallows
+   * every touch on the screen underneath. One Modal per screen; everything else
+   * is a view inside it — the same rule DocumentViewer and PassportDetailsPanel
+   * already follow.
+   *
+   * The layer is absolutely positioned, so the caller must render it inside its
+   * Modal (last child, so it stacks above the rest).
+   */
+  inline?: boolean;
 }
 
 export function BottomSheetShell({
@@ -68,6 +92,7 @@ export function BottomSheetShell({
   avoidKeyboard = false,
   swipeToDismiss = true,
   onDismissed,
+  inline = false,
 }: Props) {
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
@@ -90,15 +115,17 @@ export function BottomSheetShell({
 
   // `onDismiss` is iOS-only. Everywhere else the Modal has no teardown callback, so
   // fall back to the unmount of our own `mounted` flag — safe there because those
-  // platforms present their pickers in-process.
+  // platforms present their pickers in-process. `inline` has no Modal at all, so it
+  // takes the same fallback on every platform: there is no controller to tear down,
+  // which is the whole reason the callback exists.
   const onDismissedRef = React.useRef(onDismissed);
   onDismissedRef.current = onDismissed;
   const wasMounted = React.useRef(mounted);
   React.useEffect(() => {
-    if (Platform.OS === 'ios') return;
+    if (Platform.OS === 'ios' && !inline) return;
     if (wasMounted.current && !mounted) onDismissedRef.current?.();
     wasMounted.current = mounted;
-  }, [mounted]);
+  }, [mounted, inline]);
 
   const isRenderProp = typeof children === 'function';
   const content = isRenderProp
@@ -126,6 +153,20 @@ export function BottomSheetShell({
     </Pressable>
   );
 
+  const wrapped = avoidKeyboard ? (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.flex}
+    >
+      {body}
+    </KeyboardAvoidingView>
+  ) : (
+    body
+  );
+
+  // A layer, not a window. `mounted` (not `visible`) so the slide-out still plays.
+  if (inline) return mounted ? <View style={styles.layer}>{wrapped}</View> : null;
+
   return (
     <Modal
       visible={mounted}
@@ -139,16 +180,7 @@ export function BottomSheetShell({
       // `androidNavBarNudge` above instead.
       statusBarTranslucent
     >
-      {avoidKeyboard ? (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.flex}
-        >
-          {body}
-        </KeyboardAvoidingView>
-      ) : (
-        body
-      )}
+      {wrapped}
     </Modal>
   );
 }
@@ -158,4 +190,7 @@ export default BottomSheetShell;
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { flex: 1, justifyContent: 'flex-end' },
+  // `inline` only. Above DocumentViewer's own inline layer (zIndex 50), because a
+  // sheet opened from the viewer has to sit on top of it.
+  layer: { ...StyleSheet.absoluteFillObject, zIndex: 60 },
 });
