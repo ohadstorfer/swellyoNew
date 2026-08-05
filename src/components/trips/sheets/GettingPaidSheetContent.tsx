@@ -45,14 +45,11 @@ const OPTIONS: { key: PaymentMode; title: string; desc: string }[] = [
 export const GettingPaidSheetContent: React.FC<{
   value: PaymentMode;
   onChange: (next: PaymentMode) => void;
-  /** Bubbles Stripe's charges_enabled up so the sheet's `validate` can block
-   *  Save on 'managed' until the operator can actually receive the money. */
-  onStripeStatusChange: (chargesEnabled: boolean) => void;
   /** The trip's deposit, for the line under the managed card. Read-only here —
    *  the amount itself is the Price & deposit row's job, and duplicating the
    *  input would give two places to change one number. */
   depositLabel: string | null;
-}> = ({ value, onChange, onStripeStatusChange, depositLabel }) => (
+}> = ({ value, onChange, depositLabel }) => (
   <View style={styles.list}>
     {OPTIONS.map((o) => {
       const selected = value === o.key;
@@ -82,10 +79,11 @@ export const GettingPaidSheetContent: React.FC<{
     {value === 'managed' && (
       <View>
         {/* Mounted only while 'managed' is the draft, so an operator who never
-            opens that option is never asked to connect anything. It re-reads
-            Stripe on mount — onboarding finishes on Stripe's own site and
-            nothing else tells us it happened. */}
-        <ConnectStripeCard onStatusChange={onStripeStatusChange} />
+            opens that option is never asked to connect anything. It reads the
+            status itself through useConnectStatus — the parent screen reads
+            the SAME cached query for its own `validate`, so there is one
+            round trip and the two can never disagree. */}
+        <ConnectStripeCard />
         <Text style={styles.footnote}>
           {depositLabel
             ? `Travelers pay a ${depositLabel} deposit, then the rest before the trip. Change it in Price & deposit.`

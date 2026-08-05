@@ -37,7 +37,14 @@ export type NotificationType =
   // blank "Notification". There is deliberately no `operator_document_approved`
   // counterpart: the approve RPC writes no row (Ohad, 30 Jul — a push per
   // approval would mean eight pushes for one operator clearing a queue).
-  | 'operator_document_rejected';
+  | 'operator_document_rejected'
+  // Stripe finished verifying an operator's payout account and they can now be
+  // paid. Written by `stripe-connect-webhook`, and the ONLY notification here
+  // that is not about a trip — `trip_id` is null, because this can (and by
+  // design usually will) happen before the operator's first trip exists.
+  // NotificationCenter already refuses to navigate a row with no trip_id, so
+  // it renders as an unpressable status line, which is exactly right.
+  | 'operator_stripe_ready';
 
 /**
  * Every bell type, as a runtime set for the foreground push gate.
@@ -66,6 +73,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   trip_invite_accepted: true,
   trip_invite_declined: true,
   operator_document_rejected: true,
+  operator_stripe_ready: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
   Object.keys(BELL_TYPE_FLAGS)
@@ -577,6 +585,16 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: 'close-circle-outline',
       };
     }
+    case 'operator_stripe_ready':
+      // Not about a trip, so no trip name and nothing to tap through to. The
+      // point of the row is to end the waiting: an operator who connected
+      // Stripe and was told "we will review this" has been given no way to
+      // find out the answer except opening the app and looking.
+      return {
+        title: 'Stripe approved you',
+        body: 'You can now collect payment for your trips in Swellyo.',
+        icon: 'card-outline',
+      };
     default:
       return { title: 'Notification', body: '', icon: 'notifications-outline' };
   }

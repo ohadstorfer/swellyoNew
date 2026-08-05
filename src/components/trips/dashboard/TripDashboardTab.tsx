@@ -34,6 +34,7 @@ import {
   type TripMoney,
 } from '../../../services/trips/operatorDashboardService';
 import { STRIPE_LIVEMODE } from '../../../services/trips/tripPaymentsService';
+import { useConnectStatus } from '../../../hooks/trips/useConnectStatus';
 import type { TravelerReview } from '../../../services/trips/tripDocumentsService';
 import type { ReviewTraveler } from '../DocumentReviewScreen';
 import { D } from './dashboardTheme';
@@ -88,6 +89,9 @@ export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
     <View style={styles.root}>
       {/* ── Mode notices ───────────────────────────────────────────────── */}
       <ModeNotices hiddenCount={money.data?.hiddenCount ?? 0} />
+
+      {/* ── Payments not live yet ──────────────────────────────────────── */}
+      <StripeBanner isOffline={money.data?.isOffline ?? true} loading={money.isPending} />
 
       {/* ── Needs review ───────────────────────────────────────────────── */}
       <ReviewBanner
@@ -207,6 +211,69 @@ const ModeNotices: React.FC<{ hiddenCount: number }> = ({ hiddenCount }) => (
     )}
   </>
 );
+
+// ---------------------------------------------------------------------------
+// Payments not live yet
+// ---------------------------------------------------------------------------
+
+/**
+ * The gap between "this trip collects payment" and "a traveler can pay today".
+ *
+ * That gap exists on purpose. Until 2026-08-05 an operator could not publish a
+ * managed trip at all until Stripe had approved them, which meant the person
+ * who had just filled in every form correctly was held at a button that said
+ * "Connect Stripe" for as long as Stripe's review took. Now they publish, and
+ * this banner is what keeps that honest: the trip is live, the money is not.
+ *
+ * Reads the SAME shared query as ConnectStripeCard (`useConnectStatus`), so an
+ * approval that arrives while this screen is open updates both at once.
+ */
+const StripeBanner: React.FC<{ isOffline: boolean; loading: boolean }> = ({
+  isOffline,
+  loading,
+}) => {
+  // Offline trips are paid outside Swellyo and have no Stripe account to wait
+  // on. `enabled` also keeps every operator running an offline trip from
+  // making a Stripe round trip just by opening their dashboard.
+  const managed = !loading && !isOffline;
+  const { state, isLive } = useConnectStatus({ enabled: managed });
+
+  if (!managed || isLive) return null;
+
+  // Silence while we do not know yet. A banner that says "travelers cannot pay"
+  // and then disappears a second later is worse than a beat of nothing.
+  if (state === 'not_started') return null;
+
+  // `wait` is this theme's "the operator's own backlog, not an error" colour,
+  // and that is exactly what a review in progress is. Reaching for the warning
+  // tint here would tell an operator something is wrong when nothing is.
+  const tone =
+    state === 'under_review'
+      ? { bg: styles.bannerWait, fg: D.wait }
+      : state === 'blocked'
+        ? { bg: styles.bannerDanger, fg: D.danger }
+        : { bg: styles.bannerWarn, fg: D.warn };
+
+  const text =
+    state === 'under_review'
+      ? "Stripe is still checking your details. Travelers can join, but they can't pay yet — we'll let you know the moment they can."
+      : state === 'blocked'
+        ? 'Stripe turned down your payout account, so nobody can pay for this trip. Contact Stripe support.'
+        : "Travelers can't pay yet. Finish connecting Stripe in Edit trip → Getting paid.";
+
+  return (
+    <View style={[styles.banner, tone.bg]}>
+      {state === 'under_review' ? (
+        // Motion says "elsewhere, something is happening" better than any
+        // static icon, and this is the one state where nothing is wrong.
+        <ActivityIndicator size="small" color={tone.fg} />
+      ) : (
+        <Ionicons name="alert-circle-outline" size={16} color={tone.fg} />
+      )}
+      <Text style={[styles.bannerText, { flex: 1, color: tone.fg }]}>{text}</Text>
+    </View>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Needs review
@@ -551,6 +618,7 @@ const styles = StyleSheet.create({
   bannerOk: { backgroundColor: D.okBg },
   bannerWarn: { backgroundColor: D.warnBg },
   bannerDanger: { backgroundColor: D.dangerBg },
+  bannerWait: { backgroundColor: D.waitBg },
 
   // ── section ──
   section: { paddingTop: 20, paddingBottom: 20, borderTopWidth: 1, borderTopColor: D.hairline },

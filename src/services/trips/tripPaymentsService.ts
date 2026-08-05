@@ -15,6 +15,7 @@
 import { supabase } from '../../config/supabase';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
+import type { ConnectStatus } from './connectStatus';
 
 export type PayStep = 'deposit' | 'balance';
 
@@ -221,10 +222,20 @@ export async function startCheckout(requirementId: string): Promise<void> {
   await WebBrowser.openAuthSessionAsync(data.url, url);
 }
 
-export async function fetchConnectStatus(): Promise<{
-  chargesEnabled: boolean;
-  accountId: string | null;
-}> {
+/**
+ * Ask Stripe what it currently thinks of this operator's account.
+ *
+ * Returns the RAW fields. What they MEAN — the six states the UI draws, and
+ * whether the operator may sell — is derived by `deriveConnectState` in
+ * services/trips/connectStatus.ts, which is the only implementation of that
+ * rule. The edge function deliberately derives nothing either.
+ *
+ * Every field is normalised here rather than trusted: an older deployment of
+ * `stripe-connect-onboard` returns only `chargesEnabled`, and a missing array
+ * reaching `deriveConnectState` would throw on `.length` instead of degrading
+ * to "nothing outstanding".
+ */
+export async function fetchConnectStatus(): Promise<ConnectStatus> {
   const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
     body: { action: 'status' },
   });
@@ -233,9 +244,16 @@ export async function fetchConnectStatus(): Promise<{
       await edgeFunctionErrorMessage(error, 'Could not check your payment account'),
     );
   }
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
   return {
-    chargesEnabled: !!data?.chargesEnabled,
     accountId: data?.accountId ?? null,
+    chargesEnabled: !!data?.chargesEnabled,
+    payoutsEnabled: !!data?.payoutsEnabled,
+    detailsSubmitted: !!data?.detailsSubmitted,
+    currentlyDue: list(data?.currentlyDue),
+    pastDue: list(data?.pastDue),
+    pendingVerification: list(data?.pendingVerification),
+    disabledReason: data?.disabledReason ?? null,
   };
 }
 

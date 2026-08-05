@@ -115,6 +115,14 @@ export function renderPush(
           : `Your organiser asked for a new one for ${trip}`,
       };
     }
+    case 'operator_stripe_ready':
+      // The one push here that deliberately never mentions a trip: it fires on
+      // the operator's ACCOUNT, usually before their first trip exists, so
+      // `trip` would render as the "your trip" fallback and read like a bug.
+      return {
+        title: 'Stripe approved you 🎉',
+        body: 'You can now collect payment for your trips in Swellyo.',
+      };
     default:
       return { title: trip, body: 'You have a new trip update' };
   }

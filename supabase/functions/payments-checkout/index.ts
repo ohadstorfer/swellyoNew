@@ -188,7 +188,17 @@ serve(async req => {
     // one typo away from being true in production. Ohad, 2026-08-04.
     const isTestKey = STRIPE_SECRET_KEY.startsWith('sk_test_');
     if (!routeToOperator && !isTestKey) {
-      return json({ error: 'The organiser cannot accept payments yet' }, 400);
+      // This message is shown to a TRAVELER, verbatim, in an alert. As of
+      // 2026-08-05 an operator may publish a managed trip while Stripe is
+      // still verifying them, so hitting this is no longer a sign that
+      // something is broken — it is a normal, temporary window that usually
+      // closes in minutes. Say that, rather than telling a paying customer
+      // that the person running their trip "cannot accept payments", which
+      // reads like a warning about the operator.
+      return json(
+        { error: 'The organiser is still setting up payments. Please try again a bit later.' },
+        400,
+      );
     }
     if (!routeToOperator) {
       console.warn(

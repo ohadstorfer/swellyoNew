@@ -103,6 +103,7 @@ import {
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from '../../components/trips/sheets/SpecificStaySheetContent';
 import { ConnectStripeCard } from '../../components/trips/ConnectStripeCard';
+import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
 
 // Existing dependencies still used (preview card)
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
@@ -1521,10 +1522,15 @@ export default function CreateTripFlowA({
     };
   }, []);
 
-  // Flow C, managed payments — whether the operator's Stripe account can
-  // accept charges right now. Gates publish (see validateStep, 'budget' case);
-  // set by ConnectStripeCard, which re-asks Stripe on every mount.
-  const [stripeReady, setStripeReady] = useState(false);
+  // Flow C, managed payments — what Stripe currently thinks of this operator's
+  // payout account. Gates publish (see validateStep, 'budget' case). The same
+  // shared query the ConnectStripeCard below renders from, so the button and
+  // the card can never tell the operator two different things.
+  //
+  // `enabled` on the managed branch keeps the promise the card's own comment
+  // makes: an operator who never opens "Collect payment in Swellyo" is never
+  // asked about Stripe at all.
+  const connect = useConnectStatus({ enabled: state.paymentMode === 'managed' });
 
   // Budget estimate (transient — not persisted)
   const [budgetEstimate, setBudgetEstimate] = useState<BudgetEstimate | null>(null);
@@ -1754,10 +1760,28 @@ export default function CreateTripFlowA({
           const priceError = validatePrice(price);
           if (priceError) fail('price', priceError);
           if (isFixedFlow && state.paymentMode === 'managed') {
-            // Publishing a trip that asks for money it cannot receive is the one
-            // failure with no recovery for the traveler.
-            if (!stripeReady) {
-              setError('deposit', 'Connect Stripe before collecting payment in the app.');
+            // Publishing a trip that asks for money it cannot receive is the
+            // one failure with no recovery for the traveler — but "cannot
+            // receive" is not the same as "cannot receive YET". An operator
+            // whose account Stripe is still verifying now gets through here
+            // (Ohad, 2026-08-05): blocking them left the person who had done
+            // everything right staring at the button they had just pressed,
+            // with no way forward and nothing to do. The trip publishes and
+            // simply cannot be paid for until Stripe finishes — payments-
+            // checkout refuses a live-mode charge against an account that
+            // cannot take one, and the Dashboard says so in the meantime.
+            // See canCollectPayments in services/trips/connectStatus.ts.
+            if (connect.loading) {
+              setError('deposit', 'Checking your Stripe account…');
+              return false;
+            }
+            if (!connect.canCollect) {
+              setError(
+                'deposit',
+                connect.state === 'blocked'
+                  ? 'Stripe could not approve your account, so this trip cannot collect payment.'
+                  : 'Connect Stripe before collecting payment in the app.',
+              );
               return false;
             }
             const depositPrice = state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
@@ -1825,7 +1849,9 @@ export default function CreateTripFlowA({
     audienceDone,
     clearErrors,
     setError,
-    stripeReady,
+    connect.loading,
+    connect.canCollect,
+    connect.state,
   ]);
 
   // -----------------------------------------------------------------------
@@ -3288,7 +3314,7 @@ export default function CreateTripFlowA({
 
             {state.paymentMode === 'managed' && (
               <>
-                <ConnectStripeCard onStatusChange={setStripeReady} />
+                <ConnectStripeCard />
 
                 <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
                   Deposit · {operatorCurrency === 'ILS' ? '₪' : 'USD'}

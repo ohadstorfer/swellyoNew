@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { fetchConnectStatus } from '../../services/trips/tripPaymentsService';
+import { Ionicons } from '@expo/vector-icons';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
 // showErrorAlert(title, error, fallback) — three arguments. It exists to keep a
 // raw `e.message` off the screen; never pass one through by hand.
@@ -10,6 +10,8 @@ import { showErrorAlert } from '../../utils/friendlyError';
 // iOS does not synthesise a weight for a named family. `fontWeight` is kept
 // alongside it for web, where the family is one variable face.
 import { ff } from '../../theme/fonts';
+import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
+import { describeConnectState, type ConnectState } from '../../services/trips/connectStatus';
 
 /**
  * The native Stripe SDK, loaded only where it can exist.
@@ -39,50 +41,38 @@ const Onboarding = stripeConnect?.StripeConnectOnboarding ?? null;
 const nativeOnboarding = !!Onboarding && (stripeConnect?.hasStripePublishableKey ?? false);
 
 /**
- * The gate on managed mode. Until Stripe says this operator can accept charges,
- * a trip must not be publishable asking for money it has no way to receive.
+ * Where an operator connects Stripe, and — more often — where they find out
+ * what Stripe is currently doing about it.
  *
- * Status is re-read on every mount, and again whenever onboarding closes.
- * Even though the form is now drawn in-app, the ACCOUNT still changes on
- * Stripe's side and nothing tells us it happened except asking — and the
- * operator can close the flow one step from the end, so a close is not a
- * finish.
+ * ── What changed, and why it mattered ───────────────────────────────────────
+ * This card used to have two faces: "Connect Stripe" and "Stripe connected",
+ * drawn off `charges_enabled`. Stripe's model has six states, and the boolean
+ * collapsed "you never finished" together with "you finished and we are
+ * checking you". An operator who had just been told by Stripe "We will review
+ * the information you submitted" closed the sheet and landed back on a button
+ * that said "Connect Stripe" — the same button they had already pressed, and
+ * the only thing on screen to press.
  *
- * This renders in the CREATE wizard's budget step, BEFORE any trip row exists.
- * `stripe-connect-onboard` must therefore never require the caller to already
- * host an operator trip — it did once, and the wizard's hard block on
- * `!stripeReady` turned that into a deadlock no first-time operator could
- * escape. See the comment in that function.
+ * The six states now live in services/trips/connectStatus.ts, under unit test,
+ * along with the copy for each. This file only draws them.
+ *
+ * ── It is not about a trip ──────────────────────────────────────────────────
+ * Nothing here takes a trip id, and `stripe-connect-onboard` refuses to
+ * require one. This renders inside the create wizard today and is meant to
+ * render in a settings screen tomorrow (Ohad, 2026-08-05: most operators will
+ * connect Stripe before their first trip exists). Reading the status through
+ * `useConnectStatus` rather than a prop is what makes that a drop-in.
+ *
+ * ── Deliberately not animated ───────────────────────────────────────────────
+ * The state changes here are rare — most operators see two of them, once. The
+ * card is allowed to just be correct. The only motion is the app-wide 0.97
+ * press scale, which is feedback, not decoration.
  */
-export const ConnectStripeCard: React.FC<{
-  onStatusChange: (chargesEnabled: boolean) => void;
-}> = ({ onStatusChange }) => {
-  const [loading, setLoading] = useState(true);
-  const [connected, setConnected] = useState(false);
-  const [onboarding, setOnboarding] = useState(false);
+export const ConnectStripeCard: React.FC = () => {
+  const { state, status, loading, watchForChange } = useConnectStatus();
+  const [onboarding, setOnboarding] = React.useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const s = await fetchConnectStatus();
-      setConnected(s.chargesEnabled);
-      onStatusChange(s.chargesEnabled);
-    } catch (e) {
-      // Deliberately swallowed: a status check that fails means "we do not
-      // know", and the safe reading of that is "not connected" — never a
-      // crash, and never an alert on a screen the operator did not ask a
-      // question on. Logged so a real outage is not silently invisible.
-      console.warn('[ConnectStripeCard] fetchConnectStatus failed:', e);
-      setConnected(false);
-      onStatusChange(false);
-    } finally {
-      setLoading(false);
-    }
-  }, [onStatusChange]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const copy = describeConnectState(state, status);
 
   const onConnect = useCallback(() => {
     if (!nativeOnboarding) {
@@ -103,10 +93,13 @@ export const ConnectStripeCard: React.FC<{
 
   const onOnboardingExit = useCallback(() => {
     setOnboarding(false);
-    // Closing the flow says nothing about whether they finished it — they can
-    // back out of the last step. Always re-ask Stripe rather than assuming.
-    void refresh();
-  }, [refresh]);
+    // Closing says nothing about whether they finished — they can back out of
+    // the last step, and even finishing only means Stripe has the form, not
+    // that it has decided. Re-ask, then keep watching for a minute so an
+    // approval that lands while they are still on this screen updates the card
+    // in front of them instead of on their next visit.
+    watchForChange();
+  }, [watchForChange]);
 
   if (onboarding && Onboarding) {
     return (
@@ -126,6 +119,9 @@ export const ConnectStripeCard: React.FC<{
     );
   }
 
+  // Only on the very first read. A background refetch keeps the current card
+  // on screen — blanking it to a spinner every time we re-ask Stripe would
+  // make the poll after onboarding look like the screen was breaking.
   if (loading) {
     return (
       <View style={styles.card}>
@@ -134,48 +130,111 @@ export const ConnectStripeCard: React.FC<{
     );
   }
 
-  if (connected) {
-    return (
-      <View style={[styles.card, styles.cardDone]}>
-        <Text style={styles.title}>Stripe connected</Text>
-        <Text style={styles.sub}>You can collect payments for this trip.</Text>
+  const tone = TONE[state];
+  const body = (
+    <>
+      <View style={styles.headRow}>
+        {tone.icon ? (
+          tone.icon === 'spinner' ? (
+            // Motion is the message here: something is happening elsewhere and
+            // the operator is not being asked for anything.
+            <ActivityIndicator size="small" color={tone.iconColor} style={styles.icon} />
+          ) : (
+            <Ionicons name={tone.icon} size={18} color={tone.iconColor} style={styles.icon} />
+          )
+        ) : null}
+        <Text style={[styles.title, tone.titleColor ? { color: tone.titleColor } : null]}>
+          {copy.title}
+        </Text>
       </View>
-    );
+      <Text style={styles.sub}>{copy.body}</Text>
+    </>
+  );
+
+  // No button to press → not a Pressable. A card that dents under your finger
+  // and then does nothing is worse than one that plainly does not respond.
+  if (!copy.cta) {
+    return <View style={[styles.card, tone.card]}>{body}</View>;
   }
 
   return (
     <Pressable
       onPress={onConnect}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      accessibilityRole="button"
+      accessibilityLabel={copy.cta}
+      style={({ pressed }) => [styles.card, tone.card, pressed && styles.pressed]}
     >
-      <Text style={styles.title}>Connect Stripe</Text>
-      <Text style={styles.sub}>
-        Takes a few minutes. You will need your ID and bank details. Money goes
-        straight to you.
-      </Text>
+      {body}
+      <Text style={[styles.cta, tone.ctaColor ? { color: tone.ctaColor } : null]}>{copy.cta}</Text>
     </Pressable>
   );
+};
+
+const C = {
+  accent: '#0788B0',
+  accentTint: '#F0F7FA',
+  ink: '#181D27',
+  sub: '#535862',
+  line: '#D5D7DA',
+  warn: '#B54708',
+  warnTint: '#FFFAEB',
+  warnLine: '#F5C77E',
+  bad: '#B42318',
+  badTint: '#FEF3F2',
+  badLine: '#F0B4AE',
+};
+
+/** How each state looks. The words live in connectStatus.ts; only the paint is here. */
+const TONE: Record<
+  ConnectState,
+  {
+    card?: object;
+    icon?: React.ComponentProps<typeof Ionicons>['name'] | 'spinner';
+    iconColor?: string;
+    titleColor?: string;
+    ctaColor?: string;
+  }
+> = {
+  not_started: {},
+  incomplete: {},
+  // Calm, not alarming: nothing is wrong and there is nothing to do.
+  under_review: { card: { borderColor: C.accent, backgroundColor: C.accentTint }, icon: 'spinner', iconColor: C.accent, titleColor: C.accent },
+  action_needed: { card: { borderColor: C.warnLine, backgroundColor: C.warnTint }, icon: 'alert-circle-outline', iconColor: C.warn, titleColor: C.warn, ctaColor: C.warn },
+  ready: { card: { borderColor: C.accent, backgroundColor: C.accentTint }, icon: 'checkmark-circle', iconColor: C.accent, titleColor: C.accent },
+  blocked: { card: { borderColor: C.badLine, backgroundColor: C.badTint }, icon: 'close-circle-outline', iconColor: C.bad, titleColor: C.bad },
 };
 
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderColor: '#D5D7DA',
+    borderColor: C.line,
     borderRadius: 16,
     padding: 16,
     marginTop: 12,
     backgroundColor: '#FFFFFF',
   },
-  cardDone: { borderColor: '#0788B0', backgroundColor: '#F0F7FA' },
   // Instant feedback on press. 0.97 is the app-wide value for pressables.
   pressed: { transform: [{ scale: 0.97 }] },
+  headRow: { flexDirection: 'row', alignItems: 'center' },
+  // Fixed width so the title starts in the same place whether the icon is a
+  // glyph or a spinner — the two measure differently, and without this the
+  // heading shifts sideways the moment Stripe answers.
+  icon: { width: 20, marginRight: 8 },
   title: {
+    flex: 1,
     fontFamily: ff('Inter', '600'),
     fontSize: 15,
     // Web only — on native this would re-trigger the synthetic-bold path ff()
     // exists to avoid.
     ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),
-    color: '#181D27',
+    color: C.ink,
   },
-  sub: { fontFamily: ff('Inter', '400'), fontSize: 13, color: '#535862', marginTop: 4, lineHeight: 18 },
+  sub: { fontFamily: ff('Inter', '400'), fontSize: 13, color: C.sub, marginTop: 4, lineHeight: 18 },
+  cta: {
+    fontFamily: ff('Inter', '600'),
+    ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),
+    fontSize: 13,
+    color: C.accent,
+    marginTop: 10,
+  },
 });

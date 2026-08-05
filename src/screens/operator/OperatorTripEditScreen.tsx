@@ -78,6 +78,7 @@ import { AGE_WINDOW_BY_STYLE } from '../trips/CreateTripFlowA';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { showErrorAlert } from '../../utils/friendlyError';
 import { ff } from '../../theme/fonts';
+import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
 
 /**
  * Order-insensitive equality for the multi-select array fields below
@@ -341,16 +342,15 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   // re-fires PriceSheetContent's focus effect even when it reopens on the same
   // field (the effect is keyed on this value changing).
   const [priceFocus, setPriceFocus] = useState<PriceField | null>(null);
-  // Stripe's charges_enabled, reported by ConnectStripeCard inside the Getting
-  // paid sheet. Enforces the same "block managed mode until connected" rule the
-  // create wizard applies with its own `stripeReady`.
+  // What Stripe currently thinks of this operator's payout account. Enforces
+  // the same rule the create wizard applies, from the same shared query — the
+  // ConnectStripeCard inside the Getting paid sheet reads this exact cache
+  // entry, so the card and this screen's `validate` cannot disagree.
   //
-  // null = ConnectStripeCard has not answered yet, and is NOT the same as
-  // false. Starting at false would flash "Connect Stripe before you can..."
-  // over an ALREADY-connected managed trip for as long as the status fetch
-  // takes. Both non-true states still block Save; only `false` accuses the
-  // operator of not having connected.
-  const [stripeReady, setStripeReady] = useState<boolean | null>(null);
+  // `enabled` is the sheet being open, not the trip being managed: it keeps
+  // an operator who only ever edits dates from triggering a Stripe round trip,
+  // while still having the answer ready by the time they can press Save.
+  const connect = useConnectStatus({ enabled: sheet === 'gettingPaid' });
   const close = useCallback(() => {
     setSheet(null);
     setPriceFocus(null);
@@ -1057,9 +1057,12 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           setOperatorTripPaymentMode writes both halves, in the only order the
           triggers allow, and reverts if the second half fails.
           `validate` enforces the same rule the wizard enforces with its Next
-          button: no managed mode until Stripe says this operator can accept
-          charges. `stripeReady` is only ever true after ConnectStripeCard has
-          asked Stripe, and that card mounts only inside the managed branch. */}
+          button, through the same tested predicate (`canCollectPayments`).
+          Note what that rule now ALLOWS: an operator whose account Stripe is
+          still reviewing may turn this on. Blocking them punished the person
+          who had done everything right, and the money is protected a layer
+          down — payments-checkout refuses a live-mode charge unless the
+          account really can take one. See connectStatus.ts. */}
       <EditFieldSheet<{ paymentMode: PaymentMode }>
         visible={sheet === 'gettingPaid'}
         title="Getting paid"
@@ -1083,9 +1086,15 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           if (trip.cost_per_person == null) {
             return 'Set a price per person before you collect payment in the app.';
           }
-          if (stripeReady === null) return 'Checking your Stripe account…';
-          if (!stripeReady) return 'Connect Stripe before you can collect payment in the app.';
-          return null;
+          // Loading is not the same as "not connected": starting from false
+          // would flash "Connect Stripe before you can…" over an ALREADY
+          // connected trip for as long as the status read takes.
+          if (connect.loading) return 'Checking your Stripe account…';
+          if (connect.canCollect) return null;
+          if (connect.state === 'blocked') {
+            return 'Stripe could not approve your account, so this trip cannot collect payment.';
+          }
+          return 'Connect Stripe before you can collect payment in the app.';
         }}
         confirm={(next) =>
           next.paymentMode === 'managed'
@@ -1107,7 +1116,6 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <GettingPaidSheetContent
             value={draft.paymentMode}
             onChange={(paymentMode) => setDraft({ paymentMode })}
-            onStripeStatusChange={setStripeReady}
             depositLabel={formatTripAmount(trip.deposit_amount, trip.budget_currency)}
           />
         )}

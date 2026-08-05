@@ -62,6 +62,56 @@ async function stripe(path: string, params?: Record<string, string>, idempotency
   return body;
 }
 
+/** The Stripe fields that decide what an operator is shown about their account. */
+type AccountStatus = {
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  currentlyDue: string[];
+  pastDue: string[];
+  pendingVerification: string[];
+  disabledReason: string | null;
+};
+
+/**
+ * Pull the status fields off a Stripe Account.
+ *
+ * ⚠️ DUPLICATED in `stripe-connect-webhook`. These functions are deployed one
+ * by one and this repo has no shared module for them, so the copy is
+ * deliberate — but the two must agree, because one writes the same columns on
+ * a webhook and the other on a poll. Change both or neither.
+ *
+ * Everything is normalised to a definite value: Stripe omits array fields
+ * entirely on a brand-new account, and `?? []` there is the difference between
+ * "nothing outstanding" and a crash on `.length`.
+ */
+function readAccountStatus(acct: Record<string, unknown>): AccountStatus {
+  const req = (acct.requirements ?? {}) as Record<string, unknown>;
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
+  return {
+    chargesEnabled: !!acct.charges_enabled,
+    payoutsEnabled: !!acct.payouts_enabled,
+    detailsSubmitted: !!acct.details_submitted,
+    currentlyDue: list(req.currently_due),
+    pastDue: list(req.past_due),
+    pendingVerification: list(req.pending_verification),
+    disabledReason: (req.disabled_reason as string | null) ?? null,
+  };
+}
+
+/** The same status, shaped for `operator_payout_accounts`. Also duplicated. */
+function statusColumns(s: AccountStatus) {
+  return {
+    charges_enabled: s.chargesEnabled,
+    payouts_enabled: s.payoutsEnabled,
+    details_submitted: s.detailsSubmitted,
+    requirements_due: s.currentlyDue,
+    requirements_past_due: s.pastDue,
+    disabled_reason: s.disabledReason,
+    status_checked_at: new Date().toISOString(),
+  };
+}
+
 /**
  * Create this operator's Express account and record it, or return null if it
  * could not be recorded.
@@ -164,23 +214,44 @@ serve(async req => {
 
     let accountId: string | null = payoutRow?.stripe_account_id ?? null;
 
-    // ── status: re-read Stripe, because onboarding finishes on Stripe's site
+    // ── status: re-read Stripe, because onboarding finishes on Stripe's side
     //    and nothing tells us about it except asking.
+    //
+    // Returns the RAW Stripe fields and derives nothing. The six states the UI
+    // draws are derived on the client (src/services/trips/connectStatus.ts),
+    // in one tested pure function — deriving here as well would give two
+    // implementations of the same rule that can disagree, and the client needs
+    // its own copy anyway to decide what to render.
+    //
+    // `chargesEnabled` is kept at the top level, spelled exactly as before, so
+    // an already-shipped build calling this still gets the answer it expects.
     if (action === 'status') {
-      if (!accountId) return json({ chargesEnabled: false, accountId: null });
+      if (!accountId) {
+        return json({
+          accountId: null,
+          chargesEnabled: false,
+          payoutsEnabled: false,
+          detailsSubmitted: false,
+          currentlyDue: [],
+          pastDue: [],
+          pendingVerification: [],
+          disabledReason: null,
+        });
+      }
       const acct = await stripe(`accounts/${accountId}`);
-      const chargesEnabled = !!acct.charges_enabled;
+      const status = readAccountStatus(acct);
+
       const { error: updateErr } = await supabase
         .from('operator_payout_accounts')
-        .update({ charges_enabled: chargesEnabled })
+        .update(statusColumns(status))
         .eq('user_id', userId);
       if (updateErr) {
         // Stripe stays the source of truth either way, and the response below
         // is still correct — this is only our local cache falling behind, so
         // log it and keep going rather than fail the whole request.
-        console.error('[stripe-connect-onboard] failed to cache charges_enabled', updateErr.message);
+        console.error('[stripe-connect-onboard] failed to cache account status', updateErr.message);
       }
-      return json({ chargesEnabled, accountId });
+      return json({ accountId, ...status });
     }
 
     // ── diagnose: which Stripe account and mode is this key actually on?
