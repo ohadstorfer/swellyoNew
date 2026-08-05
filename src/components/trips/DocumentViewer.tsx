@@ -33,7 +33,7 @@
  *
  * Spec: docs/specs/operator-trips/passport-upload-v1.md §4.6
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -42,6 +42,7 @@ import {
   Modal,
   ActivityIndicator,
   Platform,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -53,6 +54,22 @@ import { PassportDetailsPanel } from './PassportDetailsPanel';
 import { ff } from '../../theme/fonts';
 import { getViewUrl } from '../../services/trips/tripDocumentsService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
+
+/**
+ * A filename the OS and every share target will accept.
+ *
+ * Slashes would create directories that do not exist, and a colon is illegal on
+ * some targets — so anything outside letters, digits, space, dash and dot goes.
+ * Capped because a long trip title plus a long name can otherwise exceed the
+ * filesystem's per-component limit and the write fails with nothing useful.
+ */
+function safeFileName(input: string): string {
+  return input
+    .replace(/[^\p{L}\p{N} .-]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
 
 export const DocumentViewer: React.FC<{
   visible: boolean;
@@ -76,6 +93,20 @@ export const DocumentViewer: React.FC<{
   isPassport?: boolean;
   /** Shown in the details panel so a copied block is attributable on screen. */
   travelerName?: string | null;
+  /**
+   * Offer Export — hand the real file to the OS share sheet.
+   *
+   * ⚠️ This REVERSES rule 4 above, and only for the host. Ohad asked for it on
+   * 2026-08-04, and the web dashboard has had it since it shipped: an operator
+   * forwards passports to hotels, airlines and visa agents, and doing that from
+   * a phone is the entire reason this tab exists. The accepted cost is the same
+   * one `docs/SPEC.md` §4.3 already records — a copy the operator saves is
+   * theirs, and Swellyo's 30-day delete does not reach it.
+   *
+   * A traveler viewing their OWN document never gets this. They already have
+   * the original; the flag exists to keep the export a host capability.
+   */
+  allowExport?: boolean;
 }> = ({
   visible,
   onClose,
@@ -87,13 +118,26 @@ export const DocumentViewer: React.FC<{
   inline = false,
   isPassport = false,
   travelerName,
+  allowExport = false,
 }) => {
   const insets = useSafeAreaInsets();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdf, setPdf] = useState<{ uri: string; size: number } | null>(null);
+  const [exporting, setExporting] = useState(false);
   const isPdf = !!storagePath && storagePath.toLowerCase().endsWith('.pdf');
+
+  /**
+   * Files written for an export, deleted when the viewer closes.
+   *
+   * NOT deleted the moment `shareAsync` resolves: the receiving app may still
+   * be reading the file it was handed, and on iOS the promise settles when the
+   * sheet dismisses, not when Mail has finished attaching. Tying the delete to
+   * the viewer's own teardown keeps rule 3 (nothing outlives the viewer)
+   * without racing the share.
+   */
+  const exportedPaths = useRef<string[]>([]);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -168,6 +212,70 @@ export const DocumentViewer: React.FC<{
       }
     };
   }, [visible, storagePath, isPdf, resetZoom]);
+
+  /**
+   * Hand the real file to the OS share sheet.
+   *
+   * Its own signed URL and its own download, never the one the viewer is
+   * showing: the image path only ever holds a URL (rule 2 keeps the bytes out
+   * of the disk cache), and reusing the PDF's copy would let the share hold a
+   * file the close handler is about to delete.
+   *
+   * The filename is what the operator will see in Mail or WhatsApp, so it is
+   * built from the traveler and the document — "Maya Cohen - Passport.jpg" —
+   * and never from the storage key, which is a bare UUID.
+   */
+  const handleExport = useCallback(async () => {
+    if (!storagePath || exporting) return;
+    setExporting(true);
+    try {
+      const Sharing = require('expo-sharing');
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Not available', 'Sharing is not available on this device.');
+        return;
+      }
+
+      const FileSystem = require('expo-file-system/legacy');
+      const signed = await getViewUrl(storagePath);
+      const ext = isPdf ? 'pdf' : 'jpg';
+      const name = safeFileName([travelerName, title].filter(Boolean).join(' - ')) || 'document';
+      const target = `${FileSystem.cacheDirectory}${name}.${ext}`;
+
+      const res = await FileSystem.downloadAsync(signed, target);
+      if (!res?.uri) throw new Error('download failed');
+      exportedPaths.current.push(res.uri);
+
+      await Sharing.shareAsync(res.uri, {
+        mimeType: isPdf ? 'application/pdf' : 'image/jpeg',
+        // iOS picks the destination app off the UTI, not the extension.
+        UTI: isPdf ? 'com.adobe.pdf' : 'public.jpeg',
+        dialogTitle: name,
+      });
+    } catch (e) {
+      // Never log the path or the raw error — either can carry the storage key.
+      console.error('[DocumentViewer] export failed');
+      Alert.alert('Export failed', friendlyErrorMessage(e, 'Could not export this document.'));
+    } finally {
+      setExporting(false);
+    }
+  }, [storagePath, exporting, isPdf, travelerName, title]);
+
+  // Rule 3 again: an exported copy must not outlive the viewer either.
+  useEffect(
+    () => () => {
+      const paths = exportedPaths.current;
+      exportedPaths.current = [];
+      if (paths.length === 0) return;
+      const FileSystem = require('expo-file-system/legacy');
+      paths.forEach(p => {
+        FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {
+          // Best effort — a leftover in the OS-managed cache directory is not
+          // worth surfacing to the operator.
+        });
+      });
+    },
+    [],
+  );
 
   const pinch = Gesture.Pinch()
     .onUpdate(e => {
@@ -273,8 +381,26 @@ export const DocumentViewer: React.FC<{
             <Ionicons name="close" size={26} color="#FFFFFF" />
           </Pressable>
           <Text style={styles.headerTitle}>{title}</Text>
-          {/* Deliberately empty: no share, no save, no "open in". */}
-          <View style={styles.closeBtn} />
+          {/* Export is HOST-ONLY (`allowExport`). Rule 4 above still holds for
+              everyone else: no share, no save, no "open in". */}
+          {allowExport && !!storagePath && !error ? (
+            <Pressable
+              onPress={handleExport}
+              disabled={exporting}
+              hitSlop={12}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Export this document"
+            >
+              {exporting ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Ionicons name="share-outline" size={24} color="#FFFFFF" />
+              )}
+            </Pressable>
+          ) : (
+            <View style={styles.closeBtn} />
+          )}
         </View>
 
         <View style={styles.body}>

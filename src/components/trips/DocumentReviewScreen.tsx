@@ -20,7 +20,7 @@
  * signed URL per row and a decrypted copy in the image cache, which is exactly
  * what the private bucket exists to prevent.
  */
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -110,9 +110,42 @@ export const DocumentReviewScreen: React.FC<{
   review: TravelerReview[];
   /** Refetch after a decision — every state is derived server-side. */
   onChanged: () => void;
-}> = ({ visible, onClose, loading, travelers, review, onChanged }) => {
+  /**
+   * Open straight into one person instead of the queue.
+   *
+   * The Dashboard's Travelers list needs "show me Maya", not "show me the
+   * queue and let me find Maya". Read on each open, so tapping a different
+   * traveler re-targets it.
+   */
+  initialUserId?: string | null;
+  /**
+   * Extra blocks under one traveler's documents — money, medical, and the
+   * actions the operator can take on that person.
+   *
+   * A render prop rather than more props on this component: those blocks are
+   * operator-business, this screen is about documents, and the Dashboard tab
+   * already holds the money it would otherwise have to fetch a second time.
+   */
+  renderTravelerExtras?: (userId: string) => React.ReactNode;
+}> = ({
+  visible,
+  onClose,
+  loading,
+  travelers,
+  review,
+  onChanged,
+  initialUserId,
+  renderTravelerExtras,
+}) => {
   const insets = useSafeAreaInsets();
-  const [openUserId, setOpenUserId] = useState<string | null>(null);
+  const [openUserId, setOpenUserId] = useState<string | null>(initialUserId ?? null);
+
+  // Re-target on each open. Without the `visible` guard this would also yank
+  // the operator back to the initial traveler when they tap Back inside an
+  // already-open screen.
+  useEffect(() => {
+    if (visible) setOpenUserId(initialUserId ?? null);
+  }, [visible, initialUserId]);
   const [viewing, setViewing] = useState<ReviewItem | null>(null);
   const [rejecting, setRejecting] = useState<ReviewItem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -246,6 +279,7 @@ export const DocumentReviewScreen: React.FC<{
             >
               {/* ── Level 2: one traveler's items ───────────────────────── */}
               {openReview ? (
+                <>
                 <View style={styles.card}>
                   {openReview.items.map((item, i) => {
                     const reviewable = item.state === 'submitted' && !!item.documentId;
@@ -293,6 +327,11 @@ export const DocumentReviewScreen: React.FC<{
                     );
                   })}
                 </View>
+                {/* Money, medical and the per-person actions. Supplied by the
+                    Dashboard tab; absent everywhere else, which is what keeps
+                    this screen usable on its own. */}
+                {renderTravelerExtras?.(openReview.userId)}
+                </>
               ) : (
                 /* ── Level 1: everyone ─────────────────────────────────── */
                 <View style={styles.card}>
@@ -364,6 +403,9 @@ export const DocumentReviewScreen: React.FC<{
           onApprove={viewing?.state === 'submitted' ? handleApprove : undefined}
           onReject={viewing?.state === 'submitted' ? () => setRejecting(viewing) : undefined}
           busy={busy}
+          // This screen is the host's, so export belongs here and nowhere a
+          // traveler can reach. See the note on `allowExport`.
+          allowExport
           // Offer "Copy details" on passports only. The operator retypes these
           // into a flight booking, which is the whole reason we hold a passport
           // at all — see passport-upload-v1.md §1.

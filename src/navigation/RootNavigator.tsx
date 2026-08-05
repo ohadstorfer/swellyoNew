@@ -121,6 +121,9 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       onEditTrip={trip => navigation.dispatch(StackActions.push('EditTrip', { trip }))}
       onEditOperatorTrip={editTripId => navigation.dispatch(StackActions.push('OperatorEditTrip', { tripId: editTripId }))}
       onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
+      // Same handler the Members list uses, so "Message" behaves identically
+      // wherever an operator taps it.
+      onMessageUser={tripCard.onStartConversation}
       onViewAllUpdates={() => navigation.dispatch(StackActions.push('TripUpdates', { tripId }))}
       onViewAllMembers={() => navigation.dispatch(StackActions.push('TripMembers', { tripId }))}
       onViewAllGroupGear={() => navigation.dispatch(StackActions.push('PackingAndGear', { tripId }))}

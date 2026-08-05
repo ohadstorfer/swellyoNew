@@ -1,8 +1,14 @@
-// Overview / Plan tabs — shared chrome on the trip detail screen. Underline
-// style (Figma node 12557-4992). The active tab is bold with an accent
-// underline; switching animates smoothly: the weight crossfades (two stacked
-// text layers) and the accent underline slides between halves. Only shown to
-// members (host + approved); non-members never see it.
+// Trip detail tabs — shared chrome on the trip detail screen. Underline style
+// (Figma node 12557-4992). The active tab is bold with an accent underline;
+// switching animates smoothly: the weight crossfades (two stacked text layers)
+// and the accent underline slides between segments.
+//
+// Overview and Plan are the traveler's two tabs. An operator hosting the trip
+// gets a third, Dashboard — so this takes a LIST of tabs rather than the two it
+// used to hardcode. Everything below is sized off `tabs.length`, never off a
+// literal 2.
+//
+// Only shown to members (host + approved); non-members never see it.
 
 import React, { useEffect } from 'react';
 import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
@@ -10,35 +16,53 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  Easing,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { ff } from '../../theme/fonts';
 
-export type TripTab = 'overview' | 'plan';
+export type TripTab = 'overview' | 'plan' | 'dashboard';
+
+export const TAB_LABEL: Record<TripTab, string> = {
+  overview: 'Overview',
+  plan: 'Plan',
+  dashboard: 'Dashboard',
+};
 
 interface Props {
   value: TripTab;
   onChange: (tab: TripTab) => void;
+  /** Which tabs this viewer gets, in order. Defaults to the traveler's two. */
+  tabs?: TripTab[];
 }
 
-export const TripTabToggle: React.FC<Props> = ({ value, onChange }) => {
-  // 0 = overview active, 1 = plan active. Drives both the weight crossfade and
-  // the sliding underline.
-  const progress = useSharedValue(value === 'plan' ? 1 : 0);
+const DEFAULT_TABS: TripTab[] = ['overview', 'plan'];
+
+// The indicator MOVES across the screen rather than entering or leaving it, so
+// it accelerates and decelerates — ease-out would have it arrive already
+// stopped. Same curve the app's other on-screen movement uses.
+const SLIDE = { duration: 220, easing: Easing.bezier(0.77, 0, 0.175, 1) };
+
+export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT_TABS }) => {
+  const count = tabs.length;
+  const index = Math.max(0, tabs.indexOf(value));
+
+  // Animated in tab-INDEX units, not pixels, so the same value drives both the
+  // slide and each label's weight crossfade.
+  const position = useSharedValue(index);
   const width = useSharedValue(0);
 
   useEffect(() => {
-    progress.value = withTiming(value === 'plan' ? 1 : 0, { duration: 220 });
-  }, [value, progress]);
+    position.value = withTiming(index, SLIDE);
+  }, [index, position]);
 
-  // Accent underline slides to the active half.
+  // Only translateX is animated. The indicator's WIDTH is a static percentage
+  // below — putting it in here would run a layout property through the UI
+  // thread on every frame of the slide, for a value that never changes during
+  // one.
   const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: progress.value * (width.value / 2) }],
+    transform: [{ translateX: (position.value * width.value) / count }],
   }));
-  // Bold layer is visible when that tab is active; regular layer is its inverse.
-  const ovBold = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
-  const ovReg = useAnimatedStyle(() => ({ opacity: progress.value }));
-  const plBold = useAnimatedStyle(() => ({ opacity: progress.value }));
-  const plReg = useAnimatedStyle(() => ({ opacity: 1 - progress.value }));
 
   return (
     <View
@@ -47,44 +71,69 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange }) => {
         width.value = e.nativeEvent.layout.width;
       }}
     >
-      <TouchableOpacity
-        style={styles.segment}
-        onPress={() => onChange('overview')}
-        activeOpacity={0.8}
-        accessibilityRole="tab"
-        accessibilityState={{ selected: value === 'overview' }}
-        accessibilityLabel="Overview"
-      >
-        <View style={styles.labelWrap}>
-          <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, ovBold]}>
-            Overview
-          </Animated.Text>
-          <Animated.Text numberOfLines={1} style={[styles.label, styles.reg, styles.overlay, ovReg]}>
-            Overview
-          </Animated.Text>
-        </View>
-      </TouchableOpacity>
+      {tabs.map((tab, i) => (
+        <TabSegment
+          key={tab}
+          label={TAB_LABEL[tab]}
+          index={i}
+          position={position}
+          selected={tab === value}
+          onPress={() => onChange(tab)}
+        />
+      ))}
 
-      <TouchableOpacity
-        style={styles.segment}
-        onPress={() => onChange('plan')}
-        activeOpacity={0.8}
-        accessibilityRole="tab"
-        accessibilityState={{ selected: value === 'plan' }}
-        accessibilityLabel="Plan"
-      >
-        <View style={styles.labelWrap}>
-          <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, plBold]}>
-            Plan
-          </Animated.Text>
-          <Animated.Text numberOfLines={1} style={[styles.label, styles.reg, styles.overlay, plReg]}>
-            Plan
-          </Animated.Text>
-        </View>
-      </TouchableOpacity>
-
-      <Animated.View style={[styles.indicator, indicatorStyle]} />
+      <Animated.View
+        style={[styles.indicator, { width: `${100 / count}%` }, indicatorStyle]}
+      />
     </View>
+  );
+};
+
+/**
+ * One tab. Two stacked text layers — bold and regular — crossfaded by distance
+ * from the active index, so the label never reflows mid-animation the way a
+ * `fontWeight` swap would.
+ */
+const TabSegment: React.FC<{
+  label: string;
+  index: number;
+  position: SharedValue<number>;
+  selected: boolean;
+  onPress: () => void;
+}> = ({ label, index, position, selected, onPress }) => {
+  // 1 when this tab is active, 0 once the indicator is a full tab away. The
+  // clamp is what keeps a three-tab jump (Overview -> Dashboard) from flashing
+  // the middle label as it passes over Plan.
+  const weight = useAnimatedStyle(() => {
+    const d = Math.min(1, Math.abs(position.value - index));
+    return { opacity: 1 - d };
+  });
+  const regular = useAnimatedStyle(() => {
+    const d = Math.min(1, Math.abs(position.value - index));
+    return { opacity: d };
+  });
+
+  return (
+    <TouchableOpacity
+      style={styles.segment}
+      onPress={onPress}
+      activeOpacity={0.8}
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+    >
+      <View style={styles.labelWrap}>
+        <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, weight]}>
+          {label}
+        </Animated.Text>
+        <Animated.Text
+          numberOfLines={1}
+          style={[styles.label, styles.reg, styles.overlay, regular]}
+        >
+          {label}
+        </Animated.Text>
+      </View>
+    </TouchableOpacity>
   );
 };
 
@@ -145,14 +194,14 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
-  // Accent underline — half-width, slides between the two tabs. Sits on top of
-  // the container's hairline.
+  // Accent underline — one segment wide, slides to the active tab. Sits on top
+  // of the container's hairline. Width comes from the animated style, because
+  // it depends on how many tabs this viewer has.
   indicator: {
     position: 'absolute',
     bottom: -1,
     left: 0,
     height: 3,
-    width: '50%',
     backgroundColor: '#05BCD3',
   },
 });
