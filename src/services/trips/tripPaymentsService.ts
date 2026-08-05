@@ -262,6 +262,21 @@ export async function fetchConnectAccountSession(): Promise<string> {
   return data.clientSecret as string;
 }
 
+/**
+ * The OLD hosted onboarding: open Stripe's own page in a browser sheet.
+ *
+ * ⚠️ NOTHING CALLS THIS. Onboarding is native-only as of 2026-08-04 — see
+ * {@link fetchConnectAccountSession} and StripeConnectOnboarding.tsx.
+ *
+ * It is kept, unwired, on purpose. The edge function still serves
+ * `action: 'onboard'`, so pointing ConnectStripeCard back here is a one-line
+ * change if the native component misbehaves in a real build. Deleting it would
+ * also throw away the returnUrl scheme handling, which is subtle enough that
+ * re-deriving it under pressure is how mistakes get made.
+ *
+ * If you wire it back up, say so here — an unwired escape hatch and a live
+ * code path should not look the same.
+ */
 export async function startConnectOnboarding(): Promise<void> {
   // Same string to Stripe and to openAuthSessionAsync — see startCheckout.
   const url = returnUrl();

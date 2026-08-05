@@ -68,10 +68,10 @@ export const ConnectStripeCard: React.FC<{
       setConnected(s.chargesEnabled);
       onStatusChange(s.chargesEnabled);
     } catch (e) {
-      // Expected today: the Stripe edge functions aren't deployed yet, so
-      // every call lands here. Logged (not surfaced to the operator) so a
-      // real failure later than that isn't silently invisible — the caller
-      // still reads this as "not connected," never a crash.
+      // Deliberately swallowed: a status check that fails means "we do not
+      // know", and the safe reading of that is "not connected" — never a
+      // crash, and never an alert on a screen the operator did not ask a
+      // question on. Logged so a real outage is not silently invisible.
       console.warn('[ConnectStripeCard] fetchConnectStatus failed:', e);
       setConnected(false);
       onStatusChange(false);

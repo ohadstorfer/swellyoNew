@@ -2772,6 +2772,113 @@ PODS:
   - Sentry (9.15.0):
     - Sentry/Core (= 9.15.0)
   - Sentry/Core (9.15.0)
+  - Stripe (26.5.0):
+    - StripeApplePay (= 26.5.0)
+    - StripeCore (= 26.5.0)
+    - StripeIssuing (= 26.5.0)
+    - StripePayments (= 26.5.0)
+    - StripePaymentsUI (= 26.5.0)
+    - StripeUICore (= 26.5.0)
+  - stripe-react-native (0.73.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - stripe-react-native/Core (= 0.73.0)
+    - stripe-react-native/NewArch (= 0.73.0)
+    - Yoga
+  - stripe-react-native/Core (0.73.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Stripe (= 26.5.0)
+    - StripeApplePay (= 26.5.0)
+    - StripeFinancialConnections (= 26.5.0)
+    - StripePayments (= 26.5.0)
+    - StripePaymentSheet (= 26.5.0)
+    - StripePaymentsUI (= 26.5.0)
+    - Yoga
+  - stripe-react-native/NewArch (0.73.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
+  - StripeApplePay (26.5.0):
+    - StripeCore (= 26.5.0)
+  - StripeCore (26.5.0)
+  - StripeFinancialConnections (26.5.0):
+    - StripeCore (= 26.5.0)
+    - StripeUICore (= 26.5.0)
+  - StripeIssuing (26.5.0):
+    - StripeCore (= 26.5.0)
+    - StripePayments (= 26.5.0)
+    - StripePaymentsUI (= 26.5.0)
+  - StripePayments (26.5.0):
+    - StripeCore (= 26.5.0)
+    - StripePayments/Stripe3DS2 (= 26.5.0)
+  - StripePayments/Stripe3DS2 (26.5.0):
+    - StripeCore (= 26.5.0)
+  - StripePaymentSheet (26.5.0):
+    - StripeApplePay (= 26.5.0)
+    - StripeCore (= 26.5.0)
+    - StripePayments (= 26.5.0)
+    - StripePaymentsUI (= 26.5.0)
+  - StripePaymentsUI (26.5.0):
+    - StripeCore (= 26.5.0)
+    - StripePayments (= 26.5.0)
+    - StripeUICore (= 26.5.0)
+  - StripeUICore (26.5.0):
+    - StripeCore (= 26.5.0)
   - SwellyoQuickLook (1.0.0):
     - ExpoModulesCore
   - SwellyoVideoExport (1.0.0):
@@ -2945,6 +3052,7 @@ DEPENDENCIES:
   - RNShare (from `../node_modules/react-native-share`)
   - RNSVG (from `../node_modules/react-native-svg`)
   - RNVectorIcons (from `../node_modules/react-native-vector-icons`)
+  - "stripe-react-native (from `../node_modules/@stripe/stripe-react-native`)"
   - SwellyoQuickLook (from `../modules/swellyo-quicklook/ios`)
   - SwellyoVideoExport (from `../modules/swellyo-video-export/ios`)
   - VideoTrim (from `../node_modules/react-native-video-trim`)
@@ -2970,6 +3078,15 @@ SPEC REPOS:
     - SDWebImageSVGCoder
     - SDWebImageWebPCoder
     - Sentry
+    - Stripe
+    - StripeApplePay
+    - StripeCore
+    - StripeFinancialConnections
+    - StripeIssuing
+    - StripePayments
+    - StripePaymentSheet
+    - StripePaymentsUI
+    - StripeUICore
     - SwiftUIIntrospect
     - TOCropViewController
     - ZXingObjC
@@ -3246,6 +3363,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-svg"
   RNVectorIcons:
     :path: "../node_modules/react-native-vector-icons"
+  stripe-react-native:
+    :path: "../node_modules/@stripe/stripe-react-native"
   SwellyoQuickLook:
     :path: "../modules/swellyo-quicklook/ios"
   SwellyoVideoExport:
@@ -3409,6 +3528,16 @@ SPEC CHECKSUMS:
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
   SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   Sentry: d5b72948d692d369ded835e2e77baadcd3c492dd
+  Stripe: 42c446f3f3ee60c2e96aa27491fd88cb849a3887
+  stripe-react-native: 791148b68c49f9ea20fda2ecc40bf18f5a15b3fc
+  StripeApplePay: d6e62eb6150d7739e7a6aff99d3ed69905461fc4
+  StripeCore: ccde420bc8e878df43d356f8661702b921ace869
+  StripeFinancialConnections: fb8e12e36d2e5e79a1b5413c72900a9bf571fbe2
+  StripeIssuing: 104bad01e6a872713b81d44821eebc958a49d6cf
+  StripePayments: 43fb89181afd417966fa1e8bf7b8a0e5c85eb9ac
+  StripePaymentSheet: dbe9a57e2cef4d54630b56511f501d2c355e102d
+  StripePaymentsUI: 71c5666d50b62889d5f935f283ba6afb88135533
+  StripeUICore: aa5d5a1ff0e8a090078303915a5c14a0bce80a01
   SwellyoQuickLook: 9cd5ced880baea99ccf051ee98ada6e8cf7ae7eb
   SwellyoVideoExport: 936d23cd7d20e4b0d7fc5bb31ee3d65cb49008d7
   SwiftUIIntrospect: fee9aa07293ee280373a591e1824e8ddc869ba5d
