@@ -7,21 +7,31 @@
  * everything, so it gets one component and one `onUploaded` callback rather than
  * five pieces of state.
  *
- * TWO THINGS HERE ARE NOT STYLE CHOICES:
+ * THREE THINGS HERE ARE NOT STYLE CHOICES:
  *
  * 1. The picker is launched from the shell's `onDismissed`, never from the tile
  *    press. Firing a picker while iOS is still tearing down the Modal's
  *    UIViewController hangs the main thread on PHPicker (it runs out of process)
  *    and the OS kills the app. See the note in BottomSheetShell and the history
  *    in AttachMenuGrid.
- * 2. The confirm preview asks the traveler to check the two machine-readable
+ * 2. Because of (1), THIS COMPONENT MUST OUTLIVE ITS OWN SHEET. Closing a sheet
+ *    hides it (`hidden`) — it never tells the parent, until the flow is really
+ *    over. `onClose` means "unmount me", and the parent does exactly that.
+ *
+ *    Getting this wrong is not a subtle bug. Between 6fd2a4b and this fix, the
+ *    parent unmounted the flow the moment a button was tapped: the queued
+ *    hand-off died with the component, `onDismissed` never ran, and NO upload
+ *    was possible on any operator trip. It looked like the buttons did nothing.
+ *    Every non-picker sheet (waiver, medical) kept working, which is what made
+ *    it read as "the pickers are broken" rather than "the sheet unmounted".
+ * 3. The confirm preview asks the traveler to check the two machine-readable
  *    lines are legible. That one line of copy is the only quality gate in v1 —
  *    the operator reads the passport by eye — and it is what v2's scanner will
  *    depend on too.
  *
  * Spec: docs/specs/operator-trips/passport-upload-v1.md
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -44,10 +54,16 @@ import {
 } from '../../services/trips/tripDocumentsService';
 import { showErrorAlert } from '../../utils/friendlyError';
 
-type PendingPick = 'camera' | 'library' | 'file' | null;
+type PickSource = 'camera' | 'library' | 'file';
 
 export const RequirementUploadFlow: React.FC<{
   visible: boolean;
+  /**
+   * The whole flow is over — the traveler backed out of everything.
+   *
+   * The parent may unmount on this, and does. It is NOT "hide the sheet": see
+   * point 2 in the file header. Nothing in here calls it to close a sheet.
+   */
   onClose: () => void;
   tripId: string;
   requirementId: string;
@@ -71,25 +87,52 @@ export const RequirementUploadFlow: React.FC<{
 }) => {
   const catalog = REQUIREMENT_CATALOG[kind];
   const allowPdf = catalog.allowPdf;
-  const [pendingPick, setPendingPick] = useState<PendingPick>(null);
+  /** "passport", "travel insurance", … — this sheet serves every upload kind. */
+  const itemLabel = catalog.title.toLowerCase();
   const [pickedUri, setPickedUri] = useState<string | null>(null);
   const [pickedIsPdf, setPickedIsPdf] = useState(false);
   const [pickedName, setPickedName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  /**
+   * Slides whichever sheet is on screen away WITHOUT unmounting this component,
+   * so the queued hand-off below still has somewhere to run.
+   */
+  const [hidden, setHidden] = useState(false);
+  /**
+   * What to do once that sheet has fully gone. Every native hand-off and every
+   * exit is queued here and fired from the shell's `onDismissed` — see point 1
+   * in the file header for why nothing may present while a Modal is tearing
+   * down.
+   */
+  const afterDismiss = useRef<(() => void) | null>(null);
   // Survives the sheet closing, so "Retake" can reopen the picker directly
   // instead of bouncing the traveler back through the disclosure.
-  const lastSource = useRef<PendingPick>(null);
-
-  const reset = useCallback(() => {
-    setPendingPick(null);
-    setPickedUri(null);
-    setPickedIsPdf(false);
-    setPickedName(null);
-    setUploading(false);
+  const lastSource = useRef<PickSource | null>(null);
+  // The picker resolves long after the tap. Nothing may touch state once the
+  // parent has unmounted us.
+  const alive = useRef(true);
+  useEffect(() => () => {
+    alive.current = false;
   }, []);
 
+  /** Slide the current sheet away, then run `next`. */
+  const dismissThen = useCallback((next: () => void) => {
+    afterDismiss.current = next;
+    setHidden(true);
+  }, []);
+
+  const handleDismissed = useCallback(() => {
+    const next = afterDismiss.current;
+    afterDismiss.current = null;
+    next?.();
+  }, []);
+
+  /** Back out of the whole thing. Animates first, THEN tells the parent. */
+  const close = useCallback(() => dismissThen(onClose), [dismissThen, onClose]);
+
   // ── the OS picker ────────────────────────────────────────────────────────
-  const launch = useCallback(async (source: 'camera' | 'library' | 'file') => {
+  /** Returns whether the traveler actually chose something. */
+  const openPicker = useCallback(async (source: PickSource): Promise<boolean> => {
     lastSource.current = source;
     try {
       // A PDF comes from the document picker, not the photo library, and is
@@ -102,12 +145,11 @@ export const RequirementUploadFlow: React.FC<{
           multiple: false,
         });
         const asset = !res.canceled ? res.assets?.[0] : null;
-        if (asset?.uri) {
-          setPickedUri(asset.uri);
-          setPickedIsPdf(true);
-          setPickedName(asset.name ?? 'document.pdf');
-        }
-        return;
+        if (!asset?.uri || !alive.current) return false;
+        setPickedUri(asset.uri);
+        setPickedIsPdf(true);
+        setPickedName(asset.name ?? 'document.pdf');
+        return true;
       }
 
       const ImagePicker = require('expo-image-picker');
@@ -115,8 +157,8 @@ export const RequirementUploadFlow: React.FC<{
       if (source === 'camera') {
         const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-          askAgainOrSettings(canAskAgain, 'camera');
-          return;
+          askAgainOrSettings(canAskAgain, 'camera', itemLabel);
+          return false;
         }
       } else {
         // Android 13+ uses the system photo picker, which needs no permission.
@@ -125,8 +167,8 @@ export const RequirementUploadFlow: React.FC<{
           const { status, canAskAgain } =
             await ImagePicker.requestMediaLibraryPermissionsAsync();
           if (status !== 'granted') {
-            askAgainOrSettings(canAskAgain, 'photos');
-            return;
+            askAgainOrSettings(canAskAgain, 'photos', itemLabel);
+            return false;
           }
         }
       }
@@ -148,34 +190,46 @@ export const RequirementUploadFlow: React.FC<{
           : await ImagePicker.launchImageLibraryAsync(options);
 
       const uri = !result.canceled ? result.assets?.[0]?.uri : null;
-      if (uri) {
-        setPickedUri(uri);
-        setPickedIsPdf(false);
-        setPickedName(null);
-      }
+      if (!uri || !alive.current) return false;
+      setPickedUri(uri);
+      setPickedIsPdf(false);
+      setPickedName(null);
+      return true;
     } catch (e) {
-      console.error('[PassportUploadFlow] picker failed:', e);
+      console.error('[RequirementUploadFlow] picker failed:', e);
       showErrorAlert(
         'Something went wrong',
         e,
         source === 'camera'
           ? 'Could not open your camera. Please try again.'
+          : source === 'file'
+          ? 'Could not open your files. Please try again.'
           : 'Could not open your photos. Please try again.',
       );
+      return false;
     }
-  }, []);
+  }, [itemLabel]);
 
-  // The shell has fully gone away — safe to present native UI now.
-  const handleDismissed = useCallback(() => {
-    const next = pendingPick;
-    setPendingPick(null);
-    if (next) launch(next);
-  }, [pendingPick, launch]);
-
-  const choose = (source: 'camera' | 'library' | 'file') => {
-    setPendingPick(source);
-    onClose();
-  };
+  /**
+   * Hand off to the OS picker: slide the sheet away, launch once it is really
+   * gone, then come back with the confirm view.
+   *
+   * Nothing chosen means the traveler backed out, and by then there is no sheet
+   * left on screen — so the flow ends rather than leaving this component
+   * mounted and invisible.
+   */
+  const pick = useCallback(
+    (source: PickSource) => {
+      dismissThen(() => {
+        void openPicker(source).then(picked => {
+          if (!alive.current) return;
+          if (picked) setHidden(false);
+          else onClose();
+        });
+      });
+    },
+    [dismissThen, openPicker, onClose],
+  );
 
   // ── upload ───────────────────────────────────────────────────────────────
   const handleUse = useCallback(async () => {
@@ -189,38 +243,52 @@ export const RequirementUploadFlow: React.FC<{
         localUri: pickedUri,
         isPdf: pickedIsPdf,
       });
-      reset();
-      onUploaded();
+      if (!alive.current) return;
+      // Still spinning while it slides out — the row behind is about to flip to
+      // "submitted", and a button that snaps back to idle first reads as a
+      // failure.
+      dismissThen(onUploaded);
     } catch (e) {
-      console.error('[PassportUploadFlow] upload failed:', e);
+      console.error('[RequirementUploadFlow] upload failed:', e);
+      if (!alive.current) return;
       setUploading(false);
       // Keep the picked photo on screen so "Use this photo" can simply be
       // tapped again. Never silently drop it.
       showErrorAlert(
         'Upload failed',
         e,
-        'Could not upload your passport. Please try again.',
+        `Could not upload your ${itemLabel}. Please try again.`,
       );
     }
-  }, [pickedUri, pickedIsPdf, uploading, tripId, requirementId, userId, reset, onUploaded]);
+  }, [
+    pickedUri,
+    pickedIsPdf,
+    uploading,
+    tripId,
+    requirementId,
+    userId,
+    itemLabel,
+    dismissThen,
+    onUploaded,
+  ]);
 
+  // Goes through the same dismiss-then-launch hand-off as the first pick. The
+  // confirm view IS a shell — it has a Modal in it just like the disclosure —
+  // so launching straight from here is the exact hazard point 1 warns about.
   const handleRetake = useCallback(() => {
-    setPickedUri(null);
-    const source = lastSource.current ?? 'camera';
-    // No Modal in the way here — the confirm view is not a shell — so the
-    // picker can be launched directly.
-    launch(source);
-  }, [launch]);
+    pick(lastSource.current ?? 'camera');
+  }, [pick]);
 
   // ── confirm view ─────────────────────────────────────────────────────────
   // Its own shell so it inherits the same scrim + slide as every other sheet.
   if (pickedUri) {
     return (
       <BottomSheetShell
-        visible
+        visible={visible && !hidden}
         onClose={() => {
-          if (!uploading) reset();
+          if (!uploading) close();
         }}
+        onDismissed={handleDismissed}
         swipeToDismiss={!uploading}
       >
         <View style={styles.surface}>
@@ -277,7 +345,11 @@ export const RequirementUploadFlow: React.FC<{
 
   // ── disclosure sheet ─────────────────────────────────────────────────────
   return (
-    <BottomSheetShell visible={visible} onClose={onClose} onDismissed={handleDismissed}>
+    <BottomSheetShell
+      visible={visible && !hidden}
+      onClose={close}
+      onDismissed={handleDismissed}
+    >
       <View style={styles.surface}>
         <View style={styles.grabber} />
 
@@ -309,24 +381,24 @@ export const RequirementUploadFlow: React.FC<{
           />
         </View>
 
-        <Pressable onPress={() => choose('camera')} style={styles.primaryBtn}>
+        <Pressable onPress={() => pick('camera')} style={styles.primaryBtn}>
           <Ionicons name="camera-outline" size={18} color="#FFFFFF" />
           <Text style={styles.primaryBtnText}>Take a photo</Text>
         </Pressable>
 
-        <Pressable onPress={() => choose('library')} style={styles.outlineBtn}>
+        <Pressable onPress={() => pick('library')} style={styles.outlineBtn}>
           <Ionicons name="images-outline" size={18} color="#212121" />
           <Text style={styles.outlineBtnText}>Choose from photos</Text>
         </Pressable>
 
         {allowPdf ? (
-          <Pressable onPress={() => choose('file')} style={styles.outlineBtn}>
+          <Pressable onPress={() => pick('file')} style={styles.outlineBtn}>
             <Ionicons name="document-outline" size={18} color="#212121" />
             <Text style={styles.outlineBtnText}>Choose a PDF</Text>
           </Pressable>
         ) : null}
 
-        <Pressable onPress={onClose} hitSlop={8}>
+        <Pressable onPress={close} hitSlop={8}>
           <Text style={styles.secondaryText}>Not now</Text>
         </Pressable>
       </View>
@@ -341,7 +413,12 @@ const DisclosureRow: React.FC<{ icon: any; text: string }> = ({ icon, text }) =>
   </View>
 );
 
-function askAgainOrSettings(canAskAgain: boolean, what: 'camera' | 'photos') {
+function askAgainOrSettings(
+  canAskAgain: boolean,
+  what: 'camera' | 'photos',
+  /** Lowercased requirement title — this sheet is not passport-only. */
+  item: string,
+) {
   if (!canAskAgain) {
     Alert.alert(
       'Permission needed',
@@ -353,7 +430,7 @@ function askAgainOrSettings(canAskAgain: boolean, what: 'camera' | 'photos') {
     );
     return;
   }
-  Alert.alert('Permission needed', `Swellyo needs access to your ${what} to add your passport.`);
+  Alert.alert('Permission needed', `Swellyo needs access to your ${what} to add your ${item}.`);
 }
 
 const styles = StyleSheet.create({
