@@ -4,10 +4,12 @@ import { Link, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
 import { fetchTripReview } from '../services/review';
 import { fetchCounts, fetchMedicalFlags } from '../services/counts';
-import { fetchProfiles } from '../services/travelers';
+import { fetchProfiles, type SurferProfile } from '../services/travelers';
+import type { TripReview } from '../services/review';
 import { isKnownUploadKind, kindLabel } from '../domain/catalog';
 import { isUploadRequirement } from '../domain/requirements';
 import { useTripMoney } from '../services/useTripMoney';
+import type { TravelerMoney } from '../domain/money';
 import { formatRange, formatUsd, plural } from '../lib/format';
 import { ErrorBox, Loading, CountPair } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
@@ -212,8 +214,143 @@ export function TripPage() {
             {profiles.data && <SurfStats profiles={[...profiles.data.values()]} />}
           </div>
         </div>
+
+        {/* ── Travelers ─────────────────────────────────────────────────── */}
+        <TravelersCard
+          tripId={tripId}
+          userIds={userIds}
+          review={review.data}
+          reviewPending={review.isPending}
+          profiles={profiles.data}
+        />
       </div>
     </>
+  );
+}
+
+/**
+ * Everyone on the trip, one row each, opening that person's own page.
+ *
+ * Every other card on this screen is per-requirement — one document read
+ * across all travelers. This is the other axis: one person, everything about
+ * them. The page it opens already existed; the only way in was through a
+ * document, so a traveler with nothing submitted was unreachable.
+ *
+ * The roster comes from `userIds` (the member query), never from the review —
+ * a failed or slow review must not make the trip look empty. Document counts
+ * and money are drawn from queries this page already ran, so the card costs
+ * no extra round trip.
+ */
+function TravelersCard({
+  tripId,
+  userIds,
+  review,
+  reviewPending,
+  profiles,
+}: {
+  tripId: string;
+  userIds: string[];
+  review: TripReview | undefined;
+  reviewPending: boolean;
+  profiles: Map<string, SurferProfile> | undefined;
+}) {
+  // React Query serves this from the cache the Money card already filled.
+  const { money, isOffline, hasMoney } = useTripMoney(tripId);
+
+  const nameOf = (userId: string) => profiles?.get(userId)?.name ?? 'Traveler';
+
+  // Alphabetical. This is the card you open to find one named person, not to
+  // see who joined first. Names arrive with the profile query, so the order
+  // settles once — everything else on the page loads in the same breath.
+  const rows = [...userIds].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+
+  return (
+    <div className="card enter">
+      <div className="card-head">
+        <h2>Travelers</h2>
+        <span className="muted small">{userIds.length}</span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="card-body">
+          <p className="muted small">Nobody has joined this trip yet.</p>
+        </div>
+      ) : (
+        rows.map(userId => {
+          const profile = profiles?.get(userId);
+          const docs = review?.travelers.find(t => t.userId === userId) ?? null;
+          const paid = money?.travelers.find(t => t.userId === userId) ?? null;
+
+          const detail =
+            [
+              docs ? `${docs.done}/${docs.total} approved` : reviewPending ? 'Loading…' : null,
+              hasMoney && paid ? moneyLine(paid, isOffline) : null,
+            ]
+              .filter(Boolean)
+              .join(' · ') || 'No details yet';
+
+          return (
+            <Link key={userId} to={`/trips/${tripId}/t/${userId}`} className="row-link">
+              <span className="row" style={{ gap: 11, minWidth: 0 }}>
+                <Avatar url={profile?.photoUrl ?? null} name={nameOf(userId)} />
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block' }}>{nameOf(userId)}</span>
+                  <span className="muted small" style={{ display: 'block', marginTop: 2 }}>
+                    {detail}
+                  </span>
+                </span>
+              </span>
+              <span className="row" style={{ gap: 10 }}>
+                {docs && docs.toReview > 0 && (
+                  <span className="tag tag-wait">{docs.toReview} waiting</span>
+                )}
+                <span className="muted" aria-hidden>
+                  ›
+                </span>
+              </span>
+            </Link>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+/**
+ * One traveler's money, short enough to sit on a list row.
+ *
+ * Both numbers, always — "paid in full" would need a threshold rule, and this
+ * file is not where money rules get invented. On an offline trip Swellyo has
+ * no idea what arrived, so quoting a paid figure there would be a lie.
+ */
+function moneyLine(m: TravelerMoney, isOffline: boolean): string {
+  if (m.totalUsd === null) return 'no price set';
+  if (isOffline) return `${formatUsd(m.totalUsd)} · paid outside Swellyo`;
+  return `${formatUsd(m.paidUsd)} of ${formatUsd(m.totalUsd)} paid`;
+}
+
+/** Profile photo, or the first letter when there is none. */
+function Avatar({ url, name }: { url: string | null; name: string }) {
+  const box = { width: 34, height: 34, borderRadius: 99, flexShrink: 0 } as const;
+
+  if (url) return <img src={url} alt="" style={{ ...box, objectFit: 'cover' }} />;
+
+  return (
+    <span
+      aria-hidden
+      style={{
+        ...box,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'var(--panel)',
+        border: '1px solid var(--line)',
+        color: 'var(--muted)',
+        fontSize: 13,
+        fontWeight: 640,
+      }}
+    >
+      {name.trim().charAt(0).toUpperCase() || '?'}
+    </span>
   );
 }
 

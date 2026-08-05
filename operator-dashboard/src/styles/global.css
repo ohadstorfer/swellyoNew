@@ -187,6 +187,29 @@ h3 {
   }
 }
 
+/* A list row inside a card where the WHOLE row is the link.
+ * Full-bleed, so it sits directly in .card — not inside .card-body. */
+.row-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  color: inherit;
+  border-bottom: 1px solid var(--line);
+  transition: background var(--t-fast) ease;
+}
+.row-link:last-child {
+  border-bottom: none;
+}
+.row-link:hover {
+  text-decoration: none;
+  background: var(--panel);
+}
+.row-link:active {
+  background: var(--line);
+}
+
 /* ── Tags ───────────────────────────────────────────────────────────────── */
 .tag {
   display: inline-block;

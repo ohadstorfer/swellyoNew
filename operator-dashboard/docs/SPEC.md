@@ -90,6 +90,9 @@ Top to bottom:
    Custom requirements go in a separate **Other requirements** list, one line each.
 4. **Medical flags** — counts only, no names: "3 injuries", "2 allergies", "5 diet notes".
 5. **Surf stats** — levels, board types, age range, nationalities. Background awareness, not a to-do list.
+6. **Travelers** — everyone on the trip, one row each, alphabetical: photo, name, `3/5 approved · $500 of $1,200 paid`, and a `2 waiting` tag when they have documents to review. Opens their traveler page (§4.4).
+   This is the only per-person way into the site — every other card is per-requirement, so before this a traveler who had submitted nothing could not be opened at all.
+   The roster comes from the member list, never from the review read: a slow or failed review must not make the trip look empty.
 
 ### 4.3 Requirement detail page
 
