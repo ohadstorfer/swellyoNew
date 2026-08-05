@@ -112,9 +112,15 @@ export const ConnectStripeCard: React.FC<{
     return (
       <Onboarding
         onExit={onOnboardingExit}
-        onLoadError={() => {
+        onLoadError={message => {
+          // Close first: leaving the sheet up behind an alert strands the
+          // operator on a spinner that will never finish.
           setOnboarding(false);
-          showErrorAlert('Stripe', null, 'Could not open Stripe. Try again.');
+          // `message` is the edge function's own text, which for the common
+          // setup failure names the Stripe account that is missing Connect.
+          // That is far more use than "try again" — it is not something
+          // trying again will fix.
+          showErrorAlert('Stripe', null, message || 'Could not open Stripe. Try again.');
         }}
       />
     );

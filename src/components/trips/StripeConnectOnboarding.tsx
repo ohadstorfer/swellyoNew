@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ConnectAccountOnboarding,
   ConnectComponentsProvider,
@@ -36,6 +36,14 @@ export const StripeConnectOnboarding: React.FC<{
   /** Fired when the component cannot load at all. */
   onLoadError?: (message: string) => void;
 }> = ({ onExit, onLoadError }) => {
+  // The SDK captures `fetchClientSecret` once, at init. A ref keeps the LATEST
+  // error handler reachable from inside that captured closure without
+  // rebuilding the Connect instance (which would restart the flow).
+  const onLoadErrorRef = useRef(onLoadError);
+  useEffect(() => {
+    onLoadErrorRef.current = onLoadError;
+  }, [onLoadError]);
+
   // useState's initialiser form, not useMemo: this must run exactly once per
   // mount. useMemo is a performance hint that React is allowed to discard, and
   // a second Connect instance would re-open the flow from the start.
@@ -44,7 +52,23 @@ export const StripeConnectOnboarding: React.FC<{
       publishableKey: PUBLISHABLE_KEY,
       // Called again by the SDK whenever the secret expires mid-flow, so it
       // must stay cheap and side-effect free.
-      fetchClientSecret: fetchConnectAccountSession,
+      //
+      // ⚠️ A REJECTION HERE DOES NOT REACH `onLoadError`. The SDK simply keeps
+      // showing its spinner, forever — which is exactly what a "Connect is not
+      // enabled" 503 looked like on the simulator: a blank sheet spinning with
+      // the real explanation sitting unread in the response body. So the
+      // failure is surfaced here by hand, and then rethrown so the SDK does
+      // not carry on with a secret it never got.
+      fetchClientSecret: async () => {
+        try {
+          return await fetchConnectAccountSession();
+        } catch (e) {
+          onLoadErrorRef.current?.(
+            e instanceof Error ? e.message : 'Could not reach Stripe. Please try again.',
+          );
+          throw e;
+        }
+      },
       appearance: {
         variables: {
           // The app's primary blue, so the form does not look borrowed.
