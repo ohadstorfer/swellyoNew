@@ -183,6 +183,33 @@ serve(async req => {
       return json({ chargesEnabled, accountId });
     }
 
+    // ── diagnose: which Stripe account and mode is this key actually on?
+    //
+    // Exists because Stripe sandboxes and Test mode are separate environments
+    // with separate keys and separate Connect signups, and NOTHING in the
+    // normal flow tells you which one STRIPE_SECRET_KEY belongs to. Two people
+    // can each be certain they enabled Connect and both be right about
+    // different environments.
+    //
+    // Read-only, and returns identifiers rather than secrets: an `acct_…` id
+    // and a livemode flag are not credentials. `charges_enabled` here is the
+    // PLATFORM's own, not any operator's.
+    if (action === 'diagnose') {
+      const platform = await stripe('account');
+      return json({
+        // The one value that settles "which environment is this?". Compare it
+        // against the account shown in the Stripe dashboard you enabled
+        // Connect on. A sandbox has a DIFFERENT acct_ id from Test mode.
+        platformAccountId: platform.id,
+        // From the key prefix, which is definitive and never exposes the key.
+        keyMode: STRIPE_SECRET_KEY.startsWith('sk_live_') ? 'live' : 'test',
+        // Does the CALLER already have a payout account? Not a platform fact —
+        // included because "did my account get created" is the other question
+        // people ask at this point.
+        callerHasPayoutAccount: !!accountId,
+      });
+    }
+
     // ── account_session: the native embedded onboarding component.
     //
     // Same Express account as the hosted flow — this only changes WHERE the
@@ -279,7 +306,46 @@ serve(async req => {
       onboardingUrl: link.url,
     });
   } catch (e) {
-    console.error('[stripe-connect-onboard]', e instanceof Error ? e.message : e);
+    const raw = e instanceof Error ? e.message : String(e);
+    console.error('[stripe-connect-onboard]', raw);
+
+    // A SETUP problem, not a runtime one: this platform's Stripe account has
+    // never been signed up for Connect, so it may not create accounts for
+    // anyone. Collapsing it into the generic message below cost a day of
+    // guessing — the operator saw "Could not start Stripe onboarding" and had
+    // no way to know it was nothing to do with them.
+    //
+    // The trap underneath it: Stripe sandboxes and Test mode are SEPARATE
+    // environments, each with its own keys AND its own Connect signup.
+    // Enabling Connect in one while STRIPE_SECRET_KEY comes from the other
+    // produces exactly this error, and nothing on screen says which
+    // environment is which. So name the account the key actually belongs to —
+    // an `acct_…` id is an identifier, not a credential, and it turns
+    // "somewhere isn't set up" into "THIS one isn't set up".
+    if (/signed up for Connect/i.test(raw)) {
+      let who = '';
+      try {
+        const platform = await stripe('account');
+        const mode = STRIPE_SECRET_KEY.startsWith('sk_live_') ? 'live' : 'test';
+        who =
+          ` The key in use is a ${mode} key for Stripe account ${platform.id}.` +
+          ' Connect must be enabled on THAT account — a sandbox and Test mode' +
+          ' are separate environments with separate Connect signups.';
+      } catch {
+        // Never let the diagnostic itself break the response.
+      }
+      return json(
+        {
+          error:
+            'Stripe Connect is not enabled on this Swellyo Stripe account, so operator ' +
+            'accounts cannot be created yet. This is a one-time setup step and is not ' +
+            'something the operator can fix.' + who,
+          code: 'connect_not_enabled',
+        },
+        503,
+      );
+    }
+
     return json({ error: 'Could not start Stripe onboarding' }, 500);
   }
 });
