@@ -85,10 +85,13 @@ organized_trip_travelers_documents
   full_name       text           -- full name as printed
   nationality     text
   expiry_date     date
-  file_deleted_at timestamptz    -- set by the purge job once the object is gone
+  file_deleted_at timestamptz    -- set once the object is gone: by the reject flow
+                                 -- at reject time, by the purge job otherwise
 ```
 
 There is no `doc_type` column — the requirement the row points at already knows its kind. The canonical review fields are `approved_at` / `approved_by` / `rejected_at` / `approbation_note`, added by `approval-review.md`. There is no separate audit table (decided 2026-07-23): a reject deletes the **storage object** immediately and keeps the row, carrying `rejected_at` and the note. The traveler's re-upload replaces the row (new file, review fields cleared).
+
+**A reject stamps `file_deleted_at` itself** (`operator_mark_document_file_deleted`, migration `20260805000200`), called by the client only after `storage.remove()` returns clean. Before that it was left to the nightly purge, so for up to a day the row claimed a file that was already gone and the review screen offered to open it — the operator got Storage's raw "Object not found". **The order is load-bearing:** the purge's third case sweeps `rejected_at not null and file_deleted_at is null`, so a stamp written before the object is actually gone hides a surviving file from the only job that would remove it. Stamp last, or not at all. Readers should still treat `rejected_at` alone as "no file" — it is the older, wider truth, and it covers rows from before this and deletes that failed.
 
 **This row is also the single source of truth for the upload requirement's state — there is no separate state table (decided 2026-07-23). See `requirements-model.md`.** No row = open, row with `approved_at` and `rejected_at` null = submitted, `approved_at` set = approved, `rejected_at` set = rejected (needs a new upload).
 

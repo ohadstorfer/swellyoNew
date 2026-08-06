@@ -121,8 +121,12 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
     [participants, currentUserId]
   );
   const isInsider = isHost || isMember;
-  // Insiders see who's committed; outside viewers do not.
-  const canSeeCommitted = isInsider;
+  // Insiders see who's committed; outside viewers do not. Operator trips
+  // (hosting_style 'C') have no commitment at all — the traveler paid — so the
+  // count and the badges go away here too, the same as in the Plan tab. This
+  // screen is one tap from it ("View all"); leaving "0 committed" here would
+  // just move the dead row rather than remove it.
+  const canSeeCommitted = isInsider && trip?.hosting_style !== 'C';
 
   const participantCount = participants.length;
   const maxParticipants = trip?.max_participants ?? null;

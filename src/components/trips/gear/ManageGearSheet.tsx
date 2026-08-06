@@ -588,13 +588,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // The app's one primary CTA — same as onboarding's Next and as `primaryBtn`
+  // above. See TravelerPriceSheet.
   saveBtn: {
     flex: 1,
-    backgroundColor: SHEET.brandTeal,
-    paddingVertical: 16,
-    borderRadius: 10,
+    height: 56,
+    backgroundColor: '#212121',
+    borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   saveBtnDisabled: { opacity: 0.35 },
-  saveText: { color: '#FFFFFF', fontWeight: '700', fontFamily: SHEET.fontHead, fontSize: 15 },
+  saveText: { color: '#FFFFFF', fontWeight: '600', fontFamily: ff('Montserrat', '600'), fontSize: 16 },
 });

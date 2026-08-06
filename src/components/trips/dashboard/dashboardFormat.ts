@@ -34,3 +34,45 @@ export function formatUsd(usd: number | null | undefined): string {
 export function plural(n: number, one: string, many?: string): string {
   return `${n} ${n === 1 ? one : many ?? `${one}s`}`;
 }
+
+/**
+ * `2 injuries · 1 allergy · 3 diet notes` — the flagged counts, zeros removed.
+ *
+ * Returns an EMPTY STRING when nothing is flagged, so the caller can say
+ * "Nothing flagged." rather than printing a row of zeros. That distinction is
+ * the whole point: this line used to render "0 medications" as content, four
+ * words of noise sitting beside the counts that carry signal.
+ *
+ * Lives here rather than in the component so the zero-dropping is testable
+ * without a renderer — it is the part with the edge cases.
+ */
+export function medicalFlagLine(flags: {
+  injuriesReported: number;
+  allergiesReported: number;
+  dietaryReported: number;
+  medicationsReported: number;
+}): string {
+  return [
+    flags.injuriesReported > 0 && plural(flags.injuriesReported, 'injury', 'injuries'),
+    flags.allergiesReported > 0 && plural(flags.allergiesReported, 'allergy', 'allergies'),
+    flags.dietaryReported > 0 &&
+      `${flags.dietaryReported} diet ${flags.dietaryReported === 1 ? 'note' : 'notes'}`,
+    flags.medicationsReported > 0 && plural(flags.medicationsReported, 'medication'),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/**
+ * What is still owed on the trip.
+ *
+ * Clamped at zero: an over-refund would otherwise print a negative balance,
+ * which reads as the operator owing the traveler — not a claim this screen is
+ * entitled to make.
+ *
+ * Meaningless on an `offline` trip, where Swellyo does not know what arrived.
+ * The caller decides that; this is arithmetic.
+ */
+export function outstandingUsd(expectedUsd: number, collectedUsd: number): number {
+  return Math.max(0, expectedUsd - collectedUsd);
+}

@@ -6,7 +6,7 @@
 // in isolation. Operational sections (join requests, breakdown, destructive
 // actions) stay in TripDetailScreen below these blocks.
 
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
+// Aliased: this file already uses RN's own `Animated` for PressableScale.
+import Reanimated, {
+  FadeIn,
+  FadeInDown,
+  FadeOut,
+  LinearTransition,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { AdminUpdateRow, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
@@ -27,7 +39,7 @@ import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../../assets/images';
 import { formatPrice, isIsraeli } from '../../../utils/currency';
-import { isPayKind } from '../../../services/trips/tripDocumentsService';
+import { isPayKind, actionForRequirement } from '../../../services/trips/tripDocumentsService';
 import type {
   AdminUpdate,
   EnrichedGearItem,
@@ -303,7 +315,13 @@ export const TripMemberSection: React.FC<{
   /** Host only — number of pending join requests. When > 0, a red pill next to
    *  "View all" nudges the admin to open the Members screen and act on them. */
   pendingCount?: number;
-}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0 }) => {
+  /** Off on operator trips (hosting_style 'C'), which drops the "Committed to
+   *  trip" progress AND the per-avatar passport badge. Commitment is a peer-trip
+   *  concept — "how serious is everyone about this?" On an operator trip the
+   *  traveler paid, so the answer is never in doubt and the bar would read 0/N
+   *  forever. Defaults to on so every existing caller is unchanged. */
+  showCommitment?: boolean;
+}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0, showCommitment = true }) => {
   // "View all (N)" = the actual number of members to view. Previously this used
   // the trip cap (max_participants), which made a 2-member/13-cap trip read as
   // "View all (13)" — i.e. "13 members". Always show the real head-count.
@@ -371,7 +389,7 @@ export const TripMemberSection: React.FC<{
                     <View style={styles.memberBadge}>
                       <AdminBadgeIcon size={26} />
                     </View>
-                  ) : m.committed ? (
+                  ) : showCommitment && m.committed ? (
                     <View style={styles.memberBadge}>
                       <CommittedPassportIcon size={26} />
                     </View>
@@ -388,21 +406,24 @@ export const TripMemberSection: React.FC<{
         <Text style={styles.empty}>No members yet</Text>
       )}
 
-      {/* "Committed to trip" progress — committed head-count vs the cap. */}
-      <View style={styles.memberProgress}>
-        <View style={styles.memberProgressRow}>
-          <View style={styles.memberProgressLabelRow}>
-            <CommittedPassportIcon size={24} />
-            <Text style={styles.memberProgressLabel}>Committed to trip</Text>
+      {/* "Committed to trip" progress — committed head-count vs the cap.
+          Peer trips only; see `showCommitment`. */}
+      {showCommitment && (
+        <View style={styles.memberProgress}>
+          <View style={styles.memberProgressRow}>
+            <View style={styles.memberProgressLabelRow}>
+              <CommittedPassportIcon size={24} />
+              <Text style={styles.memberProgressLabel}>Committed to trip</Text>
+            </View>
+            <Text style={styles.memberProgressCount}>
+              {committedCount}/{participantCount}
+            </Text>
           </View>
-          <Text style={styles.memberProgressCount}>
-            {committedCount}/{participantCount}
-          </Text>
+          <View style={styles.memberProgressTrack}>
+            <View style={[styles.memberProgressFill, { width: `${fillPct * 100}%` }]} />
+          </View>
         </View>
-        <View style={styles.memberProgressTrack}>
-          <View style={[styles.memberProgressFill, { width: `${fillPct * 100}%` }]} />
-        </View>
-      </View>
+      )}
     </View>
   );
 };
@@ -772,6 +793,15 @@ export type DocumentRow = {
    *  state so the traveler sees something happening instead of an unchanged
    *  screen. */
   confirming?: boolean;
+  /** Pay rows only — `confirming` ran out of patience and the webhook still
+   *  hasn't landed. Distinct from `confirming` because it is NOT transient:
+   *  the row stays here until the server says otherwise.
+   *
+   *  ⚠️ The row must never fall back to a plain "Pay" from this state. Someone
+   *  who has just been through Checkout for $2,000 and is shown a Pay button
+   *  will pay again — this exists precisely so that button is not there. It
+   *  stays tappable, but the tap opens the explanation, not a new checkout. */
+  pending?: boolean;
 };
 
 /** "12 Oct" — deadlines are always shown as a real date, never as
@@ -826,6 +856,10 @@ function statusFor(row: DocumentRow): { label: string; tone: 'accent' | 'muted' 
   // Checkout just closed — the webhook hasn't confirmed yet, so this is
   // neither "Pay" (misleading — they just paid) nor "Done" (unconfirmed).
   if (row.confirming) return { label: 'Confirming…', tone: 'muted' };
+  // The poll gave up. "Processing" and not "Pay": we cannot say it succeeded,
+  // but offering to charge them again for something that may already have gone
+  // through is the one outcome here worth engineering against.
+  if (row.pending) return { label: 'Processing', tone: 'muted' };
   const base = DOC_STATUS[row.state];
   if (row.state === 'approved') return base;
   if (row.kind === 'waiver') {
@@ -867,6 +901,90 @@ const DocProgress: React.FC<{ done: number; total: number }> = ({ done, total })
   );
 };
 
+/** The requirement's own icon. `passport` is the only kind with a real TripIcon;
+ *  the rest fall back to Ionicons through DOC_ICON. */
+const DocKindIcon: React.FC<{ kind: string; size?: number; color?: string }> = ({
+  kind,
+  size = 18,
+  color = '#535862',
+}) =>
+  kind === 'passport' ? (
+    <TripIcon name="passport" size={size} color={color} strokeWidth={1.4} />
+  ) : (
+    <Ionicons name={DOC_ICON[kind] ?? 'document-outline'} size={size} color={color} />
+  );
+
+/** Can the traveler still open this once it is approved? An upload opens the
+ *  file they sent, a waiver re-opens to be re-read, the medical form re-opens to
+ *  be corrected. A paid row opens nothing — the tap handler returns early — so
+ *  it must not wear a chevron that promises otherwise. */
+function isOpenableWhenDone(row: DocumentRow): boolean {
+  if (isPayKind(row.kind)) return false;
+  return actionForRequirement({ kind: row.kind, reqType: row.reqType }) !== null;
+}
+
+/**
+ * One approved item, filed in the wallet.
+ *
+ * `justArrived` is the payoff: the item the traveler just got approved lands
+ * with a teal wash that fades out over ~1s, so their eye follows it from the
+ * task list into the wallet instead of having to re-find it. Every other row
+ * renders flat — a wallet opened twice a day cannot flash every time.
+ */
+const WalletRow: React.FC<{
+  row: DocumentRow;
+  isLast: boolean;
+  justArrived: boolean;
+  onPress: () => void;
+}> = ({ row, isLast, justArrived, onPress }) => {
+  const wash = useSharedValue(0);
+  useEffect(() => {
+    if (!justArrived) return;
+    // Set to 1 first: the row mounts before `justArrived` is known (it is
+    // computed one commit later), so the wash has to be lit here, not at
+    // useSharedValue's initial value.
+    wash.value = 1;
+    // Holds while the entrance finishes, then fades. Slow on purpose — this is
+    // the one moment on the card that is allowed to linger.
+    wash.value = withDelay(320, withTiming(0, { duration: 900 }));
+  }, [justArrived, wash]);
+  const washStyle = useAnimatedStyle(() => ({ opacity: wash.value }));
+
+  const openable = isOpenableWhenDone(row);
+  return (
+    <Pressable
+      onPress={openable ? onPress : undefined}
+      disabled={!openable}
+      style={({ pressed }) => [
+        styles.ygRow,
+        isLast && styles.ygRowLast,
+        pressed && openable && styles.docRowPressed,
+      ]}
+    >
+      {/* Behind the content — first child, so it never paints over the title. */}
+      <Reanimated.View
+        pointerEvents="none"
+        style={[StyleSheet.absoluteFill, styles.walletWash, washStyle]}
+      />
+      <View style={styles.walletIcon}>
+        <DocKindIcon kind={row.kind} />
+      </View>
+      {/* `ygItem` alone — NOT with docRowTitle, which is flex:0 and only makes
+          sense inside the task rows' flex:1 text column. Here the title IS the
+          flexing column, and pinning it to flex:0 would let a long one shove
+          the chevron off the row. */}
+      <Text style={styles.ygItem} numberOfLines={1}>
+        {row.title}
+      </Text>
+      {isPayKind(row.kind) ? (
+        <Text style={styles.walletPaid}>Paid</Text>
+      ) : openable ? (
+        <Ionicons name="chevron-forward" size={18} color="#C4C4C4" />
+      ) : null}
+    </Pressable>
+  );
+};
+
 export const TripDocumentsCard: React.FC<{
   rows: DocumentRow[];
   /** 'member' = the traveler's own checklist. 'host' = the operator reviewing. */
@@ -898,6 +1016,42 @@ export const TripDocumentsCard: React.FC<{
   budgetFxRate,
   viewerCountry,
 }) => {
+  // ── Move-to-wallet animation state ──────────────────────────────────────
+  // Hooks first: the early return below is conditional, the hooks cannot be.
+  //
+  // `live` is a post-mount gate. Nothing animates on the first paint — the
+  // traveler opens this tab constantly and an entrance animation on every
+  // approved item they already knew about would just make the tab feel slow.
+  // Only a change that happens WHILE they are looking is worth animating.
+  const reduceMotion = useReducedMotion();
+  const [live, setLive] = useState(false);
+  useEffect(() => setLive(true), []);
+  const animate = live && !reduceMotion;
+
+  // Which items crossed into `approved` since the last render — the ones that
+  // just travelled from Open tasks into the wallet.
+  const approvedKey = rows
+    .filter(r => r.state === 'approved')
+    .map(r => r.requirementId)
+    .join(',');
+  const prevApprovedRef = useRef<Set<string> | null>(null);
+  const [justArrived, setJustArrived] = useState<string[]>([]);
+  useEffect(() => {
+    const current = new Set(approvedKey ? approvedKey.split(',') : []);
+    const prev = prevApprovedRef.current;
+    prevApprovedRef.current = current;
+    if (!prev) return; // first pass — everything here is old news
+    const fresh = [...current].filter(id => !prev.has(id));
+    if (fresh.length) setJustArrived(fresh);
+  }, [approvedKey]);
+  // Let go of the flag once the wash has played, so a later re-render can't
+  // re-light it.
+  useEffect(() => {
+    if (!justArrived.length) return;
+    const t = setTimeout(() => setJustArrived([]), 2000);
+    return () => clearTimeout(t);
+  }, [justArrived]);
+
   const canManage = mode === 'host' && !!onManage;
   // Nothing asked for = nothing to show. Keeps peer trips completely untouched.
   // The one exception is an operator who can still add something: with no card
@@ -942,7 +1096,7 @@ export const TripDocumentsCard: React.FC<{
               <Ionicons name="add" size={20} color={T.accent} />
             </View>
             <View style={styles.docRowText}>
-              <Text style={styles.ygItem} numberOfLines={1}>
+              <Text style={[styles.ygItem, styles.docRowTitle]} numberOfLines={1}>
                 Ask for documents
               </Text>
               <Text style={styles.docDue} numberOfLines={1}>
@@ -963,7 +1117,7 @@ export const TripDocumentsCard: React.FC<{
               />
             </View>
             <View style={styles.docRowText}>
-              <Text style={styles.ygItem} numberOfLines={1}>
+              <Text style={[styles.ygItem, styles.docRowTitle]} numberOfLines={1}>
                 {waiting
                   ? `${pendingReviewCount} waiting for you`
                   : 'Nothing to review'}
@@ -981,22 +1135,30 @@ export const TripDocumentsCard: React.FC<{
     );
   }
 
-  // ── Traveler: their own checklist ───────────────────────────────────────
+  // ── Traveler: open tasks, then the travel wallet ────────────────────────
+  // One list used to carry both "you still have to do this" and "this is
+  // done", so the work was permanently mixed in with the receipts. Split in
+  // two: Open tasks is the only part that asks anything of the traveler, and an
+  // item LEAVES it the moment it is approved. That departure is the reward, and
+  // it is the one thing on this card worth animating.
   const done = rows.filter(r => r.state === 'approved').length;
-  const allDone = done === rows.length;
+  const tasks = rows.filter(r => r.state !== 'approved');
+  const walletRows = rows.filter(r => r.state === 'approved');
+  const allDone = tasks.length === 0;
 
   return (
+    <>
     <View style={styles.ygBlock}>
       <View style={styles.ygHeader}>
         <View style={styles.ygHeaderText}>
-          <Text style={styles.ygTitle}>Documents</Text>
-          <Text style={styles.ygSub}>Your organiser needs these to book for you</Text>
+          <Text style={styles.ygTitle}>Open tasks</Text>
+          <Text style={styles.ygSub}>What your organiser still needs from you</Text>
         </View>
         {/* The count answers the only question a traveler has here — "how much
             is left?" — which the list itself never said out loud. */}
         <View style={styles.ygHeaderRight}>
           <Text style={[styles.docCount, allDone && styles.docCountDone]}>
-            {allDone ? 'All done' : `${done} of ${rows.length}`}
+            {allDone ? 'All done' : `${tasks.length} left`}
           </Text>
         </View>
       </View>
@@ -1004,16 +1166,41 @@ export const TripDocumentsCard: React.FC<{
       <DocProgress done={done} total={rows.length} />
 
       <View style={styles.ygCard}>
-        {rows.map((row, i) => {
+        {allDone ? (
+          // Delayed past the last row's exit, so the two never overlap inside
+          // the card.
+          <Reanimated.View entering={animate ? FadeIn.delay(220).duration(240) : undefined}>
+            <View style={[styles.ygRow, styles.ygRowLast]}>
+              <View style={styles.walletIconDone}>
+                <Ionicons name="checkmark" size={16} color="#FFFFFF" />
+              </View>
+              <View style={styles.docRowText}>
+                <Text style={[styles.ygItem, styles.docRowTitle]} numberOfLines={1}>
+                  Nothing left to do
+                </Text>
+                <Text style={styles.docDue} numberOfLines={1}>
+                  Everything is in your travel wallet
+                </Text>
+              </View>
+            </View>
+          </Reanimated.View>
+        ) : null}
+        {tasks.map((row, i) => {
           const status = statusFor(row);
-          const isLast = i === rows.length - 1;
+          const isLast = i === tasks.length - 1;
           const showNote = row.state === 'rejected' && !!row.note;
           // A deadline is only worth showing while it still matters.
           const due =
             row.dueDate && row.state !== 'approved' && row.state !== 'submitted'
               ? formatDue(row.dueDate)
               : null;
-          const showSecondLine = showNote || !!due;
+          // The one sentence that stops a second payment, on the row itself —
+          // not only behind the tap. Outranks the deadline: "was due 12 Oct"
+          // next to a payment that may already be through is the wrong thing
+          // to be reading. A due date the traveler has, in all likelihood,
+          // just met.
+          const pendingHint = row.pending ? "We'll tick this off automatically" : null;
+          const showSecondLine = !!pendingHint || showNote || !!due;
           // Only these two states are quiet enough to be plain text. Anything
           // the traveler still has to act on gets a pill, so scanning the card
           // shows the work without reading a single word.
@@ -1044,8 +1231,16 @@ export const TripDocumentsCard: React.FC<{
           const showApprox = !!approxLocal;
 
           return (
-            <Pressable
+            // The wrapper owns the exit: approved → the row fades out here and
+            // the ones under it slide up to close the gap, while the same item
+            // fades into the wallet below. `layout` is what makes the gap close
+            // instead of snap.
+            <Reanimated.View
               key={row.requirementId}
+              layout={animate ? LinearTransition.duration(220) : undefined}
+              exiting={animate ? FadeOut.duration(160) : undefined}
+            >
+            <Pressable
               onPress={() => onPressRow(row)}
               disabled={!!row.confirming}
               // A rejection needs two lines, so the fixed row height is dropped
@@ -1060,7 +1255,7 @@ export const TripDocumentsCard: React.FC<{
               <GearCheckbox checked={row.state === 'approved'} />
 
               <View style={styles.docRowText}>
-                <Text style={styles.ygItem} numberOfLines={1}>
+                <Text style={[styles.ygItem, styles.docRowTitle]} numberOfLines={1}>
                   {row.title}
                 </Text>
                 {row.amountError ? (
@@ -1073,7 +1268,11 @@ export const TripDocumentsCard: React.FC<{
                     ) : null}
                   </Text>
                 ) : null}
-                {showNote ? (
+                {pendingHint ? (
+                  <Text style={styles.docPending} numberOfLines={1}>
+                    {pendingHint}
+                  </Text>
+                ) : showNote ? (
                   <Text style={styles.docNote} numberOfLines={2}>
                     {row.note}
                   </Text>
@@ -1098,10 +1297,70 @@ export const TripDocumentsCard: React.FC<{
                 {status.label}
               </Text>
             </Pressable>
+            </Reanimated.View>
           );
         })}
       </View>
     </View>
+
+    {/* ── Travel wallet ─────────────────────────────────────────────────────
+        Everything that has been approved, in one place, so "where is my
+        passport copy?" has an answer that is not "scroll the checklist". It is
+        rendered even while empty: the traveler learns where their documents
+        will end up BEFORE the first one lands, and the first arrival is then a
+        row appearing inside a box that was already there — not a whole section
+        materialising out of nowhere. */}
+    <View style={styles.ygBlock}>
+      <View style={styles.ygHeader}>
+        <View style={styles.ygHeaderText}>
+          <Text style={styles.ygTitle}>Travel wallet</Text>
+          <Text style={styles.ygSub}>Everything that's already been approved</Text>
+        </View>
+      </View>
+
+      <View style={styles.ygCard}>
+        {walletRows.length === 0 ? (
+          <Reanimated.View exiting={animate ? FadeOut.duration(120) : undefined}>
+            <View style={[styles.ygRow, styles.ygRowLast]}>
+              <View style={styles.walletIcon}>
+                <Ionicons name="folder-open-outline" size={18} color="#A0A0A0" />
+              </View>
+              <Text style={[styles.ygItem, styles.walletEmpty]} numberOfLines={1}>
+                Approved documents land here
+              </Text>
+            </View>
+          </Reanimated.View>
+        ) : (
+          walletRows.map((row, i) => (
+            <Reanimated.View
+              key={row.requirementId}
+              layout={animate ? LinearTransition.duration(220) : undefined}
+              // Delayed so it arrives AFTER the task row has left — that is what
+              // turns two separate animations into one move. The initial
+              // translateY is overridden to -10 (FadeInDown ships +25, i.e. it
+              // rises from below): the item travels DOWN the screen from the
+              // task list, so it has to arrive moving down, and 10px is enough
+              // to read as movement without looking like it fell.
+              entering={
+                animate
+                  ? FadeInDown.delay(170)
+                      .duration(260)
+                      .withInitialValues({ transform: [{ translateY: -10 }] })
+                  : undefined
+              }
+            >
+              <WalletRow
+                row={row}
+                isLast={i === walletRows.length - 1}
+                justArrived={animate && justArrived.includes(row.requirementId)}
+                onPress={() => onPressRow(row)}
+              />
+            </Reanimated.View>
+          ))
+        )}
+      </View>
+    </View>
+    </>
   );
 };
 
@@ -1428,8 +1687,34 @@ const styles = StyleSheet.create({
   cbBoxChecked: { backgroundColor: T.accent, borderColor: T.accent },
 
   // Documents rows — same rhythm as ygRow; only a rejection needs two lines.
-  docRowTall: { height: undefined, minHeight: 54, paddingVertical: 10 },
-  docRowText: { flex: 1, gap: 2 },
+  // `height: 'auto'`, NOT `height: undefined`. StyleSheet.create drops keys
+  // whose value is undefined, so the old version never cancelled `ygRow`'s
+  // `height: 54` — it only added a minHeight the row was already taller than.
+  // Every row stayed pinned at 54 and clipped anything that didn't fit.
+  //
+  // It took three lines to become visible: title + amount + a second line is
+  // ~75px. Two lines fit inside 54 by luck, which is why a rejected passport
+  // ("Send a new one" + reason) always looked fine and a priced pay row with
+  // a note or a due date did not.
+  docRowTall: { height: 'auto', minHeight: 54, paddingVertical: 10 },
+  // `justifyContent` so the title and whatever follows it stay a PAIR in the
+  // middle of the row, however tall the row ends up. Without it a two-line row
+  // read as two unrelated lines, one clinging to the top edge and one to the
+  // bottom, while the checkbox and the pill sat centred between them.
+  docRowText: { flex: 1, gap: 2, justifyContent: 'center' },
+  // `ygItem` carries `flex: 1` because on a GEAR row the title is a direct
+  // child of the row and has to take the free WIDTH. Here it is a child of the
+  // column above, where that same `flex: 1` grows it VERTICALLY and pushes the
+  // amount away from it. Same type, no growth.
+  //
+  // It MUST be the `flex` shorthand, not `flexGrow: 0`. `flex: 1` also means
+  // `flexBasis: 0`, and overriding only the grow leaves that basis in place —
+  // a zero-basis box that is not allowed to grow measures ZERO, so every title
+  // in a fixed-height row vanished (rows with a note survived, because their
+  // height is auto and a zero basis still falls back to content). `flex: 0` is
+  // grow 0 / shrink 0 / basis AUTO, and StyleSheet.flatten lets the later
+  // shorthand replace the earlier one outright.
+  docRowTitle: { flex: 0 },
   // Rows sit inside a bordered card, so a press scales badly (the corners peel
   // away from the divider). A background wash gives the same "heard you" without
   // breaking the card.
@@ -1445,6 +1730,10 @@ const styles = StyleSheet.create({
   docAmountError: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: T.muted },
   docNote: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: '#C4361E' },
   docDue: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: T.muted },
+  // Amber, matching PaymentStatusSheet's waiting ring — the same "in flight,
+  // nothing is wrong" register. Not `docNote`'s red: red here would read as
+  // "your payment failed", which is the thing we cannot claim.
+  docPending: { fontFamily: ff('Inter', '400'), fontSize: 11, lineHeight: 15, color: '#B26B00' },
   docDueLate: { color: '#C4361E' },
   docStatus: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted },
   docStatusDone: { color: T.done },
@@ -1466,6 +1755,32 @@ const styles = StyleSheet.create({
   // Header count + progress bar (traveler view).
   docCount: { fontFamily: ff('Inter', '600'), fontSize: 12, fontWeight: '600', color: T.muted },
   docCountDone: { color: T.done },
+
+  // ── Travel wallet ───────────────────────────────────────────────────────
+  // A filed document, not a task: the checklist's 20px checkbox is replaced by
+  // the requirement's own icon in a quiet circle, and nothing on the row asks
+  // to be acted on.
+  walletIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F6F6F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletIconDone: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: T.done,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletEmpty: { color: '#A0A0A0' },
+  walletPaid: { fontFamily: ff('Inter', '600'), fontSize: 12, fontWeight: '600', color: T.done },
+  // The arrival wash. Sits behind the row content at opacity 0 and is lit only
+  // for the item that just moved in.
+  walletWash: { backgroundColor: '#E4F8FB' },
   docProgTrack: {
     height: 4,
     borderRadius: 2,

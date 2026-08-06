@@ -130,6 +130,25 @@ serve(async req => {
       return json({ error: 'returnUrl scheme is not allowed' }, 400);
     }
 
+    // Success and cancel used to be the SAME url, which made the two
+    // outcomes indistinguishable to the app: a traveler who pressed "back"
+    // inside Checkout came home on exactly the same redirect as one who had
+    // just paid, and got eight seconds of "Confirming…" for a payment that
+    // never started. The marker is what lets `startCheckout` tell them apart.
+    //
+    // Appended with the right separator because the Expo Go return url
+    // (`exp://<ip>:8081/--/pay/done`) can already carry a query string, and a
+    // second bare `?` would make Stripe's redirect unparseable.
+    //
+    // ⚠️ Read by `readPayMarker` in services/trips/tripPaymentsService.ts.
+    // Renaming the param on one side silently degrades every cancel back into
+    // the old "confirm a payment that never happened" behaviour — the client
+    // deliberately falls back to 'returned' when the marker is absent, because
+    // a missing marker also means "an older session, created before this
+    // shipped", and treating THAT as a cancel would hide a real payment.
+    const withMarker = (url: string, outcome: 'success' | 'cancel') =>
+      `${url}${url.includes('?') ? '&' : '?'}swellyo_pay=${outcome}`;
+
     // ── 1. The requirement must be a live pay row.
     const { data: req_ } = await supabase
       .from('organized_trip_requirements')
@@ -406,7 +425,21 @@ serve(async req => {
     //      cannot pay through. The refund adds a ledger row, which changes
     //      the count and forces a fresh key. idempotencySuffix does the same
     //      job for an expired-and-replaced session (see above).
-    const idempotencyKey = `checkout:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
+    // ⚠️ `m2` is a REQUEST-SHAPE version, not a feature flag. Stripe does not
+    // merely ignore an idempotency key whose parameters have changed — it
+    // rejects the whole call with a 400 `idempotency_error`, which `stripe()`
+    // throws and the catch below turns into a 500. Adding the `swellyo_pay`
+    // marker to success_url/cancel_url changed the request shape, so every
+    // traveler holding a key minted in the previous 24h was hard-wedged:
+    // "We couldn't start the payment", on every retry, until the window aged
+    // out. Observed in production 2026-08-05 (v9 → 200, v10 → 500 on every
+    // call).
+    //
+    // BUMP THIS STRING whenever any field of the create call below changes.
+    // Safe to bump: the open-session lookup above already early-returns a
+    // matching live session, so a new key does not mint a duplicate payable
+    // session — it only takes effect where no fresh session existed anyway.
+    const idempotencyKey = `checkout:m2:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
     const session = await stripe(
       'checkout/sessions',
       {
@@ -433,8 +466,14 @@ serve(async req => {
         'metadata[trip_id]': req_.trip_id,
         'metadata[user_id]': userId,
         'metadata[requirement_id]': requirementId,
-        success_url: returnUrl,
-        cancel_url: returnUrl,
+        // ⚠️ These are part of the request SHAPE, so changing them requires
+        // bumping the `m2` namespace on the idempotency key above. An earlier
+        // version of this comment claimed the opposite — that leaving the urls
+        // out of the key was safe because Stripe would "replay the cached
+        // response". It does not: a key reused with different parameters is a
+        // 400, not a replay. That mistake took the whole payment flow down.
+        success_url: withMarker(returnUrl, 'success'),
+        cancel_url: withMarker(returnUrl, 'cancel'),
       },
       idempotencyKey,
     );

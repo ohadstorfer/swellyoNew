@@ -71,8 +71,11 @@ export function TripPage() {
 
       <div className="stack">
         {/* ── Needs review ──────────────────────────────────────────────── */}
+        {/* Straight to everything that needs a decision — not to the first
+            requirement that happens to contain some of it. A banner counting
+            three documents used to open a page showing one. */}
         {review.data && review.data.totalToReview > 0 && (
-          <Link to={`/trips/${tripId}/d/${firstPendingRequirement(review.data) ?? ''}`} className="banner enter">
+          <Link to={`/trips/${tripId}/waiting`} className="banner enter">
             <span>
               {plural(review.data.totalToReview, 'document')} waiting for you
             </span>
@@ -129,12 +132,24 @@ export function TripPage() {
               );
             })}
 
-            {/* Waiver and medical are not uploads, so they get a short line. */}
+            {/* Waiver and medical are not uploads, so they get a short line
+                rather than a row of their own. They still OPEN, though — the
+                page behind them lists who has done it and who has not, which is
+                the only question this line raises. It read as dead text while
+                the app made the same two items tappable. */}
             {(waiver || medical) && (
-              <p className="muted small" style={{ paddingTop: 10 }}>
-                {waiver && `Waiver signed ${agreedCount(waiver.id)}/${memberCount}`}
-                {waiver && medical && ' · '}
-                {medical && `Medical form ${agreedCount(medical.id)}/${memberCount}`}
+              <p className="small" style={{ paddingTop: 10 }}>
+                {waiver && (
+                  <Link className="muted" to={`/trips/${tripId}/d/${waiver.id}`}>
+                    Waiver signed {agreedCount(waiver.id)}/{memberCount}
+                  </Link>
+                )}
+                {waiver && medical && <span className="muted"> · </span>}
+                {medical && (
+                  <Link className="muted" to={`/trips/${tripId}/d/${medical.id}`}>
+                    Medical form {agreedCount(medical.id)}/{memberCount}
+                  </Link>
+                )}
               </p>
             )}
           </div>
@@ -428,20 +443,6 @@ function MoneyCard({ tripId }: { tripId: string }) {
       </Link>
     </>
   );
-}
-
-/** Jump target for the review banner: the first requirement with work waiting. */
-function firstPendingRequirement(review: {
-  requirements: { id: string }[];
-  travelers: { items: { requirementId: string; state: string }[] }[];
-}): string | null {
-  for (const r of review.requirements) {
-    const pending = review.travelers.some(
-      t => t.items.find(i => i.requirementId === r.id)?.state === 'submitted',
-    );
-    if (pending) return r.id;
-  }
-  return null;
 }
 
 function SurfStats({ profiles }: { profiles: { surfLevel: string | null; boardType: string | null; age: number | null; countryFrom: string | null }[] }) {

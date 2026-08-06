@@ -65,6 +65,17 @@ export function useTripRealtime(tripId: string) {
         [...tripsKeys.detailUpdates(tripId)],
         [...tripsKeys.detailGear(tripId)],
         [...tripsKeys.detailGearRequests(tripId)],
+        // The operator Dashboard's three queries — money, medical, profiles.
+        // They sat outside EVERY automatic refresh path: not here, not in the
+        // broadcast handler below, nowhere. Their only invalidation in the whole
+        // repo was one manual call from the traveler price sheet. So an operator
+        // who backgrounded the app and came back read yesterday's money.
+        //
+        // ONE PREFIX KEY, not three. Prefix matching covers all three, and the
+        // header above is explicit that each entry here costs two synchronous
+        // O(total-cache) scans — three keys would have tripled this addition's
+        // share of the burst that was measured into the progressive-lag freeze.
+        ['operatorDashboard'],
       );
     }
 

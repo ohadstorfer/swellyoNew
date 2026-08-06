@@ -1284,7 +1284,23 @@ export async function fetchTripReview(
         storagePath: d?.storage_path ?? null,
         submittedAt: d?.uploaded_at ?? null,
         note: d?.approbation_note ?? null,
-        fileDeleted: !!d?.file_deleted_at,
+        /**
+         * A REJECTED row has no file, whatever the column says.
+         *
+         * `rejectDocument` now stamps `file_deleted_at` itself, so the column
+         * is usually right within the same refetch. This clause is what covers
+         * the cases where it is not: rows rejected before that shipped, and
+         * rejections whose storage delete or stamp failed (both leave the row
+         * purge-eligible on purpose).
+         *
+         * It is not a patch over those gaps either way — it is the actual
+         * invariant. Rejecting always removes the object, and `rejected_at` is
+         * never cleared in place, because a re-upload writes a NEW row. Even
+         * when the delete failed and the file is still sitting in the bucket
+         * waiting for the purge, it is not something anyone should be looking
+         * at. Ohad, 5 August: "es mala UX porque no dice nada al respecto."
+         */
+        fileDeleted: !!d?.file_deleted_at || !!d?.rejected_at,
       };
     });
 
@@ -1304,11 +1320,41 @@ export async function fetchTripReview(
 }
 
 /** Local calendar date as YYYY-MM-DD. `toISOString()` would be UTC, which turns
- *  a deadline overdue up to a day early for anyone west of Greenwich. */
-function todayISO(): string {
+ *  a deadline overdue up to a day early for anyone west of Greenwich.
+ *
+ *  Exported so the Dashboard's own "is this late?" test uses the SAME today
+ *  this function stamped `state: 'overdue'` with. A second definition that
+ *  drifted by a day would make the tab's late count disagree with the states it
+ *  is counting. */
+export function todayISO(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Nudge everyone who still owes this requirement.
+ *
+ * Returns HOW MANY WERE ACTUALLY SENT, which is not the same as how many owe:
+ * the RPC silently skips anyone already reminded for this requirement in the
+ * last 24 hours. The caller shows the difference rather than claiming eight
+ * when it sent five — an operator who is told "reminded 8" and gets no replies
+ * needs to know whether the message went out at all.
+ *
+ * Pay requirements are rejected by the RPC (errcode 0A000). `fetchTripReview`
+ * hardcodes every pay row to `not_started` because it never loads the ledger,
+ * so the count here would be wrong for exactly the people who had already paid.
+ */
+export async function remindRequirement(
+  tripId: string,
+  requirementId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc('operator_remind_requirement', {
+    p_trip_id: tripId,
+    p_requirement_id: requirementId,
+  });
+  if (error) throw error;
+  return (data as number) ?? 0;
 }
 
 export async function approveDocuments(
@@ -1324,13 +1370,19 @@ export async function approveDocuments(
 }
 
 /**
- * Reject: mark the row, then delete the file.
+ * Reject: mark the row, delete the file, record that the file is gone.
  *
  * The RPC keeps the row (carrying the note) and the host has the storage DELETE
  * policy, so the client removes the object. If that second step fails the row is
  * left rejected with `file_deleted_at` still null — which is exactly the
  * condition the nightly purge sweeps. So a failure here leaks nothing; it just
  * delays the delete. Never block the UI on it.
+ *
+ * The third step is the one that is easy to get backwards. `file_deleted_at` is
+ * ALSO what excludes a row from that purge, so it may only be written once the
+ * object is actually gone: stamping it up front would hide a surviving file from
+ * the only job that would ever remove it. Hence remove first, stamp second, and
+ * stamp nothing at all when the remove failed.
  */
 export async function rejectDocument(
   doc: { id: string; storagePath: string },
@@ -1346,6 +1398,17 @@ export async function rejectDocument(
     const { error: rmErr } = await supabase.storage.from(BUCKET).remove([doc.storagePath]);
     if (rmErr) {
       console.warn('[tripDocuments] reject: file delete failed; the purge job will sweep it');
+      return;
+    }
+
+    // The file is gone — say so on the row, so every screen stops offering it
+    // within this refetch instead of within a day. A failure here is the same
+    // harmless state as above: rejected, not yet stamped, purge-eligible.
+    const { error: markErr } = await supabase.rpc('operator_mark_document_file_deleted', {
+      p_document_id: doc.id,
+    });
+    if (markErr) {
+      console.warn('[tripDocuments] reject: could not stamp file_deleted_at; the purge job will');
     }
   }
 }

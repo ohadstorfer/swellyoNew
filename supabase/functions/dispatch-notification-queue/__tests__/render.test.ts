@@ -36,4 +36,42 @@ describe('renderPush', () => {
     expect(r.title.length).toBeGreaterThan(0);
     expect(r.body.length).toBeGreaterThan(0);
   });
+
+  describe('operator_requirement_due_soon — the Dashboard "Remind N people" push', () => {
+    it('names the document, so the traveler knows which one is wanted', () => {
+      // The bug this replaces: with no case and no template row, this type hit
+      // the `default` and pushed "You have a new trip update" — true, useless.
+      const r = renderPush(
+        'operator_requirement_due_soon',
+        { item_name: 'Passport' },
+        'El Salvador 26',
+      );
+      expect(r.title).toContain('El Salvador 26');
+      expect(r.body).toContain('Passport');
+    });
+
+    it('lets the template row win, which is what production actually uses', () => {
+      // 20260806000000 seeds exactly this key, so the branch above is a fallback
+      // for if that row is deleted — not the live path.
+      const r = renderPush(
+        'operator_requirement_due_soon',
+        { item_name: 'Passport' },
+        'El Salvador 26',
+        {
+          operator_requirement_due_soon: {
+            push_title: 'Still needed for {trip}',
+            push_body: 'Your organiser is waiting for {item}',
+          },
+        },
+      );
+      expect(r.title).toBe('Still needed for El Salvador 26');
+      expect(r.body).toBe('Your organiser is waiting for Passport');
+    });
+
+    it('does not say "an item" when the requirement title is missing', () => {
+      const r = renderPush('operator_requirement_due_soon', {}, 'El Salvador 26');
+      expect(r.body.length).toBeGreaterThan(0);
+      expect(r.title).toContain('El Salvador 26');
+    });
+  });
 });

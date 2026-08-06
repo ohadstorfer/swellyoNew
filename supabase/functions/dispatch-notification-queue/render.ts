@@ -115,6 +115,21 @@ export function renderPush(
           : `Your organiser asked for a new one for ${trip}`,
       };
     }
+    case 'operator_requirement_due_soon':
+      // The operator tapped "Remind N people" on their Dashboard. Names the
+      // document, for the same reason the rejection above does: someone with
+      // three outstanding items needs to know which one is being asked for.
+      //
+      // NOT REACHED IN PRODUCTION TODAY — `notification_templates` carries a row
+      // for this key (20260806000000) and the template wins at line 44. This is
+      // the fallback if that row is ever deleted, and it closes the TODO that
+      // 20260724000500 left ("copy for these types still has to be added to
+      // dispatch-notification-queue/render.ts"). It is also why shipping this
+      // needed no deploy of this function, whose live copy is behind the repo.
+      return {
+        title: `Still needed for ${trip}`,
+        body: `Your organiser is waiting for ${item}`,
+      };
     case 'operator_stripe_ready':
       // The one push here that deliberately never mentions a trip: it fires on
       // the operator's ACCOUNT, usually before their first trip exists, so

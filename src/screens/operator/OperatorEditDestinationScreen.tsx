@@ -411,13 +411,14 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     backgroundColor: '#F6F6F6',
   },
+  // The app's one primary CTA — same as onboarding's Next. See TravelerPriceSheet.
   saveBtn: {
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#0788B0',
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#212121',
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnDisabled: { backgroundColor: '#CFCFCF' },
-  saveText: { fontFamily: ff('Inter', '700'), fontSize: 16, color: '#FFFFFF' },
+  saveText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, color: '#FFFFFF' },
 });

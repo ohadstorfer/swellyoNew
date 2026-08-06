@@ -14,6 +14,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Share,
+  RefreshControl,
   type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -156,7 +157,18 @@ import {
   fetchTravelerPrices,
   fetchPaidByRequirement,
   type PayStep,
+  type CheckoutOutcome,
 } from '../../services/trips/tripPaymentsService';
+import { PaymentStatusSheet, type PaymentStatusMode } from '../../components/trips/PaymentStatusSheet';
+import {
+  attemptPhase,
+  describeAttemptAge,
+  loadPaymentAttempts,
+  recordPaymentAttempt,
+  clearPaymentAttempt,
+  PENDING_WINDOW_MS,
+  type PaymentAttempts,
+} from '../../services/trips/pendingPaymentStore';
 import { isTripHost } from '../../utils/tripRole';
 import { useUserProfile } from '../../context/UserProfileContext';
 
@@ -466,6 +478,36 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // once the poll gives up or the row flips to `approved`.
   const [confirmingRequirementId, setConfirmingRequirementId] = useState<string | null>(null);
 
+  // Payments that came back from Checkout unconfirmed, keyed by requirement id
+  // → when the poll gave up. Persisted, because this used to be a plain
+  // `useState` that died on unmount and handed a fresh "Pay" button to someone
+  // who may already have paid. See services/trips/pendingPaymentStore.ts.
+  const [paymentAttempts, setPaymentAttempts] = useState<PaymentAttempts>({});
+
+  // Re-renders the rows so a `pending` attempt visibly ages out of
+  // "Processing" instead of sitting there forever on a screen nobody has
+  // navigated away from. Runs ONLY while something is actually pending — an
+  // unconditional interval on a screen this heavy is not worth one label.
+  const [attemptTick, setAttemptTick] = useState(0);
+
+  // The background poll's interval closure reads this instead of the state, so
+  // recording a second attempt doesn't tear down and restart the interval —
+  // which, on a 5s timer, would keep pushing the next check further away.
+  const paymentAttemptsRef = useRef<PaymentAttempts>({});
+  paymentAttemptsRef.current = paymentAttempts;
+
+  // The unhappy-path sheet. `null` = nothing wrong. Carries its own title and
+  // reason so the sheet can stay a pure presentational component and the copy
+  // can name the actual requirement ("Deposit") rather than say "your payment".
+  const [paymentIssue, setPaymentIssue] = useState<{
+    mode: PaymentStatusMode;
+    requirementId: string;
+    title: string;
+    reason?: string | null;
+    attemptAge?: string | null;
+  } | null>(null);
+  const [recheckingPayment, setRecheckingPayment] = useState(false);
+
   const documentRows: DocumentRow[] = useMemo(
     () =>
       (documentsQuery.data ?? []).map(r => {
@@ -498,9 +540,25 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           amountUsd,
           amountError,
           confirming: r.requirementId === confirmingRequirementId,
+          // Gated on the server's own state, not just on our stored attempt:
+          // the moment the webhook lands the row is `approved` and must render
+          // as Done, even if the background poll below hasn't yet noticed and
+          // cleared the attempt.
+          pending:
+            r.state !== 'approved' &&
+            attemptPhase(paymentAttempts[r.requirementId] ?? 0, Date.now()) === 'pending',
         };
       }),
-    [documentsQuery.data, paymentsQuery.data, paymentsQuery.isError, confirmingRequirementId],
+    [
+      documentsQuery.data,
+      paymentsQuery.data,
+      paymentsQuery.isError,
+      confirmingRequirementId,
+      paymentAttempts,
+      // Not read in the body — it exists so the ticker below can force the
+      // `Date.now()` above to be re-evaluated when an attempt ages out.
+      attemptTick,
+    ],
   );
 
   // ── Host review ───────────────────────────────────────────────────────────
@@ -537,6 +595,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   /** Set when the Dashboard's Travelers list opens review on ONE person; null
    *  opens the whole queue, which is every other entry point. */
   const [reviewFocusUserId, setReviewFocusUserId] = useState<string | null>(null);
+  /** Set when the Dashboard's Documents list opens review on ONE document type.
+   *  Mutually exclusive with the focus above — the review screen's level 2 is
+   *  a person OR a requirement, so each setter clears the other. */
+  const [reviewFocusRequirementId, setReviewFocusRequirementId] = useState<string | null>(null);
+  /** Set when the "N documents waiting for you" banner opens review on
+   *  everything that needs a decision. Lowest priority of the three. */
+  const [reviewWaiting, setReviewWaiting] = useState(false);
   /** Who the price sheet is open for, launched from inside the review screen. */
   const [pricingUserId, setPricingUserId] = useState<string | null>(null);
 
@@ -625,6 +690,35 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // leaves, trip edits and admin updates invalidate the queries above.
   useTripRealtime(tripId);
 
+  /**
+   * Pull to refresh.
+   *
+   * This screen had none. For a traveler that was survivable — realtime and the
+   * focus refresh in `useTripRealtime` cover most of it. For an operator it was
+   * not: the Dashboard tab is the thing they open to see what changed, and a
+   * screen that quietly shows yesterday's numbers is worse than no screen,
+   * because they will trust it and be wrong.
+   *
+   * `type: 'active'` refetches only what is currently mounted, so pulling on
+   * Overview does not go and fetch the whole Dashboard. The predicate keeps it
+   * to this feature's two key roots rather than every query in the app.
+   */
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await queryClient.refetchQueries({
+        type: 'active',
+        predicate: q => {
+          const root = q.queryKey[0];
+          return root === 'trips' || root === 'operatorDashboard';
+        },
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [queryClient]);
+
   const [openingChat, setOpeningChat] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -672,10 +766,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     agreed: boolean;
   } | null>(null);
   // The kind travels with the path because the viewer offers "Copy details" on
-  // passports only, and the storage path alone cannot say what it holds.
+  // passports only, and the storage path alone cannot say what it holds. The
+  // title travels with it for the same reason: DocumentViewer's header has no
+  // way to name what it is showing, and its default is 'Document' — every file
+  // a traveler opened used to be titled "Passport", including their flights.
   const [viewingDoc, setViewingDoc] = useState<{
     storagePath: string;
     kind: string;
+    title: string;
   } | null>(null);
 
   // Admin updates — host-posted free-text lines, visible to all members.
@@ -697,6 +795,80 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     () => participants.some(p => p.role !== 'host'),
     [participants]
   );
+
+  // ── Which tabs exist ──────────────────────────────────────────────────────
+  // Computed up here, above the loading/not-found early returns, because the
+  // two hooks below must run on EVERY render. Deep-linking in from a
+  // notification mounts this screen with no cached trip, so the first render
+  // takes the skeleton return — if these hooks lived after it, the render that
+  // follows the fetch would add hooks and React would throw
+  // "Rendered more hooks than during the previous render".
+  const isLockedForTabs =
+    !!trip &&
+    (trip.status === 'cancelled' || trip.status === 'completed' || isTripPast(trip));
+  // Tabs: only members (host + approved) get the Plan tab, and only while the
+  // trip is live. Once locked (completed / ended / cancelled) the toggle is gone
+  // and everyone sees just the Overview.
+  const canSeePlan = (isHost || isApprovedMember) && !isLockedForTabs;
+
+  /**
+   * The Dashboard tab — running the trip, not going on it.
+   *
+   * Operator trips only, and only for a host. `isOperatorTrip` is what makes a
+   * trip a business: peer trips have no documents, no travelers to review and
+   * no money to collect, so a third tab there would be three empty sections.
+   *
+   * Kept alive on a locked trip on purpose, unlike Plan. A trip that ended
+   * yesterday is exactly when an operator still needs the ledger and the
+   * documents — the tab that disappears the moment the trip is over is the one
+   * they will look for first.
+   */
+  const canSeeDashboard = isHost && !!isOperatorTrip;
+
+  const visibleTabs = useMemo<TripTab[]>(() => {
+    const tabs: TripTab[] = ['overview'];
+    if (canSeePlan) tabs.push('plan');
+    if (canSeeDashboard) tabs.push('dashboard');
+    return tabs;
+  }, [canSeePlan, canSeeDashboard]);
+
+  // A tab that stops being available must not leave the screen showing nothing
+  // — losing host rights, or the trip locking, would otherwise strand the
+  // viewer on a blank body with no way back.
+  useEffect(() => {
+    if (!visibleTabs.includes(activeTab)) setActiveTab('overview');
+  }, [visibleTabs, activeTab]);
+
+  /**
+   * Operators open on the tab that has news.
+   *
+   * Overview is the page the operator wrote themselves and it does not change.
+   * Dashboard is what moved since yesterday — money in, documents to decide on,
+   * people to chase. Starting everyone on Overview charged every operator a tap
+   * on every open to get past a page they know by heart.
+   *
+   * ONE SHOT, via the ref. A plain effect on `canSeeDashboard` would drag them
+   * back here every time they deliberately chose Overview.
+   *
+   * The deep link always wins. `initialFocus` is set when the screen was opened
+   * from a notification, and the effect below this one is already steering to
+   * the right tab and section — landing on Dashboard instead would send someone
+   * who tapped "your passport was approved" to the wrong place. Claim the ref
+   * without acting so this never fires later in the session either.
+   */
+  const didPickDefaultTab = useRef(false);
+  useEffect(() => {
+    if (didPickDefaultTab.current) return;
+    if (initialFocus) {
+      didPickDefaultTab.current = true;
+      return;
+    }
+    // `canSeeDashboard` is false until the trip loads, so this waits rather
+    // than deciding on incomplete data.
+    if (!canSeeDashboard) return;
+    didPickDefaultTab.current = true;
+    setActiveTab('dashboard');
+  }, [canSeeDashboard, initialFocus]);
 
   // ── Notification deep-link: land on the right tab + section ───────────────
   // Plan sections register their content-relative Y here as they lay out; the
@@ -1426,6 +1598,245 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Admin updates handlers
   // -------------------------------------------------------------------------
   // ── Requirements ──────────────────────────────────────────────────────────
+  /**
+   * Wait for the webhook after Checkout, and make sure the wait ENDS somewhere.
+   *
+   * The browser closing is not proof of payment — the webhook is the only
+   * truth, and it has not necessarily landed the instant the sheet closes. So
+   * we poll. Two things about the schedule are deliberate:
+   *
+   *  • It opens at 700ms, not 1500. Most webhooks land inside that, so the row
+   *    usually ticks over almost the moment the traveler is back — the
+   *    difference between "it just worked" and "it thought about it first".
+   *  • It backs off to ~14s total, where it used to give up at 8. Stripe is
+   *    normally sub-second, but a retried delivery is not, and every second
+   *    spent here is a second not spent in the far worse `pending` state.
+   *
+   * `quiet` is for the `abandoned` outcome — no redirect came back, so this is
+   * almost certainly someone who swiped the sheet away. It checks anyway, in
+   * case a real payment lost its redirect, but spends no UI on it and gives up
+   * early. Critically it does NOT leave the row in `pending`: parking a
+   * "Processing" state on a payment the traveler deliberately walked out of
+   * would lock them out of ever making it.
+   *
+   * `detailDocuments` is the traveler's own requirement list (it wraps
+   * fetchMyRequirements). There is no `myRequirements` key — do not invent one.
+   */
+  const confirmPayment = useCallback(
+    async (row: { requirementId: string; title: string }, opts: { quiet: boolean }) => {
+      const delaysMs = opts.quiet ? [700, 1500, 2500] : [700, 1000, 1500, 2500, 3500, 5000];
+      if (!opts.quiet) setConfirmingRequirementId(row.requirementId);
+      try {
+        for (const delayMs of delaysMs) {
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          if (currentUserId) {
+            await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
+          }
+          await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+          const freshRows = queryClient.getQueryData<TripRequirement[]>(
+            tripsKeys.detailDocuments(tripId),
+          );
+          if (freshRows?.find(r => r.requirementId === row.requirementId)?.state === 'approved') {
+            // The row ticks itself off; the haptic is what makes it land as an
+            // event rather than a checkbox that quietly changed while they
+            // weren't looking.
+            hapticSuccess();
+            setPaymentAttempts(prev => {
+              void clearPaymentAttempt(tripId, row.requirementId, prev);
+              const next = { ...prev };
+              delete next[row.requirementId];
+              return next;
+            });
+            return;
+          }
+        }
+      } finally {
+        setConfirmingRequirementId(null);
+      }
+
+      // Ran out of patience. The old code returned the row to "Pay" here and
+      // said nothing — which, to someone who has just been through Checkout
+      // for $2,000, reads as "it didn't work, do it again". That is how people
+      // pay twice. Say what we actually know instead: we don't know yet.
+      if (opts.quiet) return;
+      const startedAt = Date.now();
+      setPaymentAttempts(prev => {
+        void recordPaymentAttempt(tripId, row.requirementId, prev, startedAt);
+        return { ...prev, [row.requirementId]: startedAt };
+      });
+      hapticMedium();
+      setPaymentIssue({ mode: 'pending', requirementId: row.requirementId, title: row.title });
+    },
+    [currentUserId, tripId, queryClient],
+  );
+
+  // Restore unconfirmed attempts for this trip. This is the whole point of the
+  // store: without it, coming back to the screen hands a plain "Pay" button to
+  // someone whose money may already be gone.
+  useEffect(() => {
+    if (!tripId) return;
+    let alive = true;
+    loadPaymentAttempts(tripId).then(stored => {
+      if (!alive) return;
+      // Merged, not replaced. A hydrate that resolves AFTER a payment made in
+      // this same session would otherwise wipe the fresher in-memory record.
+      setPaymentAttempts(prev => ({ ...stored, ...prev }));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [tripId]);
+
+  // Age `pending` out of "Processing" while the screen stays open. Only runs
+  // while something is actually in that window, and stops on its own once the
+  // last one crosses it.
+  const hasPendingAttempt = useMemo(
+    () => Object.values(paymentAttempts).some(at => attemptPhase(at, Date.now()) === 'pending'),
+    [paymentAttempts, attemptTick],
+  );
+  useEffect(() => {
+    if (!hasPendingAttempt) return;
+    const id = setInterval(() => setAttemptTick(t => t + 1), 30000);
+    return () => clearInterval(id);
+  }, [hasPendingAttempt]);
+
+  // While a payment is stuck in `pending`, keep asking. The traveler should
+  // not have to pull-to-refresh to find out whether their money arrived, and
+  // the row is designed to resolve itself under them.
+  //
+  // Capped at ~2 minutes: past that the webhook is not merely late, and an
+  // interval that never stops would keep firing behind a screen the traveler
+  // has stopped looking at. The `pending` row survives the cap — giving up on
+  // polling is not the same as giving up on the state.
+  useEffect(() => {
+    if (!hasPendingAttempt || !tripId) return;
+    let stopped = false;
+
+    const check = async () => {
+      if (stopped) return;
+      if (currentUserId) {
+        await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
+      }
+      await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+      if (stopped) return;
+      const freshRows = queryClient.getQueryData<TripRequirement[]>(
+        tripsKeys.detailDocuments(tripId),
+      );
+      if (!freshRows) return;
+
+      // Every pending attempt, not just one: a trip can have both a deposit
+      // and a balance mid-flight, and the old single-id version could only
+      // ever resolve whichever was stored last.
+      const landed = Object.keys(paymentAttemptsRef.current).filter(
+        reqId => freshRows.find(r => r.requirementId === reqId)?.state === 'approved',
+      );
+      if (landed.length === 0) return;
+
+      hapticSuccess();
+      setPaymentAttempts(prev => {
+        const next = { ...prev };
+        for (const reqId of landed) {
+          delete next[reqId];
+          void clearPaymentAttempt(tripId, reqId, prev);
+        }
+        return next;
+      });
+      // Close the explanation if they happen to be reading it — it is about to
+      // be describing something that is no longer true.
+      setPaymentIssue(prev =>
+        prev && prev.mode === 'pending' && landed.includes(prev.requirementId) ? null : prev,
+      );
+    };
+
+    const interval = setInterval(check, 5000);
+    const giveUp = setTimeout(() => clearInterval(interval), 120000);
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      clearTimeout(giveUp);
+    };
+  }, [hasPendingAttempt, tripId, currentUserId, queryClient]);
+
+  // "Try again" has to re-enter the row handler, which is declared below it
+  // (the sheet is wired before the list it belongs to). A ref, not a reorder:
+  // the handler already closes over `confirmPayment`, so hoisting it above
+  // this would only move the cycle rather than remove it.
+  const handlePressDocumentRowRef = useRef<((row: DocumentRow) => Promise<void>) | null>(null);
+
+  /**
+   * The primary button on PaymentStatusSheet. The two modes want opposite
+   * things from it, which is exactly why it is one button and not two sheets:
+   *
+   *  • `failed` — nothing happened, so "Try again" means try again. Close
+   *    first: Checkout opens a browser sheet, and stacking that over a bottom
+   *    sheet mid-dismiss is how iOS strands an invisible view controller that
+   *    swallows every touch underneath.
+   *
+   *  • `pending` — something may be in flight, so the button must NEVER start
+   *    a second checkout. It re-asks the server, and the sheet stays open with
+   *    a spinner so the answer arrives where the question was asked. On a hit
+   *    it closes itself; on a miss it stays, which is the honest outcome —
+   *    silently closing would read as "sorted", and it isn't.
+   */
+  const handleRetryPayment = useCallback(async () => {
+    const issue = paymentIssue;
+    if (!issue) return;
+
+    // "Pay anyway" — they have read the warning and decided. Forget the
+    // attempt FIRST, or the retry would immediately hit the same gate and
+    // re-open this sheet instead of opening Checkout.
+    if (issue.mode === 'unconfirmed') {
+      setPaymentIssue(null);
+      const cleared = await clearPaymentAttempt(
+        tripId,
+        issue.requirementId,
+        paymentAttemptsRef.current,
+      );
+      // The ref is normally assigned during render; set it by hand here so the
+      // gate below sees the cleared map without waiting for one.
+      paymentAttemptsRef.current = cleared;
+      setPaymentAttempts(cleared);
+      const row = documentRows.find(r => r.requirementId === issue.requirementId);
+      if (row) await handlePressDocumentRowRef.current?.({ ...row, pending: false });
+      return;
+    }
+
+    if (issue.mode === 'failed') {
+      setPaymentIssue(null);
+      const row = documentRows.find(r => r.requirementId === issue.requirementId);
+      if (row) await handlePressDocumentRowRef.current?.(row);
+      return;
+    }
+
+    setRecheckingPayment(true);
+    try {
+      if (currentUserId) {
+        await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
+      }
+      await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+      const freshRows = queryClient.getQueryData<TripRequirement[]>(
+        tripsKeys.detailDocuments(tripId),
+      );
+      if (freshRows?.find(r => r.requirementId === issue.requirementId)?.state === 'approved') {
+        hapticSuccess();
+        const cleared = await clearPaymentAttempt(
+          tripId,
+          issue.requirementId,
+          paymentAttemptsRef.current,
+        );
+        paymentAttemptsRef.current = cleared;
+        setPaymentAttempts(cleared);
+        setPaymentIssue(null);
+      } else {
+        // Not a failure — just not yet. A light tap acknowledges the press
+        // without implying anything went wrong.
+        hapticLight();
+      }
+    } finally {
+      setRecheckingPayment(false);
+    }
+  }, [paymentIssue, documentRows, currentUserId, tripId, queryClient]);
+
   // One tap handler for all six kinds. Where it goes depends on what the
   // requirement wants: a file, an agreement, or a form.
   const handlePressDocumentRow = useCallback(
@@ -1435,42 +1846,59 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         // told "Already paid". Also skips a re-tap while we're already
         // polling this exact row.
         if (row.state === 'approved' || row.confirming) return;
-        try {
-          await startCheckout(row.requirementId);
-        } catch (e) {
-          showErrorAlert('Payment', e, 'Could not start the payment. Try again.');
+
+        // Stuck in `pending`: the tap must NOT open a second checkout. It
+        // opens the explanation instead — the row is deliberately still
+        // tappable so the traveler has somewhere to go with the question
+        // "did my money arrive?", just not somewhere that charges them again.
+        if (row.pending) {
+          setPaymentIssue({ mode: 'pending', requirementId: row.requirementId, title: row.title });
           return;
         }
-        // The browser closing is NOT proof of payment — Stripe rejects custom URL
-        // schemes so there is no trustworthy redirect back. The webhook is the
-        // only truth, and it hasn't necessarily landed the instant the browser
-        // sheet closes. Poll for it: a short delay, then a couple of retries,
-        // with a transient "Confirming…" state on the row so the traveler sees
-        // something happening rather than an unchanged screen. Stop as soon as
-        // the row flips to approved; if it never does within this window,
-        // leave the row exactly as "Pay" — never assert success the server
-        // hasn't confirmed.
-        //
-        // `detailDocuments` is the traveler's own requirement list (it wraps
-        // fetchMyRequirements). There is no `myRequirements` key — do not invent one.
-        setConfirmingRequirementId(row.requirementId);
-        try {
-          const retryDelaysMs = [1500, 2500, 4000];
-          for (const delayMs of retryDelaysMs) {
-            await new Promise(resolve => setTimeout(resolve, delayMs));
-            if (currentUserId) {
-              await queryClient.refetchQueries({ queryKey: tripsKeys.payments(tripId, currentUserId) });
-            }
-            await queryClient.refetchQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
-            const freshRows = queryClient.getQueryData<TripRequirement[]>(
-              tripsKeys.detailDocuments(tripId),
-            );
-            const updated = freshRows?.find(r => r.requirementId === row.requirementId);
-            if (updated?.state === 'approved') break;
-          }
-        } finally {
-          setConfirmingRequirementId(null);
+
+        // Past the 30-minute window the row is back to a normal "Pay", but we
+        // still remember the attempt for a week — and this is the gate that
+        // memory buys. Letting expiry hand back a plain one-tap payment would
+        // just re-open the double-payment trap on a delay.
+        // Read through the ref, not the state: "Pay anyway" clears the attempt
+        // and re-enters this handler in the same tick, before a re-render has
+        // refreshed any closure. Off the state it would hit the gate it just
+        // cleared and bounce straight back into the sheet.
+        const attemptAt = paymentAttemptsRef.current[row.requirementId];
+        if (attemptAt && attemptPhase(attemptAt, Date.now()) === 'unconfirmed') {
+          setPaymentIssue({
+            mode: 'unconfirmed',
+            requirementId: row.requirementId,
+            title: row.title,
+            attemptAge: describeAttemptAge(attemptAt),
+          });
+          return;
         }
+
+        let outcome: CheckoutOutcome;
+        try {
+          outcome = await startCheckout(row.requirementId);
+        } catch (e) {
+          // Was: a one-button OS alert. Now the traveler gets the reason, a
+          // retry, and a way to reach the operator — see PaymentStatusSheet.
+          hapticError();
+          setPaymentIssue({
+            mode: 'failed',
+            requirementId: row.requirementId,
+            title: row.title,
+            reason: friendlyErrorMessage(e, 'Something went wrong before you reached the payment page.'),
+          });
+          return;
+        }
+
+        // They pressed "back" inside Checkout. Nothing was charged, nothing is
+        // in flight, and there is nothing to confirm — so do nothing at all.
+        // This used to be eight seconds of "Confirming…" for a payment that
+        // never started, which is the single most confusing thing this screen
+        // did.
+        if (outcome === 'cancelled') return;
+
+        await confirmPayment(row, { quiet: outcome === 'abandoned' });
         return;
       }
 
@@ -1510,7 +1938,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       try {
         const doc = await fetchMyDocument(tripId, row.requirementId, currentUserId);
         if (doc?.storagePath && !doc.fileDeletedAt) {
-          setViewingDoc({ storagePath: doc.storagePath, kind: row.kind });
+          setViewingDoc({ storagePath: doc.storagePath, kind: row.kind, title: row.title });
         } else {
           // Past the 30-day purge the row survives but the file does not. Say so
           // rather than opening an empty viewer.
@@ -1521,8 +1949,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         showErrorAlert('Something went wrong', e, 'Could not open this document.');
       }
     },
-    [currentUserId, tripId, queryClient],
+    [currentUserId, tripId, queryClient, confirmPayment],
   );
+  handlePressDocumentRowRef.current = handlePressDocumentRow;
 
   const handleRequirementDone = useCallback(() => {
     setOpenRequirement(null);
@@ -1712,39 +2141,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     return true; // no dates set — let the host decide
   })();
 
-  // Tabs: only members (host + approved) get the Plan tab, and only while the
-  // trip is live. Once locked (completed / ended / cancelled) the toggle is gone
-  // and everyone sees just the Overview.
-  const canSeePlan = (isHost || isApprovedMember) && !isLocked;
-
-  /**
-   * The Dashboard tab — running the trip, not going on it.
-   *
-   * Operator trips only, and only for a host. `isOperatorTrip` is what makes a
-   * trip a business: peer trips have no documents, no travelers to review and
-   * no money to collect, so a third tab there would be three empty sections.
-   *
-   * Kept alive on a locked trip on purpose, unlike Plan. A trip that ended
-   * yesterday is exactly when an operator still needs the ledger and the
-   * documents — the tab that disappears the moment the trip is over is the one
-   * they will look for first.
-   */
-  const canSeeDashboard = isHost && !!isOperatorTrip;
-
-  const visibleTabs = useMemo<TripTab[]>(() => {
-    const tabs: TripTab[] = ['overview'];
-    if (canSeePlan) tabs.push('plan');
-    if (canSeeDashboard) tabs.push('dashboard');
-    return tabs;
-  }, [canSeePlan, canSeeDashboard]);
-
-  // A tab that stops being available must not leave the screen showing nothing
-  // — losing host rights, or the trip locking, would otherwise strand the
-  // viewer on a blank body with no way back.
-  useEffect(() => {
-    if (!visibleTabs.includes(activeTab)) setActiveTab('overview');
-  }, [visibleTabs, activeTab]);
-
+  // canSeePlan / canSeeDashboard / visibleTabs are computed above the early
+  // returns — see the "Which tabs exist" block — so their hooks always run.
   const showPlan = canSeePlan && activeTab === 'plan';
   const showDashboard = canSeeDashboard && activeTab === 'dashboard';
   /** Anything that replaces the Overview body. */
@@ -1896,6 +2294,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#7B7B7B"
+            colors={['#05BCD3']}
+          />
+        }
         scrollEventThrottle={16}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
@@ -2025,11 +2431,30 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <View style={styles.dashboardWrap}>
             <TripDashboardTab
               tripId={tripId}
+              // The tab's only sense of time. Without these it cannot tell a
+              // passport missing three months out from one missing in three
+              // days, and both read as the same number.
+              startDateISO={trip.start_date}
+              endDateISO={trip.end_date}
               travelers={reviewTravelers}
               review={reviewData}
               reviewLoading={reviewQuery.isLoading}
               onOpenReview={userId => {
                 setReviewFocusUserId(userId ?? null);
+                setReviewFocusRequirementId(null);
+                setReviewWaiting(false);
+                setReviewOpen(true);
+              }}
+              onOpenRequirement={requirementId => {
+                setReviewFocusUserId(null);
+                setReviewFocusRequirementId(requirementId);
+                setReviewWaiting(false);
+                setReviewOpen(true);
+              }}
+              onOpenWaiting={() => {
+                setReviewFocusUserId(null);
+                setReviewFocusRequirementId(null);
+                setReviewWaiting(true);
                 setReviewOpen(true);
               }}
               onManageRequirements={
@@ -2056,6 +2481,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             participantCount={participants.length}
             maxParticipants={trip.max_participants}
             committedCount={committedCount}
+            showCommitment={!isOperatorTrip}
             onViewAll={onViewAllMembers}
             pendingCount={isHost ? pendingRequests.length : 0}
             onMemberPress={
@@ -2069,8 +2495,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         </View>
 
         {/* 1.5) Commit pill — below the members + commitment bar (approved
-            members only; the host can't commit). */}
-        {isApprovedMember && (
+            members only; the host can't commit). Never on an operator trip:
+            commitment is a peer-trip promise, and a traveler who already paid
+            has nothing left to promise. */}
+        {isApprovedMember && !isOperatorTrip && (
           <View onLayout={registerSection('commit')}>
             <CommitPill status={myCommitmentStatus} onPress={handleOpenCommitSheet} />
           </View>
@@ -2160,7 +2588,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               travelersDone={travelersFinished}
               travelerCount={reviewTravelers.length}
               onPressRow={handlePressDocumentRow}
-              onReviewAll={() => setReviewOpen(true)}
+              /* The whole queue, so every focus has to be cleared. This card
+                 and the Dashboard's entry points are mutually exclusive today
+                 (`!canSeeDashboard` above), so no stale focus can actually
+                 reach here — but the day that stops being true, a leftover
+                 `reviewWaiting` would silently open the wrong screen. */
+              onReviewAll={() => {
+                setReviewFocusUserId(null);
+                setReviewFocusRequirementId(null);
+                setReviewWaiting(false);
+                setReviewOpen(true);
+              }}
               onManage={canManageRequirements ? openManageRequirements : undefined}
               budgetFxRate={trip?.budget_fx_rate}
               viewerCountry={viewerCountry}
@@ -2356,6 +2794,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           travelers={reviewTravelers}
           review={reviewData}
           initialUserId={reviewFocusUserId}
+          initialRequirementId={reviewFocusRequirementId}
+          initialWaiting={reviewWaiting}
           renderTravelerExtras={userId => {
             const t = reviewTravelers.find(x => x.userId === userId);
             const name = t?.name ?? 'Traveler';
@@ -2389,38 +2829,40 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               />
             );
           }}
+          /* Per-traveler price, opened by "Set price" in the traveler's own
+             view — so it has to live INSIDE that screen's Modal, as a layer.
+             As a sibling of it (which it was) RN resolved its presentation to
+             the root view controller, already presenting the review screen;
+             UIKit refused and the sheet only surfaced once the operator left
+             the traveler. It is the same sheet the Members list uses, so the
+             two can never price someone differently. */
+          renderOverlay={() => (
+            <TravelerPriceSheet
+              inline
+              visible={!!pricingUserId}
+              tripId={tripId}
+              userId={pricingUserId ?? ''}
+              travelerName={
+                reviewTravelers.find(t => t.userId === pricingUserId)?.name ?? 'Traveler'
+              }
+              budgetFxRate={trip?.budget_fx_rate ?? null}
+              requirements={
+                requirementsQuery.data
+                  ? requirementsQuery.data.map(r => ({ kind: r.kind, isActive: r.isActive }))
+                  : null
+              }
+              onClose={() => setPricingUserId(null)}
+              onSaved={() => {
+                setPricingUserId(null);
+                // Every number on the Dashboard is derived from this — refetch
+                // rather than patch, so the summary and the row agree again.
+                void queryClient.invalidateQueries({
+                  queryKey: ['operatorDashboard', 'money', tripId],
+                });
+              }}
+            />
+          )}
           onChanged={() => reviewQuery.refetch()}
-        />
-      )}
-
-      {/* Per-traveler price, opened from the Dashboard's traveler view.
-          Mounted on `isHost` alone, for the same reason the review screen is:
-          a Modal's mount must not depend on data that moves under it. The
-          sheet itself is the same one the Members list uses, so the two can
-          never price someone differently. */}
-      {isHost && (
-        <TravelerPriceSheet
-          visible={!!pricingUserId}
-          tripId={tripId}
-          userId={pricingUserId ?? ''}
-          travelerName={
-            reviewTravelers.find(t => t.userId === pricingUserId)?.name ?? 'Traveler'
-          }
-          budgetFxRate={trip?.budget_fx_rate ?? null}
-          requirements={
-            requirementsQuery.data
-              ? requirementsQuery.data.map(r => ({ kind: r.kind, isActive: r.isActive }))
-              : null
-          }
-          onClose={() => setPricingUserId(null)}
-          onSaved={() => {
-            setPricingUserId(null);
-            // Every number on the Dashboard is derived from this — refetch
-            // rather than patch, so the summary and the row agree again.
-            void queryClient.invalidateQueries({
-              queryKey: ['operatorDashboard', 'money', tripId],
-            });
-          }}
         />
       )}
 
@@ -2497,6 +2939,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         />
       )}
 
+      {/* Every unhappy payment path ends here rather than in a one-button OS
+          alert or, worse, in silence. See PaymentStatusSheet's header. */}
+      <PaymentStatusSheet
+        visible={!!paymentIssue}
+        mode={paymentIssue?.mode ?? 'failed'}
+        title={paymentIssue?.title ?? 'This payment'}
+        reason={paymentIssue?.reason}
+        attemptAge={paymentIssue?.attemptAge}
+        busy={recheckingPayment}
+        onClose={() => setPaymentIssue(null)}
+        onRetry={handleRetryPayment}
+        onMessageOrganiser={
+          onOpenGroupChat
+            ? () => {
+                setPaymentIssue(null);
+                handleOpenGroupChat();
+              }
+            : undefined
+        }
+      />
+
       {/* Document viewer — mints its own ~60s signed URL per open and never
           disk-caches the image. Read-only here; the host review screen is the
           one that passes approve/reject.
@@ -2509,6 +2972,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         visible={!!viewingDoc}
         storagePath={viewingDoc?.storagePath ?? null}
         onClose={() => setViewingDoc(null)}
+        title={viewingDoc?.title ?? 'Document'}
         isPassport={viewingDoc?.kind === 'passport'}
       />
 

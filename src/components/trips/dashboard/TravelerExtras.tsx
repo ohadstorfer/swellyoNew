@@ -17,6 +17,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { ff } from '../../../theme/fonts';
+import { PressableScale } from '../PressableScale';
 import { fetchMyMedicalForm } from '../../../services/trips/tripDocumentsService';
 import type { TravelerMoney } from '../../../services/trips/operatorDashboardService';
 import { D } from './dashboardTheme';
@@ -142,15 +143,14 @@ export const TravelerExtras: React.FC<{
       </Block>
 
       {/* ── Actions ────────────────────────────────────────────────────── */}
-      <Pressable
+      <PressableScale
         onPress={onMessage}
-        style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-        accessibilityRole="button"
+        style={styles.action}
         accessibilityLabel={`Message ${name}`}
       >
         <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
         <Text style={styles.actionText}>Message {firstName(name)}</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 };
@@ -197,8 +197,13 @@ function formatDay(iso: string | null): string {
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// This file renders INSIDE DocumentReviewScreen, not in the Dashboard tab, so
+// it stays on that screen's 12 / 13 / 14 / 15 type scale rather than the Figma
+// scale the tab moved to. The two are neighbours, not the same page. See §2 and
+// §6 of `docs/specs/operator-trips/dashboard-tab-design.md`.
 const styles = StyleSheet.create({
   root: { gap: 12, marginTop: 12 },
+  // 14/14 matches `PlanSections.card`.
   block: {
     borderWidth: 1,
     borderColor: D.cardBorder,
@@ -207,11 +212,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  // 12 — a sub-block header sitting under the tab's 16. Was 10, which was a
+  // third value for a gap that only has two legitimate ones.
   blockHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   blockTitle: {
     fontFamily: ff('Inter', '700'),
@@ -239,8 +246,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
-  // Instant feedback. 0.97 is the app-wide press scale.
-  pressed: { transform: [{ scale: 0.97 }] },
 });
 
 export default TravelerExtras;

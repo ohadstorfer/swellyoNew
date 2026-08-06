@@ -195,18 +195,53 @@ async function edgeFunctionErrorMessage(error: unknown, fallback: string): Promi
 }
 
 /**
+ * How the traveler left Stripe Checkout. This is a hint about what to DO next,
+ * never a claim about money — see the warning on {@link startCheckout}.
+ *
+ * The three cases exist because they deserve three different screens:
+ *
+ *  • `cancelled` — Stripe redirected to the cancel marker. They pressed "back"
+ *    inside Checkout. Nothing was charged and nothing is in flight, so the
+ *    right response is to do nothing at all: no spinner, no alert, straight
+ *    back to a tappable "Pay". Telling someone "you cancelled" is nagging them
+ *    about a decision they just made on purpose.
+ *
+ *  • `returned` — Stripe redirected to the success marker. Confirm it.
+ *
+ *  • `abandoned` — the browser sheet closed with no redirect: swiped away on
+ *    iOS, hardware back on Android, or the session simply expired. Almost
+ *    always a cancel, but not provably one — a payment that succeeded a
+ *    heartbeat before the sheet was dismissed lands here too. Verified
+ *    QUIETLY: refetch without showing a confirming state, so the common case
+ *    (they backed out) costs nothing visible, and the rare one still flips the
+ *    row to Done on its own.
+ */
+export type CheckoutOutcome = 'returned' | 'cancelled' | 'abandoned';
+
+/**
+ * Read the marker `payments-checkout` appends to its success/cancel urls.
+ *
+ * ⚠️ Absent means UNKNOWN, not "cancel". A session created before markers
+ * shipped (Stripe replays those from its 24h idempotency cache) redirects
+ * without one, and reading that as a cancel would drop a real payment on the
+ * floor. Unknown therefore falls back to the safe side: confirm it.
+ */
+function readPayMarker(url: string): CheckoutOutcome {
+  return /[?&]swellyo_pay=cancel(?:&|$)/.test(url) ? 'cancelled' : 'returned';
+}
+
+/**
  * Open Stripe Checkout and wait for the browser sheet to close.
  *
- * ⚠️ The return trip is NOT proof of payment, and the resolution of this
- * promise is not either. RETURN_URL now brings the traveler straight back
- * (see it), so `openAuthSessionAsync` DOES resolve 'success' on a real
- * redirect — but that only means Stripe finished with the browser, not that
- * the money moved. The payer can also lose their connection between paying
- * and being redirected, in which case they never come back at all and the
- * payment is still real. The webhook is the only source of truth: the caller
- * MUST refetch and trust the server, never branch on how this call returned.
+ * ⚠️ NONE of the three outcomes is proof of payment, in either direction.
+ * `returned` only means Stripe finished with the browser, not that the money
+ * moved; the payer can also lose their connection between paying and being
+ * redirected, landing on `abandoned` with a perfectly real charge behind them.
+ * The webhook is the only source of truth. The caller MUST refetch and trust
+ * the server — the outcome decides how much UI to spend on the wait, never
+ * whether the requirement is paid.
  */
-export async function startCheckout(requirementId: string): Promise<void> {
+export async function startCheckout(requirementId: string): Promise<CheckoutOutcome> {
   // Resolved once and reused: the value handed to Stripe and the value
   // openAuthSessionAsync watches for MUST be the same string, or the browser
   // sheet never closes itself.
@@ -219,7 +254,12 @@ export async function startCheckout(requirementId: string): Promise<void> {
   }
   if (!data?.url) throw new Error(data?.error ?? 'Could not start the payment');
 
-  await WebBrowser.openAuthSessionAsync(data.url, url);
+  const result = await WebBrowser.openAuthSessionAsync(data.url, url);
+  // `success` here is expo-web-browser's word for "the redirect fired", not
+  // Stripe's for "paid" — the cancel_url redirect resolves as `success` too.
+  // Which one it was is only in the url.
+  if (result.type !== 'success' || typeof result.url !== 'string') return 'abandoned';
+  return readPayMarker(result.url);
 }
 
 /**

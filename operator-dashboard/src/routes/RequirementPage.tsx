@@ -184,6 +184,9 @@ export function RequirementPage() {
                 {isUpload && <th style={{ width: 36 }} />}
                 <th>Traveler</th>
                 <th>State</th>
+                {/* Only an upload has a file to name. On a waiver or the
+                    medical form the column would be a row of dashes. */}
+                {isUpload && <th>Document</th>}
                 <th>When</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
@@ -191,10 +194,20 @@ export function RequirementPage() {
             <tbody>
               {rows.map(row => {
                 const canSelect = row.item.state === 'submitted' && !!row.item.documentId;
+                // The whole row opens the document. Aiming at a 60px button in
+                // the last column was the only way in, on a screen whose entire
+                // job is "look at these and decide".
+                const viewable = !!row.item.storagePath && !row.item.fileDeleted;
                 return (
-                  <tr key={row.userId}>
+                  <tr
+                    key={row.userId}
+                    className={viewable ? 'tr-open' : undefined}
+                    onClick={viewable ? () => setViewing(row) : undefined}
+                  >
                     {isUpload && (
-                      <td>
+                      // Selecting is not opening. Without this, ticking the box
+                      // would also throw the document up over the table.
+                      <td onClick={e => e.stopPropagation()}>
                         {canSelect && (
                           <input
                             type="checkbox"
@@ -212,7 +225,15 @@ export function RequirementPage() {
                       </td>
                     )}
                     <td>
-                      <Link to={`/trips/${tripId}/t/${row.userId}`}>{row.name}</Link>
+                      {/* The one competing target on the row, and it stays: the
+                          name is the way to the person, the rest of the row is
+                          the way to the file. */}
+                      <Link
+                        to={`/trips/${tripId}/t/${row.userId}`}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {row.name}
+                      </Link>
                       {row.item.fileDeleted && (
                         <div className="muted" style={{ fontSize: 12 }}>
                           File deleted after 30 days
@@ -227,11 +248,36 @@ export function RequirementPage() {
                     <td>
                       <StateTag state={row.item.state} />
                     </td>
+                    {/* What this file IS. Every row on this page carries the
+                        same requirement, so the value repeats — that is the
+                        point (Ohad, 5 Aug): a row lifted out of context, read
+                        across, or scrolled to under a header that has left the
+                        viewport still says what it is. The heading alone did
+                        not survive any of those.
+
+                        The requirement's own title, not `kindLabel` — that one
+                        is plural for the tiles ("Passports"), and a row is one
+                        document belonging to one person. */}
+                    {isUpload && (
+                      <td className="muted small">
+                        {row.item.fileDeleted ? (
+                          <>
+                            {requirement.title}{' '}
+                            <span style={{ opacity: 0.7 }}>· deleted</span>
+                          </>
+                        ) : (
+                          requirement.title
+                        )}
+                      </td>
+                    )}
                     <td className="muted small">
                       {row.item.submittedAt ? formatDate(row.item.submittedAt) : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {row.item.storagePath && !row.item.fileDeleted ? (
+                      {viewable ? (
+                        // Kept even though the row itself is now clickable: it
+                        // is the visible affordance that says the row is, and
+                        // it is the tab stop keyboard users navigate to.
                         <button className="btn btn-sm" onClick={() => setViewing(row)}>
                           View
                         </button>

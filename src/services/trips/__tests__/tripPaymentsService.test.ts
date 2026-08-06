@@ -232,3 +232,79 @@ describe('fetchPaidByRequirement', () => {
     await expect(fetchPaidByRequirement('t1', 'u1')).resolves.toEqual({ r1: 300, r2: 1000 });
   });
 });
+
+// ── startCheckout's outcome ─────────────────────────────────────────────────
+// The decode is three lines, and every one of them is load-bearing: it is what
+// separates "they pressed back in Checkout" from "they paid", which the app
+// could not tell apart at all before markers shipped. Getting `cancelled`
+// wrong shows a spinner for a payment that never started; getting `returned`
+// wrong drops a real payment on the floor.
+describe('startCheckout outcome', () => {
+  const openAuthSessionAsync = jest.fn();
+
+  const load = () => {
+    let mod: any;
+    jest.isolateModules(() => {
+      jest.doMock('expo-web-browser', () => ({ openAuthSessionAsync }));
+      jest.doMock('expo-linking', () => ({ createURL: () => 'swellyo://pay/done' }));
+      const { supabase } = require('../../../config/supabase');
+      supabase.functions = {
+        invoke: jest.fn().mockResolvedValue({
+          data: { url: 'https://checkout.stripe.com/c/pay/cs_test_123' },
+          error: null,
+        }),
+      };
+      mod = require('../tripPaymentsService');
+    });
+    return mod;
+  };
+
+  beforeEach(() => openAuthSessionAsync.mockReset());
+
+  it('reads the cancel marker as cancelled', async () => {
+    openAuthSessionAsync.mockResolvedValue({
+      type: 'success',
+      url: 'swellyo://pay/done?swellyo_pay=cancel',
+    });
+    await expect(load().startCheckout('req1')).resolves.toBe('cancelled');
+  });
+
+  it('reads the success marker as returned', async () => {
+    openAuthSessionAsync.mockResolvedValue({
+      type: 'success',
+      url: 'swellyo://pay/done?swellyo_pay=success',
+    });
+    await expect(load().startCheckout('req1')).resolves.toBe('returned');
+  });
+
+  // The Expo Go return url already carries a query, so the marker lands after
+  // an `&`. Matching only on `?` would read every dev-build cancel as a
+  // payment.
+  it('finds the marker after an existing query string', async () => {
+    openAuthSessionAsync.mockResolvedValue({
+      type: 'success',
+      url: 'exp://10.0.0.4:8081/--/pay/done?foo=1&swellyo_pay=cancel',
+    });
+    await expect(load().startCheckout('req1')).resolves.toBe('cancelled');
+  });
+
+  // Stripe replays sessions from a 24h idempotency cache, so for a day after
+  // this ships some redirects come back marker-less. Unknown must fall to the
+  // side that CONFIRMS — the old behaviour — not the side that assumes a
+  // cancel and discards a real payment.
+  it('treats a missing marker as returned, never as cancelled', async () => {
+    openAuthSessionAsync.mockResolvedValue({ type: 'success', url: 'swellyo://pay/done' });
+    await expect(load().startCheckout('req1')).resolves.toBe('returned');
+  });
+
+  // Swiped away on iOS / hardware back on Android: no redirect fired at all.
+  it('reports a dismissed browser sheet as abandoned', async () => {
+    openAuthSessionAsync.mockResolvedValue({ type: 'dismiss' });
+    await expect(load().startCheckout('req1')).resolves.toBe('abandoned');
+  });
+
+  it('reports a cancelled browser sheet as abandoned', async () => {
+    openAuthSessionAsync.mockResolvedValue({ type: 'cancel' });
+    await expect(load().startCheckout('req1')).resolves.toBe('abandoned');
+  });
+});

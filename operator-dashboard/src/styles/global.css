@@ -267,6 +267,20 @@ td {
   vertical-align: middle;
 }
 
+/* A table row that opens something. The row is the target; the button in the
+ * last column is the affordance that says so, and the tab stop. Background
+ * only — a transform on a <tr> is undefined in table layout. */
+tr.tr-open {
+  cursor: pointer;
+  transition: background var(--t-fast) ease;
+}
+tr.tr-open:hover {
+  background: var(--panel);
+}
+tr.tr-open:active {
+  background: var(--line);
+}
+
 /* ── Banner ─────────────────────────────────────────────────────────────── */
 .banner {
   border: 1px solid var(--line);

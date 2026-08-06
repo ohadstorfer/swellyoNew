@@ -67,7 +67,22 @@ export const TravelerPriceSheet: React.FC<{
   requirements: { kind: string; isActive: boolean }[] | null;
   onClose: () => void;
   onSaved: () => void;
-}> = ({ visible, tripId, userId, travelerName, budgetFxRate, requirements, onClose, onSaved }) => {
+  /** Set when this is opened from a screen that is ITSELF a presented Modal —
+   *  the document review screen, say. Without it the sheet is not just badly
+   *  stacked, it never appears until that screen closes. See the note on
+   *  BottomSheetShell's `inline`, and `renderOverlay` on DocumentReviewScreen. */
+  inline?: boolean;
+}> = ({
+  visible,
+  tripId,
+  userId,
+  travelerName,
+  budgetFxRate,
+  requirements,
+  onClose,
+  onSaved,
+  inline = false,
+}) => {
   const insets = useSafeAreaInsets();
   const { profile } = useUserProfile();
   const operatorCurrency: 'ILS' | 'USD' = isIsraeli(profile?.country_from) ? 'ILS' : 'USD';
@@ -245,7 +260,7 @@ export const TravelerPriceSheet: React.FC<{
   return (
     // No `title` prop exists on BottomSheetShell — the heading is rendered
     // below. `avoidKeyboard` is required: this sheet has text inputs.
-    <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard>
+    <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard inline={inline}>
       <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
         {loading ? (
           <ActivityIndicator style={styles.loading} />
@@ -415,14 +430,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#0788B0',
   },
   confirmAskText: { fontFamily: ff('Inter', '600'), fontWeight: '600', fontSize: 14, color: '#FFFFFF' },
+  // The app's one primary CTA, same as onboarding's Next: Surface/M 07 at 56
+  // high, radius 12, Montserrat SemiBold 16. Ohad, 5 August — every Save wears
+  // it, so a save never looks like a different kind of act depending on which
+  // sheet the operator happens to be in.
   save: {
-    backgroundColor: '#0788B0',
-    borderRadius: 999,
-    paddingVertical: 14,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#212121',
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 20,
   },
   saveDisabled: { opacity: 0.6 },
-  saveText: { fontFamily: ff('Inter', '600'), fontWeight: '600', fontSize: 15, color: '#FFFFFF' },
+  saveText: { fontFamily: ff('Montserrat', '600'), fontWeight: '600', fontSize: 16, color: '#FFFFFF' },
   pressedScale: { transform: [{ scale: 0.97 }] },
 });

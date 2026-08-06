@@ -292,17 +292,18 @@ const styles = StyleSheet.create({
     color: '#1F7A4D',
     textAlign: 'center',
   },
+  // The app's one primary CTA — same as onboarding's Next. See TravelerPriceSheet.
   primaryBtn: {
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#05BCD3',
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#212121',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 4,
   },
   primaryBtnText: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 15,
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
   },

@@ -42,6 +42,10 @@ const TECHNICAL_PATTERNS: RegExp[] = [
   /edge function returned/i,
   /non-2xx status code/i,
   /status code \d{3}/i,
+  // Supabase Storage's 404. Short and English enough to look hand-written, so
+  // it sailed through and got rendered at a traveler's passport: a whole black
+  // screen saying "Object not found". The caller's fallback is always better.
+  /^object not found$/i,
 ];
 
 const NETWORK_PATTERNS: RegExp[] = [

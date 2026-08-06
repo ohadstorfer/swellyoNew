@@ -36,13 +36,21 @@ import {
   Pressable,
   TextInput,
   ScrollView,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { KeyboardAvoidingView } from '../../utils/keyboardAvoidingView';
 import { ff } from '../../theme/fonts';
 import {
@@ -178,10 +186,7 @@ export const PassportDetailsPanel: React.FC<{
         </View>
 
         {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color="#FFFFFF" />
-            <Text style={styles.centerText}>Reading the passport…</Text>
-          </View>
+          <ReadingSkeleton />
         ) : problem ? (
           <CouldNotRead problem={problem} onClose={onClose} />
         ) : (
@@ -279,6 +284,60 @@ const CouldNotRead: React.FC<{ problem: string; onClose: () => void }> = ({
 };
 
 /** One line telling the operator how much to trust what they are looking at. */
+/**
+ * The form, drawn in grey, while the passport is being read.
+ *
+ * A spinner said "wait" and nothing else. This says what is being built — one
+ * labelled box per field, in the order they will appear — so the read finishes
+ * into a layout the operator has already been looking at.
+ *
+ * The banner slot is not left empty either: an OCR read of a photo takes a few
+ * seconds and there is no way to guess why from an empty screen, so the one
+ * line that explains it lives exactly where the result banner will.
+ *
+ * A group pulse rather than a sweep. The fields are separated boxes, not one
+ * surface, and a band travelling across the gaps between them reads as a
+ * glitch. The pulse stays above 0.5 opacity so nothing ever looks switched off.
+ */
+const ReadingSkeleton: React.FC = () => {
+  const reducedMotion = useReducedMotion();
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (reducedMotion) return;
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(0.5, { duration: 780, easing: Easing.inOut(Easing.quad) }),
+        withTiming(1, { duration: 780, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(pulse);
+  }, [reducedMotion, pulse]);
+
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <View style={styles.body}>
+      <View style={[styles.banner, styles.bannerReading]}>
+        <Text style={styles.bannerText}>Reading the passport…</Text>
+        <Text style={styles.bannerSub}>
+          The two code lines at the bottom hold every field.
+        </Text>
+      </View>
+      <Animated.View style={pulseStyle}>
+        {FIELD_ORDER.map(key => (
+          <View key={key} style={styles.field}>
+            <View style={styles.skelLabel} />
+            <View style={styles.skelInput} />
+          </View>
+        ))}
+      </Animated.View>
+    </View>
+  );
+};
+
 const Banner: React.FC<{
   trusted: boolean;
   suspectCount: number;
@@ -419,6 +478,8 @@ const styles = StyleSheet.create({
   banner: { borderRadius: 12, padding: 12, marginBottom: 18 },
   bannerOk: { backgroundColor: 'rgba(5,188,211,0.14)' },
   bannerWarn: { backgroundColor: 'rgba(232,163,61,0.16)' },
+  // Colourless on purpose — the read has not said "ok" or "check this" yet.
+  bannerReading: { backgroundColor: 'rgba(255,255,255,0.07)' },
   bannerText: {
     fontFamily: ff('Inter', '600'),
     fontSize: 13,
@@ -459,6 +520,23 @@ const styles = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 12 : 8,
   },
   inputSuspect: { borderColor: WARN },
+
+  // Same box the real field draws, minus the text — matched by hand because
+  // `input` sets its height through padding and font size.
+  skelLabel: {
+    width: 84,
+    height: 10,
+    borderRadius: 5,
+    marginBottom: 8,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  skelInput: {
+    height: Platform.OS === 'ios' ? 46 : 40,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+    backgroundColor: '#1A1A1A',
+  },
 
   footnote: {
     fontFamily: ff('Inter', '400'),

@@ -80,13 +80,24 @@ describe('renderNotification — happy path (full snapshot)', () => {
     expect(r.icon).toBe('close-circle-outline');
   });
 
+  it('names the document in a reminder, so someone with three open items knows which', () => {
+    // Written by operator_remind_requirement. Before this type was added to the
+    // switch it fell through to the `default` branch and rendered as the
+    // literal word "Notification" with an empty body.
+    const r = renderNotification(
+      row('operator_requirement_due_soon', { ...full, requirement_title: 'Passport' }),
+    );
+    expect(r.title).toBe('Passport still needed');
+    expect(r.body).toContain('Costa Rica Camp');
+  });
+
   it('renders a body+title+icon for every notification type', () => {
     const types: NotificationType[] = [
       'member_joined', 'member_committed', 'gear_claimed', 'admin_update_posted',
       'group_gear_updated', 'personal_gear_updated', 'gear_request_decided',
       'commitment_decided', 'join_request_decided', 'join_request_received',
       'gear_request_received', 'commitment_request_received',
-      'operator_document_rejected',
+      'operator_document_rejected', 'operator_requirement_due_soon',
     ];
     for (const t of types) {
       const r = renderNotification(row(t, full));

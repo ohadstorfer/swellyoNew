@@ -38,6 +38,12 @@ export type NotificationType =
   // counterpart: the approve RPC writes no row (Ohad, 30 Jul — a push per
   // approval would mean eight pushes for one operator clearing a queue).
   | 'operator_document_rejected'
+  // The operator tapped "Remind N people" on the Dashboard. Written by
+  // `operator_remind_requirement`, which is the FIRST thing ever to create one
+  // of these — the enum value and its push priority were added in July with the
+  // note "reminder cadence is not decided yet", and then nothing sent it. The
+  // cadence is now whatever the operator taps, with a 24h cooldown in the RPC.
+  | 'operator_requirement_due_soon'
   // Stripe finished verifying an operator's payout account and they can now be
   // paid. Written by `stripe-connect-webhook`, and the ONLY notification here
   // that is not about a trip — `trip_id` is null, because this can (and by
@@ -73,6 +79,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   trip_invite_accepted: true,
   trip_invite_declined: true,
   operator_document_rejected: true,
+  operator_requirement_due_soon: true,
   operator_stripe_ready: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
@@ -160,6 +167,10 @@ export function tripFocusForNotification(
     // Straight to the Documents card, where the row is already sitting in the
     // "Send a new one" state with the operator's reason under it.
     case 'operator_document_rejected':
+    // Same destination: the row they need is sitting in the Documents card
+    // waiting to be tapped. A reminder that lands on the trip's Overview would
+    // make the traveler hunt for the thing they were just asked for.
+    case 'operator_requirement_due_soon':
       return 'documents';
     case 'trip_invite_accepted':
     case 'trip_invite_declined':
@@ -583,6 +594,18 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
           ? `${d.note}`
           : `Your organiser asked for a new one for ${trip}.`,
         icon: 'close-circle-outline',
+      };
+    }
+    case 'operator_requirement_due_soon': {
+      // The document name leads, for the same reason it does above: someone
+      // with three outstanding items needs to know which one is being asked
+      // for. Deliberately not phrased as an accusation — this fires on things
+      // that are merely still open, not only on things that are late.
+      const needed = d.requirement_title || 'A document';
+      return {
+        title: `${needed} still needed`,
+        body: `Your organiser is still waiting for this for ${trip}.`,
+        icon: 'time-outline',
       };
     }
     case 'operator_stripe_ready':

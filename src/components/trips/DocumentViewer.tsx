@@ -51,6 +51,7 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FilePreviewBody } from '../filePreview/FilePreviewBody';
 import { PassportDetailsPanel } from './PassportDetailsPanel';
+import { DocumentLoading } from './DocumentLoading';
 import { ff } from '../../theme/fonts';
 import { getViewUrl } from '../../services/trips/tripDocumentsService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
@@ -111,7 +112,10 @@ export const DocumentViewer: React.FC<{
   visible,
   onClose,
   storagePath,
-  title = 'Passport',
+  // Neutral, NOT 'Passport'. This viewer opens any requirement's file, and a
+  // wrong-but-confident header ("Passport" over a flight booking) is worse than
+  // a vague one. Both callers pass a real title; this is only the safety net.
+  title = 'Document',
   onApprove,
   onReject,
   busy,
@@ -127,6 +131,35 @@ export const DocumentViewer: React.FC<{
   const [pdf, setPdf] = useState<{ uri: string; size: number } | null>(null);
   const [exporting, setExporting] = useState(false);
   const isPdf = !!storagePath && storagePath.toLowerCase().endsWith('.pdf');
+
+  /**
+   * Real download progress for the PDF, 0..1 — or `null` when it cannot be
+   * known, which is also the starting value.
+   *
+   * Stays null until a callback reports a real content length: a response with
+   * no `Content-Length` gives `totalBytesExpectedToWrite === -1`, and a ring
+   * frozen at zero for the whole download is a worse lie than no ring at all.
+   */
+  const [pdfProgress, setPdfProgress] = useState<number | null>(null);
+
+  /**
+   * The signed URL arriving is NOT the image being on screen — `expo-image`
+   * still has to fetch and decode it, and with `cachePolicy="none"` that is a
+   * full network round trip every single open. Swapping the placeholder out on
+   * `url` alone left a black pane for exactly that long.
+   */
+  const [imageReady, setImageReady] = useState(false);
+  /** Kept true through the fade-out — see DocumentLoading's `exiting`. */
+  const [loaderMounted, setLoaderMounted] = useState(true);
+
+  useEffect(() => {
+    if (!imageReady) {
+      setLoaderMounted(true);
+      return;
+    }
+    const t = setTimeout(() => setLoaderMounted(false), 200);
+    return () => clearTimeout(t);
+  }, [imageReady]);
 
   /**
    * Files written for an export, deleted when the viewer closes.
@@ -161,8 +194,12 @@ export const DocumentViewer: React.FC<{
       setUrl(null);
       setPdf(null);
       setError(null);
+      setPdfProgress(null);
+      setImageReady(false);
       return;
     }
+    setPdfProgress(null);
+    setImageReady(false);
     let cancelled = false;
     // Captured for the cleanup: `pdf` state is already null by the time the
     // cleanup runs, so the path to delete has to be held here.
@@ -184,7 +221,22 @@ export const DocumentViewer: React.FC<{
         const FileSystem = require('expo-file-system/legacy');
         const basename = storagePath.split('/').pop() ?? 'document.pdf';
         const target = `${FileSystem.cacheDirectory}doc-${basename}`;
-        const res = await FileSystem.downloadAsync(signed, target);
+        // Resumable, not `downloadAsync`, purely for the progress callback —
+        // it is what lets the placeholder draw a real ring instead of a
+        // spinner. The download is never actually paused or resumed.
+        const task = FileSystem.createDownloadResumable(
+          signed,
+          target,
+          {},
+          ({ totalBytesWritten, totalBytesExpectedToWrite }: {
+            totalBytesWritten: number;
+            totalBytesExpectedToWrite: number;
+          }) => {
+            if (cancelled || !(totalBytesExpectedToWrite > 0)) return;
+            setPdfProgress(Math.min(totalBytesWritten / totalBytesExpectedToWrite, 1));
+          },
+        );
+        const res = await task.downloadAsync();
         if (cancelled || !res?.uri) return;
         downloadedPath = res.uri;
         const info = await FileSystem.getInfoAsync(res.uri);
@@ -428,22 +480,36 @@ export const DocumentViewer: React.FC<{
                 />
               </View>
             ) : (
-              <ActivityIndicator color="#FFFFFF" />
+              // A4-ish and portrait, because that is what is about to fill it.
+              <DocumentLoading aspectRatio={1 / 1.414} progress={pdfProgress} />
             )
-          ) : !url ? (
-            <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <GestureDetector gesture={composed}>
-              <Animated.View style={[styles.imageWrap, imageStyle]}>
-                <Image
-                  source={{ uri: url }}
-                  style={styles.image}
-                  contentFit="contain"
-                  cachePolicy="none"
-                  transition={140}
-                />
-              </Animated.View>
-            </GestureDetector>
+            <>
+              {url ? (
+                <GestureDetector gesture={composed}>
+                  <Animated.View style={[styles.imageWrap, imageStyle]}>
+                    <Image
+                      source={{ uri: url }}
+                      style={styles.image}
+                      contentFit="contain"
+                      cachePolicy="none"
+                      transition={140}
+                      // Both, so a decode failure still clears the placeholder
+                      // and shows the empty pane rather than loading forever.
+                      onLoad={() => setImageReady(true)}
+                      onError={() => setImageReady(true)}
+                    />
+                  </Animated.View>
+                </GestureDetector>
+              ) : null}
+              {/* Sits ON the image, not instead of it: `transition={140}` fades
+                  the photo in underneath, so the two cross rather than one
+                  popping in after the other disappears. No ring — expo-image
+                  reports no progress, and a fake one is worse than none. */}
+              {loaderMounted ? (
+                <DocumentLoading aspectRatio={3 / 2} exiting={imageReady} />
+              ) : null}
+            </>
           )}
         </View>
 

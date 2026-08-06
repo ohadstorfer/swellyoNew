@@ -294,19 +294,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Footer primary button
+  // Footer primary button — the app's one primary CTA, same as onboarding's
+  // Next and as `saveBtn` below. See TravelerPriceSheet.
   primaryBtn: {
-    backgroundColor: SHEET.brandTeal,
-    paddingVertical: 16,
+    height: 56,
+    backgroundColor: '#212121',
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   primaryBtnDisabled: { opacity: 0.5 },
   primaryBtnText: {
-    fontFamily: SHEET.fontBody,
-    fontSize: 15,
-    fontWeight: '700',
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: 16,
+    fontWeight: '600',
     color: '#FFFFFF',
   },
 });
