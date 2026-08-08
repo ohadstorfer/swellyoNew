@@ -72,19 +72,32 @@ describe('loadPaymentAttempts', () => {
   });
 
   it('reads back what was recorded', async () => {
+    store[KEY] = JSON.stringify({ req1: { at: T0, basePaidUsd: 500 } });
+    await expect(loadPaymentAttempts('trip1', T0 + 1000)).resolves.toEqual({
+      req1: { at: T0, basePaidUsd: 500 },
+    });
+  });
+
+  // Attempts recorded before basePaidUsd existed are bare numbers on disk.
+  // They must survive the app update — forgetting an attempt is the
+  // double-payment trap reopening — just with an unknown baseline.
+  it('upgrades a legacy bare-timestamp attempt instead of dropping it', async () => {
     store[KEY] = JSON.stringify({ req1: T0 });
-    await expect(loadPaymentAttempts('trip1', T0 + 1000)).resolves.toEqual({ req1: T0 });
+    await expect(loadPaymentAttempts('trip1', T0 + 1000)).resolves.toEqual({
+      req1: { at: T0, basePaidUsd: null },
+    });
   });
 
   it('prunes attempts past the 7-day window and writes the pruned map back', async () => {
-    store[KEY] = JSON.stringify({ old: T0, fresh: T0 + ATTEMPT_WINDOW_MS });
+    const fresh = { at: T0 + ATTEMPT_WINDOW_MS, basePaidUsd: null };
+    store[KEY] = JSON.stringify({ old: { at: T0, basePaidUsd: null }, fresh });
     const out = await loadPaymentAttempts('trip1', T0 + ATTEMPT_WINDOW_MS + 1000);
-    expect(out).toEqual({ fresh: T0 + ATTEMPT_WINDOW_MS });
-    expect(JSON.parse(store[KEY])).toEqual({ fresh: T0 + ATTEMPT_WINDOW_MS });
+    expect(out).toEqual({ fresh });
+    expect(JSON.parse(store[KEY])).toEqual({ fresh });
   });
 
   it('removes the key entirely once every attempt has aged out', async () => {
-    store[KEY] = JSON.stringify({ old: T0 });
+    store[KEY] = JSON.stringify({ old: { at: T0, basePaidUsd: null } });
     await expect(loadPaymentAttempts('trip1', T0 + ATTEMPT_WINDOW_MS)).resolves.toEqual({});
     expect(KEY in store).toBe(false);
   });
@@ -101,9 +114,25 @@ describe('loadPaymentAttempts', () => {
     await expect(loadPaymentAttempts('trip1', T0)).resolves.toEqual({});
   });
 
-  it('drops non-numeric values instead of trusting them', async () => {
-    store[KEY] = JSON.stringify({ good: T0, bad: 'yesterday', worse: null });
-    await expect(loadPaymentAttempts('trip1', T0)).resolves.toEqual({ good: T0 });
+  it('drops malformed values instead of trusting them', async () => {
+    store[KEY] = JSON.stringify({
+      good: { at: T0, basePaidUsd: null },
+      bad: 'yesterday',
+      worse: null,
+      noAt: { basePaidUsd: 3 },
+    });
+    await expect(loadPaymentAttempts('trip1', T0)).resolves.toEqual({
+      good: { at: T0, basePaidUsd: null },
+    });
+  });
+
+  // basePaidUsd is money arithmetic downstream ("paid > base") — a string or
+  // NaN there must degrade to "unknown", never flow into a comparison.
+  it('nulls a malformed basePaidUsd but keeps the attempt', async () => {
+    store[KEY] = JSON.stringify({ req1: { at: T0, basePaidUsd: 'lots' } });
+    await expect(loadPaymentAttempts('trip1', T0)).resolves.toEqual({
+      req1: { at: T0, basePaidUsd: null },
+    });
   });
 
   it('ignores a stored array', async () => {
@@ -113,47 +142,49 @@ describe('loadPaymentAttempts', () => {
 });
 
 describe('recordPaymentAttempt / clearPaymentAttempt', () => {
+  const att = (at: number, basePaidUsd: number | null = null) => ({ at, basePaidUsd });
+
   it('records and persists', async () => {
-    const next = await recordPaymentAttempt('trip1', 'req1', {}, T0);
-    expect(next).toEqual({ req1: T0 });
-    expect(JSON.parse(store[KEY])).toEqual({ req1: T0 });
+    const next = await recordPaymentAttempt('trip1', 'req1', {}, att(T0, 250));
+    expect(next).toEqual({ req1: att(T0, 250) });
+    expect(JSON.parse(store[KEY])).toEqual({ req1: att(T0, 250) });
   });
 
   // Deposit and balance can both be mid-flight on the same trip. An earlier
   // single-id version of this state could only ever hold whichever was last.
   it('keeps two attempts on the same trip side by side', async () => {
-    const one = await recordPaymentAttempt('trip1', 'deposit', {}, T0);
-    const two = await recordPaymentAttempt('trip1', 'balance', one, T0 + 5000);
-    expect(two).toEqual({ deposit: T0, balance: T0 + 5000 });
+    const one = await recordPaymentAttempt('trip1', 'deposit', {}, att(T0));
+    const two = await recordPaymentAttempt('trip1', 'balance', one, att(T0 + 5000));
+    expect(two).toEqual({ deposit: att(T0), balance: att(T0 + 5000) });
   });
 
   it('clears one without touching the other', async () => {
     const both = await recordPaymentAttempt(
       'trip1',
       'balance',
-      await recordPaymentAttempt('trip1', 'deposit', {}, T0),
-      T0 + 5000,
+      await recordPaymentAttempt('trip1', 'deposit', {}, att(T0)),
+      att(T0 + 5000),
     );
     const left = await clearPaymentAttempt('trip1', 'deposit', both);
-    expect(left).toEqual({ balance: T0 + 5000 });
-    expect(JSON.parse(store[KEY])).toEqual({ balance: T0 + 5000 });
+    expect(left).toEqual({ balance: att(T0 + 5000) });
+    expect(JSON.parse(store[KEY])).toEqual({ balance: att(T0 + 5000) });
   });
 
   it('is a no-op when clearing something that was never there', async () => {
-    const same = await clearPaymentAttempt('trip1', 'nope', { req1: T0 });
-    expect(same).toEqual({ req1: T0 });
+    const same = await clearPaymentAttempt('trip1', 'nope', { req1: att(T0) });
+    expect(same).toEqual({ req1: att(T0) });
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
   });
 
   it('does not mutate the map it was given', async () => {
-    const before = { req1: T0 };
-    await recordPaymentAttempt('trip1', 'req2', before, T0);
-    expect(before).toEqual({ req1: T0 });
+    const before = { req1: att(T0) };
+    await recordPaymentAttempt('trip1', 'req2', before, att(T0));
+    expect(before).toEqual({ req1: att(T0) });
   });
 
   it('keeps trips in separate keys', async () => {
-    await recordPaymentAttempt('tripA', 'req1', {}, T0);
-    await recordPaymentAttempt('tripB', 'req1', {}, T0);
+    await recordPaymentAttempt('tripA', 'req1', {}, att(T0));
+    await recordPaymentAttempt('tripB', 'req1', {}, att(T0));
     expect(Object.keys(store).sort()).toEqual([
       'swellyo:pendingPayments:tripA',
       'swellyo:pendingPayments:tripB',

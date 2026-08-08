@@ -467,6 +467,13 @@ export interface TripDetailViewProps {
   /** Real participants (host first) for the tappable, horizontally-scrolling
    *  avatar row. Tapping an avatar opens that user's profile. */
   participants?: { id: string; avatarUrl: string | null; name: string | null }[];
+  /** Operator-trip crew (guides, managers, listed credits) shown to travelers.
+   *  Separate from `participants` on purpose: crew are NOT trip members — they
+   *  do not take a spot, do not pay, and are not in group_trip_participants.
+   *  Only people the operator chose to show reach this list; the filtering is
+   *  server-side (capability `profile.shown_to_travelers`).
+   *  Empty on ordinary group trips, which have no crew. */
+  crew?: { id: string; name: string; title: string | null; avatarUrl: string | null }[];
   /** Open a participant's profile (tap on their avatar). */
   onParticipantPress?: (userId: string) => void;
   /** Optional handler for the Participants "See all" link. */

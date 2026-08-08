@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trip notifications — plan</title>
+<style>
+  :root{
+    --bg:#F5F8FC;
+    --card:#FFFFFF;
+    --ink:#0F172A;
+    --ink2:#475569;
+    --ink3:#94A3B8;
+    --line:#E6EDF5;
+    --accent:#0EA5E9;
+    --accent-soft:#E0F2FE;
+    --green:#10B981; --green-soft:#DCFCE7;
+    --amber:#F59E0B; --amber-soft:#FEF3C7;
+    --violet:#8B5CF6; --violet-soft:#EDE9FE;
+    --rose:#F43F5E; --rose-soft:#FFE4E6;
+    --ease-out:cubic-bezier(.23,1,.32,1);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html{color-scheme:light}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:32px 20px 96px}
+
+  /* ── header ─────────────────────────────────────────── */
+  header h1{font-size:30px;line-height:1.15;margin:0 0 6px;letter-spacing:-.02em}
+  header p{margin:0;color:var(--ink2);max-width:62ch}
+  .stats{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0 0}
+  .stat{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:10px 14px;min-width:96px;
+  }
+  .stat b{display:block;font-size:22px;letter-spacing:-.02em}
+  .stat span{font-size:12px;color:var(--ink3)}
+
+  /* ── how it works ───────────────────────────────────── */
+  .how{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 20px;margin:24px 0 0;
+  }
+  .how h2{font-size:14px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3)}
+  .pipe{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+  .pipe .step{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 10px;white-space:nowrap}
+  .pipe .arrow{color:var(--ink3)}
+  .how ul{margin:14px 0 0;padding-left:18px;color:var(--ink2);font-size:13.5px}
+  .how li{margin:4px 0}
+  code{background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* ── global rules ───────────────────────────────────── */
+  .globals{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:12px 0 0}
+  .g{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .g label{display:block;font-size:12px;color:var(--ink3);margin:0 0 6px}
+  .g .row{display:flex;align-items:center;gap:8px}
+  .g input[type=text],.g input[type=number]{
+    width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;background:var(--bg);
+  }
+  .g small{display:block;color:var(--ink3);font-size:11.5px;margin-top:6px;line-height:1.4}
+
+  /* ── toolbar ────────────────────────────────────────── */
+  .toolbar{
+    position:sticky;top:0;z-index:20;margin:28px 0 0;padding:12px 0;
+    background:linear-gradient(var(--bg) 76%,rgba(245,248,252,0));
+    display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  }
+  .chip{
+    border:1px solid var(--line);background:var(--card);color:var(--ink2);
+    border-radius:999px;padding:7px 13px;font-size:13px;cursor:pointer;
+    transition:transform 140ms var(--ease-out),background 140ms ease,color 140ms ease,border-color 140ms ease;
+  }
+  .chip:active{transform:scale(.97)}
+  .chip[aria-pressed=true]{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .spacer{flex:1}
+  .btn{
+    border:1px solid var(--line);background:var(--card);color:var(--ink);
+    border-radius:10px;padding:8px 14px;font-size:13px;font-weight:550;cursor:pointer;
+    transition:transform 140ms var(--ease-out),background 140ms ease;
+  }
+  .btn:active{transform:scale(.97)}
+  .btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  /* ── groups ─────────────────────────────────────────── */
+  .group{margin:26px 0 0}
+  .group > h2{
+    font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);
+    margin:0 0 10px;display:flex;align-items:baseline;gap:8px;
+  }
+  .group > h2 em{font-style:normal;color:var(--ink3);text-transform:none;letter-spacing:0;font-size:12.5px}
+
+  /* ── card ───────────────────────────────────────────── */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 18px;margin:0 0 10px;
+    transition:opacity 200ms ease,border-color 140ms ease;
+  }
+  .card[data-off=true]{opacity:.45}
+  .card .top{display:flex;align-items:flex-start;gap:12px}
+  .card h3{margin:0;font-size:15.5px;letter-spacing:-.01em;flex:1}
+  .card .who{color:var(--ink2);font-size:13.5px;margin:6px 0 0}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 6px}
+  .b{font-size:11px;font-weight:600;border-radius:6px;padding:3px 7px;letter-spacing:.01em}
+  .b.live{background:var(--green-soft);color:#047857}
+  .b.half{background:var(--amber-soft);color:#92400E}
+  .b.new{background:var(--violet-soft);color:#6D28D9}
+  .b.aud{background:var(--accent-soft);color:#0369A1}
+  .b.id{background:var(--bg);color:var(--ink3);font-family:ui-monospace,Menlo,monospace}
+
+  /* switch */
+  .sw{
+    appearance:none;width:42px;height:25px;border-radius:999px;background:#CBD5E1;
+    position:relative;cursor:pointer;flex:none;border:none;
+    transition:background 180ms ease;
+  }
+  .sw::after{
+    content:"";position:absolute;top:3px;left:3px;width:19px;height:19px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.2);
+    transition:transform 180ms var(--ease-out);
+  }
+  .sw:checked{background:var(--green)}
+  .sw:checked::after{transform:translateX(17px)}
+
+  /* fields */
+  .fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 0}
+  @media(max-width:760px){.fields{grid-template-columns:1fr}}
+  .f label{display:block;font-size:11.5px;color:var(--ink3);margin:0 0 5px;letter-spacing:.02em}
+  .f input{
+    width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;
+    font:inherit;font-size:13.5px;background:var(--bg);color:var(--ink);
+    transition:border-color 140ms ease,background 140ms ease;
+  }
+  .f input:focus{outline:none;border-color:var(--accent);background:#fff}
+  .f.wide{grid-column:1/-1}
+  .timing input{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+  .hint{font-size:11.5px;color:var(--ink3);margin:5px 0 0;line-height:1.45}
+  .note{
+    font-size:12.5px;color:var(--ink2);background:var(--bg);border-radius:9px;
+    padding:9px 11px;margin:12px 0 0;border-left:2px solid var(--line);
+  }
+  .note b{color:var(--ink)}
+
+  /* preview */
+  .prev{
+    margin:12px 0 0;background:linear-gradient(180deg,#F8FAFF,#F1F5FB);
+    border:1px solid var(--line);border-radius:11px;padding:10px 12px;
+  }
+  .prev .t{font-size:13px;font-weight:640;letter-spacing:-.01em}
+  .prev .b2{font-size:12.5px;color:var(--ink2);margin-top:1px}
+  .prev .cap{font-size:10.5px;color:var(--ink3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
+
+  footer{margin:44px 0 0;color:var(--ink3);font-size:12.5px;text-align:center}
+  .toast{
+    position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(120%);
+    background:var(--ink);color:#fff;border-radius:11px;padding:11px 18px;font-size:13.5px;
+    transition:transform 320ms var(--ease-out);z-index:60;
+  }
+  .toast[data-on=true]{transform:translateX(-50%) translateY(0)}
+  @media(prefers-reduced-motion:reduce){*{transition-duration:1ms!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Trip notifications — what we can send, and when</h1>
+  <p>Every reminder we could send on a trip. Turn each one on or off, change the words, change the days. Nothing here is built yet unless it says <b>Live</b>.</p>
+  <div class="stats">
+    <div class="stat"><b id="s-on">0</b><span>turned on</span></div>
+    <div class="stat"><b id="s-live">0</b><span>live today</span></div>
+    <div class="stat"><b id="s-half">0</b><span>half built</span></div>
+    <div class="stat"><b id="s-new">0</b><span>new</span></div>
+  </div>
+</header>
+
+<section class="how">
+  <h2>How a notification travels</h2>
+  <div class="pipe">
+    <span class="step">a row in <code>notifications</code></span><span class="arrow">→</span>
+    <span class="step"><code>tg_enqueue_push</code></span><span class="arrow">→</span>
+    <span class="step"><code>notification_queue</code></span><span class="arrow">→</span>
+    <span class="step">cron, every minute</span><span class="arrow">→</span>
+    <span class="step">phone push + bell</span>
+  </div>
+  <ul>
+    <li>The pipe is <b>already built and running</b>. What is missing is the part that decides <i>when</i> to write the row. That is what this page plans.</li>
+    <li>Priority <code>0</code> sends now. Priority <code>1</code> waits for quiet hours. Priority <code>-1</code> never pushes — bell only.</li>
+    <li>The words can be changed in the database (<code>notification_templates</code>) with <b>no deploy</b>. One row per key. Placeholders: <code>{trip}</code> <code>{item}</code> <code>{actor}</code> <code>{qty}</code> <code>{days}</code>. New ones we would need: <code>{amount}</code> <code>{count}</code> <code>{date}</code>.</li>
+    <li>A daily job already exists — <code>scan-trip-reminders</code>, 06:07 UTC. Most of this plan is new rules inside that same job.</li>
+    <li>Documents <b>and</b> money are the same kind of row (<code>organized_trip_requirements</code>) with a due date. One engine can chase both.</li>
+  </ul>
+</section>
+
+<section class="how" style="margin-top:12px">
+  <h2>Rules that apply to everything</h2>
+  <div class="globals" id="globals"></div>
+</section>
+
+<div class="toolbar" id="toolbar"></div>
+<main id="list"></main>
+
+<footer>
+  Edits are saved in this browser. “Copy plan” gives you the JSON to hand back to Claude.
+</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─────────────────────────────────────────────────────────
+   Global rules
+   ───────────────────────────────────────────────────────── */
+const GLOBALS = [
+  { id:'quiet',   label:'Quiet hours (no pushes)',  value:'22:00 – 08:00 local',
+    note:'Already built. Priority-1 pushes wait for the next window.' },
+  { id:'cap',     label:'Max pushes per person per day', value:'2', type:'number',
+    note:'Not built. A traveler missing 4 documents should not get 4 pushes.' },
+  { id:'bundle',  label:'Bundle missing things into one push', value:'yes',
+    note:'“3 things still needed” instead of one push per item. Needs a new key.' },
+  { id:'cooldown',label:'Cooldown per item', value:'24 hours',
+    note:'Built for the manual Remind button. Reuse it for the automatic ones.' },
+  { id:'stop',    label:'Stop sending when', value:'trip started · cancelled · person removed',
+    note:'Nothing chases a traveler after departure day.' },
+  { id:'test',    label:'Test only on', value:'trips where every member is a dev account',
+    note:'House rule. These are real pushes to real people.' },
+];
+
+/* ─────────────────────────────────────────────────────────
+   The catalog
+   status: live | half | new
+     live = running in production today
+     half = the notification type exists in the database but nothing creates it
+     new  = does not exist at all
+   ───────────────────────────────────────────────────────── */
+const ITEMS = [
+
+/* ── DOCUMENTS ───────────────────────────────────────── */
+{ group:'Documents', id:'DOC-1', on:true, status:'half', aud:'Traveler',
+  key:'operator_requirement_added',
+  title:'A new thing was added to your list',
+  who:'The operator adds a requirement after people already joined.',
+  timing:'right away, once',
+  push:['Something new for {trip}','{item} was added to your list'],
+  bell:['{item} was added','The organiser added this to {trip}.'],
+  note:'The type exists. Nothing creates it. A trigger on insert would be enough.' },
+
+{ group:'Documents', id:'DOC-2', on:true, status:'half', aud:'Traveler',
+  key:'operator_requirement_due_soon',
+  title:'Still missing, before the due date',
+  who:'Traveler has sent nothing for this item and the due date is coming.',
+  timing:'-14, -7, -3 days before due date',
+  push:['Still needed for {trip}','Your organiser is waiting for {item}'],
+  bell:['{item} still needed','Your organiser is still waiting for this for {trip}.'],
+  note:'The type is <b>live</b>, but only when the operator taps “Remind N people” by hand. This makes it automatic. Copy already exists in <code>notification_templates</code>.' },
+
+{ group:'Documents', id:'DOC-3', on:true, status:'half', aud:'Traveler',
+  key:'operator_requirement_overdue',
+  title:'Past the due date',
+  who:'Due date passed and still nothing sent.',
+  timing:'+1, +3, +7 days after due date',
+  push:['{item} is late','{trip} needed this on {date}'],
+  bell:['{item} is late','This was due on {date} for {trip}.'],
+  note:'Type exists, no producer. Priority is 0 — it would bypass quiet hours. Decide if that is right.' },
+
+{ group:'Documents', id:'DOC-4', on:true, status:'live', aud:'Traveler',
+  key:'operator_document_rejected',
+  title:'Your document was sent back',
+  who:'The operator rejects an upload.',
+  timing:'right away',
+  push:['{item} needs another look','Your organiser sent it back for {trip}'],
+  bell:['{item} was sent back','Open it to see why and send a new one.'],
+  note:'Live. Fires from <code>operator_reject_document</code>.' },
+
+{ group:'Documents', id:'DOC-5', on:false, status:'half', aud:'Traveler',
+  key:'operator_document_approved',
+  title:'Your document was accepted',
+  who:'The operator approves an upload.',
+  timing:'right away',
+  push:['{item} accepted','You are all set for {trip}'],
+  bell:['{item} accepted','Nothing else needed for this one.'],
+  note:'Type exists on purpose but was left with no producer — good news pushes can feel like noise. Off by default.' },
+
+{ group:'Documents', id:'DOC-6', on:true, status:'new', aud:'Traveler',
+  key:'operator_passport_expiring',
+  title:'Passport expires too soon',
+  who:'Passport expiry is less than 6 months after the trip ends.',
+  timing:'once, when we read the passport · then -30 days before departure',
+  push:['Check your passport for {trip}','It expires on {date} — many countries need 6 months'],
+  bell:['Passport expires {date}','Most countries want 6 months left after you travel.'],
+  note:'We already store <code>expiry_date</code> from the passport scan. Nothing looks at it. This is the cheapest real-value notification on the page.' },
+
+{ group:'Documents', id:'DOC-7', on:true, status:'new', aud:'Traveler',
+  key:'operator_last_call',
+  title:'Last call before departure',
+  who:'Anything at all still missing, and the trip starts very soon.',
+  timing:'-3, -1 days before departure',
+  push:['{count} things still missing for {trip}','The trip starts in {days} days'],
+  bell:['{count} things still missing','{trip} starts in {days} days. Open your list.'],
+  note:'The one bundled message. Ignores each item’s own due date — departure is the real deadline.' },
+
+/* ── MONEY ───────────────────────────────────────────── */
+{ group:'Money', id:'PAY-1', on:true, status:'new', aud:'Traveler',
+  key:'operator_payment_due_soon:deposit',
+  title:'Deposit due soon',
+  who:'Deposit not paid, due date coming.',
+  timing:'-7, -3, -1 days before due date',
+  push:['Deposit due for {trip}','{amount} to hold your spot'],
+  bell:['Deposit due {date}','{amount} to hold your spot on {trip}.'],
+  note:'A deposit is all-or-nothing — it cannot be part paid. Say the full number.' },
+
+{ group:'Money', id:'PAY-2', on:true, status:'new', aud:'Traveler',
+  key:'operator_payment_overdue:deposit',
+  title:'Deposit is late',
+  who:'Deposit due date passed, nothing paid.',
+  timing:'+1, +3 days after due date',
+  push:['Your deposit for {trip} is late','{amount} was due on {date}'],
+  bell:['Deposit late','{amount} was due on {date}.'],
+  note:'Decide the real consequence. If a spot is actually released, the message should say so.' },
+
+{ group:'Money', id:'PAY-3', on:true, status:'new', aud:'Traveler',
+  key:'operator_payment_due_soon:balance',
+  title:'Final payment due soon',
+  who:'Balance still owed, due date coming.',
+  timing:'-21, -14, -7 days before due date',
+  push:['{amount} left for {trip}','Final payment is due {date}'],
+  bell:['{amount} left to pay','Final payment for {trip} is due {date}.'],
+  note:'The balance <b>can</b> be part paid, so the number moves. Always send what is left, never the total.' },
+
+{ group:'Money', id:'PAY-4', on:true, status:'new', aud:'Traveler',
+  key:'operator_payment_overdue:balance',
+  title:'Final payment is late',
+  who:'Balance due date passed, money still owed.',
+  timing:'+1, +5 days after due date',
+  push:['{amount} still owed for {trip}','This was due on {date}'],
+  bell:['{amount} still owed','Due on {date} for {trip}.'],
+  note:'' },
+
+{ group:'Money', id:'PAY-5', on:true, status:'new', aud:'Traveler',
+  key:'operator_payment_part_paid',
+  title:'You part paid — some is still left',
+  who:'They paid a part and then went quiet.',
+  timing:'14 days after the last payment, then every 14 days',
+  push:['{amount} left on {trip}','Pick up where you left off'],
+  bell:['{amount} left to pay','You paid part of it. The rest is still open.'],
+  note:'Only makes sense now that part payments exist. Stop as soon as it hits zero.' },
+
+{ group:'Money', id:'PAY-6', on:false, status:'new', aud:'Traveler',
+  key:'operator_payment_stuck',
+  title:'A payment did not finish',
+  who:'Checkout was opened, nothing arrived.',
+  timing:'2 hours after the attempt, once',
+  push:['Your payment for {trip} did not go through','Nothing was charged — try again'],
+  bell:['Payment did not finish','Nothing was charged. You can try again.'],
+  note:'We know the attempt started (<code>pendingPaymentStore</code>) but that lives on the phone, not the server. Would need the server to see it. Off until we decide.' },
+
+{ group:'Money', id:'PAY-7', on:true, status:'new', aud:'Traveler',
+  key:'operator_payment_received',
+  title:'We got your payment',
+  who:'A payment lands.',
+  timing:'right away',
+  push:['Payment received for {trip}','{amount} — thank you'],
+  bell:['{amount} received','Thanks. {amount} is on your {trip} balance.'],
+  note:'Not a reminder, but the one message people actually want. Silences the “did it work?” message to the operator.' },
+
+/* ── FORMS ───────────────────────────────────────────── */
+{ group:'Forms', id:'FRM-2', on:true, status:'new', aud:'Traveler',
+  key:'operator_form_due_soon:waiver',
+  title:'Waiver not signed',
+  who:'No signed waiver.',
+  timing:'-14, -5, -2 days before departure',
+  push:['Waiver for {trip}','One tap to sign'],
+  bell:['Waiver not signed','You need this before the trip starts.'],
+  note:'This is a legal record. It may be worth blocking, not just nagging.' },
+
+/* ── GROUP GEAR ──────────────────────────────────────── */
+{ group:'Group gear', id:'GRP-1', on:true, status:'live', aud:'Everyone',
+  key:'trip_reminder:gear',
+  title:'Group gear nobody claimed',
+  who:'Some item still needs more people than claimed it.',
+  timing:'-10, -5, -3, -1 days before departure',
+  push:['{trip} needs gear','Some group gear still has nobody bringing it'],
+  bell:['Group gear still open','Some items on {trip} still need someone.'],
+  note:'Live today for every group trip, from <code>scan-trip-reminders</code>. Goes to everyone, not only the people who claimed nothing.' },
+
+{ group:'Group gear', id:'GRP-2', on:true, status:'new', aud:'Traveler',
+  key:'trip_reminder:gear_mine',
+  title:'Remember what you said you would bring',
+  who:'This person claimed an item.',
+  timing:'-2 days before departure',
+  push:['Packing for {trip}?','You said you would bring {item}'],
+  bell:['You are bringing {item}','Do not forget it for {trip}.'],
+  note:'Different from the one above — this one is personal, so it can be short and friendly.' },
+
+{ group:'Group gear', id:'GRP-3', on:true, status:'live', aud:'Everyone',
+  key:'group_gear_updated',
+  title:'The gear list changed',
+  who:'The host edits group gear.',
+  timing:'right away',
+  push:['{trip} gear list changed','Have a look at what is still open'],
+  bell:['Gear list updated','{actor} changed the gear list for {trip}.'],
+  note:'Live. Priority 1, so it waits for quiet hours.' },
+
+/* ── PERSONAL GEAR ───────────────────────────────────── */
+{ group:'Personal gear', id:'PRS-1', on:true, status:'live', aud:'Traveler',
+  key:'personal_gear_updated',
+  title:'The host set what you should bring',
+  who:'The host edits your personal gear list.',
+  timing:'right away',
+  push:['Your packing list for {trip}','The host updated what to bring'],
+  bell:['Your list changed','{actor} updated what you should bring to {trip}.'],
+  note:'Live.' },
+
+{ group:'Personal gear', id:'PRS-2', on:true, status:'new', aud:'Traveler',
+  key:'personal_gear_unchecked',
+  title:'Personal gear not ticked off',
+  who:'The host listed items and this person ticked none of them.',
+  timing:'-7, -2 days before departure',
+  push:['Packing for {trip}','{count} things on your list are not ticked'],
+  bell:['{count} things not ticked','Open your packing list for {trip}.'],
+  note:'We store the host list and the personal list separately, so we can already tell. Nothing reads it yet.' },
+
+/* ── TRIP ────────────────────────────────────────────── */
+{ group:'The trip itself', id:'TRP-1', on:true, status:'live', aud:'Everyone',
+  key:'trip_reminder:week',
+  title:'One week to go',
+  who:'Everyone on the trip.',
+  timing:'-7 days',
+  push:['{trip} is in a week','Time to get ready'],
+  bell:['{trip} in 7 days','One week to go.'],
+  note:'Live.' },
+
+{ group:'The trip itself', id:'TRP-2', on:true, status:'live', aud:'Everyone',
+  key:'trip_reminder:tomorrow',
+  title:'Tomorrow / today',
+  who:'Everyone on the trip.',
+  timing:'-1 day, and departure day',
+  push:['{trip} starts tomorrow','See you there'],
+  bell:['{trip} starts tomorrow','Have a good one.'],
+  note:'Live. Two separate stages, same shape.' },
+
+{ group:'The trip itself', id:'TRP-4', on:true, status:'live', aud:'Everyone',
+  key:'trip_ended',
+  title:'The trip ended',
+  who:'Everyone, on the end date.',
+  timing:'end day',
+  push:['{trip} is a wrap','Hope it was good'],
+  bell:['{trip} ended','Hope it was good.'],
+  note:'Live. Bell only in practice — the push is low priority.' },
+
+/* ── OPERATOR SIDE ───────────────────────────────────── */
+{ group:'Operator and staff', id:'OPS-1', on:true, status:'new', aud:'Operator',
+  key:'operator_review_backlog',
+  title:'Documents waiting for you to review',
+  who:'Uploads sitting with no decision.',
+  timing:'once a day, only if something waited more than 24 hours',
+  push:['{count} documents waiting','Open {trip} to review them'],
+  bell:['{count} waiting for review','Some have been waiting more than a day.'],
+  note:'The operator side has no reminders at all right now. This is the one they will feel first — travelers complain when nothing gets approved.' },
+
+{ group:'Operator and staff', id:'OPS-2', on:true, status:'half', aud:'Operator',
+  key:'operator_requirement_overdue_operator',
+  title:'People are late',
+  who:'Travelers past a due date.',
+  timing:'weekly · then daily from -7 days',
+  push:['{count} people are late on {trip}','Open the dashboard to chase them'],
+  bell:['{count} people late','Passport, waiver, money — open the dashboard.'],
+  note:'Type exists, nothing creates it. Should pair with the “Remind N people” button so the operator can act in one tap.' },
+
+{ group:'Operator and staff', id:'OPS-3', on:true, status:'new', aud:'Operator',
+  key:'operator_money_outstanding',
+  title:'Money still not in',
+  who:'Trip is close and some travelers still owe.',
+  timing:'-14, -7 days before departure',
+  push:['{amount} not collected for {trip}','{count} travelers still owe'],
+  bell:['{amount} still not collected','{count} travelers on {trip} still owe money.'],
+  note:'Only for trips that collect through Swellyo. Offline trips have no ledger to read.' },
+
+{ group:'Operator and staff', id:'OPS-4', on:true, status:'half', aud:'Operator',
+  key:'operator_stripe_ready',
+  title:'Payouts are set up (or still are not)',
+  who:'Stripe onboarding finishes — or stalls halfway.',
+  timing:'right away when it finishes · +2 days if it stalls',
+  push:['You can take payments on {trip}','Stripe is connected'],
+  bell:['Payouts ready','Stripe is connected. You can charge travelers now.'],
+  note:'Type exists, no producer. Connect has six states, not two — the stall reminder matters more than the success one.' },
+
+{ group:'Operator and staff', id:'OPS-5', on:true, status:'new', aud:'Operator',
+  key:'operator_trip_readiness',
+  title:'Trip starts soon — here is who is not ready',
+  who:'The whole group, summed up.',
+  timing:'-14, -7, -2 days before departure',
+  push:['{trip} in {days} days','{count} travelers are not ready'],
+  bell:['{count} not ready','{trip} starts in {days} days.'],
+  note:'The one that replaces opening the dashboard to check.' },
+
+{ group:'Operator and staff', id:'OPS-6', on:true, status:'new', aud:'Staff',
+  key:'operator_staff_invite_pending',
+  title:'A staff invite was never accepted',
+  who:'Invite sent, not accepted, not expired.',
+  timing:'+3 days after sending, once · to both sides',
+  push:['{actor} invited you to help on {trip}','The invite is still open'],
+  bell:['Invite still open','{actor} invited you to help run {trip}.'],
+  note:'Invites have an expiry date. Remind before it dies, not after.' },
+
+{ group:'Operator and staff', id:'OPS-7', on:true, status:'new', aud:'Operator',
+  key:'operator_passport_risk',
+  title:'A traveler’s passport expires too soon',
+  who:'Same check as the traveler one, told to the operator.',
+  timing:'when we read it · and -30 days before departure',
+  push:['Passport problem on {trip}','{actor}’s passport expires {date}'],
+  bell:['Passport expires {date}','{actor} may not be allowed to travel.'],
+  note:'This is the one that stops a person being turned away at the airport. Worth building even if nothing else here is.' },
+];
+
+/* ─────────────────────────────────────────────────────────
+   Render
+   ───────────────────────────────────────────────────────── */
+const STORE = 'swellyo-notif-plan-v1';
+const saved = JSON.parse(localStorage.getItem(STORE) || '{}');
+const state = { filter:'all', items:{}, globals:{} };
+
+ITEMS.forEach(it => {
+  const s = saved.items?.[it.id] || {};
+  state.items[it.id] = {
+    on: s.on ?? it.on,
+    timing: s.timing ?? it.timing,
+    pushT: s.pushT ?? it.push[0], pushB: s.pushB ?? it.push[1],
+    bellT: s.bellT ?? it.bell[0], bellB: s.bellB ?? it.bell[1],
+  };
+});
+GLOBALS.forEach(g => { state.globals[g.id] = saved.globals?.[g.id] ?? g.value; });
+
+function save(){ localStorage.setItem(STORE, JSON.stringify(state)); }
+
+const STATUS_LABEL = { live:'Live', half:'Half built', new:'New' };
+
+function renderGlobals(){
+  document.getElementById('globals').innerHTML = GLOBALS.map(g => `
+    <div class="g">
+      <label>${g.label}</label>
+      <input type="text" data-g="${g.id}" value="${esc(state.globals[g.id])}" />
+      <small>${g.note}</small>
+    </div>`).join('');
+  document.querySelectorAll('[data-g]').forEach(el => {
+    el.addEventListener('input', e => { state.globals[e.target.dataset.g] = e.target.value; save(); });
+  });
+}
+
+function renderToolbar(){
+  const f = [
+    ['all','Everything'],['live','Live'],['half','Half built'],['new','New'],
+    ['Traveler','Traveler'],['Operator','Operator'],
+  ];
+  document.getElementById('toolbar').innerHTML =
+    f.map(([k,l]) => `<button class="chip" data-f="${k}" aria-pressed="${state.filter===k}">${l}</button>`).join('') +
+    `<span class="spacer"></span>
+     <button class="btn" id="reset">Reset</button>
+     <button class="btn primary" id="copy">Copy plan</button>`;
+
+  document.querySelectorAll('[data-f]').forEach(el =>
+    el.addEventListener('click', () => { state.filter = el.dataset.f; renderToolbar(); renderList(); }));
+  document.getElementById('copy').addEventListener('click', copyPlan);
+  document.getElementById('reset').addEventListener('click', () => {
+    if (confirm('Throw away all your edits?')) { localStorage.removeItem(STORE); location.reload(); }
+  });
+}
+
+function passes(it){
+  const f = state.filter;
+  if (f === 'all') return true;
+  if (f === 'live' || f === 'half' || f === 'new') return it.status === f;
+  if (f === 'Traveler') return it.aud === 'Traveler' || it.aud === 'Everyone';
+  if (f === 'Operator') return it.aud === 'Operator' || it.aud === 'Staff';
+  return true;
+}
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function renderList(){
+  const shown = ITEMS.filter(passes);
+  const groups = [...new Set(shown.map(i => i.group))];
+  document.getElementById('list').innerHTML = groups.map(g => {
+    const rows = shown.filter(i => i.group === g);
+    return `<section class="group">
+      <h2>${g} <em>${rows.length}</em></h2>
+      ${rows.map(card).join('')}
+    </section>`;
+  }).join('') || `<p style="color:var(--ink3)">Nothing matches that filter.</p>`;
+
+  bind();
+  updateStats();
+}
+
+function card(it){
+  const s = state.items[it.id];
+  return `
+  <article class="card" data-off="${!s.on}" data-id="${it.id}">
+    <div class="badges">
+      <span class="b id">${it.id}</span>
+      <span class="b ${it.status}">${STATUS_LABEL[it.status]}</span>
+      <span class="b aud">${it.aud}</span>
+      <span class="b id">${esc(it.key)}</span>
+    </div>
+    <div class="top">
+      <div style="flex:1">
+        <h3>${it.title}</h3>
+        <p class="who">${it.who}</p>
+      </div>
+      <input class="sw" type="checkbox" data-on="${it.id}" ${s.on ? 'checked':''} aria-label="on or off" />
+    </div>
+
+    <div class="fields">
+      <div class="f timing wide">
+        <label>WHEN</label>
+        <input data-k="timing" data-id="${it.id}" value="${esc(s.timing)}" />
+        <p class="hint">Minus = before the date. Plus = after it. Documents and money count from their own due date; the rest count from departure.</p>
+      </div>
+      <div class="f"><label>PUSH TITLE</label><input data-k="pushT" data-id="${it.id}" value="${esc(s.pushT)}" /></div>
+      <div class="f"><label>PUSH BODY</label><input data-k="pushB" data-id="${it.id}" value="${esc(s.pushB)}" /></div>
+      <div class="f"><label>BELL TITLE</label><input data-k="bellT" data-id="${it.id}" value="${esc(s.bellT)}" /></div>
+      <div class="f"><label>BELL BODY</label><input data-k="bellB" data-id="${it.id}" value="${esc(s.bellB)}" /></div>
+    </div>
+
+    <div class="prev">
+      <div class="cap">On the phone</div>
+      <div class="t" data-prev-t="${it.id}">${esc(fill(s.pushT))}</div>
+      <div class="b2" data-prev-b="${it.id}">${esc(fill(s.pushB))}</div>
+    </div>
+
+    ${it.note ? `<div class="note">${it.note}</div>` : ''}
+  </article>`;
+}
+
+const SAMPLE = { trip:'El Salvador 26', item:'Passport', actor:'Maya', qty:'2',
+                 days:'7', amount:'$450', count:'3', date:'12 Mar', preview:'The host posted an update' };
+function fill(s){ return String(s).replace(/\{(\w+)\}/g, (m,k) => SAMPLE[k] ?? m); }
+
+function bind(){
+  document.querySelectorAll('[data-on]').forEach(el => el.addEventListener('change', e => {
+    const id = e.target.dataset.on;
+    state.items[id].on = e.target.checked;
+    document.querySelector(`.card[data-id="${id}"]`).dataset.off = String(!e.target.checked);
+    save(); updateStats();
+  }));
+  document.querySelectorAll('[data-k]').forEach(el => el.addEventListener('input', e => {
+    const { id, k } = e.target.dataset;
+    state.items[id][k] = e.target.value;
+    if (k === 'pushT') document.querySelector(`[data-prev-t="${id}"]`).textContent = fill(e.target.value);
+    if (k === 'pushB') document.querySelector(`[data-prev-b="${id}"]`).textContent = fill(e.target.value);
+    save();
+  }));
+}
+
+function updateStats(){
+  const on = ITEMS.filter(i => state.items[i.id].on);
+  document.getElementById('s-on').textContent   = on.length;
+  document.getElementById('s-live').textContent = ITEMS.filter(i => i.status==='live').length;
+  document.getElementById('s-half').textContent = ITEMS.filter(i => i.status==='half').length;
+  document.getElementById('s-new').textContent  = ITEMS.filter(i => i.status==='new').length;
+}
+
+function copyPlan(){
+  const out = {
+    globals: state.globals,
+    notifications: ITEMS.map(it => ({
+      id: it.id, group: it.group, key: it.key, audience: it.aud, status: it.status,
+      enabled: state.items[it.id].on,
+      when: state.items[it.id].timing,
+      push: { title: state.items[it.id].pushT, body: state.items[it.id].pushB },
+      bell: { title: state.items[it.id].bellT, body: state.items[it.id].bellB },
+    })),
+  };
+  navigator.clipboard.writeText(JSON.stringify(out, null, 2))
+    .then(() => toast('Plan copied — paste it back to Claude'))
+    .catch(() => toast('Could not copy. Check browser permissions.'));
+}
+
+let toastTimer;
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.dataset.on = 'true';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.dataset.on = 'false'; }, 2600);
+}
+
+renderGlobals();
+renderToolbar();
+renderList();
+</script>
+</body>
+</html>

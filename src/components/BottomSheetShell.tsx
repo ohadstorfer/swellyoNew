@@ -27,10 +27,62 @@ import {
   Animated,
   StyleSheet,
   KeyboardAvoidingView,
+  Keyboard,
+  Dimensions,
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../hooks/useSheetTransition';
+
+/**
+ * How far the keyboard covers the screen, on iOS, for `avoidKeyboard` sheets.
+ *
+ * WHY NOT KeyboardAvoidingView (which is what this replaced on iOS): KAV with
+ * `behavior="padding"` pads ITSELF, and it was wrapping the shell's
+ * `styles.container` — the full-screen, `justifyContent: 'flex-end'` box that
+ * every sheet is pinned to. Any padding there makes the container shorter than
+ * the screen, and flex-end then faithfully pins the sheet to a bottom edge that
+ * is no longer the screen's. That is the floating sheet: a gap underneath, the
+ * trip screen showing through it, on every sheet that passed `avoidKeyboard`
+ * and no others.
+ *
+ * The height is DERIVED FROM THE FRAME on every event rather than accumulated,
+ * and forced to 0 on hide, so there is no state to go stale — a missed final
+ * event cannot leave the sheet parked above the bottom.
+ *
+ * iOS only, deliberately. Android keeps its existing KeyboardAvoidingView: it
+ * uses `behavior="height"` there, the reported bug is iOS-only, and Android's
+ * bottom edge is already delicate (see `androidNavBarNudge` and expo/expo#39749).
+ * RN's keyboard metrics are the wrong ruler on Android edge-to-edge anyway —
+ * that is what `react-native-keyboard-controller` exists for in this project —
+ * but rnkc is a no-op in Expo Go, which is where these sheets get tested.
+ */
+function useIosKeyboardInset(enabled: boolean): number {
+  const [height, setHeight] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!enabled || Platform.OS !== 'ios') {
+      setHeight(0);
+      return;
+    }
+    const apply = (e: { endCoordinates: { screenY: number } }) => {
+      // Screen height minus where the keyboard's top edge sits. Off-screen
+      // keyboard → screenY === screen height → 0. No accumulation, no drift.
+      const screenH = Dimensions.get('window').height;
+      setHeight(Math.max(0, screenH - e.endCoordinates.screenY));
+    };
+    const subs = [
+      Keyboard.addListener('keyboardWillChangeFrame', apply),
+      // Belt and braces: `willHide` sometimes arrives without a final frame
+      // change, and a stale inset here is exactly the bug being fixed.
+      Keyboard.addListener('keyboardWillHide', () => setHeight(0)),
+      Keyboard.addListener('keyboardDidHide', () => setHeight(0)),
+    ];
+    return () => subs.forEach(s => s.remove());
+  }, [enabled]);
+
+  return height;
+}
 
 /** Gesture props to spread onto a drag handle (returned via the render-prop form). */
 type SheetApi = { panHandlers: ReturnType<typeof useSheetTransition>['panHandlers'] };
@@ -97,6 +149,9 @@ export function BottomSheetShell({
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
   const insets = useSafeAreaInsets();
+  // Gated on `visible` as well as the prop: a closed sheet must not hold a
+  // keyboard inset from the last time it was open.
+  const keyboardInset = useIosKeyboardInset(avoidKeyboard && visible);
 
   // Android edge-to-edge: the RN Modal draws in its OWN window and anchors content to
   // the SAFE AREA (window height excludes the nav bar), so a bottom-anchored sheet
@@ -140,29 +195,40 @@ export function BottomSheetShell({
         pointerEvents="none"
         style={[StyleSheet.absoluteFill, { backgroundColor: backdropColor, opacity: backdropOpacity }]}
       />
-      <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
-        {/* Whole-sheet swipe only when NOT using the render-prop (caller places it). */}
-        <Pressable
-          onPress={e => e.stopPropagation()}
-          style={androidNavBarNudge}
-          {...(swipeToDismiss && !isRenderProp ? panHandlers : {})}
-        >
-          {content}
-        </Pressable>
-      </Animated.View>
+      {/* The keyboard inset lives HERE, on a spacer wrapper — never on
+          `styles.container` and never on the sheet itself.
+          • Not the container: it is the full-screen `flex-end` box, and padding
+            there shortens the box the sheet is pinned to. That was the bug.
+          • Not the sheet: `onSheetLayout` measures the view below this one, and
+            an inset folded into that measurement would make the slide-out
+            animation travel the sheet's height PLUS the keyboard's.
+          The scrim above is `absoluteFill` on the container, so it keeps
+          covering the whole screen regardless of what happens in here. */}
+      <View style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : null}>
+        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+          {/* Whole-sheet swipe only when NOT using the render-prop (caller places it). */}
+          <Pressable
+            onPress={e => e.stopPropagation()}
+            style={androidNavBarNudge}
+            {...(swipeToDismiss && !isRenderProp ? panHandlers : {})}
+          >
+            {content}
+          </Pressable>
+        </Animated.View>
+      </View>
     </Pressable>
   );
 
-  const wrapped = avoidKeyboard ? (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.flex}
-    >
-      {body}
-    </KeyboardAvoidingView>
-  ) : (
-    body
-  );
+  // Android only. iOS is handled by `keyboardInset` above — see
+  // useIosKeyboardInset for why KAV cannot wrap the container.
+  const wrapped =
+    avoidKeyboard && Platform.OS !== 'ios' ? (
+      <KeyboardAvoidingView behavior="height" style={styles.flex}>
+        {body}
+      </KeyboardAvoidingView>
+    ) : (
+      body
+    );
 
   // A layer, not a window. `mounted` (not `visible`) so the slide-out still plays.
   if (inline) return mounted ? <View style={styles.layer}>{wrapped}</View> : null;

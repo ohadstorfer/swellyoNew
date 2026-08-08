@@ -50,7 +50,12 @@ export type NotificationType =
   // design usually will) happen before the operator's first trip exists.
   // NotificationCenter already refuses to navigate a row with no trip_id, so
   // it renders as an unpressable status line, which is exactly right.
-  | 'operator_stripe_ready';
+  | 'operator_stripe_ready'
+  // An operator asked someone to join their trip's crew, from inside the app.
+  // Written by `invite_staff_member`. Like `trip_invite_received`, this row is
+  // a QUESTION, not news: tapping it opens the accept sheet rather than the
+  // trip, because the recipient is not on the crew until they say yes.
+  | 'operator_staff_invited';
 
 /**
  * Every bell type, as a runtime set for the foreground push gate.
@@ -81,6 +86,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   operator_document_rejected: true,
   operator_requirement_due_soon: true,
   operator_stripe_ready: true,
+  operator_staff_invited: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
   Object.keys(BELL_TYPE_FLAGS)
@@ -618,6 +624,19 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         body: 'You can now collect payment for your trips in Swellyo.',
         icon: 'card-outline',
       };
+    case 'operator_staff_invited': {
+      // The tier leads. "Marta added you to El Salvador 26" says nothing about
+      // what you are being handed — Crew and Manager are very different jobs,
+      // and Manager can read every traveler's passport. Naming it in the row
+      // means the answer is informed before the sheet is even open.
+      const who = d.actor_name || 'An operator';
+      const tier = d.role_label || 'crew';
+      return {
+        title: `Join ${trip} as ${tier}?`,
+        body: `${who} wants you on the crew.`,
+        icon: 'people-outline',
+      };
+    }
     default:
       return { title: 'Notification', body: '', icon: 'notifications-outline' };
   }

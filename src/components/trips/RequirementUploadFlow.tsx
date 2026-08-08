@@ -44,6 +44,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { TripIcon } from './tripIcons';
 import { ff } from '../../theme/fonts';
@@ -85,6 +86,7 @@ export const RequirementUploadFlow: React.FC<{
   onUploaded,
   rejectionNote,
 }) => {
+  const insets = useSafeAreaInsets();
   const catalog = REQUIREMENT_CATALOG[kind];
   const allowPdf = catalog.allowPdf;
   /** "passport", "travel insurance", … — this sheet serves every upload kind. */
@@ -291,7 +293,7 @@ export const RequirementUploadFlow: React.FC<{
         onDismissed={handleDismissed}
         swipeToDismiss={!uploading}
       >
-        <View style={styles.surface}>
+        <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
           <View style={styles.grabber} />
           <Text style={styles.title}>{pickedIsPdf ? 'Check the file' : 'Check the photo'}</Text>
           <Text style={styles.checkLine}>
@@ -350,7 +352,7 @@ export const RequirementUploadFlow: React.FC<{
       onClose={close}
       onDismissed={handleDismissed}
     >
-      <View style={styles.surface}>
+      <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
         <View style={styles.grabber} />
 
         <View style={styles.titleRow}>
@@ -440,7 +442,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
     paddingTop: 10,
-    paddingBottom: 28,
+    // paddingBottom is applied inline from the safe-area inset.
     alignItems: 'center',
     gap: 12,
   },

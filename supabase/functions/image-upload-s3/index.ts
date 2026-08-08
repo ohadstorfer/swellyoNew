@@ -14,7 +14,12 @@ const S3_BASE = "https://swellyo-images.s3.us-east-1.amazonaws.com";
 // Public buckets this fn may sign uploads for, and the allowed filename kinds.
 const ALLOWED: Record<string, Set<string>> = {
   "profile-images": new Set(["profile", "cover", "video-thumbnail", "surf-photo"]),
-  "trip-images": new Set(["hero", "accommodation"]),
+  // "crew": the photo of an operator-trip crew member who has NO Swellyo
+  // account (a Tier 1 "Listed" credit). Crew who signed in already have a
+  // profile photo, so this only ever covers the people who cannot upload one
+  // themselves — the operator uploads it for them, which is why the key lands
+  // under the OPERATOR's userId folder and not the subject's.
+  "trip-images": new Set(["hero", "accommodation", "crew"]),
   "surftrip-images": new Set(["hero"]),
 };
 

@@ -1365,6 +1365,167 @@ export const TripDocumentsCard: React.FC<{
 };
 
 // ===========================================================================
+// Payment — the money summary at the bottom of the traveler's Plan tab.
+//
+// The task rows above already carry a "Pay" pill per requirement; this section
+// answers the question they never do — "how much of the whole trip have I
+// paid?" — and offers one place to pay from, including paying only part of
+// what is left (the amount sheet opens from `onPayNow`; this stays pure
+// presentation like everything else in this file).
+//
+// Only rendered for a traveler on a managed operator trip whose price is
+// known; the screen owns that gate. `payState` mirrors the pay rows' own
+// states so the button can never contradict the row above it:
+//   • 'ready'      — "Pay now" opens the amount sheet.
+//   • 'confirming' — Checkout just closed, webhook poll running. Disabled.
+//   • 'processing' — the poll gave up; a payment MAY be in flight. Still
+//     tappable, but the screen routes the tap to the explanation sheet, never
+//     to a new checkout — same rule as the task row.
+//   • 'paid'       — nothing left; the button is gone, not disabled. A
+//     disabled "Pay now" under "All paid" reads as something being wrong.
+export type PaymentSectionState = 'ready' | 'confirming' | 'processing' | 'paid';
+
+/** One pay step of the trip — "Deposit $1,000", "Final payment $2,000". */
+export type PaymentStep = {
+  key: string;
+  /** The requirement's own title, so this can never drift from the task row. */
+  title: string;
+  /** What this step costs. */
+  totalUsd: number;
+  /** Already paid against it, clamped to totalUsd. */
+  paidUsd: number;
+};
+
+export const PaymentSection: React.FC<{
+  totalUsd: number;
+  paidUsd: number;
+  payState: PaymentSectionState;
+  /**
+   * The trip's pay steps, in the order they are collected.
+   *
+   * This exists because of a real confusion on device: the card said
+   * "$2,500 left to pay" while the pay sheet said "$500 left on deposit" —
+   * two different "left" figures, and the word "deposit" arriving from
+   * nowhere, because nothing here ever said the total was collected in two
+   * parts. Naming the split ONCE, here, is what lets the sheet stop
+   * explaining itself.
+   *
+   * Only rendered when there is more than one step: on a single-payment trip
+   * the breakdown would just restate the line above it.
+   */
+  steps?: PaymentStep[];
+  /** The trip's frozen USD→₪ rate + viewer country, for the same secondary
+   *  "about ₪X" hint the pay rows show. See TripDocumentsCard. */
+  budgetFxRate?: number | null;
+  viewerCountry?: string | null;
+  onPayNow: () => void;
+}> = ({ totalUsd, paidUsd, payState, steps = [], budgetFxRate, viewerCountry, onPayNow }) => {
+  const paid = Math.min(paidUsd, totalUsd);
+  const remaining = Math.max(0, totalUsd - paidUsd);
+  const allPaid = payState === 'paid';
+  const fillPct = totalUsd > 0 ? Math.max(0, Math.min(1, paid / totalUsd)) : 0;
+  const showSteps = steps.length > 1;
+
+  // Same gate as the task rows: the ₪ hint only for a viewer who genuinely
+  // thinks in a different currency, never as a bogus rounding echo.
+  const hasLocalCurrency =
+    isIsraeli(viewerCountry) &&
+    typeof budgetFxRate === 'number' &&
+    Number.isFinite(budgetFxRate) &&
+    budgetFxRate > 0;
+  const approxRemaining =
+    !allPaid && hasLocalCurrency ? formatPrice(remaining, budgetFxRate!, viewerCountry) : null;
+
+  return (
+    <View style={styles.ygBlock}>
+      <View style={styles.ygHeader}>
+        <View style={styles.ygHeaderText}>
+          <Text style={styles.ygTitle}>Payment</Text>
+          <Text style={styles.ygSub}>What you've paid for this trip</Text>
+        </View>
+      </View>
+
+      <View style={styles.payCard}>
+        <View style={styles.payAmountRow}>
+          <Text style={styles.payLabel}>Paid so far</Text>
+          <Text style={styles.payCount}>
+            <Text style={styles.payCountStrong}>{formatExactUsd(paid)}</Text>
+            {` of ${formatExactUsd(totalUsd)}`}
+          </Text>
+        </View>
+        {/* Static, like DocProgress above: this tab is opened constantly, and
+            a bar that animates every time reads as slow, not delightful. */}
+        <View style={styles.payTrack}>
+          <View
+            style={[
+              styles.payFill,
+              { width: `${fillPct * 100}%` },
+              allPaid && styles.payFillDone,
+            ]}
+          />
+        </View>
+        <Text style={[styles.payRemaining, allPaid && styles.payRemainingDone]}>
+          {allPaid ? "All paid — you're all set" : (
+            <>
+              {`${formatExactUsd(remaining)} left to pay`}
+              {approxRemaining ? (
+                <Text style={styles.payRemainingApprox}>{` (about ${approxRemaining})`}</Text>
+              ) : null}
+            </>
+          )}
+        </Text>
+
+        {/* How the total splits. Two short rows, no prose — this is the whole
+            answer to "where did the deposit come from?", and it is why the pay
+            sheet needs no explanation of its own. A finished step reads "Paid"
+            rather than "$1,000 of $1,000": the number is noise once it's done. */}
+        {showSteps ? (
+          <View style={styles.paySteps}>
+            {steps.map(s => {
+              const done = s.paidUsd >= s.totalUsd;
+              return (
+                <View key={s.key} style={styles.payStepRow}>
+                  <Text style={styles.payStepName} numberOfLines={1}>
+                    {s.title}
+                  </Text>
+                  <Text style={[styles.payStepAmount, done && styles.payStepAmountDone]}>
+                    {done
+                      ? 'Paid'
+                      : s.paidUsd > 0
+                        ? `${formatExactUsd(s.paidUsd)} of ${formatExactUsd(s.totalUsd)}`
+                        : formatExactUsd(s.totalUsd)}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {!allPaid ? (
+          <PressableScale
+            onPress={payState === 'confirming' ? undefined : onPayNow}
+            disabled={payState === 'confirming'}
+            style={[styles.payBtn, payState !== 'ready' && styles.payBtnQuiet]}
+            accessibilityLabel="Pay now"
+          >
+            {payState === 'confirming' ? (
+              <>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+                <Text style={styles.payBtnText}>Confirming…</Text>
+              </>
+            ) : (
+              <Text style={styles.payBtnText}>
+                {payState === 'processing' ? 'Processing…' : 'Pay now'}
+              </Text>
+            )}
+          </PressableScale>
+        ) : null}
+      </View>
+    </View>
+  );
+};
+
+// ===========================================================================
 // Sticky Trip Chat button — floats over content with a faded #FAFAFA gradient
 // (mirrors the Connect button in ProfileScreen). Rendered OUTSIDE the scroll.
 // Reusable faded-gradient floating footer (Figma CTA frame 12557-3613): a 230px
@@ -1821,6 +1982,87 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: T.accent,
+  },
+
+  // ── Payment section ─────────────────────────────────────────────────────
+  payCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  payAmountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  payLabel: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: T.muted },
+  payCount: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted },
+  payCountStrong: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 14,
+    fontWeight: '700',
+    color: T.inkBody,
+  },
+  // Same 6px track the Members "Committed to trip" bar uses — this is the same
+  // kind of statement ("how far along"), so it wears the same clothes.
+  payTrack: {
+    height: 6,
+    borderRadius: 2,
+    backgroundColor: T.border,
+    overflow: 'hidden',
+    flexDirection: 'row',
+  },
+  payFill: { height: '100%', backgroundColor: T.accent, borderRadius: 2 },
+  payFillDone: { backgroundColor: T.done },
+  payRemaining: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#535862',
+    marginTop: 8,
+  },
+  payRemainingApprox: { fontFamily: ff('Inter', '400'), fontWeight: '400', color: T.muted },
+  payRemainingDone: { color: T.done },
+  // The split. Sits between the summary line and the button, separated by a
+  // hairline so it reads as a breakdown OF the number above rather than as
+  // more of the same sentence.
+  paySteps: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: T.hairline,
+    gap: 6,
+  },
+  payStepRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  payStepName: { flex: 1, fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: T.muted },
+  payStepAmount: { fontFamily: ff('Inter', '600'), fontSize: 12, lineHeight: 18, fontWeight: '600', color: '#535862' },
+  payStepAmountDone: { fontFamily: ff('Inter', '400'), fontWeight: '400', color: T.done },
+  // The commit pill's clothes (52h / radius 12 / dark ink / Montserrat 700):
+  // the one other full-width primary act on this tab, so paying looks like the
+  // same species of commitment.
+  payBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: T.ink,
+    marginTop: 16,
+  },
+  // Confirming / processing — still the same button, drained of urgency.
+  payBtnQuiet: { opacity: 0.75 },
+  payBtnText: {
+    fontFamily: ff('Montserrat', '700'),
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 
   // Sticky Trip Chat

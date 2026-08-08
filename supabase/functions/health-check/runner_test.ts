@@ -78,7 +78,7 @@ Deno.test("runCheck: an overridden timeout still fires when exceeded", async () 
 Deno.test("storageCheck carries the longer timeout, other checks do not", () => {
   const checks = buildAllChecks();
   const storage = checks.find((c) => c.name === "supabase_storage");
-  assertEquals(storage?.timeoutMs, 15000);
+  assertEquals(storage?.timeoutMs, 30000);
   // Every other check must keep the runner default (undefined = no override).
   for (const c of checks.filter((c) => c.name !== "supabase_storage")) {
     assertEquals(c.timeoutMs, undefined, `${c.name} unexpectedly overrides the timeout`);

@@ -13,7 +13,7 @@
  *
  * Spec: docs/specs/operator-trips/waiver-medical.md
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,8 +22,11 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  Keyboard,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { ff } from '../../theme/fonts';
 import {
@@ -80,9 +83,33 @@ export const MedicalFormSheet: React.FC<{
   userId: string;
   onSaved: () => void;
 }> = ({ visible, onClose, tripId, userId, onSaved }) => {
+  const insets = useSafeAreaInsets();
+  // The cap has to be a NUMBER. `maxHeight: '90%'` resolves against the parent,
+  // and BottomSheetShell wraps children in auto-height views — so the 90% was
+  // taken of the surface's OWN content height, leaving the white surface
+  // shorter than the box it sits in and a strip of the trip screen showing
+  // below the sheet. Same fix as ManageRequirementsSheet, EditFieldSheet and
+  // InviteMembersSheet.
+  const { height: windowHeight } = useWindowDimensions();
+  const maxSheetHeight = Math.round(windowHeight * 0.9);
   const [form, setForm] = useState<MedicalForm>(EMPTY_MEDICAL_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Let go of the keyboard BEFORE the sheet starts sliding out. A TextInput in
+  // here is the Modal's first responder, and iOS dismissing the two in the
+  // wrong order is what leaves a layer behind that eats every touch on the
+  // screen underneath.
+  //
+  // Guarded on the open→close transition, not on `!visible`: this sheet stays
+  // mounted for the life of the screen now, so an unguarded dismiss would also
+  // fire on mount and could snatch the keyboard from something else on the
+  // trip screen.
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    if (wasVisible.current && !visible) Keyboard.dismiss();
+    wasVisible.current = visible;
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -138,7 +165,15 @@ export const MedicalFormSheet: React.FC<{
   return (
     <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard>
       {({ panHandlers }) => (
-        <View style={styles.surface}>
+        // Home indicator: the surface used a flat 24, which on an iPhone with a
+        // 34pt indicator left the Save button sitting under it. Same
+        // `Math.max(insets.bottom, …)` the other operator sheets use.
+        <View
+          style={[
+            styles.surface,
+            { maxHeight: maxSheetHeight, paddingBottom: Math.max(insets.bottom, 16) + 8 },
+          ]}
+        >
           <View {...panHandlers} style={styles.grabWrap}>
             <View style={styles.grabber} />
             <Text style={styles.title}>Medical info</Text>
@@ -215,8 +250,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingBottom: 24,
-    maxHeight: '90%',
+    // paddingBottom and maxHeight are applied INLINE, in pixels — see
+    // maxSheetHeight above for why the cap cannot be a percentage.
   },
   grabWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 10, gap: 6 },
   grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E4E4E4', marginBottom: 4 },

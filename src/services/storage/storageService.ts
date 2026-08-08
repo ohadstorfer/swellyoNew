@@ -274,6 +274,26 @@ export const uploadTripImage = async (
   uploadImageToS3(imageUri, userId, 'trip-images', kind, { maxDimension: 2048, quality: 0.85 });
 
 /**
+ * Upload a photo for an operator-trip crew member to swellyo-images S3
+ * (`trip-images/` prefix).
+ *
+ * Only ever needed for a Tier 1 "Listed" credit — someone with no account, and
+ * therefore no `surfers` row to read a picture from. Crew who signed in already
+ * have a profile photo, which `listTripStaff` prefers over this one.
+ *
+ * 1024px @ q0.75, matching `uploadProfileImage`: it is an avatar, shown small,
+ * and the operator is uploading it on a phone.
+ *
+ * `userId` is the OPERATOR uploading, not the person in the photo — the person
+ * has no account. That only affects the storage path.
+ */
+export const uploadCrewPhoto = async (
+  imageUri: string,
+  userId: string
+): Promise<UploadResult> =>
+  uploadImageToS3(imageUri, userId, 'trip-images', 'crew', { maxDimension: 1024, quality: 0.75 });
+
+/**
  * Upload a profile video to Supabase Storage
  * @param videoUri - The local file URI or blob URL
  * @param userId - The authenticated user's ID

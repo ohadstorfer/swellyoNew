@@ -36,6 +36,7 @@ import {
   ScrollView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,9 +52,11 @@ import { plural } from './dashboard/dashboardFormat';
 import {
   approveDocuments,
   rejectDocument,
+  remindRequirement,
   type ReviewItem,
   type TravelerReview,
 } from '../../services/trips/tripDocumentsService';
+import { PressableScale } from './PressableScale';
 import { showErrorAlert } from '../../utils/friendlyError';
 import { SkeletonBase } from '../skeletons/SkeletonPrimitives';
 
@@ -213,6 +216,8 @@ function initialLevel2(
 export const DocumentReviewScreen: React.FC<{
   visible: boolean;
   onClose: () => void;
+  /** Only for "Remind everyone who still owes this" — see `remind` below. */
+  tripId: string;
   loading: boolean;
   travelers: ReviewTraveler[];
   review: TravelerReview[];
@@ -279,6 +284,7 @@ export const DocumentReviewScreen: React.FC<{
 }> = ({
   visible,
   onClose,
+  tripId,
   loading,
   travelers,
   review,
@@ -316,6 +322,11 @@ export const DocumentReviewScreen: React.FC<{
   const [viewing, setViewing] = useState<{ item: ReviewItem; userId: string } | null>(null);
   const [rejecting, setRejecting] = useState<ReviewItem | null>(null);
   const [busy, setBusy] = useState(false);
+  // Reminders: whether one is in flight, and what the last send reported.
+  // Keyed by requirement so walking to another document and back does not show
+  // a message about the one before it.
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState<Record<string, string>>({});
 
   const byUser = useMemo(() => {
     const m = new Map<string, TravelerReview>();
@@ -376,6 +387,24 @@ export const DocumentReviewScreen: React.FC<{
   const openRequirement = requirementRows?.[0]?.item ?? null;
 
   /**
+   * How many people this requirement is still waiting on.
+   *
+   * Counted off the SAME rows the list above renders, so the number on the
+   * button and the names on screen can never disagree — that was the risk in
+   * deriving it from a separate tally on the Dashboard card.
+   */
+  const owed =
+    requirementRows?.filter(
+      r => r.item.state !== 'submitted' && r.item.state !== 'approved',
+    ).length ?? 0;
+
+  // Pay rows never offer Remind: fetchTripReview hardcodes them to
+  // `not_started`, so `owed` would read as everybody — including the people who
+  // have already paid. The RPC refuses them too, so the two sides agree rather
+  // than one being quietly wrong. (D3.)
+  const canRemind = !!openRequirement && owed > 0 && openRequirement.reqType !== 'pay';
+
+  /**
    * Level 2, waiting shape: everything the operator has to act on, whoever
    * sent it and whatever it is.
    *
@@ -427,6 +456,51 @@ export const DocumentReviewScreen: React.FC<{
   // leave the operator on an empty queue that says so, not drop them back to
   // the traveler list mid-tap.
   const inLevel2 = !!openReview || !!openRequirement || waitingMode;
+
+  /**
+   * Chase everyone who still owes this one.
+   *
+   * Confirmed first, always. It sends a real push to real phones, and no undo
+   * exists — the only protection against notifying fifteen people by accident
+   * is the operator having said yes twice.
+   */
+  const remind = useCallback(() => {
+    if (!openRequirement || sending) return;
+    const { requirementId, title } = openRequirement;
+    Alert.alert(
+      `Remind ${plural(owed, 'person', 'people')}?`,
+      `Everyone who has not sent “${title}” gets a notification. Anyone already reminded about it today is skipped.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setSending(true);
+            try {
+              const n = await remindRequirement(tripId, requirementId);
+              setSent(s => ({
+                ...s,
+                // The honest number. `n` is what the server actually sent — the
+                // cooldown may have dropped some — and an operator told
+                // "reminded 8" who then hears nothing back needs to know
+                // whether the message went out at all.
+                [requirementId]:
+                  n === 0
+                    ? 'Everyone was already reminded today'
+                    : n < owed
+                      ? `Reminded ${n} · ${owed - n} already reminded today`
+                      : `Reminded ${plural(n, 'person', 'people')}`,
+              }));
+            } catch (e) {
+              showErrorAlert('Could not send reminders', e, 'Please try again.');
+            } finally {
+              setSending(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [openRequirement, owed, sending, tripId]);
 
   const handleApprove = useCallback(async () => {
     if (!viewing?.item.documentId || busy) return;
@@ -607,6 +681,7 @@ export const DocumentReviewScreen: React.FC<{
                 </View>
               ) : /* ── Level 2b: one requirement, everyone ───────────────── */
               openRequirement && requirementRows ? (
+                <>
                 <View style={styles.card}>
                   {requirementRows.map(({ traveler, item }, i) => {
                     const reviewable = item.state === 'submitted' && !!item.documentId;
@@ -657,6 +732,32 @@ export const DocumentReviewScreen: React.FC<{
                     );
                   })}
                 </View>
+
+                {/* The chase, under the list of the very people it notifies.
+                    Reads as a sentence with the rows above it: these three have
+                    not done it, remind them. Tinted rather than filled — it is
+                    the only action on this screen, but it fires a push to other
+                    people's phones, so it should not look like a Continue. */}
+                {sent[openRequirement.requirementId] ? (
+                  <View style={styles.remindDoneRow}>
+                    <Ionicons name="checkmark-circle" size={16} color="#34C759" />
+                    <Text style={styles.remindDoneText}>
+                      {sent[openRequirement.requirementId]}
+                    </Text>
+                  </View>
+                ) : canRemind ? (
+                  <PressableScale onPress={remind} disabled={sending} style={styles.remindBtn}>
+                    {sending ? (
+                      <ActivityIndicator size="small" color="#05BCD3" />
+                    ) : (
+                      <Ionicons name="notifications-outline" size={17} color="#05BCD3" />
+                    )}
+                    <Text style={styles.remindBtnText}>
+                      Remind {plural(owed, 'person', 'people')}
+                    </Text>
+                  </PressableScale>
+                ) : null}
+                </>
               ) : /* ── Level 2: one traveler's items ────────────────────── */
               openReview ? (
                 <>
@@ -883,6 +984,38 @@ const styles = StyleSheet.create({
   },
   rowSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 16, color: '#7B7B7B' },
   rowSubBad: { color: '#C4361E' },
+  remindBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    marginTop: 12,
+    borderRadius: 12,
+    backgroundColor: '#E4F8FB',
+  },
+  remindBtnText: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#05BCD3',
+  },
+  remindDoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 48,
+    marginTop: 12,
+    paddingHorizontal: 16,
+  },
+  remindDoneText: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#1F7A4D',
+    textAlign: 'center',
+  },
   pillAccent: {
     fontFamily: ff('Inter', '600'),
     fontSize: 12,

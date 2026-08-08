@@ -256,6 +256,7 @@ const IconCell: React.FC<{
 export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   vm,
   participants = [],
+  crew = [],
   onParticipantPress,
   onSeeAllParticipants,
   onLeaderPress,
@@ -695,6 +696,44 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                     : 'Tell surfers who you are and why you’re the Captain for this trip.'}
                 </Text>
               )}
+            </View>
+          ) : null}
+
+          {/* ---- Crew ---- */}
+          {/* Operator trips only, and only the people the operator chose to show
+              (capability `profile.shown_to_travelers`, filtered server-side).
+              A name and a face, not a link: crew are not trip members, so there
+              is no profile to open for a Listed credit and no reason to treat
+              the two kinds differently here. */}
+          {crew.length > 0 ? (
+            <View style={styles.section}>
+              <SectionTitle title="Crew" />
+              <View style={styles.crewList}>
+                {crew.map(c => (
+                  <View key={c.id} style={styles.crewRow}>
+                    {c.avatarUrl ? (
+                      <CachedImage
+                        source={{ uri: getStorageThumbUrl(c.avatarUrl, 144) ?? c.avatarUrl }}
+                        style={styles.crewAvatar}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                    ) : (
+                      <CachedImage
+                        source={Images.defaultAvatar}
+                        style={styles.crewAvatar}
+                        contentFit="cover"
+                      />
+                    )}
+                    <View style={styles.crewText}>
+                      <Text style={styles.crewName} numberOfLines={1}>{c.name}</Text>
+                      {!!c.title && (
+                        <Text style={styles.crewTitle} numberOfLines={1}>{c.title}</Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+              </View>
             </View>
           ) : null}
 
@@ -1606,6 +1645,32 @@ const styles = StyleSheet.create({
   avatarRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  // Crew: a vertical list, not the horizontal avatar strip participants use.
+  // There are a handful of them and the title ("Head Guide") is the point —
+  // a scrolling row of faces would hide exactly the thing worth reading.
+  crewList: { gap: 12 },
+  crewRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  crewAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.avatarBg },
+  crewText: { flex: 1 },
+  // Bare fontFamily + fontWeight, matching every other style in this file
+  // rather than the ff() helper used elsewhere in the app. Mixing them here
+  // would render this one section at a different weight from the sections
+  // directly above and below it.
+  crewName: {
+    fontFamily: FONT_MONTSERRAT,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: C.ink,
+  },
+  crewTitle: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '400',
+    color: C.textMuted,
+    marginTop: 2,
   },
   // Tappable avatar row — bleeds edge-to-edge so it scrolls to the screen edge.
   avatarScroll: {

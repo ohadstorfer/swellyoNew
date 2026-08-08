@@ -67,13 +67,25 @@ restoring the whole screen is a single `getItem`:
 
 ```
 swellyo:pendingPayments:<tripId>
-  → { [requirementId]: startedAt }        // epoch ms
+  → { [requirementId]: { at, basePaidUsd } }
+     // at — epoch ms when the poll gave up
+     // basePaidUsd — what the ledger showed paid on this requirement when the
+     //   checkout STARTED, or null (attempts stored before this field existed)
 ```
 
 **One timestamp, not two.** The draft of this spec proposed a separate `lastAttemptAt` next to
 `startedAt`. They are the same moment — when the poll gave up — asked two different questions,
 so the phase is derived from a single number against two thresholds (`attemptPhase`). Two
 fields would have been two things to keep in sync for no gain.
+
+**Why `basePaidUsd` was added (2026-08-06, partial payments).** A partial payment never flips
+the requirement to `approved` — the sum is still short of the amount due — so "state is
+approved" stopped being the only way an attempt resolves. The second signal is "the ledger now
+shows MORE paid than when the checkout started", and this field is the "than it was". Legacy
+bare-number attempts are upgraded on read to `{ at, basePaidUsd: null }` (kept, never dropped —
+forgetting an attempt on app update is the double-payment trap reopening); a null base means
+only the `approved` check can clear it, which is exactly the old behaviour. See
+`docs/specs/operator-trips/partial-payments.md`.
 
 - Written when `confirmPayment` gives up, alongside the in-memory state.
 - Read on mount and **merged as `{...stored, ...inMemory}`**, so a hydrate that resolves after a

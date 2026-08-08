@@ -64,6 +64,8 @@ export const tripsKeys = {
   /** One traveler's price + what they've paid, per requirement. */
   payments: (tripId: string, userId: string) =>
     ['trips', 'payments', tripId, userId] as const,
+  /** What the current user is allowed to do on this trip. Staff & permissions. */
+  capabilities: (tripId: string) => ['trips', 'capabilities', tripId] as const,
 };
 
 export type MyTripsData = { buckets: MyTripsBuckets; meta: Map<string, TripCardMeta> };

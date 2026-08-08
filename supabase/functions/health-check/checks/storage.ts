@@ -15,12 +15,27 @@ export function storageCheck(): Check {
     // runtime -> Supabase Storage path, not something we introduced.
     //
     // 8s left almost no headroom over a 4-6s baseline, so normal jitter tripped
-    // it 1-3x/day and emailed everyone. 15s restores the same ratio of headroom
-    // the check had before the regression. This is noise suppression, NOT a
-    // fix: if this ever needs raising again, find out which of the 6 ops is
-    // slow first (per-op timing) instead of raising it a third time.
-    timeoutMs: 15000,
+    // it 1-3x/day and emailed everyone. 15s restored headroom, then a SECOND
+    // platform-side step change (~2026-07-28) pushed p90 to 11-15s and the
+    // check started hitting 15s too. Now 30s, with per-op timing: every run
+    // returns the per-op breakdown (persisted as `note` in health_check_log),
+    // and an internal 27s deadline aborts BEFORE the runner's opaque timeout
+    // so a failure also names the slow op(s). The timings are the evidence
+    // for a Supabase ticket — do not raise again.
+    timeoutMs: 30000,
     run: async () => {
+      const t0 = Date.now();
+      const timings: string[] = [];
+      const timed = async <T>(op: string, p: PromiseLike<T>): Promise<T> => {
+        const s = Date.now();
+        const v = await p;
+        timings.push(`${op}=${Date.now() - s}ms`);
+        if (Date.now() - t0 > 27000) {
+          throw new Error(`storage slow, aborted after [${timings.join(" ")}]`);
+        }
+        return v;
+      };
+
       const supabase = createClient(
         Deno.env.get("SUPABASE_URL")!,
         Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -28,9 +43,10 @@ export function storageCheck(): Check {
       );
 
       // Create healthcheck bucket, only ignore "already exists" (409) errors.
-      const { error: bucketErr } = await supabase.storage.createBucket("healthcheck", {
-        public: false,
-      });
+      const { error: bucketErr } = await timed(
+        "createBucket",
+        supabase.storage.createBucket("healthcheck", { public: false }),
+      );
       if (bucketErr) {
         const msg = bucketErr.message ?? "";
         // @ts-ignore: statusCode may exist on StorageError at runtime
@@ -45,19 +61,23 @@ export function storageCheck(): Check {
       const path = `ping-${crypto.randomUUID()}.txt`;
 
       // Upload
-      const up = await supabase.storage
-        .from("healthcheck")
-        .upload(path, new Blob(["ok"]), { upsert: true, contentType: "text/plain" });
+      const up = await timed(
+        "upload",
+        supabase.storage
+          .from("healthcheck")
+          .upload(path, new Blob(["ok"]), { upsert: true, contentType: "text/plain" }),
+      );
       if (up.error) throw new Error(`storage upload: ${up.error.message}`);
 
       // Signed-URL read — exercises the real read path users rely on.
-      const { data: signedData, error: signedErr } = await supabase.storage
-        .from("healthcheck")
-        .createSignedUrl(path, 60);
+      const { data: signedData, error: signedErr } = await timed(
+        "createSignedUrl",
+        supabase.storage.from("healthcheck").createSignedUrl(path, 60),
+      );
       if (signedErr || !signedData?.signedUrl) {
         throw new Error(`storage signedUrl: ${signedErr?.message ?? "no url returned"}`);
       }
-      const fetchRes = await fetch(signedData.signedUrl);
+      const fetchRes = await timed("signedFetch", fetch(signedData.signedUrl));
       if (!fetchRes.ok) {
         throw new Error(`storage signed fetch ${fetchRes.status}: ${await fetchRes.text().catch(() => "")}`);
       }
@@ -67,11 +87,17 @@ export function storageCheck(): Check {
       }
 
       // Remove the test object.
-      const del = await supabase.storage.from("healthcheck").remove([path]);
+      const del = await timed(
+        "remove",
+        supabase.storage.from("healthcheck").remove([path]),
+      );
       if (del.error) throw new Error(`storage remove: ${del.error.message}`);
 
       // Assert that real production buckets exist.
-      const { data: buckets, error: listErr } = await supabase.storage.listBuckets();
+      const { data: buckets, error: listErr } = await timed(
+        "listBuckets",
+        supabase.storage.listBuckets(),
+      );
       if (listErr) throw new Error(`storage listBuckets: ${listErr.message}`);
 
       const names = new Set((buckets ?? []).map((b) => b.name));
@@ -79,6 +105,8 @@ export function storageCheck(): Check {
       if (missing.length > 0) {
         throw new Error(`storage: missing bucket(s): ${missing.join(", ")}`);
       }
+
+      return timings.join(" ");
     },
   };
 }

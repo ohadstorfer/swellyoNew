@@ -29,6 +29,7 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
@@ -57,6 +58,11 @@ export const WaiverAgreeSheet: React.FC<{
   onAgreed: () => void;
 }> = ({ visible, onClose, tripId, requirementId, agreed = false, onAgreed }) => {
   const insets = useSafeAreaInsets();
+  // The cap has to be a NUMBER — `maxHeight: '88%'` resolved against an
+  // auto-height parent and left the sheet floating above the bottom of the
+  // screen. See the note in MedicalFormSheet.
+  const { height: windowHeight } = useWindowDimensions();
+  const maxSheetHeight = Math.round(windowHeight * 0.88);
   const [waiver, setWaiver] = useState<Waiver | null>(null);
   const [localPdf, setLocalPdf] = useState<{ uri: string; size: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,7 +188,7 @@ export const WaiverAgreeSheet: React.FC<{
   return (
     <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard>
       {({ panHandlers }) => (
-        <View style={styles.surface}>
+        <View style={[styles.surface, { maxHeight: maxSheetHeight }]}>
           <View {...panHandlers} style={styles.grabWrap}>
             <View style={styles.grabber} />
             <Text style={styles.title}>Trip waiver</Text>
@@ -227,7 +233,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingBottom: 28,
-    maxHeight: '88%',
+    // maxHeight is applied INLINE, in pixels — see maxSheetHeight above.
   },
   grabWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 8, gap: 10 },
   grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E4E4E4' },

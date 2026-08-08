@@ -96,6 +96,8 @@ import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateShee
 import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGearSheet';
 import { ReportTripSheet } from '../../components/ReportTripSheet';
 import { ShareTripStorySheet } from '../../components/trips/ShareTripStorySheet';
+import { TripStaffSheet } from '../../components/trips/TripStaffSheet';
+import { useTripCrew } from '../../hooks/trips/useTripCapabilities';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
 import { hapticMedium, hapticLight, hapticSuccess, hapticError } from '../../utils/haptics';
 import { toWidthThumbUrl } from '../../services/media/thumbnails';
@@ -113,8 +115,11 @@ import {
   GroupGearCard,
   YourGearCard,
   TripDocumentsCard,
+  PaymentSection,
+  type PaymentSectionState,
   type DocumentRow,
 } from '../../components/trips/plan/PlanSections';
+import { PayAmountSheet } from '../../components/trips/PayAmountSheet';
 import { RequirementUploadFlow } from '../../components/trips/RequirementUploadFlow';
 import { WaiverAgreeSheet } from '../../components/trips/WaiverAgreeSheet';
 import { MedicalFormSheet } from '../../components/trips/MedicalFormSheet';
@@ -158,6 +163,7 @@ import {
   fetchPaidByRequirement,
   type PayStep,
   type CheckoutOutcome,
+  type TravelerPrices,
 } from '../../services/trips/tripPaymentsService';
 import { PaymentStatusSheet, type PaymentStatusMode } from '../../components/trips/PaymentStatusSheet';
 import {
@@ -405,6 +411,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Discreet "report this whole trip" flow — available to members and non-members alike.
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [storySheetVisible, setStorySheetVisible] = useState(false);
+  const [staffSheetVisible, setStaffSheetVisible] = useState(false);
   // Header kebab (⋮) overflow menu: Chat / Report / Share for everyone, plus
   // Complete / Cancel for the host.
   const [menuVisible, setMenuVisible] = useState(false);
@@ -546,7 +553,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           // cleared the attempt.
           pending:
             r.state !== 'approved' &&
-            attemptPhase(paymentAttempts[r.requirementId] ?? 0, Date.now()) === 'pending',
+            attemptPhase(paymentAttempts[r.requirementId]?.at ?? 0, Date.now()) === 'pending',
         };
       }),
     [
@@ -560,6 +567,51 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       attemptTick,
     ],
   );
+
+  // ── Payment section (traveler, managed trips) ─────────────────────────────
+  // The Plan tab's money summary: one pot — this traveler's total — with every
+  // pay requirement's ledger rows summed against it. The "Pay now" button
+  // still targets ONE requirement (a Stripe session pays against one step),
+  // deposit before balance, because that is the order the server collects in.
+  const payRows = useMemo(() => documentRows.filter(r => r.reqType === 'pay'), [documentRows]);
+  const payTarget = useMemo(
+    () =>
+      payRows.find(
+        r => r.kind === 'deposit' && r.state !== 'approved' && (r.amountUsd ?? 0) > 0,
+      ) ??
+      payRows.find(r => r.state !== 'approved' && (r.amountUsd ?? 0) > 0) ??
+      null,
+    [payRows],
+  );
+  // Plain sum, refunds included (they are negative rows). Clamped at render,
+  // not here — an overpaid traveler should still read as "all paid".
+  const totalPaidUsd = useMemo(
+    () => Object.values(paymentsQuery.data?.paid ?? {}).reduce((s, n) => s + n, 0),
+    [paymentsQuery.data],
+  );
+  // How the total splits, for the card's breakdown. Deposit before balance —
+  // `payRows` already arrives in REQUIREMENT_ORDER, but the order is what
+  // makes the two rows readable, so it is pinned here rather than assumed.
+  // Titles come from the requirement rows themselves, so the breakdown can
+  // never disagree with the task list above it.
+  const paySteps = useMemo(() => {
+    const prices = paymentsQuery.data?.prices;
+    if (!prices) return [];
+    return payRows
+      .map(r => {
+        const total = amountDue(r.kind as PayStep, prices) ?? 0;
+        return {
+          key: r.requirementId,
+          kind: r.kind,
+          title: r.title,
+          totalUsd: total,
+          paidUsd: Math.min(paymentsQuery.data?.paid[r.requirementId] ?? 0, total),
+        };
+      })
+      .filter(s => s.totalUsd > 0)
+      .sort((a, b) => (a.kind === 'deposit' ? -1 : b.kind === 'deposit' ? 1 : 0));
+  }, [payRows, paymentsQuery.data]);
+  const [payAmountSheetOpen, setPayAmountSheetOpen] = useState(false);
 
   // ── Host review ───────────────────────────────────────────────────────────
   // Everyone except the hosts: an operator reviewing their own passport is not a
@@ -623,6 +675,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     // would be a temporal-dead-zone crash on first render.
     enabled: isHostDerived && trip?.hosting_style === 'C',
   });
+
+  // Crew shown on the Overview. Operator trips only — an ordinary group trip
+  // has no staff table rows, so this would be a guaranteed-empty round trip.
+  // Same `hosting_style === 'C'` inline as above, for the same TDZ reason.
+  const crewQuery = useTripCrew(tripId, trip?.hosting_style === 'C');
 
   // ── Editing what the trip asks for (host) ─────────────────────────────────
   //
@@ -1623,7 +1680,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
    * fetchMyRequirements). There is no `myRequirements` key — do not invent one.
    */
   const confirmPayment = useCallback(
-    async (row: { requirementId: string; title: string }, opts: { quiet: boolean }) => {
+    async (
+      row: { requirementId: string; title: string },
+      opts: {
+        quiet: boolean;
+        /** What the ledger said was already paid on this requirement when the
+         *  checkout STARTED. A partial payment never flips the row to
+         *  `approved` (the sum stays short of the amount due), so "paid is now
+         *  more than this" is the only signal that it landed. */
+        baselinePaidUsd: number;
+      },
+    ) => {
       const delaysMs = opts.quiet ? [700, 1500, 2500] : [700, 1000, 1500, 2500, 3500, 5000];
       if (!opts.quiet) setConfirmingRequirementId(row.requirementId);
       try {
@@ -1636,7 +1703,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           const freshRows = queryClient.getQueryData<TripRequirement[]>(
             tripsKeys.detailDocuments(tripId),
           );
-          if (freshRows?.find(r => r.requirementId === row.requirementId)?.state === 'approved') {
+          const paidNow = currentUserId
+            ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+                tripsKeys.payments(tripId, currentUserId),
+              )?.paid?.[row.requirementId]
+            : undefined;
+          const landed =
+            freshRows?.find(r => r.requirementId === row.requirementId)?.state === 'approved' ||
+            (paidNow != null && paidNow > opts.baselinePaidUsd);
+          if (landed) {
             // The row ticks itself off; the haptic is what makes it land as an
             // event rather than a checkbox that quietly changed while they
             // weren't looking.
@@ -1659,10 +1734,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // for $2,000, reads as "it didn't work, do it again". That is how people
       // pay twice. Say what we actually know instead: we don't know yet.
       if (opts.quiet) return;
-      const startedAt = Date.now();
+      const attempt = { at: Date.now(), basePaidUsd: opts.baselinePaidUsd };
       setPaymentAttempts(prev => {
-        void recordPaymentAttempt(tripId, row.requirementId, prev, startedAt);
-        return { ...prev, [row.requirementId]: startedAt };
+        void recordPaymentAttempt(tripId, row.requirementId, prev, attempt);
+        return { ...prev, [row.requirementId]: attempt };
       });
       hapticMedium();
       setPaymentIssue({ mode: 'pending', requirementId: row.requirementId, title: row.title });
@@ -1691,7 +1766,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // while something is actually in that window, and stops on its own once the
   // last one crosses it.
   const hasPendingAttempt = useMemo(
-    () => Object.values(paymentAttempts).some(at => attemptPhase(at, Date.now()) === 'pending'),
+    () => Object.values(paymentAttempts).some(a => attemptPhase(a.at, Date.now()) === 'pending'),
     [paymentAttempts, attemptTick],
   );
   useEffect(() => {
@@ -1727,9 +1802,24 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // Every pending attempt, not just one: a trip can have both a deposit
       // and a balance mid-flight, and the old single-id version could only
       // ever resolve whichever was stored last.
-      const landed = Object.keys(paymentAttemptsRef.current).filter(
-        reqId => freshRows.find(r => r.requirementId === reqId)?.state === 'approved',
-      );
+      //
+      // Two ways an attempt resolves: the requirement flipped to `approved`
+      // (a full payment), or the ledger simply shows MORE paid than when the
+      // checkout started (a partial payment — which by definition never
+      // reaches `approved`, so without this second check a confirmed partial
+      // would sit in "Processing" until the 30-minute window aged it out).
+      const freshPaid = currentUserId
+        ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+            tripsKeys.payments(tripId, currentUserId),
+          )?.paid
+        : undefined;
+      const landed = Object.entries(paymentAttemptsRef.current)
+        .filter(([reqId, attempt]) => {
+          if (freshRows.find(r => r.requirementId === reqId)?.state === 'approved') return true;
+          const paidNow = freshPaid?.[reqId];
+          return attempt.basePaidUsd != null && paidNow != null && paidNow > attempt.basePaidUsd;
+        })
+        .map(([reqId]) => reqId);
       if (landed.length === 0) return;
 
       hapticSuccess();
@@ -1761,7 +1851,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // (the sheet is wired before the list it belongs to). A ref, not a reorder:
   // the handler already closes over `confirmPayment`, so hoisting it above
   // this would only move the cycle rather than remove it.
-  const handlePressDocumentRowRef = useRef<((row: DocumentRow) => Promise<void>) | null>(null);
+  const handlePressDocumentRowRef = useRef<
+    ((row: DocumentRow, amountUsd?: number) => Promise<void>) | null
+  >(null);
 
   /**
    * The primary button on PaymentStatusSheet. The two modes want opposite
@@ -1817,7 +1909,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       const freshRows = queryClient.getQueryData<TripRequirement[]>(
         tripsKeys.detailDocuments(tripId),
       );
-      if (freshRows?.find(r => r.requirementId === issue.requirementId)?.state === 'approved') {
+      // Same two resolution signals as the background poll: `approved` for a
+      // full payment, "paid more than when the checkout started" for a partial.
+      const attempt = paymentAttemptsRef.current[issue.requirementId];
+      const paidNow = currentUserId
+        ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+            tripsKeys.payments(tripId, currentUserId),
+          )?.paid?.[issue.requirementId]
+        : undefined;
+      const resolved =
+        freshRows?.find(r => r.requirementId === issue.requirementId)?.state === 'approved' ||
+        (attempt?.basePaidUsd != null && paidNow != null && paidNow > attempt.basePaidUsd);
+      if (resolved) {
         hapticSuccess();
         const cleared = await clearPaymentAttempt(
           tripId,
@@ -1839,8 +1942,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // One tap handler for all six kinds. Where it goes depends on what the
   // requirement wants: a file, an agreement, or a form.
+  //
+  // `amountUsd` is the Payment section's partial-payment path: pay only this
+  // much of what is outstanding. Only meaningful on a pay row; undefined —
+  // every task-row tap — means the full outstanding amount, exactly as before.
   const handlePressDocumentRow = useCallback(
-    async (row: DocumentRow) => {
+    async (row: DocumentRow, amountUsd?: number) => {
       if (row.reqType === 'pay') {
         // Already paid — don't round-trip to the edge function just to be
         // told "Already paid". Also skips a re-tap while we're already
@@ -1864,20 +1971,30 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         // and re-enters this handler in the same tick, before a re-render has
         // refreshed any closure. Off the state it would hit the gate it just
         // cleared and bounce straight back into the sheet.
-        const attemptAt = paymentAttemptsRef.current[row.requirementId];
-        if (attemptAt && attemptPhase(attemptAt, Date.now()) === 'unconfirmed') {
+        const attempt = paymentAttemptsRef.current[row.requirementId];
+        if (attempt && attemptPhase(attempt.at, Date.now()) === 'unconfirmed') {
           setPaymentIssue({
             mode: 'unconfirmed',
             requirementId: row.requirementId,
             title: row.title,
-            attemptAge: describeAttemptAge(attemptAt),
+            attemptAge: describeAttemptAge(attempt.at),
           });
           return;
         }
 
+        // Snapshot BEFORE Checkout opens: the confirm poll's "did a partial
+        // land?" signal is "paid is now more than this". Read from the cache,
+        // not the paymentsQuery closure — this callback can be re-entered via
+        // a ref in the same tick a refetch resolves.
+        const baselinePaidUsd = currentUserId
+          ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+              tripsKeys.payments(tripId, currentUserId),
+            )?.paid?.[row.requirementId] ?? 0
+          : 0;
+
         let outcome: CheckoutOutcome;
         try {
-          outcome = await startCheckout(row.requirementId);
+          outcome = await startCheckout(row.requirementId, amountUsd);
         } catch (e) {
           // Was: a one-button OS alert. Now the traveler gets the reason, a
           // retry, and a way to reach the operator — see PaymentStatusSheet.
@@ -1898,7 +2015,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         // did.
         if (outcome === 'cancelled') return;
 
-        await confirmPayment(row, { quiet: outcome === 'abandoned' });
+        await confirmPayment(row, { quiet: outcome === 'abandoned', baselinePaidUsd });
         return;
       }
 
@@ -1952,6 +2069,59 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     [currentUserId, tripId, queryClient, confirmPayment],
   );
   handlePressDocumentRowRef.current = handlePressDocumentRow;
+
+  // ── Payment section wiring ────────────────────────────────────────────────
+  // No target = nothing left with money owed on it = all paid. The other three
+  // states mirror the target row's own, so the button can never contradict the
+  // task list above it.
+  const payState: PaymentSectionState = !payTarget
+    ? 'paid'
+    : payTarget.confirming
+      ? 'confirming'
+      : payTarget.pending
+        ? 'processing'
+        : 'ready';
+
+  const handlePayNow = useCallback(() => {
+    if (!payTarget) return;
+    // A payment already in doubt goes straight to the explanation through the
+    // SAME gates a task-row tap runs — never to a sheet whose only exit is a
+    // fresh checkout.
+    const attempt = paymentAttemptsRef.current[payTarget.requirementId];
+    if (
+      payTarget.pending ||
+      (attempt && attemptPhase(attempt.at, Date.now()) === 'unconfirmed')
+    ) {
+      void handlePressDocumentRow(payTarget);
+      return;
+    }
+    // A deposit is all-or-nothing (payments-checkout enforces it), so there is
+    // no amount to choose and the sheet would be a tap that asks nothing.
+    // Straight to Checkout for the full deposit — the card above already
+    // states the figure, and Stripe restates it before anything is charged.
+    if (payTarget.kind === 'deposit') {
+      void handlePressDocumentRow(payTarget);
+      return;
+    }
+    setPayAmountSheetOpen(true);
+  }, [payTarget, handlePressDocumentRow]);
+
+  // Hoisted so the JSX condition narrows on a plain const (an optional chain
+  // in the condition would not narrow the member access in the props).
+  const travelerTotalUsd = paymentsQuery.data?.prices.totalUsd ?? null;
+
+  // The sheet only CHOOSES; the checkout itself runs through the one shared
+  // pay path. Closed first — startCheckout's edge-function round trip gives
+  // the Modal time to dismiss before the browser sheet presents (the iOS
+  // stacking rule PaymentStatusSheet's header explains).
+  const handlePayAmountChosen = useCallback(
+    (amountUsd?: number) => {
+      setPayAmountSheetOpen(false);
+      if (!payTarget) return;
+      void handlePressDocumentRow(payTarget, amountUsd);
+    },
+    [payTarget, handlePressDocumentRow],
+  );
 
   const handleRequirementDone = useCallback(() => {
     setOpenRequirement(null);
@@ -2221,6 +2391,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         group: 2,
         onPress: () => onEditOperatorTrip?.(trip.id),
       },
+      // Crew — the operator OF RECORD only, on an operator trip. Same gate as
+      // the database: `staff.manage` is hard-locked to group_trips.host_id and
+      // is deliberately NOT readable from an editable capability set, so that
+      // no permission row can ever hand out the power to hand out power. Using
+      // isHost here would put a second, weaker door on the same room.
+      (isTripOwner && isOperatorTrip && !isLocked) && {
+        key: 'staff',
+        icon: 'people-outline' as const,
+        label: 'Crew',
+        group: 2,
+        onPress: () => setStaffSheetVisible(true),
+      },
       // Cancel — host only, while the trip is still live.
       (isHost && !isLocked) && {
         key: 'cancel',
@@ -2346,6 +2528,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 }
               : undefined
           }
+          crew={crewQuery.data ?? []}
           onSeeAllParticipants={onViewAllMembers}
           onLeaderPress={
             onViewUserProfile && trip.host_id && trip.host_id !== currentUserId
@@ -2606,6 +2789,29 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
+        {/* Payment — the traveler's money summary, at the bottom of Plan:
+            paid-so-far against their total, and one "Pay now" that can also
+            pay just part of what's left (PayAmountSheet). Needs a known price:
+            with no price set nothing is owed yet, and a "$0" summary under a
+            Pay button reads as "this trip is free". */}
+        {!canSeeDashboard &&
+          !isHost &&
+          trip?.payment_mode === 'managed' &&
+          payRows.length > 0 &&
+          travelerTotalUsd != null && (
+            <View style={styles.planSection} onLayout={registerSection('payment')}>
+              <PaymentSection
+                totalUsd={travelerTotalUsd}
+                paidUsd={totalPaidUsd}
+                payState={payState}
+                steps={paySteps}
+                budgetFxRate={trip?.budget_fx_rate}
+                viewerCountry={viewerCountry}
+                onPayNow={handlePayNow}
+              />
+            </View>
+          )}
+
         {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
 
         {/* Gear suggestions (host) — review members' "suggest item" submissions.
@@ -2790,6 +2996,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         <DocumentReviewScreen
           visible={reviewOpen}
           onClose={() => setReviewOpen(false)}
+          tripId={tripId}
           loading={reviewQuery.isLoading}
           travelers={reviewTravelers}
           review={reviewData}
@@ -2929,9 +3136,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         />
       )}
 
-      {openRequirement && currentUserId && openRequirement.action === 'medical' && (
+      {/* Mounted on `currentUserId` alone, and CLOSED BY `visible`, not by
+          unmounting — the same rule ManageRequirementsSheet follows above.
+
+          The other two requirement sheets have to be unmounted (they carry
+          `openRequirement.requirementId`, which is gone the moment it closes),
+          but this one needs nothing from it, so it can stay. That matters
+          because it is the only requirement sheet with a keyboard: tearing the
+          Modal down while a TextInput inside it is still first responder is
+          what stranded an invisible layer over the Plan tab — the tab kept
+          rendering and kept looking alive, but it would not scroll and would
+          not take a tap. Closing via `visible` lets the sheet slide out and the
+          Modal dismiss in its own time instead. */}
+      {currentUserId && (
         <MedicalFormSheet
-          visible
+          visible={openRequirement?.action === 'medical'}
           onClose={() => setOpenRequirement(null)}
           tripId={tripId}
           userId={currentUserId}
@@ -2958,6 +3177,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               }
             : undefined
         }
+      />
+
+      {/* How much of what's left to pay — full or partial. ALWAYS mounted,
+          closed by `visible` — the same rule ManageRequirementsSheet documents
+          above: `payTarget` goes null the moment a payment lands (possibly
+          from a background poll while this is open), and unmounting a Modal
+          mid-dismiss is the iOS stranded-touch-layer bug again. */}
+      <PayAmountSheet
+        visible={payAmountSheetOpen && !!payTarget}
+        onClose={() => setPayAmountSheetOpen(false)}
+        stepTitle={payTarget?.title ?? 'This payment'}
+        outstandingUsd={payTarget?.amountUsd ?? 0}
+        budgetFxRate={trip?.budget_fx_rate}
+        viewerCountry={viewerCountry}
+        onPay={handlePayAmountChosen}
       />
 
       {/* Document viewer — mints its own ~60s signed URL per open and never
@@ -3114,6 +3348,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             participants.find(p => p.role === 'host') ?? null,
           )}
           onClose={() => setStorySheetVisible(false)}
+        />
+      )}
+
+      {/* Crew — operator of record only. Mounted on demand: it fetches the tier
+          definitions and the staff list on open, and nothing else on this
+          screen needs either. */}
+      {staffSheetVisible && (
+        <TripStaffSheet
+          visible={staffSheetVisible}
+          tripId={trip.id}
+          operatorId={trip.host_id ?? ''}
+          onClose={() => setStaffSheetVisible(false)}
         />
       )}
 

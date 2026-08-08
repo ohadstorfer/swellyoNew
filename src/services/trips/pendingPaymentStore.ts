@@ -42,8 +42,22 @@ export const ATTEMPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type PaymentAttemptPhase = 'pending' | 'unconfirmed' | 'none';
 
-/** requirementId → epoch ms when the poll gave up. */
-export type PaymentAttempts = Record<string, number>;
+/**
+ * One unconfirmed attempt.
+ *
+ * `basePaidUsd` is what the ledger said this requirement had ALREADY been paid
+ * when the checkout started. It exists for partial payments: a partial that
+ * lands never flips the requirement to `approved` (the sum is still short of
+ * the amount due), so "state === approved" — the original confirmation signal —
+ * can never clear it. "paid is now more than it was" can, and this snapshot is
+ * the "than it was". Null = unknown (an attempt recorded before this field
+ * existed); those fall back to the approved-only check, which is exactly the
+ * old behaviour.
+ */
+export type PaymentAttempt = { at: number; basePaidUsd: number | null };
+
+/** requirementId → the unconfirmed attempt. */
+export type PaymentAttempts = Record<string, PaymentAttempt>;
 
 const keyFor = (tripId: string) => `swellyo:pendingPayments:${tripId}`;
 
@@ -85,16 +99,35 @@ export async function loadPaymentAttempts(
 
     const out: PaymentAttempts = {};
     let pruned = false;
-    for (const [requirementId, startedAt] of Object.entries(parsed as Record<string, unknown>)) {
-      if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) {
+    for (const [requirementId, raw] of Object.entries(parsed as Record<string, unknown>)) {
+      // Two stored shapes: a bare epoch-ms number (attempts recorded before
+      // basePaidUsd existed) and the current object. The legacy number is
+      // upgraded in place — base unknown — rather than dropped: forgetting an
+      // attempt on app update is exactly the double-payment trap reopening.
+      let attempt: PaymentAttempt | null = null;
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        attempt = { at: raw, basePaidUsd: null };
+      } else if (
+        raw !== null &&
+        typeof raw === 'object' &&
+        typeof (raw as { at?: unknown }).at === 'number' &&
+        Number.isFinite((raw as { at: number }).at)
+      ) {
+        const base = (raw as { basePaidUsd?: unknown }).basePaidUsd;
+        attempt = {
+          at: (raw as { at: number }).at,
+          basePaidUsd: typeof base === 'number' && Number.isFinite(base) ? base : null,
+        };
+      }
+      if (!attempt) {
         pruned = true;
         continue;
       }
-      if (attemptPhase(startedAt, now) === 'none') {
+      if (attemptPhase(attempt.at, now) === 'none') {
         pruned = true;
         continue;
       }
-      out[requirementId] = startedAt;
+      out[requirementId] = attempt;
     }
 
     // Pruning on read, not on a schedule: this is the only moment we are
@@ -115,9 +148,9 @@ export async function recordPaymentAttempt(
   tripId: string,
   requirementId: string,
   current: PaymentAttempts,
-  now: number = Date.now(),
+  attempt: PaymentAttempt,
 ): Promise<PaymentAttempts> {
-  const next = { ...current, [requirementId]: now };
+  const next = { ...current, [requirementId]: attempt };
   await persist(tripId, next);
   return next;
 }

@@ -45,6 +45,7 @@ import {
 import { messagingService } from '../../services/messaging/messagingService';
 import { GearRequestsSheet } from '../trips/gear/GearRequestsSheet';
 import { TripInviteResponseSheet } from '../trips/TripInviteResponseSheet';
+import { StaffInviteAcceptSheet } from '../trips/StaffInviteAcceptSheet';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
@@ -184,6 +185,10 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
   const [activeInvite, setActiveInvite] = useState<
     { inviteId: string; tripId: string | null; tripName: string } | null
   >(null);
+  // Crew invite currently open (from an operator_staff_invited row). Just the
+  // token — the sheet fetches everything it renders, so the bell never has to
+  // know what a tier is.
+  const [activeStaffToken, setActiveStaffToken] = useState<string | null>(null);
 
   // Rows that were unread the moment the panel opened — kept highlighted for the
   // duration of this viewing even after we mark them read.
@@ -313,6 +318,15 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
           tripId: n.trip_id,
           tripName: n.data?.trip_title ?? 'this trip',
         });
+        return;
+      }
+      // Crew invite → the accept sheet, for the same reason as above: they are
+      // not on the crew yet, so opening the trip would show them a page they
+      // have no access to. The token comes down in the row's data; the row is
+      // RLS'd to its recipient, and accept_staff_invite refuses anyone who is
+      // not the named invitee even if the token leaks.
+      if (n.type === 'operator_staff_invited' && n.data?.staff_token) {
+        setActiveStaffToken(n.data.staff_token as string);
         return;
       }
       if (!onOpenTrip || !n.trip_id) return;
@@ -582,6 +596,21 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                 onResponded={() => {
                   invalidateTrip(activeInvite.tripId);
                   setActiveInvite(null);
+                }}
+              />
+            )}
+
+            {/* Crew invite — accept sheet opened from an operator_staff_invited
+                row. Shows what the tier can see before they commit. */}
+            {activeStaffToken && (
+              <StaffInviteAcceptSheet
+                visible
+                token={activeStaffToken}
+                onClose={() => setActiveStaffToken(null)}
+                onAccepted={(tripId) => {
+                  setActiveStaffToken(null);
+                  invalidateTrip(tripId);
+                  onOpenTrip?.(tripId);
                 }}
               />
             )}

@@ -43,6 +43,7 @@ import { userTripsTopic } from '../services/trips/tripsRealtime';
 // opening one of them is instant before the user scrolls. Critical query only.
 const EXPLORE_DETAIL_PREFETCH_COUNT = 3;
 import { ProfileEditPanel } from './ProfileEditPanel/ProfileEditPanel';
+import { StaffInviteAcceptSheet } from './trips/StaffInviteAcceptSheet';
 import { InAppBannerHost } from './notifications/InAppBannerHost';
 import { useUserProfile } from '../context/UserProfileContext';
 import { useTutorial } from '../context/TutorialContext';
@@ -184,6 +185,11 @@ export const AppContent: React.FC = () => {
   // detail, where the recipient can request to join.
   const [pendingTripInviteId, setPendingTripInviteId] = useState<string | null>(null);
   const tripInviteResolverRef = useRef(false);
+  // Operator-trip crew invite: `?staff=<token>`. Unlike the two above it does
+  // not just open something — accepting GRANTS ACCESS, so it opens a sheet that
+  // shows what the tier can see and waits for a deliberate tap.
+  const [pendingStaffToken, setPendingStaffToken] = useState<string | null>(null);
+  const [staffInviteVisible, setStaffInviteVisible] = useState(false);
 
   // ----- "Share to Swellyo" (native only) -----
   // iOS: the share extension stages a payload in the App Group container and
@@ -217,9 +223,11 @@ export const AppContent: React.FC = () => {
       const sid = params.get('surftrip');
       const token = params.get('t');
       const gtid = params.get('grouptrip');
+      const staff = params.get('staff');
       if (sid) setPendingInviteGroupId(sid);
       if (token) setPendingInviteToken(token);
       if (gtid) setPendingTripInviteId(gtid);
+      if (staff) setPendingStaffToken(staff);
     } catch (e) {
       console.warn('[AppContent] invite URL parse failed:', e);
     }
@@ -365,6 +373,43 @@ export const AppContent: React.FC = () => {
     // render, before initialization (TDZ crash). Safe to omit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingTripInviteId, user, isComplete, isDemoUser]);
+
+  // ----- Crew invite link (native only) -----
+  // Same three-step shape as the two invites above: persist through a cold boot
+  // so a signup in the middle does not lose the link, then resolve once signed
+  // in and onboarded.
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem('pendingStaffInvite')
+      .then(raw => {
+        if (cancelled || !raw) return;
+        if (!pendingStaffToken) setPendingStaffToken(raw);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []); // run once on mount
+
+  useEffect(() => {
+    if (!pendingStaffToken) return;
+    AsyncStorage.setItem('pendingStaffInvite', pendingStaffToken).catch(() => {});
+  }, [pendingStaffToken]);
+
+  // Resolver: show the sheet. It is NOT cleared here — the token has to survive
+  // until the user accepts or dismisses, because unlike opening a trip this is
+  // a decision they can still say no to.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!pendingStaffToken) return;
+    if (user === null) return;
+    if (!isComplete && !isDemoUser) return;
+    setStaffInviteVisible(true);
+  }, [pendingStaffToken, user, isComplete, isDemoUser]);
+
+  const clearStaffInvite = useCallback(() => {
+    setStaffInviteVisible(false);
+    setPendingStaffToken(null);
+    AsyncStorage.removeItem('pendingStaffInvite').catch(() => {});
+  }, []);
 
   // ----- "Share to Swellyo" intake -----
   // Android: ACTION_SEND resolved into MainActivity; expo-share-intent hands us
@@ -2355,6 +2400,19 @@ export const AppContent: React.FC = () => {
           onClose={() => setShowProfileEditor(false)}
           surfer={currentUserSurfer}
         />
+        {/* Crew invite. Mounted only once a token is pending, so the peek RPC
+            never fires on an ordinary launch. */}
+        {staffInviteVisible && pendingStaffToken && (
+          <StaffInviteAcceptSheet
+            visible={staffInviteVisible}
+            token={pendingStaffToken}
+            onClose={clearStaffInvite}
+            onAccepted={(tripId) => {
+              clearStaffInvite();
+              openTripCard(tripId);
+            }}
+          />
+        )}
         {activeJoinDecision?.status === 'declined' ? (
           <JoinDeclinedOverlay
             visible={!!activeJoinDecision}

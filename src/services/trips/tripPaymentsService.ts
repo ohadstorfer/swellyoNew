@@ -241,18 +241,36 @@ function readPayMarker(url: string): CheckoutOutcome {
  * the server — the outcome decides how much UI to spend on the wait, never
  * whether the requirement is paid.
  */
-export async function startCheckout(requirementId: string): Promise<CheckoutOutcome> {
+export async function startCheckout(
+  requirementId: string,
+  /** Pay only part of what is outstanding. Omit for the full amount. The
+   *  server clamps this to what is actually owed — it is a request, never an
+   *  authority. */
+  amountUsd?: number,
+): Promise<CheckoutOutcome> {
   // Resolved once and reused: the value handed to Stripe and the value
   // openAuthSessionAsync watches for MUST be the same string, or the browser
   // sheet never closes itself.
   const url = returnUrl();
   const { data, error } = await supabase.functions.invoke('payments-checkout', {
-    body: { requirementId, returnUrl: url },
+    body:
+      amountUsd != null
+        ? { requirementId, returnUrl: url, amountUsd }
+        : { requirementId, returnUrl: url },
   });
   if (error) {
     throw new Error(await edgeFunctionErrorMessage(error, 'Could not start the payment'));
   }
   if (!data?.url) throw new Error(data?.error ?? 'Could not start the payment');
+  // Version-skew guard. A deployment of payments-checkout that predates
+  // partial payments silently IGNORES the unknown `amountUsd` field and mints
+  // a session for the FULL outstanding amount — someone who chose to pay $100
+  // would be looking at a $1,000 Checkout page. A current deployment always
+  // echoes the amount it actually charged; its absence means the old code is
+  // live, so refuse rather than open the wrong bill.
+  if (amountUsd != null && typeof data.amountUsd !== 'number') {
+    throw new Error('Paying a custom amount is not available right now. You can still pay the full amount.');
+  }
 
   const result = await WebBrowser.openAuthSessionAsync(data.url, url);
   // `success` here is expo-web-browser's word for "the redirect fired", not

@@ -241,19 +241,16 @@ describe('fetchPaidByRequirement', () => {
 // wrong drops a real payment on the floor.
 describe('startCheckout outcome', () => {
   const openAuthSessionAsync = jest.fn();
+  let invoke: jest.Mock;
 
-  const load = () => {
+  const load = (data: Record<string, unknown> = { url: 'https://checkout.stripe.com/c/pay/cs_test_123' }) => {
     let mod: any;
     jest.isolateModules(() => {
       jest.doMock('expo-web-browser', () => ({ openAuthSessionAsync }));
       jest.doMock('expo-linking', () => ({ createURL: () => 'swellyo://pay/done' }));
       const { supabase } = require('../../../config/supabase');
-      supabase.functions = {
-        invoke: jest.fn().mockResolvedValue({
-          data: { url: 'https://checkout.stripe.com/c/pay/cs_test_123' },
-          error: null,
-        }),
-      };
+      invoke = jest.fn().mockResolvedValue({ data, error: null });
+      supabase.functions = { invoke };
       mod = require('../tripPaymentsService');
     });
     return mod;
@@ -306,5 +303,65 @@ describe('startCheckout outcome', () => {
   it('reports a cancelled browser sheet as abandoned', async () => {
     openAuthSessionAsync.mockResolvedValue({ type: 'cancel' });
     await expect(load().startCheckout('req1')).resolves.toBe('abandoned');
+  });
+});
+
+// ── startCheckout partial amounts ───────────────────────────────────────────
+// The dangerous failure here is version skew: a payments-checkout deployment
+// that predates partial payments silently ignores the unknown `amountUsd`
+// field and mints a session for the FULL outstanding amount. The current
+// deployment echoes what it actually charged; its absence must abort BEFORE
+// the browser opens, or a "$100" button puts the whole bill in front of the
+// traveler.
+describe('startCheckout partial amounts', () => {
+  const openAuthSessionAsync = jest.fn();
+  let invoke: jest.Mock;
+
+  const load = (data: Record<string, unknown>) => {
+    let mod: any;
+    jest.isolateModules(() => {
+      jest.doMock('expo-web-browser', () => ({ openAuthSessionAsync }));
+      jest.doMock('expo-linking', () => ({ createURL: () => 'swellyo://pay/done' }));
+      const { supabase } = require('../../../config/supabase');
+      invoke = jest.fn().mockResolvedValue({ data, error: null });
+      supabase.functions = { invoke };
+      mod = require('../tripPaymentsService');
+    });
+    return mod;
+  };
+
+  beforeEach(() => {
+    openAuthSessionAsync.mockReset();
+    openAuthSessionAsync.mockResolvedValue({
+      type: 'success',
+      url: 'swellyo://pay/done?swellyo_pay=success',
+    });
+  });
+
+  it('sends the chosen amount to the edge function', async () => {
+    const mod = load({ url: 'https://checkout.stripe.com/x', amountUsd: 100 });
+    await mod.startCheckout('req1', 100);
+    expect(invoke).toHaveBeenCalledWith('payments-checkout', {
+      body: { requirementId: 'req1', returnUrl: 'swellyo://pay/done', amountUsd: 100 },
+    });
+  });
+
+  it('omits the field entirely for a full payment', async () => {
+    const mod = load({ url: 'https://checkout.stripe.com/x' });
+    await mod.startCheckout('req1');
+    expect(invoke).toHaveBeenCalledWith('payments-checkout', {
+      body: { requirementId: 'req1', returnUrl: 'swellyo://pay/done' },
+    });
+  });
+
+  it('refuses to open Checkout when the server did not echo the amount', async () => {
+    const mod = load({ url: 'https://checkout.stripe.com/x' }); // stale deployment shape
+    await expect(mod.startCheckout('req1', 100)).rejects.toThrow(/full amount/);
+    expect(openAuthSessionAsync).not.toHaveBeenCalled();
+  });
+
+  it('a full payment does not care whether the amount was echoed', async () => {
+    const mod = load({ url: 'https://checkout.stripe.com/x' });
+    await expect(mod.startCheckout('req1')).resolves.toBe('returned');
   });
 });

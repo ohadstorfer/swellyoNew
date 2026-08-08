@@ -99,14 +99,23 @@ serve(async req => {
     if (userErr || !userData?.user) return json({ error: 'Not signed in' }, 401);
     const userId = userData.user.id;
 
-    let body: { requirementId?: string; returnUrl?: string };
+    let body: { requirementId?: string; returnUrl?: string; amountUsd?: number };
     try {
       body = await req.json();
     } catch {
       return json({ error: 'Invalid JSON body' }, 400);
     }
-    const { requirementId, returnUrl } = body;
+    const { requirementId, returnUrl, amountUsd } = body;
     if (typeof requirementId !== 'string') return json({ error: 'requirementId required' }, 400);
+    // Optional partial amount. Validated for SHAPE here; how much can actually
+    // be charged is decided against `outstanding` below, server-side — this
+    // field is a request, never an authority.
+    if (
+      amountUsd !== undefined &&
+      (typeof amountUsd !== 'number' || !Number.isFinite(amountUsd) || amountUsd <= 0)
+    ) {
+      return json({ error: 'Invalid amount' }, 400);
+    }
     // Stripe accepts custom URL schemes here (verified against the API,
     // 2026-08-04) — the old https-only rule was based on a wrong belief and
     // forced every payer onto a web page that does not exist. An app-scheme
@@ -282,7 +291,34 @@ serve(async req => {
     const outstanding = Math.max(0, due - paid);
     if (outstanding <= 0) return json({ error: 'Already paid' }, 400);
 
-    const amountCents = toCents(outstanding);
+    // Partial payments: charge the requested amount, clamped to what is owed.
+    // Two edges are folded back into a full payment on purpose:
+    //   • asking for MORE than outstanding — the extra would be uncollectable
+    //     overpayment with no refund path anywhere in this codebase;
+    //   • leaving less than $0.50 behind — Stripe's USD minimum is 50¢, so
+    //     that remainder could never be paid and the requirement would be
+    //     stuck short of `approved` forever.
+    // Stripe's own minimum also bounds the request itself: below 50¢ the
+    // session create would fail with a confusing gateway error, so refuse
+    // here with a sentence instead.
+    let chargeUsd = outstanding;
+    if (amountUsd !== undefined) {
+      // A DEPOSIT is all-or-nothing. It is not just an early instalment — it
+      // is the threshold that makes the booking real, so a traveler who pays
+      // $50 of a $1,000 deposit has committed to nothing while occupying a
+      // seat. Only once it is settled does the remaining balance become
+      // freely part-payable. The client does not even offer the choice on a
+      // deposit step; this is the enforcement, because the client is never
+      // the authority on what may be charged.
+      if (req_.kind === 'deposit' && amountUsd < outstanding) {
+        return json({ error: 'The deposit has to be paid in full.' }, 400);
+      }
+      if (amountUsd < 0.5) return json({ error: 'The minimum payment is $0.50' }, 400);
+      chargeUsd = Math.min(amountUsd, outstanding);
+      if (outstanding - chargeUsd < 0.5) chargeUsd = outstanding;
+    }
+
+    const amountCents = toCents(chargeUsd);
     // commission_bps is `not null default 1200` in the database — the ?? 1200
     // fallback this used to have was dead code, and if it had ever fired it
     // would have applied a fee the database itself disagrees with.
@@ -385,7 +421,12 @@ serve(async req => {
       }
     }
 
-    if (freshMatch) return json({ url: freshMatch.url });
+    // `amountUsd` in both success responses is the version handshake for
+    // partial payments: the client refuses to open Checkout for a chosen
+    // amount unless the server echoed what it actually charged, so a stale
+    // deployment (which ignores the field and charges everything) can never
+    // put the full bill behind a "$100" button. Keep it in BOTH returns.
+    if (freshMatch) return json({ url: freshMatch.url, amountUsd: chargeUsd });
 
     // The idempotency key below must change once a session for this exact
     // (user, requirement, amount) has already existed and been expired —
@@ -478,7 +519,7 @@ serve(async req => {
       idempotencyKey,
     );
 
-    return json({ url: session.url });
+    return json({ url: session.url, amountUsd: chargeUsd });
   } catch (e) {
     console.error('[payments-checkout]', safeMessage(e));
     return json({ error: 'Could not start the payment' }, 500);

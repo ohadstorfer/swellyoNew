@@ -18,8 +18,8 @@
  * every read is one the host was already allowed to make. See
  * operatorDashboardService.
  */
-import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Alert } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { Image } from 'expo-image';
@@ -37,8 +37,7 @@ import {
 } from '../../../services/trips/operatorDashboardService';
 import { STRIPE_LIVEMODE } from '../../../services/trips/tripPaymentsService';
 import { useConnectStatus } from '../../../hooks/trips/useConnectStatus';
-import { remindRequirement, type TravelerReview } from '../../../services/trips/tripDocumentsService';
-import { showErrorAlert } from '../../../utils/friendlyError';
+import { type TravelerReview } from '../../../services/trips/tripDocumentsService';
 import type { ReviewTraveler } from '../DocumentReviewScreen';
 import { D } from './dashboardTheme';
 import { formatUsd, plural, medicalFlagLine, outstandingUsd } from './dashboardFormat';
@@ -152,7 +151,6 @@ export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
 
       {/* ── Documents ──────────────────────────────────────────────────── */}
       <DocumentsCard
-        tripId={tripId}
         review={review}
         travelerCount={travelers.length}
         loading={reviewLoading}
@@ -582,19 +580,21 @@ const MoneyCard: React.FC<{
  * A row opens THAT requirement across every traveler. It used to open the
  * generic review queue — the same destination whichever row you tapped, which
  * made the seven rows and their chevrons a lie (Ohad, 5 Aug).
+ *
+ * "Remind N people" used to live under each row and now lives on the screen a
+ * row opens (Ohad, 6 Aug). It sends a real push to real phones, and hanging it
+ * off a list where the only other gesture is "open" put it one stray thumb away
+ * from notifying everybody. On the requirement screen it sits under the list of
+ * the very people it will notify, which is also the list that says who still
+ * owes the document — so the operator reads the names before they chase them.
  */
 const DocumentsCard: React.FC<{
-  tripId: string;
   review: TravelerReview[];
   travelerCount: number;
   loading: boolean;
   onOpenRequirement: (requirementId: string) => void;
   onManage?: () => void;
-}> = ({ tripId, review, travelerCount, loading, onOpenRequirement, onManage }) => {
-  // Which row is mid-send, and what the last send reported. Keyed by
-  // requirement so two rows cannot overwrite each other's message.
-  const [sending, setSending] = useState<string | null>(null);
-  const [sent, setSent] = useState<Record<string, string>>({});
+}> = ({ review, travelerCount, loading, onOpenRequirement, onManage }) => {
   // Counts are derived from the review data the screen already holds, so this
   // costs no round trip. One pass, keyed by requirement.
   const rows = useMemo(() => {
@@ -640,52 +640,6 @@ const DocumentsCard: React.FC<{
 
   const canManage = !!onManage;
 
-  /**
-   * Chase everyone who still owes this one.
-   *
-   * Confirmed first, always. This sends a real push to real phones, and it is
-   * one tap away from a row whose only other job is navigation — an accidental
-   * brush must not notify fifteen people.
-   */
-  const remind = useCallback(
-    (requirementId: string, title: string, owed: number) => {
-      Alert.alert(
-        `Remind ${plural(owed, 'person', 'people')}?`,
-        `Everyone who has not sent “${title}” gets a notification. Anyone already reminded about it today is skipped.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Send',
-            onPress: async () => {
-              setSending(requirementId);
-              try {
-                const n = await remindRequirement(tripId, requirementId);
-                setSent(s => ({
-                  ...s,
-                  // The honest number. `n` is what the server actually sent —
-                  // the cooldown may have dropped some — and an operator who is
-                  // told "reminded 8" then hears nothing back needs to know
-                  // whether the message went out at all.
-                  [requirementId]:
-                    n === 0
-                      ? 'Everyone was already reminded today'
-                      : n < owed
-                        ? `Reminded ${n} · ${owed - n} already reminded today`
-                        : `Reminded ${plural(n, 'person', 'people')}`,
-                }));
-              } catch (e) {
-                showErrorAlert('Could not send reminders', e, 'Please try again.');
-              } finally {
-                setSending(null);
-              }
-            },
-          },
-        ],
-      );
-    },
-    [tripId],
-  );
-
   if (rows.length === 0 && !canManage && !loading) return null;
 
   return (
@@ -710,69 +664,32 @@ const DocumentsCard: React.FC<{
       ) : (
         <View style={styles.list}>
           {rows.map((r, i) => {
-            const owed = Math.max(0, travelerCount - r.received);
-            // Pay rows never get a Remind button: fetchTripReview hardcodes them
-            // to `not_started`, so `owed` would read as everybody — including
-            // the people who have already paid. The RPC refuses them too, so
-            // the two sides agree rather than one being quietly wrong. (D3.)
-            const canRemind = owed > 0 && r.reqType !== 'pay';
             const last = i === rows.length - 1;
-            const message = sent[r.id];
             return (
-              <View key={r.id}>
-                <Pressable
-                  onPress={() => onOpenRequirement(r.id)}
-                  style={({ pressed }) => [
-                    styles.row,
-                    // The remind line below carries the divider when there is
-                    // one, so the two never draw a rule between themselves.
-                    (canRemind || message) && styles.rowLast,
-                    last && !canRemind && !message && styles.rowLast,
-                    pressed && styles.rowPressed,
-                  ]}
-                >
-                  <Text style={styles.rowTitle} numberOfLines={1}>
-                    {r.title}
+              <Pressable
+                key={r.id}
+                onPress={() => onOpenRequirement(r.id)}
+                style={({ pressed }) => [
+                  styles.row,
+                  last && styles.rowLast,
+                  pressed && styles.rowPressed,
+                ]}
+              >
+                <Text style={styles.rowTitle} numberOfLines={1}>
+                  {r.title}
+                </Text>
+                <Text style={styles.counts}>
+                  <Text style={styles.countsStrong}>
+                    {r.received}/{travelerCount} in
                   </Text>
-                  <Text style={styles.counts}>
-                    <Text style={styles.countsStrong}>
-                      {r.received}/{travelerCount} in
-                    </Text>
-                    <Text style={styles.muted}>
-                      {' '}
-                      · {r.approved}/{travelerCount} ok
-                    </Text>
-                    {r.late > 0 && <Text style={styles.countsLate}> · {r.late} late</Text>}
+                  <Text style={styles.muted}>
+                    {' '}
+                    · {r.approved}/{travelerCount} ok
                   </Text>
-                  <Ionicons name="chevron-forward" size={16} color="#C9C9C9" />
-                </Pressable>
-
-                {message ? (
-                  <View style={[styles.remindRow, last && styles.rowLast]}>
-                    <Ionicons name="checkmark-circle-outline" size={15} color={D.ok} />
-                    <Text style={styles.remindDone}>{message}</Text>
-                  </View>
-                ) : canRemind ? (
-                  <Pressable
-                    onPress={() => remind(r.id, r.title, owed)}
-                    disabled={sending === r.id}
-                    style={({ pressed }) => [
-                      styles.remindRow,
-                      last && styles.rowLast,
-                      pressed && styles.rowPressed,
-                    ]}
-                  >
-                    {sending === r.id ? (
-                      <ActivityIndicator size="small" color={D.accent} />
-                    ) : (
-                      <Ionicons name="notifications-outline" size={15} color={D.accent} />
-                    )}
-                    <Text style={styles.remindText}>
-                      Remind {plural(owed, 'person', 'people')}
-                    </Text>
-                  </Pressable>
-                ) : null}
-              </View>
+                  {r.late > 0 && <Text style={styles.countsLate}> · {r.late} late</Text>}
+                </Text>
+                <Ionicons name="chevron-forward" size={16} color="#C9C9C9" />
+              </Pressable>
             );
           })}
         </View>
@@ -1062,22 +979,6 @@ const styles = StyleSheet.create({
 
   countsLate: { fontFamily: ff('Inter', '600'), fontWeight: '600', color: D.danger },
 
-  // The chase action, as its own line under the row it belongs to. Indented to
-  // the row's gutter and quieter than the title — it is an action ON that row,
-  // not a sibling of it.
-  remindRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 2,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: D.cardBorder,
-    backgroundColor: '#FFFFFF',
-  },
-  remindText: { fontFamily: ff('Inter', '600'), fontSize: 13, lineHeight: 18, fontWeight: '600', color: D.accent },
-  remindDone: { fontFamily: ff('Inter', '400'), fontSize: 13, lineHeight: 18, color: D.ok },
   // Sort toggle sits beside the count, both right-aligned in the header.
   sortRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
