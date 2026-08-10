@@ -137,7 +137,11 @@ export type TripDetailFocus =
   | 'requests'      // Plan → pending join requests (host)
   | 'gear-requests' // Plan → gear requests badge + auto-open the sheet (host)
   | 'documents'     // Plan → Documents card
-  | 'breakdown';    // Plan → group breakdown
+  | 'breakdown'     // Plan → group breakdown
+  // Operator trips: push the traveler-onboarding flow on top of the trip card.
+  // Not a section of the Plan tab — an onboarding traveler cannot see the Plan
+  // tab at all. It resolves to the plain overview for anyone already in.
+  | 'onboarding';
 
 /**
  * Where tapping a notification should land. Single source of truth for both

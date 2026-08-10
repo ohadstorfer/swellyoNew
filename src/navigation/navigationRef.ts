@@ -23,6 +23,21 @@ export type RootStackParamList = {
   OperatorEditTrip: { tripId: string };
   /** Full-screen place picker pushed from the Edit trip screen's "Where" row. */
   OperatorEditDestination: { tripId: string };
+  /**
+   * Traveler onboarding on an operator trip — the flow between "approved" and
+   * "actually in the trip".
+   *
+   * A CARD, never `presentation: 'modal'`. Three of its steps open OS pickers,
+   * and a picker fired while a Modal is tearing down hangs the main thread and
+   * the OS kills the app. See the header of TravelerOnboardingScreen.
+   */
+  TravelerOnboarding: {
+    tripId: string;
+    tripTitle?: string | null;
+    /** Launched from the dev menu — shows the Reset button. Never set on the
+     *  real path; a traveler's onboarding cannot undo itself. */
+    devMode?: boolean;
+  };
   /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
   TripUpdates: { tripId: string };
   /** Full "Members" list — "View all" target of the Overview Participants row and

@@ -1,6 +1,16 @@
 /**
- * WaiverAgreeSheet — the traveler reads the operator's waiver and agrees by
- * typing their full name.
+ * WaiverAgreeSheet — the traveler reads the operator's waiver and agrees.
+ *
+ * ⚠️ THE NAME IS NOT TYPED ANY MORE (Ohad, 10 Aug). It is read from their
+ * profile and shown as "Agreeing as <name>", so agreeing is one tap on a button
+ * that is live the moment the document has loaded. Re-typing a name the app
+ * already knows bought a keyboard, a validation rule and a primary action that
+ * started disabled — the first thing the screen said was "you cannot do this
+ * yet".
+ *
+ * The RECORD is unchanged: `operator_requirement_acknowledge` still stores the
+ * name, still rejects an empty one. The text input survives only as a fallback
+ * for a profile with no name, because that RPC would raise otherwise.
  *
  * This is a legal record, not a checkbox. `operator_requirement_acknowledge`
  * writes the row and captures the IP address and user-agent SERVER-SIDE from the
@@ -41,6 +51,7 @@ import {
   acknowledgeRequirement,
 } from '../../services/trips/tripDocumentsService';
 import { showErrorAlert } from '../../utils/friendlyError';
+import { supabase } from '../../config/supabase';
 
 type Waiver = {
   version: number;
@@ -66,7 +77,10 @@ export const WaiverAgreeSheet: React.FC<{
   const [waiver, setWaiver] = useState<Waiver | null>(null);
   const [localPdf, setLocalPdf] = useState<{ uri: string; size: number } | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Only used when the profile has no name — see the header. */
   const [name, setName] = useState('');
+  /** From `surfers.name`. Null while loading, '' when they genuinely have none. */
+  const [profileName, setProfileName] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -76,6 +90,20 @@ export const WaiverAgreeSheet: React.FC<{
     setLocalPdf(null);
     (async () => {
       try {
+        // Their own name, so agreeing is a tap rather than a typing exercise.
+        // Fetched alongside the waiver, not before it — a slow profile read
+        // must not delay the document itself.
+        supabase.auth.getSession().then(async ({ data }) => {
+          const uid = data.session?.user?.id;
+          if (!uid) return;
+          const { data: me } = await supabase
+            .from('surfers')
+            .select('name')
+            .eq('user_id', uid)
+            .maybeSingle();
+          if (!cancelled) setProfileName(((me as any)?.name ?? '').trim());
+        });
+
         const w = await fetchWaiver(tripId);
         if (cancelled) return;
         setWaiver(w);
@@ -107,11 +135,17 @@ export const WaiverAgreeSheet: React.FC<{
     };
   }, [visible, tripId]);
 
+  /** The name that goes on the record: theirs if we know it, else what they
+   *  typed. `null` profileName means "still loading", not "has none". */
+  const signingName = (profileName || name).trim();
+  /** Only ask them to type when there is genuinely nothing to sign with. */
+  const needsTypedName = profileName !== null && profileName === '';
+
   const handleAgree = useCallback(async () => {
-    if (saving || name.trim().length < 2) return;
+    if (saving || signingName.length < 2) return;
     setSaving(true);
     try {
-      await acknowledgeRequirement(requirementId, name);
+      await acknowledgeRequirement(requirementId, signingName);
       setName('');
       setSaving(false);
       onAgreed();
@@ -120,9 +154,9 @@ export const WaiverAgreeSheet: React.FC<{
       setSaving(false);
       showErrorAlert('Could not save', e, 'Could not record your agreement. Please try again.');
     }
-  }, [saving, name, requirementId, onAgreed]);
+  }, [saving, signingName, requirementId, onAgreed]);
 
-  const canAgree = !!waiver && name.trim().length >= 2 && !saving;
+  const canAgree = !!waiver && signingName.length >= 2 && !saving;
 
   // Shared between both shapes so the wording of the legal record is identical.
   const agreeBlock = (dark: boolean) =>
@@ -138,20 +172,33 @@ export const WaiverAgreeSheet: React.FC<{
           dark && { paddingBottom: insets.bottom + 12, backgroundColor: '#000000' },
         ]}
       >
-        <Text style={[styles.label, dark && styles.labelDark]}>
-          Type your full name to agree
-        </Text>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Your full name"
-          placeholderTextColor="#9A9A9A"
-          autoCapitalize="words"
-          style={[styles.input, dark && styles.inputDark]}
-        />
+        {needsTypedName ? (
+          // Fallback only: no name on their profile, and the RPC rejects an
+          // empty one.
+          <>
+            <Text style={[styles.label, dark && styles.labelDark]}>
+              Type your full name to agree
+            </Text>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="Your full name"
+              placeholderTextColor="#9A9A9A"
+              autoCapitalize="words"
+              style={[styles.input, dark && styles.inputDark]}
+            />
+          </>
+        ) : (
+          // Says exactly what will be recorded, without asking them to type it
+          // back. Still an explicit, named act — just not a typing exercise.
+          <Text style={[styles.label, dark && styles.labelDark]}>
+            Agreeing as {signingName || '…'}
+          </Text>
+        )}
         <Text style={styles.legal}>
-          By typing your name you agree to this waiver. We record your name, the date, and
-          which version you agreed to.
+          {needsTypedName
+            ? 'By typing your name you agree to this waiver. We record your name, the date, and which version you agreed to.'
+            : 'We record your name, the date, and which version you agreed to.'}
         </Text>
         <Pressable
           onPress={handleAgree}

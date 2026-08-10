@@ -173,7 +173,7 @@ serve(async req => {
     //      signed-in user could open a checkout against someone else's trip.
     const { data: participant } = await supabase
       .from('group_trip_participants')
-      .select('user_id')
+      .select('user_id, status')
       .eq('trip_id', req_.trip_id)
       .eq('user_id', userId)
       .maybeSingle();
@@ -184,12 +184,59 @@ serve(async req => {
     //      receive. Re-checked here because the client is not trustworthy.
     const { data: trip } = await supabase
       .from('group_trips')
-      .select('id, title, host_id, payment_mode')
+      .select('id, title, host_id, payment_mode, max_participants')
       .eq('id', req_.trip_id)
       .single();
 
     if (!trip || trip.payment_mode !== 'managed') {
       return json({ error: 'This trip is not collecting payments' }, 400);
+    }
+
+    // ── 3b. Is there still a spot? Only asked of someone who does not have one
+    //      yet.
+    //
+    //      Approval no longer takes a seat, so an operator can approve 14 people
+    //      for 10 spots on purpose — that is the point of the onboarding. The
+    //      seat is claimed at `activate_trip_membership`, which runs AFTER the
+    //      deposit clears. Without this check the eleventh traveler would pay
+    //      first and be told "trip is full" second, and someone would have to
+    //      refund them.
+    //
+    //      An 'active' traveler skips this entirely: they already hold their
+    //      spot, and blocking their BALANCE payment because the boat filled up
+    //      would be absurd.
+    //
+    //      This narrows the race to the width of a checkout session rather than
+    //      closing it: two people can still both pass here and both pay for one
+    //      remaining spot. The activation UPDATE is the real gate — it holds a
+    //      row lock and one of the two will fail there. That leftover case ends
+    //      in a refund; this check is what keeps it rare instead of routine.
+    if (participant.status === 'onboarding' && trip.max_participants != null) {
+      const { count: activeCount, error: countErr } = await supabase
+        .from('group_trip_participants')
+        .select('user_id', { count: 'exact', head: true })
+        .eq('trip_id', req_.trip_id)
+        .eq('status', 'active');
+
+      // Fail CLOSED. A count that did not come back is not evidence of a free
+      // spot, and the cost of guessing wrong is a charge we have to reverse.
+      if (countErr) {
+        console.error('[payments-checkout] capacity count failed:', countErr);
+        return json({ error: 'Could not check availability. Please try again.' }, 503);
+      }
+
+      if ((activeCount ?? 0) >= trip.max_participants) {
+        // Shown to a TRAVELER verbatim. They were approved, so "you are not
+        // allowed" would be wrong and confusing — the honest version is that
+        // other people finished first.
+        return json(
+          {
+            error:
+              'This trip just filled up while you were getting ready. Message the organiser — they may be able to make room.',
+          },
+          409,
+        );
+      }
     }
 
     const { data: host } = await supabase

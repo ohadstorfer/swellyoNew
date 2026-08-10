@@ -100,6 +100,16 @@ export interface GroupTrip {
   host_id: string;
   hosting_style: HostingStyle;
   status: TripStatus;
+  /**
+   * MY relationship to this trip, on feeds that join the participant row
+   * (`my_trips_feed`). `'onboarding'` = approved for an operator trip but not
+   * through onboarding, so this trip is not really mine yet.
+   *
+   * Optional and usually absent: explore rows and single-trip fetches do not
+   * carry it, and `undefined` must always be read as "not applicable", never
+   * as "still onboarding". See docs/specs/operator-trips/traveler-onboarding.md
+   */
+  member_status?: ParticipantStatus;
 
   title: string | null;
   description: string;
@@ -222,6 +232,10 @@ export interface UnseenJoinDecision {
     end_date: string | null;
     /** Host user_id — lets the declined overlay open a DM with the admin. */
     host_id: string | null;
+    /** 'C' means an operator trip, where being approved is NOT being in the
+     *  trip — the overlay's CTA becomes "Start onboarding" instead of dropping
+     *  them into a trip they cannot yet open. */
+    hosting_style: HostingStyle | null;
     /** Host name + avatar for the card's profile overlay. */
     host_name: string | null;
     host_avatar: string | null;
@@ -246,8 +260,24 @@ export interface ParticipantProfile {
   lifestyle_keywords: string[] | null;
 }
 
+/**
+ * Where a participant row sits in the operator-trip lifecycle.
+ *
+ * `onboarding` = approved on an operator trip but has not finished the
+ * must-have requirements yet. They hold NO seat, are absent from
+ * `participant_count`, and must be treated as a non-member by every piece of
+ * UI. Peer (A/B) trips only ever produce `active`, and the column defaults to
+ * `active`, so nothing outside operator trips can observe this.
+ *
+ * Spec: docs/specs/operator-trips/traveler-onboarding.md
+ */
+export type ParticipantStatus = 'onboarding' | 'active';
+
 export interface EnrichedParticipant extends ParticipantProfile {
   role: 'host' | 'member';
+  /** See ParticipantStatus. Defaults to 'active' when the column is absent, so
+   *  a client running against a pre-migration database behaves as it did. */
+  status: ParticipantStatus;
   joined_at: string;
   committed: boolean;
   commitment_status: CommitmentStatus;
@@ -728,6 +758,10 @@ export async function fetchMyTripsFeed(
   const rows: MyTripsFeedRow[] = (data || []).map((r: any) => {
     const trip = normalizeTrip(r) as MyTripsFeedRow;
     trip.membership = r.membership;
+    // Rides on the trip object so it survives into the buckets below, which are
+    // plain GroupTrip[]. Absent on a pre-migration server — left undefined
+    // rather than defaulted, so nothing reads a missing column as "onboarding".
+    if (r.member_status) trip.member_status = r.member_status as ParticipantStatus;
     return trip;
   });
 
@@ -1647,7 +1681,7 @@ export async function getTripParticipants(
 ): Promise<EnrichedParticipant[]> {
   let q1 = supabase
     .from('group_trip_participants')
-    .select('role, joined_at, user_id, committed, commitment_status, commitment_items, commitment_note, personal_gear_by_host, personal_gear_by_me')
+    .select('role, status, joined_at, user_id, committed, commitment_status, commitment_items, commitment_note, personal_gear_by_host, personal_gear_by_me')
     .eq('trip_id', tripId)
     .order('joined_at', { ascending: true });
   if (signal) q1 = q1.abortSignal(signal);
@@ -1688,6 +1722,11 @@ export async function getTripParticipants(
     return {
       user_id: row.user_id,
       role: row.role,
+      // Defaulting to 'active' matters: it is what a row looks like on every
+      // peer trip, and on every row that existed before the column did. A
+      // missing value must never read as "still onboarding" — that would hide
+      // the trip from members who are long since in it.
+      status: (row.status as ParticipantStatus) ?? 'active',
       joined_at: row.joined_at,
       committed: !!row.committed,
       commitment_status: (row.commitment_status as CommitmentStatus) ?? 'none',
@@ -1967,25 +2006,26 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
     throw new Error(error.message);
   }
 
-  // Best-effort: add the approved user to the trip's group conversation. Idempotent.
+  // Best-effort: add the approved user to the trip's group conversation.
+  //
+  // On an OPERATOR trip this must not happen here. Approval there grants access
+  // to the onboarding and nothing else — the traveler holds no seat and cannot
+  // open the trip, so dropping them into the group chat would put a stranger in
+  // a conversation about a trip they may never join, and announce them to
+  // everyone. `addApprovedUserToTripChat` runs at activation instead.
+  //
+  // The status is read rather than inferred from hosting_style: the approval
+  // trigger is the thing that decides, and this asks it what it decided.
   if (updated?.trip_id && updated?.requester_id) {
-    try {
-      const conv = await messagingService.getConversationByTripId(updated.trip_id);
-      if (conv?.id) {
-        await messagingService.addConversationMember(conv.id, updated.requester_id);
-        const { data: surfer } = await supabase
-          .from('surfers')
-          .select('name')
-          .eq('user_id', updated.requester_id)
-          .maybeSingle();
-        const name = (surfer as any)?.name?.trim() || 'User';
-        await messagingService.postSystemMessage(
-          conv.id,
-          `${name} joined the group`
-        );
-      }
-    } catch (chatError) {
-      console.warn('[groupTripsService] add to trip group chat failed:', chatError);
+    const { data: newParticipant } = await supabase
+      .from('group_trip_participants')
+      .select('status')
+      .eq('trip_id', updated.trip_id)
+      .eq('user_id', updated.requester_id)
+      .maybeSingle();
+
+    if ((newParticipant as any)?.status !== 'onboarding') {
+      await addApprovedUserToTripChat(updated.trip_id, updated.requester_id);
     }
   }
 
@@ -1993,6 +2033,34 @@ export async function approveJoinRequest(requestId: string): Promise<void> {
     tripId: updated?.trip_id ?? undefined,
     properties: { action: 'approve' },
   });
+}
+
+/**
+ * Put a now-real member into the trip's group conversation and announce them.
+ *
+ * Idempotent and best-effort — a failure here must never fail the thing that
+ * called it. On peer trips this runs at approval; on operator trips it runs
+ * when onboarding completes, which is the first moment the traveler can open
+ * the trip at all.
+ */
+export async function addApprovedUserToTripChat(
+  tripId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const conv = await messagingService.getConversationByTripId(tripId);
+    if (!conv?.id) return;
+    await messagingService.addConversationMember(conv.id, userId);
+    const { data: surfer } = await supabase
+      .from('surfers')
+      .select('name')
+      .eq('user_id', userId)
+      .maybeSingle();
+    const name = (surfer as any)?.name?.trim() || 'User';
+    await messagingService.postSystemMessage(conv.id, `${name} joined the group`);
+  } catch (chatError) {
+    console.warn('[groupTripsService] add to trip group chat failed:', chatError);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2608,7 +2676,7 @@ export async function listUnseenJoinDecisions(
   const tripIds = Array.from(new Set(rows.map((r: any) => r.trip_id as string)));
   const { data: trips, error: tripsErr } = await supabase
     .from('group_trips')
-    .select(`id, host_id, title, description, hero_image_url, start_date, end_date, participant_count, ${TRIP_DEST_EMBED}`)
+    .select(`id, host_id, hosting_style, title, description, hero_image_url, start_date, end_date, participant_count, ${TRIP_DEST_EMBED}`)
     .in('id', tripIds);
   if (tripsErr) {
     console.warn('[groupTripsService] listUnseenJoinDecisions trips error:', tripsErr);
@@ -2671,6 +2739,7 @@ export async function listUnseenJoinDecisions(
         start_date: trip.start_date ?? null,
         end_date: trip.end_date ?? null,
         host_id: trip.host_id ?? null,
+        hosting_style: (trip.hosting_style as HostingStyle) ?? null,
         host_name: host?.name ?? null,
         host_avatar: host?.avatar ?? null,
         member_avatars: memberAvatars,

@@ -83,6 +83,19 @@ type FilterType = 'all' | 'lineup' | 'trips';
 // Cache helper functions are now imported from '../utils/userProfileCache'
 
 // Three Dots Menu Icon Component
+/**
+ * Which trip the dev menu's "Traveler Onboarding" shortcut opens.
+ *
+ * A TITLE, not a UUID, and matched case-insensitively at tap time — the trip
+ * gets deleted and recreated during testing, and a hardcoded id would quietly
+ * stop working. Same approach ShareTripSheetDevLauncher takes for the same
+ * reason (it points at this same trip).
+ *
+ * Must be an operator trip (hosting_style 'C'); onboarding does not exist on
+ * peer trips.
+ */
+const DEV_ONBOARDING_TRIP_TITLE = 'El Salvador 26';
+
 const ThreeDotsIcon: React.FC = () => {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
@@ -1420,6 +1433,59 @@ export default function ConversationsScreen({
                   >
                     <Ionicons name="share-social-outline" size={20} color="#222B30" />
                     <Text style={styles.menuItemText}>Share Trip Sheet</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Traveler onboarding — local mode only. Opens the operator-trip
+                    onboarding flow against a real trip so the steps can be walked
+                    without being approved into one first.
+
+                    The trip is resolved by TITLE at tap time, not a hardcoded
+                    UUID, so this survives the test trip being deleted and
+                    recreated — same reason ShareTripSheetDevLauncher does it.
+
+                    ⚠️ This is the REAL flow on a REAL trip, not a mock. Tapping
+                    through actually signs the waiver, saves the medical form and
+                    uploads files under your own user. The deposit step opens a
+                    real Stripe Checkout (test mode, per app.stripe_livemode). */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={async (e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      const { data, error } = await supabase
+                        .from('group_trips')
+                        .select('id, title')
+                        .ilike('title', DEV_ONBOARDING_TRIP_TITLE)
+                        .limit(1)
+                        .maybeSingle();
+                      if (error || !data) {
+                        Alert.alert(
+                          'Trip not found',
+                          `No trip titled "${DEV_ONBOARDING_TRIP_TITLE}". Create it, or edit DEV_ONBOARDING_TRIP_TITLE.`,
+                        );
+                        return;
+                      }
+                      // Same 350ms the Share Trip Sheet item waits: this menu is
+                      // a Modal, and pushing a card while it is still dismissing
+                      // makes iOS drop the new screen straight back out.
+                      setTimeout(
+                        () =>
+                          pushRootCard('TravelerOnboarding', {
+                            tripId: data.id as string,
+                            tripTitle: (data.title as string | null) ?? null,
+                            // Adds the Reset button, so the flow can be walked
+                            // more than once.
+                            devMode: true,
+                          }),
+                        350,
+                      );
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="clipboard-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>Traveler Onboarding</Text>
                   </TouchableOpacity>
                 )}
 

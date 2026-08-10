@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traveler Onboarding — Operator Trips (type C)</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ink:#212121;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --no:#a3323f; --no-bg:#fceef0;
+    --sun:#c98a00; --sun-bg:#fdf6e3;
+    --new:#5b3fa8; --new-bg:#f0ecfb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:40px 20px 120px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:6px}
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;font-size:14px;margin:16px 0 34px}
+  .rule b{color:var(--cyan-dark)}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:46px 0 16px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:680;margin:0 0 6px}
+  p{margin-bottom:12px} p:last-child{margin-bottom:0}
+  strong{font-weight:660}
+  code{font:600 12.5px/1.4 ui-monospace,Menlo,monospace;background:var(--panel2);
+    padding:1px 5px;border-radius:4px}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap;
+    display:inline-block}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-no{color:var(--no);background:var(--no-bg)}
+  .t-rec{color:var(--cyan-dark);background:var(--cyan-tint)}
+  .t-new{color:var(--new);background:var(--new-bg)}
+
+  /* ── the top rail ─────────────────────────────────────────── */
+  .rail{display:flex;align-items:stretch;gap:0;overflow-x:auto;padding:4px 0 14px;
+    margin-bottom:10px}
+  .rstep{flex:0 0 auto;min-width:132px;max-width:160px;border:1px solid var(--line);
+    border-radius:10px;padding:11px 12px;background:var(--panel)}
+  .rstep.hi{background:var(--cyan-tint);border-color:#bfe4ec}
+  .rstep .n{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:5px}
+  .rstep .l{font-size:13px;font-weight:660;line-height:1.35}
+  .rstep .d{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.4}
+  .rarrow{flex:0 0 auto;align-self:center;color:#b9b9b2;padding:0 8px;font-size:15px}
+
+  /* ── phone mockups ────────────────────────────────────────── */
+  .phones{display:flex;flex-wrap:wrap;gap:26px 22px;margin-top:6px}
+  .pwrap{width:250px}
+  .pcap{font-size:12px;color:var(--muted);margin-top:9px;line-height:1.45}
+  .pcap b{color:var(--text);font-weight:660;display:block;font-size:12.5px;margin-bottom:2px}
+  .phone{width:250px;height:496px;border:1px solid #d8d8d2;border-radius:26px;
+    background:#FAFAFA;overflow:hidden;display:flex;flex-direction:column;
+    box-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px -14px rgba(0,0,0,.18)}
+  .pnotch{height:24px;flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+  .pnotch:after{content:"";width:66px;height:5px;border-radius:99px;background:#e2e2dc}
+  .pbody{flex:1;padding:12px 14px;overflow:hidden;display:flex;flex-direction:column}
+  .pbar{height:3px;border-radius:99px;background:#eaeae4;margin-bottom:14px;flex:0 0 auto;
+    overflow:hidden}
+  .pbar i{display:block;height:100%;border-radius:99px;background:var(--cyan)}
+  .ph-eyebrow{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:6px}
+  .ph-title{font-size:18px;font-weight:680;letter-spacing:-.01em;line-height:1.25;
+    color:var(--ink);margin-bottom:6px}
+  .ph-sub{font-size:12px;color:#6f6f6a;line-height:1.5;margin-bottom:14px}
+
+  .row{display:flex;align-items:flex-start;gap:9px;padding:9px 10px;background:#fff;
+    border:1px solid #EFEFEF;border-radius:10px;margin-bottom:7px}
+  .row .ic{width:22px;height:22px;border-radius:99px;background:var(--panel2);flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center;font-size:11px}
+  .row .tx{flex:1;min-width:0}
+  .row .tt{font-size:12.5px;font-weight:640;color:var(--ink);line-height:1.3}
+  .row .ss{font-size:10.5px;color:#8a8a84;margin-top:2px;line-height:1.35}
+  .row .pill{font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:99px;
+    align-self:center;white-space:nowrap}
+  .p-must{background:#f0f0ec;color:#6b6b66}
+  .p-opt{background:var(--sun-bg);color:var(--sun)}
+  .p-done{background:var(--ok-bg);color:var(--ok)}
+  .row.done .tt{color:#8a8a84}
+  .row.now{border-color:var(--cyan);box-shadow:0 0 0 2px var(--cyan-tint)}
+
+  .btn{margin-top:auto;border-radius:99px;padding:12px;text-align:center;
+    font-size:13px;font-weight:680;background:var(--ink);color:#fff}
+  .btn.ghost{background:transparent;color:#8a8a84;padding:9px;margin-top:8px;font-weight:600}
+  .btn.cyan{background:var(--cyan)}
+  .btn.out{background:#fff;border:1px solid var(--line);color:var(--ink);margin-top:8px}
+
+  .doc{flex:1;background:#fff;border:1px solid #EFEFEF;border-radius:10px;padding:11px;
+    overflow:hidden;margin-bottom:12px}
+  .ln{height:6px;border-radius:99px;background:#eeeee8;margin-bottom:7px}
+  .ln.s{width:62%} .ln.m{width:84%} .ln.t{width:40%;background:#e2e2dc;height:8px;margin-bottom:11px}
+
+  .field{background:#fff;border:1px solid #EFEFEF;border-radius:10px;padding:9px 10px;
+    margin-bottom:7px}
+  .field .fl{font-size:10px;font-weight:680;color:#8a8a84;text-transform:uppercase;
+    letter-spacing:.07em;margin-bottom:4px}
+  .field .fv{font-size:12px;color:var(--ink)}
+  .field .fv.ph{color:#b5b5ae}
+
+  .amt{background:#fff;border:1px solid #EFEFEF;border-radius:12px;padding:14px;
+    text-align:center;margin-bottom:12px}
+  .amt .big{font-size:28px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+  .amt .cap{font-size:11px;color:#8a8a84;margin-top:3px}
+
+  .drop{flex:1;border:1.5px dashed #d8d8d2;border-radius:12px;display:flex;
+    flex-direction:column;align-items:center;justify-content:center;gap:7px;
+    margin-bottom:12px;background:#fff}
+  .drop .di{font-size:26px;opacity:.55}
+  .drop .dt{font-size:11.5px;color:#8a8a84;text-align:center;padding:0 18px;line-height:1.45}
+
+  .cheer{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;gap:8px}
+  .cheer .ring{width:60px;height:60px;border-radius:99px;background:var(--ok-bg);
+    display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--ok)}
+
+  .tabs{display:flex;gap:0;background:var(--panel2);border-radius:99px;padding:3px;
+    margin-bottom:12px}
+  .tabs span{flex:1;text-align:center;font-size:11px;font-weight:660;padding:6px;
+    border-radius:99px;color:#8a8a84}
+  .tabs span.on{background:#fff;color:var(--ink)}
+
+  /* ── cards / tables ──────────────────────────────────────── */
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:11px 15px;display:flex;gap:9px;align-items:center;
+    flex-wrap:wrap}
+  .chead b{font-size:14px;font-weight:680}
+  .cbody{padding:13px 15px;font-size:14px}
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin:14px 0}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:560px}
+  th,td{text-align:left;padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel);font-weight:680;font-size:12px;text-transform:uppercase;
+    letter-spacing:.05em;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+
+  ul{margin:0 0 12px 18px} li{margin-bottom:6px}
+  .lede{font-size:14px;color:#3a3a36;margin-bottom:16px;max-width:76ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Traveler onboarding — operator trips (type C)</h1>
+<p class="sub">A guided flow that starts the first time an approved traveler opens the trip.</p>
+
+<div class="rule">
+  <b>The one rule:</b> approval buys <b>nothing but a ticket to the onboarding</b>. No seat, no
+  spot in the count, no membership. Until the three required items are done, the traveler sees
+  <b>exactly what a stranger sees</b> — the public trip page, plus a <b>Start onboarding</b>
+  button. They can still DM the organiser, because anyone can. Finishing onboarding is what
+  makes them a member. It runs <b>once</b> — it never re-opens.
+</div>
+
+<h2>The whole journey</h2>
+
+<div class="rail">
+  <div class="rstep"><div class="n">Today</div><div class="l">Discover trip</div><div class="d">Explore feed</div></div>
+  <div class="rarrow">→</div>
+  <div class="rstep"><div class="n">Today</div><div class="l">Request to join</div><div class="d">Unchanged</div></div>
+  <div class="rarrow">→</div>
+  <div class="rstep hi"><div class="n">Changed</div><div class="l">Operator approves</div><div class="d"><b>No seat taken.</b> Grants access to onboarding only</div></div>
+  <div class="rarrow">→</div>
+  <div class="rstep hi"><div class="n">Changed</div><div class="l">“You’re in!”</div><div class="d">CTA becomes <b>Start onboarding</b></div></div>
+  <div class="rarrow">→</div>
+  <div class="rstep hi"><div class="n">New</div><div class="l">Onboarding runs</div><div class="d">7 steps · <b>3 are required</b></div></div>
+  <div class="rarrow">→</div>
+  <div class="rstep"><div class="n">Today</div><div class="l">Becomes a member</div><div class="d">Plan + chat appear</div></div>
+</div>
+
+<p class="lede">
+  Everything grey already exists and does not change. Only the purple box is new — and it is a
+  <strong>wrapper</strong>: it plays the sheets that are already built, one after the other,
+  in order.
+</p>
+
+<h2>The 7 steps</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>#</th><th>Step</th><th>Type</th><th>What the traveler does</th><th>Component that already exists</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>Waiver</b></td><td><span class="tag t-rec">must</span></td><td>Reads, scrolls to the end, agrees</td><td><code>WaiverAgreeSheet</code></td></tr>
+    <tr><td>2</td><td><b>Medical</b></td><td><span class="tag t-rec">must</span></td><td>Allergies, diet, injuries, medication</td><td><code>MedicalFormSheet</code></td></tr>
+    <tr><td>3</td><td><b>Deposit</b></td><td><span class="tag t-rec">must</span></td><td>Pays through Stripe</td><td><code>PayAmountSheet</code></td></tr>
+    <tr><td>4</td><td><b>Insurance</b></td><td><span class="tag t-open">skippable</span></td><td>Uploads policy, or skips</td><td><code>RequirementUploadFlow</code></td></tr>
+    <tr><td>5</td><td><b>Passport</b></td><td><span class="tag t-open">skippable</span></td><td>Photo of the passport page, or skips</td><td><code>RequirementUploadFlow</code></td></tr>
+    <tr><td>6</td><td><b>Flights</b></td><td><span class="tag t-open">skippable</span></td><td>Ticket / booking, or skips</td><td><code>RequirementUploadFlow</code></td></tr>
+    <tr><td>7</td><td><b>Visa</b></td><td><span class="tag t-open">skippable</span></td><td>Visa or entry permit, or skips</td><td><code>RequirementUploadFlow</code></td></tr>
+  </tbody>
+</table></div>
+
+<div class="card">
+  <div class="chead"><b>Order</b> <span class="tag t-ok">decided</span></div>
+  <div class="cbody">
+    <b>Deposit is third</b>, after Waiver and Medical. Those two are free and take 30 seconds. If
+    a traveler pays first and then refuses the waiver, you owe a refund. Money goes last among
+    the required ones.
+  </div>
+</div>
+
+<h2>Screen by screen</h2>
+
+<div class="phones">
+
+  <!-- 0a — "You're in!" overlay -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody" style="background:linear-gradient(180deg,#E6F4F8,#FAFAFA)">
+        <div class="cheer">
+          <div class="ring" style="background:#fff;font-size:30px">🎉</div>
+          <div class="ph-title" style="margin-bottom:2px">You’re in!</div>
+          <div class="ph-sub" style="margin-bottom:16px">Surf Nomads Co. accepted you to<br><b>Nias Boat Charter</b> · Mar 14–22</div>
+          <div class="row" style="width:100%"><div class="ic">📋</div><div class="tx"><div class="tt">3 things before you’re on board</div><div class="ss">Waiver, medical info, deposit</div></div></div>
+        </div>
+        <div class="btn cyan">Start onboarding</div>
+        <div class="btn ghost">Later</div>
+      </div>
+    </div>
+    <div class="pcap"><b>0a · The invitation <span class="tag t-new">changed</span></b>
+      The existing “You’re in!” overlay. On a type-C trip its CTA becomes
+      <b>Start onboarding</b> and goes straight into the flow. On A/B trips it is unchanged.</div>
+  </div>
+
+  <!-- 0b — the public trip page -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="ph-eyebrow">Trip · public view</div>
+        <div class="ph-title">Nias Boat Charter</div>
+        <div class="ph-sub">Mar 14 – Mar 22 · 8 nights · Nias, Indonesia</div>
+        <div class="row"><div class="ic">🏄</div><div class="tx"><div class="tt">Surf Nomads Co.</div><div class="ss">Organiser · 12 trips run</div></div><span class="pill p-opt">Message</span></div>
+        <div class="row"><div class="ic">👥</div><div class="tx"><div class="tt">8 of 10 spots taken</div><div class="ss">Intermediate and up</div></div></div>
+        <div class="row"><div class="ic">💰</div><div class="tx"><div class="tt">From $1,800</div><div class="ss">Boat, meals, guiding</div></div></div>
+        <div class="row"><div class="ic">📷</div><div class="tx"><div class="tt">Photos</div><div class="ss">14 from past trips</div></div></div>
+        <div class="btn cyan">Start onboarding — 2 left</div>
+      </div>
+    </div>
+    <div class="pcap"><b>0b · Backed out? Same page as a stranger <span class="tag t-new">new</span></b>
+      Not a special lock screen — <b>literally the public trip page</b>. No Plan tab, no group
+      chat, no member list. Two things differ: the CTA, and <b>Message</b> on the organiser row.</div>
+  </div>
+
+  <!-- 1 — intro -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:4%"></i></div>
+        <div class="ph-eyebrow">Step 1 of 7</div>
+        <div class="ph-title">You’re in. Now let’s get you ready.</div>
+        <div class="ph-sub">3 things the operator needs, and 4 you can do later.</div>
+        <div class="row"><div class="ic">📝</div><div class="tx"><div class="tt">Waiver</div><div class="ss">Read and agree</div></div><span class="pill p-must">Required</span></div>
+        <div class="row"><div class="ic">🩺</div><div class="tx"><div class="tt">Medical info</div><div class="ss">Allergies, diet, injuries</div></div><span class="pill p-must">Required</span></div>
+        <div class="row"><div class="ic">💳</div><div class="tx"><div class="tt">Deposit</div><div class="ss">Confirms your place</div></div><span class="pill p-must">Required</span></div>
+        <div class="row"><div class="ic">🛟</div><div class="tx"><div class="tt">Insurance, passport…</div><div class="ss">+3 more, can wait</div></div><span class="pill p-opt">Later</span></div>
+        <div class="btn">Start</div>
+      </div>
+    </div>
+    <div class="pcap"><b>1 · Intro</b>
+      Shows the whole list up front so nobody feels tricked into a long flow. Required vs Later is
+      visible before they tap Start.</div>
+  </div>
+
+  <!-- 2 — waiver -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:18%"></i></div>
+        <div class="ph-eyebrow">Step 2 of 7 · Required</div>
+        <div class="ph-title">Trip waiver</div>
+        <div class="doc">
+          <div class="ln t"></div>
+          <div class="ln"></div><div class="ln m"></div><div class="ln"></div><div class="ln s"></div>
+          <div class="ln"></div><div class="ln m"></div><div class="ln"></div><div class="ln"></div>
+          <div class="ln s"></div><div class="ln"></div><div class="ln m"></div>
+        </div>
+        <div class="btn">I have read and I agree</div>
+      </div>
+    </div>
+    <div class="pcap"><b>2 · Waiver</b>
+      Button stays disabled until they scroll to the bottom. Signature is stamped against the
+      <em>current waiver version</em> — that matters in step 10.</div>
+  </div>
+
+  <!-- 3 — medical -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:32%"></i></div>
+        <div class="ph-eyebrow">Step 3 of 7 · Required</div>
+        <div class="ph-title">Anything we should know?</div>
+        <div class="ph-sub">Only the operator and the guides can see this.</div>
+        <div class="field"><div class="fl">Allergies</div><div class="fv ph">Nuts, shellfish…</div></div>
+        <div class="field"><div class="fl">Injuries</div><div class="fv">Left shoulder, 2024</div></div>
+        <div class="field"><div class="fl">Medication</div><div class="fv ph">Anything you take daily</div></div>
+        <div class="field"><div class="fl">Diet</div><div class="fv ph">Vegetarian, halal…</div></div>
+        <div class="btn">Continue</div>
+        <div class="btn ghost">Nothing to report</div>
+      </div>
+    </div>
+    <div class="pcap"><b>3 · Medical</b>
+      “Nothing to report” is a real answer and must be one tap — otherwise healthy people get
+      stuck staring at four empty boxes.</div>
+  </div>
+
+  <!-- 4 — deposit -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:46%"></i></div>
+        <div class="ph-eyebrow">Step 4 of 7 · Required</div>
+        <div class="ph-title">Deposit</div>
+        <div class="ph-sub">Confirms your place on the boat.</div>
+        <div class="amt"><div class="big">$450</div><div class="cap">of $1,800 total</div></div>
+        <div class="row"><div class="ic">📅</div><div class="tx"><div class="tt">Balance due Feb 14</div><div class="ss">$1,350 remaining</div></div></div>
+        <div class="row"><div class="ic">🔒</div><div class="tx"><div class="tt">Paid to Surf Nomads Co.</div><div class="ss">Secured by Stripe</div></div></div>
+        <div class="btn cyan">Pay $450</div>
+      </div>
+    </div>
+    <div class="pcap"><b>4 · Deposit</b>
+      Leaves the app for Stripe and comes back. The flow must resume on the <em>same step</em>,
+      whether the payment succeeded or was cancelled.</div>
+  </div>
+
+  <!-- 5 — insurance (skippable) -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:60%"></i></div>
+        <div class="ph-eyebrow">Step 5 of 7 · Optional</div>
+        <div class="ph-title">Travel insurance</div>
+        <div class="ph-sub">Your policy document or confirmation.</div>
+        <div class="drop"><div class="di">🛟</div><div class="dt">Take a photo, or pick a file from your phone</div></div>
+        <div class="btn">Upload</div>
+        <div class="btn out">Skip — I’ll do it later</div>
+      </div>
+    </div>
+    <div class="pcap"><b>5 · Insurance</b>
+      First optional step. <b>Skip is a real button, same size as Upload.</b> Skipping is not
+      failing — it moves the item to the Plan tab with its deadline.</div>
+  </div>
+
+  <!-- 6 — passport -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:74%"></i></div>
+        <div class="ph-eyebrow">Step 6 of 7 · Optional</div>
+        <div class="ph-title">Passport</div>
+        <div class="ph-sub">So your organiser can book your flights.</div>
+        <div class="drop"><div class="di">🛂</div><div class="dt">Photo of the page with your picture. Check the two lines at the bottom are readable.</div></div>
+        <div class="row"><div class="ic">🔒</div><div class="tx"><div class="tt">Private storage</div><div class="ss">Deleted after the trip</div></div></div>
+        <div class="btn">Take photo</div>
+        <div class="btn out">Skip — I’ll do it later</div>
+      </div>
+    </div>
+    <div class="pcap"><b>6 · Passport</b>
+      <span class="tag t-ok">decided: skippable</span> The old master spec called it mandatory.
+      That is overruled — passport does <b>not</b> block the trip.</div>
+  </div>
+
+  <!-- 7 — flights -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:86%"></i></div>
+        <div class="ph-eyebrow">Step 7 of 7 · Optional</div>
+        <div class="ph-title">Flight details</div>
+        <div class="ph-sub">Your ticket, so the pickup can be planned.</div>
+        <div class="drop"><div class="di">✈️</div><div class="dt">Screenshot or PDF of your booking</div></div>
+        <div class="row"><div class="ic">⏰</div><div class="tx"><div class="tt">Due 21 days before</div><div class="ss">Feb 21</div></div></div>
+        <div class="btn">Upload</div>
+        <div class="btn out">Skip — I’ll do it later</div>
+      </div>
+    </div>
+    <div class="pcap"><b>7 · Flights</b>
+      Optional steps show their deadline, so skipping is an informed choice. Visa (step 8) is the
+      same screen with different copy.</div>
+  </div>
+
+  <!-- 8 — done -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="pbar"><i style="width:100%"></i></div>
+        <div class="cheer">
+          <div class="ring">✓</div>
+          <div class="ph-title" style="margin-bottom:2px">You’re all set</div>
+          <div class="ph-sub" style="margin-bottom:14px">Surf Nomads Co. has what they need to start booking.</div>
+          <div style="width:100%">
+            <div class="row done"><div class="ic">✓</div><div class="tx"><div class="tt">Waiver</div></div><span class="pill p-done">Done</span></div>
+            <div class="row done"><div class="ic">✓</div><div class="tx"><div class="tt">Medical info</div></div><span class="pill p-done">Done</span></div>
+            <div class="row done"><div class="ic">✓</div><div class="tx"><div class="tt">Deposit</div></div><span class="pill p-done">Paid</span></div>
+            <div class="row"><div class="ic">🛂</div><div class="tx"><div class="tt">3 tasks left</div><div class="ss">Passport, flights, visa</div></div><span class="pill p-opt">Later</span></div>
+          </div>
+        </div>
+        <div class="btn cyan">Go to the trip</div>
+      </div>
+    </div>
+    <div class="pcap"><b>8 · Done</b>
+      Ends on what is finished, not on what is missing. The skipped items are named once, then
+      handed to the Plan tab.</div>
+  </div>
+
+  <!-- 9 — plan tab -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="ph-eyebrow">Trip</div>
+        <div class="ph-title">Nias Boat Charter</div>
+        <div class="tabs"><span>Overview</span><span class="on">Plan</span><span>Chat</span></div>
+        <div class="ph-eyebrow" style="margin-top:4px">Your tasks · 3 open</div>
+        <div class="row"><div class="ic">🛂</div><div class="tx"><div class="tt">Passport</div><div class="ss">Due Feb 21</div></div><span class="pill p-opt">Upload</span></div>
+        <div class="row"><div class="ic">✈️</div><div class="tx"><div class="tt">Flight details</div><div class="ss">Due Feb 21</div></div><span class="pill p-opt">Upload</span></div>
+        <div class="row"><div class="ic">📄</div><div class="tx"><div class="tt">Visa</div><div class="ss">Due Feb 14</div></div><span class="pill p-opt">Upload</span></div>
+        <div class="row done"><div class="ic">✓</div><div class="tx"><div class="tt">Waiver</div></div><span class="pill p-done">Done</span></div>
+        <div class="row done"><div class="ic">✓</div><div class="tx"><div class="tt">Deposit</div><div class="ss">$1,350 balance due Feb 14</div></div><span class="pill p-done">Paid</span></div>
+      </div>
+    </div>
+    <div class="pcap"><b>9 · After onboarding</b>
+      This screen already exists (<code>TripDocumentsCard</code> + <code>PaymentSection</code>).
+      Skipped items land here. Nothing new to build.</div>
+  </div>
+
+  <!-- 10 — rejection -->
+  <div class="pwrap">
+    <div class="phone">
+      <div class="pnotch"></div>
+      <div class="pbody">
+        <div class="ph-eyebrow">Trip · Plan</div>
+        <div class="ph-title">Something needs a fix</div>
+        <div class="ph-sub">The operator looked at your passport.</div>
+        <div class="row now"><div class="ic">⚠️</div><div class="tx"><div class="tt">Passport — rejected</div><div class="ss">“The bottom two lines are blurry, can you retake it?”</div></div></div>
+        <div class="row"><div class="ic">📝</div><div class="tx"><div class="tt">Waiver updated</div><div class="ss">New version — please sign again</div></div><span class="pill p-opt">Sign</span></div>
+        <div class="ph-sub" style="margin-top:14px">These are tasks, not a new onboarding.</div>
+        <div class="btn out">Retake photo</div>
+      </div>
+    </div>
+    <div class="pcap"><b>10 · Never re-onboard</b>
+      A rejected document, or a new waiver version, comes back as a <b>task</b>. Onboarding runs
+      exactly once per traveler per trip.</div>
+  </div>
+
+</div>
+
+<h2>Rules the flow must obey</h2>
+
+<div class="card">
+  <div class="chead"><b>When does onboarding open?</b></div>
+  <div class="cbody">
+    <p>Two doors, same flow:</p>
+    <ul>
+      <li><b>“Start onboarding”</b> on the “You’re in!” overlay, right after approval.</li>
+      <li><b>Opening the trip</b>, any time, while the required items are unfinished.</li>
+    </ul>
+    <p>Both need: approved participant of a type-C trip, <b>and</b>
+      <code>onboarding_completed_at</code> is <b>null</b>.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>When is it finished?</b></div>
+  <div class="cbody">
+    <p>When the traveler reaches the last step and taps <b>Go to the trip</b>. That stamps
+      <code>onboarding_completed_at</code>. It is finished <b>even if every optional item was
+      skipped</b> — skipping is a valid outcome.</p>
+    <p style="margin-top:8px">Backing out halfway leaves the stamp null, so it opens again next
+      time — but every completed step is already saved, so it resumes where they stopped.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>What does an unfinished traveler get?</b></div>
+  <div class="cbody">
+    <p><b>Exactly what someone who never asked to join gets.</b> Approval alone changes nothing
+      about the UI. There is no new lock screen to design — the public trip page already is the
+      lock screen.</p>
+    <div class="tw" style="margin:12px 0 0"><table style="min-width:420px">
+      <thead><tr><th>Surface</th><th>Before onboarding</th><th>After</th></tr></thead>
+      <tbody>
+        <tr><td>Public trip page</td><td><span class="tag t-ok">yes</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td><b>DM the organiser</b></td><td><span class="tag t-ok">yes</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td>Plan tab / tasks</td><td><span class="tag t-no">no</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td>Group trip chat</td><td><span class="tag t-no">no</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td>Member list</td><td><span class="tag t-no">no</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td>Itinerary, gear, updates</td><td><span class="tag t-no">no</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td><b>Takes a spot</b></td><td><span class="tag t-no">no</span></td><td><span class="tag t-ok">yes</span></td></tr>
+        <tr><td><b>Counted in “8 of 10”</b></td><td><span class="tag t-no">no</span></td><td><span class="tag t-ok">yes</span></td></tr>
+      </tbody>
+    </table></div>
+    <p style="margin-top:12px">The four skippable items gate <b>nothing</b>. Skipping all four
+      still turns them into a full member.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>The trap: “no participant row” makes onboarding impossible</b>
+    <span class="tag t-no">must read</span></div>
+  <div class="cbody">
+    <p>“Approved but not a participant” sounds like <em>don’t insert the row yet</em>. That
+      breaks everything. <b>15 places</b> in the database gate on
+      <code>is_trip_participant()</code>. With no row, an approved traveler cannot:</p>
+    <ul>
+      <li>read the trip’s requirement list — they would not even see what to do</li>
+      <li>sign the waiver, or fill the medical form</li>
+      <li>upload a passport, insurance, visa or flight file</li>
+      <li>read or write anything in the documents bucket (a storage policy)</li>
+    </ul>
+    <p>Rewriting those 15 policies to also accept “has an approved join request” is a lot of
+      surface area on live, security-critical rules.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>The cheap way to get exactly what you asked for</b>
+    <span class="tag t-ok">recommended</span></div>
+  <div class="cbody">
+    <p>Keep inserting the participant row on approval, and give it a <b>status</b>:
+      <code>'onboarding'</code> → <code>'active'</code>. Then membership means three separate
+      things, and only the last one flips at approval:</p>
+    <div class="tw" style="margin:12px 0"><table style="min-width:480px">
+      <thead><tr><th>Question</th><th>Answered by</th><th>At approval</th></tr></thead>
+      <tbody>
+        <tr><td>May I touch this trip’s documents?</td><td><code>is_trip_participant()</code></td><td><span class="tag t-ok">yes</span> — all 15 policies keep working, <b>zero rewrites</b></td></tr>
+        <tr><td>Do I take a spot?</td><td>capacity trigger</td><td><span class="tag t-no">no</span> — counts <code>status = 'active'</code> only</td></tr>
+        <tr><td>Am I in the group?</td><td><code>participant_count</code> + the UI flag</td><td><span class="tag t-no">no</span> — same filter</td></tr>
+      </tbody>
+    </table></div>
+    <p><b>Three small changes instead of fifteen:</b> one column, one line in
+      <code>enforce_group_trip_max_participants()</code>, one line in
+      <code>sync_group_trip_participant_count()</code>. Default the column to
+      <code>'active'</code> so peer trips (A/B) are untouched.</p>
+    <p style="margin-top:8px">On the client, <code>TripDetailScreen</code> already draws the whole
+      member/non-member difference off one boolean, <code>isApprovedMember</code>. Point it at
+      <code>status = 'active'</code> and the Plan tab, chat button and member list disappear
+      together. DMs need no exception — they live outside the trip.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>The race: paying for a spot that is already gone</b>
+    <span class="tag t-no">decide this</span></div>
+  <div class="cbody">
+    <p>If the seat is only claimed at the <b>end</b> of onboarding, and the deposit is
+      <b>inside</b> onboarding, then this happens:</p>
+    <p style="background:var(--no-bg);border-radius:8px;padding:11px 13px;margin:10px 0;
+       font-size:13.5px;color:#7a2630">
+      10 spots. The operator approves 14 people. Twelve of them pay the deposit. The last two
+      finish onboarding and are told <b>“trip is full”</b> — after their money has already left
+      their account. That is two refunds and two very angry customers.</p>
+    <p><b>Fix — split the two moments:</b> claim the seat the instant the <b>deposit succeeds</b>,
+      not at the end of the flow. Money is the real commitment; the passport and the visa are
+      paperwork. So:</p>
+    <ul>
+      <li><b>Deposit paid</b> → <code>status = 'active'</code>. The spot is theirs, the count goes
+        up, the trip can fill.</li>
+      <li><b>Onboarding finished</b> → the Plan tab, the chat and the member list appear.</li>
+    </ul>
+    <p>In practice these are seconds apart — deposit is step 4 of 8. But when a trip is nearly
+      full, that ordering is the difference between “sorry, full” <em>before</em> paying and a
+      refund <em>after</em>.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>The operator now needs two numbers</b> <span class="tag t-open">dashboard</span></div>
+  <div class="cbody">
+    <p>Approving no longer fills the boat, so the operator will over-approve — that is the whole
+      point. The dashboard must stop saying “8 of 10” and start saying
+      <b>“6 confirmed · 5 still onboarding · 10 spots”</b>. Otherwise they cannot tell whether
+      the trip is full or empty.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="chead"><b>The one thing missing</b> <span class="tag t-open">small add</span></div>
+  <div class="cbody">
+    <p>Today the public trip page has <b>no direct “Message the organiser” button</b>. Getting
+      there means tapping the organiser → profile → message. If DM is the escape hatch for a
+      traveler who cannot pay, it should be one tap from the trip page. That is the
+      <b>Message</b> pill drawn on the organiser row in 0b.</p>
+  </div>
+</div>
+
+<h2>What has to be built</h2>
+
+<div class="tw"><table>
+  <thead><tr><th>Piece</th><th>Status</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Requirement kinds + must/skippable</td><td><span class="tag t-ok">exists</span></td><td><code>organized_trip_requirements.skip_at_onboarding</code></td></tr>
+    <tr><td>Per-traveler state</td><td><span class="tag t-ok">exists</span></td><td><code>operator_trip_my_requirements()</code></td></tr>
+    <tr><td>All 7 step UIs</td><td><span class="tag t-ok">exists</span></td><td>Waiver / Medical / Pay / Upload sheets</td></tr>
+    <tr><td>Request to join + approve</td><td><span class="tag t-ok">exists</span></td><td>Unchanged</td></tr>
+    <tr><td><b>onboarding_completed_at</b></td><td><span class="tag t-new">new</span></td><td>One column on <code>group_trip_participants</code>. No new table.</td></tr>
+    <tr><td><b>The runner screen</b></td><td><span class="tag t-new">new</span></td><td>Full-screen navigator route. Orders the steps, tracks progress, plays the existing sheets inline.</td></tr>
+    <tr><td>Public trip page as the “lock screen”</td><td><span class="tag t-ok">exists</span></td><td>It is what a non-member already sees. Nothing to design.</td></tr>
+    <tr><td><b>Gate <code>isApprovedMember</code></b></td><td><span class="tag t-new">new</span></td><td>One derived flag in <code>TripDetailScreen</code>. Removes Plan, chat and members in one move.</td></tr>
+    <tr><td><b>“Start onboarding” CTA ×2</b></td><td><span class="tag t-new">new</span></td><td>On the “You’re in!” overlay (type-C branch) and on the trip page.</td></tr>
+    <tr><td><b>“Message organiser” on the trip page</b></td><td><span class="tag t-new">new</span></td><td>One tap to a DM. The escape hatch for anyone stuck.</td></tr>
+    <tr><td><b><code>participants.status</code></b></td><td><span class="tag t-new">new</span></td><td><code>'onboarding'</code> / <code>'active'</code>. Defaults to <code>'active'</code> so A/B trips are untouched.</td></tr>
+    <tr><td><b>Capacity trigger counts active only</b></td><td><span class="tag t-new">new</span></td><td>One line in <code>enforce_group_trip_max_participants()</code>. This is what makes approval free.</td></tr>
+    <tr><td><b><code>participant_count</code> counts active only</b></td><td><span class="tag t-new">new</span></td><td>One line in <code>sync_group_trip_participant_count()</code>. Feeds “8 of 10” and the explore sort.</td></tr>
+    <tr><td>Deadline on skippable items</td><td><span class="tag t-open">gap</span></td><td>The DB <em>requires</em> a deadline on skippable rows. The operator wizard must ask for one.</td></tr>
+    <tr><td>When does the seat get claimed?</td><td><span class="tag t-no">decide</span></td><td>At the deposit, or at the end of onboarding? See the race card above.</td></tr>
+    <tr><td>Operator sees confirmed vs onboarding</td><td><span class="tag t-open">dashboard</span></td><td>“8 of 10” is no longer enough once over-approval is normal.</td></tr>
+  </tbody>
+</table></div>
+
+<div class="rule" style="margin-top:26px">
+  <b>Build note that is not a style choice:</b> the runner must be a <b>navigator screen</b>, not
+  a React Native <code>Modal</code>. The passport and upload steps open the OS photo picker;
+  launching a picker while a Modal is tearing down hangs the main thread and iOS kills the app.
+  See the header of <code>RequirementUploadFlow.tsx</code> — this already happened once and made
+  uploads impossible on every operator trip.
+</div>
+
+</div>
+</body>
+</html>

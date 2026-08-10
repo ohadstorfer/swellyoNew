@@ -203,6 +203,13 @@ export type TripRequirement = {
   title: string;
   helpText: string | null;
   dueDate: string | null;
+  /**
+   * False = must_have, and on an operator trip that means it GATES THE TRIP:
+   * membership is withheld until every must_have row is satisfied
+   * (`activate_trip_membership`). True = the traveler may Skip it during
+   * onboarding and finish it later from the Plan tab.
+   */
+  skippable: boolean;
   state: RequirementState;
   submittedAt: string | null;
   reviewedAt: string | null;
@@ -244,6 +251,11 @@ export async function fetchMyRequirements(tripId: string): Promise<TripRequireme
     title: r.title,
     helpText: r.help_text ?? null,
     dueDate: r.due_date ?? null,
+    // Anything that is not explicitly must_have is treated as skippable. An
+    // unrecognised value must not silently become a wall the traveler cannot
+    // pass — the failure mode of guessing wrong in the other direction is a
+    // trip nobody can ever join.
+    skippable: r.skip_at_onboarding !== 'must_have',
     state: (r.effective_state ?? 'not_started') as RequirementState,
     submittedAt: r.submitted_at ?? null,
     reviewedAt: r.reviewed_at ?? null,
@@ -810,27 +822,78 @@ export function isDeadlineAtEnd(current: number, direction: 1 | -1): boolean {
 }
 
 /**
- * Default timing per kind.
+ * THE onboarding set. Fixed, on every operator trip. Not a default.
  *
- * Passport and waiver are must-have: the workbench marks both as required parts
- * of onboarding (Ohad, 22 Jul). The rest are skippable with a deadline the
- * operator can move — travelers routinely buy insurance and book flights after
- * they have committed to the trip.
+ * Operators used to pick which requirements existed and which were mandatory.
+ * They no longer do (Ohad, 10 Aug): every operator trip asks for the same seven
+ * things, split the same way, so a traveler who has been on one operator trip
+ * knows exactly what the next one will ask.
  *
- * "Must-have" means urgency, not access: since the deposit is what secures a
- * spot, joining never waits on documents. A must-have item is simply an
- * obligation with no Skip button.
+ * ⚠️ `skippable: false` decides ACCESS, not urgency. The must-have set IS the
+ * wall between "approved" and "in the trip" — a traveler holds no seat and sees
+ * nothing until every must_have is satisfied (`activate_trip_membership`).
+ * Spec: docs/specs/operator-trips/traveler-onboarding.md
+ *
+ * The split is "can they finish it right now, alone?":
+ *   · Required — waiver, medical, deposit. All doable in one sitting, on the
+ *     spot, the minute they are approved.
+ *   · Optional — insurance, passport, flights, visa. Every one needs a third
+ *     party: policies get bought, passports renewed, flights booked, visas
+ *     issued. Blocking a trip on those would block it on a government office.
+ *
+ * TWO KINDS CANNOT ALWAYS EXIST, and neither is a bug:
+ *
+ *  1. `deposit` only exists on a trip that collects money.
+ *     `enforce_pay_requires_managed_trip` REFUSES a pay requirement unless
+ *     `payment_mode = 'managed'`. An offline trip takes payment outside the
+ *     app, so there is nothing here to pay.
+ *  2. `waiver` needs the operator's PDF to exist first.
+ *     `operator_trip_my_requirements` only counts an acknowledgement whose
+ *     `operator_document_id` matches the CURRENT waiver document. With no
+ *     document there is nothing to match, the state is stuck at
+ *     `not_started` forever, and NOBODY CAN EVER JOIN THE TRIP. That is why
+ *     the create wizard refuses to publish without one.
+ */
+export const ONBOARDING_REQUIREMENT_SPEC: ReadonlyArray<{
+  kind: RequirementKind;
+  skippable: boolean;
+  /** Ignored when `skippable` is false — must_have carries no deadline. */
+  daysBefore: number;
+}> = [
+  { kind: 'waiver', skippable: false, daysBefore: 30 },
+  { kind: 'medical', skippable: false, daysBefore: 30 },
+  { kind: 'deposit', skippable: false, daysBefore: 0 },
+  { kind: 'insurance', skippable: true, daysBefore: 30 },
+  { kind: 'passport', skippable: true, daysBefore: 30 },
+  { kind: 'flights', skippable: true, daysBefore: 14 },
+  { kind: 'visa', skippable: true, daysBefore: 21 },
+];
+
+/**
+ * The document/acknowledgement kinds every operator trip gets, in wizard order.
+ * `deposit` and `balance` are absent because they come from the budget step —
+ * whether they exist at all depends on `payment_mode`.
+ */
+export const FIXED_DOCUMENT_KINDS: RequirementKind[] = ONBOARDING_REQUIREMENT_SPEC
+  .filter(s => !isPayKind(s.kind))
+  .map(s => s.kind);
+
+/**
+ * Per-kind timing, derived from the spec above so the two can never disagree.
+ *
+ * Still called DEFAULT_TIMING because the wizard threads it through as state,
+ * but nothing overrides it any more — it is the rule, not a starting point.
+ * `balance` is not in the spec (it is the rest of the money, due long after
+ * joining, and never part of onboarding) so it is listed explicitly.
  */
 export const DEFAULT_TIMING: Record<RequirementKind, RequirementTiming> = {
-  passport: { skippable: false, daysBefore: 30 },
-  waiver: { skippable: false, daysBefore: 30 },
-  medical: { skippable: true, daysBefore: 30 },
-  insurance: { skippable: true, daysBefore: 30 },
-  visa: { skippable: true, daysBefore: 21 },
-  flights: { skippable: true, daysBefore: 14 },
-  // must_have carries NO deadline and skippable MUST carry one —
+  ...(Object.fromEntries(
+    ONBOARDING_REQUIREMENT_SPEC.map(s => [s.kind, { skippable: s.skippable, daysBefore: s.daysBefore }]),
+  ) as Record<RequirementKind, RequirementTiming>),
+  // Not part of onboarding: the rest of the money, due long after joining, and
+  // shown in the Plan tab instead.
+  // NB must_have carries NO deadline and skippable MUST carry one —
   // organized_trip_req_deadline_rule raises 23514 on any other pairing.
-  deposit: { skippable: false, daysBefore: 0 },
   balance: { skippable: true, daysBefore: 30 },
 };
 
@@ -918,6 +981,30 @@ export async function publishWaiverPdf(
     await supabase.storage.from(BUCKET).remove([storagePath]);
     throw error;
   }
+
+  // The waiver is REQUIRED to join on every operator trip
+  // (ONBOARDING_REQUIREMENT_SPEC) — but it can only BE required once a document
+  // exists to agree to. Until then it has to sit as skippable, because a
+  // must_have waiver with no PDF can never be satisfied and would quietly make
+  // the trip unjoinable by anyone.
+  //
+  // Publishing the PDF is exactly the moment that stops being true, so the
+  // requirement is promoted here. That is what keeps "always required" true
+  // without a migration having to guess, and what heals trips created before
+  // the rule existed.
+  //
+  // Best-effort: the document IS published either way, and failing this call
+  // must not roll that back. Worst case the waiver stays optional and the next
+  // upload promotes it.
+  const { error: promoteErr } = await supabase
+    .from('organized_trip_requirements')
+    .update({ skip_at_onboarding: 'must_have', deadline_days_before: null, is_active: true })
+    .eq('trip_id', tripId)
+    .eq('kind', 'waiver');
+  if (promoteErr) {
+    console.warn('[tripDocumentsService] waiver promote to must_have failed:', promoteErr);
+  }
+
   return data.id as string;
 }
 

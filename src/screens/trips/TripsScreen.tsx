@@ -492,10 +492,21 @@ const ExploreTripCard: React.FC<{
 
       {/* Trip-type tag (top-right) — one flat colour per hosting style
           (Crew=white/dark, Captain=cyan/white, Operator=purple/white). */}
-      <View style={[styles.tripTypePill, { backgroundColor: typeTag.bg }]}>
-        <Ionicons name={type.icon} size={16} color={typeTag.fg} />
-        <Text style={[styles.tripTypeLabel, { color: typeTag.fg }]}>{type.label}</Text>
-      </View>
+      {/* Approved for an operator trip but not through onboarding — this trip
+          is not theirs yet. Replaces the type tag rather than sitting beside
+          it: what they need to know here is that something is owed, not which
+          flavour of trip it is. */}
+      {trip.member_status === 'onboarding' ? (
+        <View style={[styles.tripTypePill, { backgroundColor: '#FDF6E3' }]}>
+          <Ionicons name="hourglass-outline" size={16} color="#C98A00" />
+          <Text style={[styles.tripTypeLabel, { color: '#C98A00' }]}>Finish onboarding</Text>
+        </View>
+      ) : (
+        <View style={[styles.tripTypePill, { backgroundColor: typeTag.bg }]}>
+          <Ionicons name={type.icon} size={16} color={typeTag.fg} />
+          <Text style={[styles.tripTypeLabel, { color: typeTag.fg }]}>{type.label}</Text>
+        </View>
+      )}
 
       {/* Noise-glass panel — same layers as the My Trips card (blur 3.5px +
           black tint + fractalNoise grain). Parent clips the rounded corners. */}

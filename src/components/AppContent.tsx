@@ -1273,11 +1273,17 @@ export const AppContent: React.FC = () => {
 
           const { data: trip } = await supabase
             .from('group_trips')
-            .select('id, host_id, title, hero_image_url, start_date, end_date, destination:group_trip_destinations(name, short_label, country)')
+            .select('id, host_id, hosting_style, title, description, hero_image_url, start_date, end_date, participant_count, destination:group_trip_destinations(name, short_label, country)')
             .eq('id', tripId)
             .maybeSingle();
           if (!trip) return;
 
+          // This is the REALTIME path — the decision arrives while the app is
+          // open, so it is built here rather than by listUnseenJoinDecisions.
+          // Every field the overlay reads has to be present: `hosting_style`
+          // in particular decides whether the CTA is "Share your trip" or
+          // "Start onboarding", and a missing one would send an operator-trip
+          // traveler to a trip they cannot open yet.
           const decision: UnseenJoinDecision = {
             request_id: requestId,
             status: status as 'approved' | 'declined',
@@ -1285,6 +1291,7 @@ export const AppContent: React.FC = () => {
             trip: {
               id: (trip as any).id,
               title: (trip as any).title ?? null,
+              description: (trip as any).description ?? null,
               hero_image_url: (trip as any).hero_image_url ?? '',
               destination_label: destinationLabel(
                 Array.isArray((trip as any).destination)
@@ -1294,6 +1301,15 @@ export const AppContent: React.FC = () => {
               start_date: (trip as any).start_date ?? null,
               end_date: (trip as any).end_date ?? null,
               host_id: (trip as any).host_id ?? null,
+              hosting_style: (trip as any).hosting_style ?? null,
+              // Host name/avatar and the member stack are a second round trip
+              // this path deliberately skips — the overlay degrades to no
+              // avatars rather than delaying a "You're in!" that is meant to
+              // land the moment the host taps approve.
+              host_name: null,
+              host_avatar: null,
+              member_avatars: [],
+              member_count: (trip as any).participant_count ?? 0,
             },
           };
 
@@ -1332,6 +1348,22 @@ export const AppContent: React.FC = () => {
       }
     },
     [advanceJoinDecisionQueue, requestTab, openTripCard]
+  );
+
+  /**
+   * Operator trips — "Start onboarding" on the "You're in!" overlay.
+   *
+   * Goes through the trip card rather than jumping straight to the flow, so
+   * closing the onboarding leaves them on the trip (where the CTA still is)
+   * instead of wherever they happened to be when the overlay appeared. The
+   * trip screen turns this focus into the push.
+   */
+  const handleJoinDecisionStartOnboarding = useCallback(
+    (decision: UnseenJoinDecision) => {
+      advanceJoinDecisionQueue(decision);
+      openTripCard(decision.trip.id, 'onboarding');
+    },
+    [advanceJoinDecisionQueue, openTripCard]
   );
 
   const handleJoinDecisionDismiss = useCallback(
@@ -2431,6 +2463,7 @@ export const AppContent: React.FC = () => {
             visible={!!activeJoinDecision}
             decision={activeJoinDecision}
             onPrimaryAction={handleJoinDecisionPrimary}
+            onStartOnboarding={handleJoinDecisionStartOnboarding}
             onDismiss={handleJoinDecisionDismiss}
           />
         )}

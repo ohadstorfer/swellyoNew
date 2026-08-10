@@ -95,6 +95,7 @@ import {
   isDeadlineAtEnd,
   isPayKind,
   DEFAULT_TIMING,
+  FIXED_DOCUMENT_KINDS,
   REQUIREMENT_CATALOG,
   REQUIREMENT_ORDER,
   type RequirementKind,
@@ -454,9 +455,11 @@ const INITIAL_STATE: WizardState = {
   priceInclusions: {},
   paymentMode: 'offline',
   depositAmount: '',
-  // Passport is on by default — it is the reason the operator can book
-  // anything. Everything else is opt-in.
-  requirementKinds: ['passport'],
+  // NOT a default — the rule. Every operator trip asks for the same seven
+  // things, split the same way, so a traveler who has done one operator trip
+  // knows what the next will ask (Ohad, 10 Aug). The operator no longer picks.
+  // Single source of truth: ONBOARDING_REQUIREMENT_SPEC.
+  requirementKinds: [...FIXED_DOCUMENT_KINDS],
   requirementTiming: { ...DEFAULT_TIMING },
   waiverFile: null,
   visibility: 'public',
@@ -1826,10 +1829,17 @@ export default function CreateTripFlowA({
         return ok;
       }
       case 'requirements': {
-        // Selecting nothing is valid — an operator may genuinely need nothing.
-        // But a waiver with no text can never be agreed to, so that one blocks.
+        // The waiver is now on EVERY operator trip and is REQUIRED to join, so
+        // this is no longer a conditional check — it blocks every publish.
+        //
+        // It has to. `operator_trip_my_requirements` only counts an
+        // acknowledgement whose operator_document_id matches the CURRENT waiver
+        // document. With no document there is nothing to match, the waiver sits
+        // at 'not_started' forever, and since it is must_have that means NOBODY
+        // CAN EVER JOIN THE TRIP. Publishing without the PDF would ship a trip
+        // that silently accepts nobody.
         if (state.requirementKinds.includes('waiver') && !state.waiverFile) {
-          fail('waiverText', 'Upload your waiver PDF so travelers can agree to it');
+          fail('waiverText', 'Upload your waiver PDF — travelers cannot join the trip until they can agree to it');
         }
         return ok;
       }
@@ -2346,33 +2356,19 @@ export default function CreateTripFlowA({
       const timing = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
       return (
         <>
+          {/* Required-vs-optional is NOT a choice any more (Ohad, 10 Aug).
+              Every operator trip asks for the same seven things, split the
+              same way — see ONBOARDING_REQUIREMENT_SPEC. It is stated here
+              rather than hidden because the operator still needs to know
+              which items can stall, and because the required set is exactly
+              what decides when a traveler is actually on the trip.
+              The DEADLINE below is still theirs to set. */}
           <View style={localStyles.timingRow}>
-            <Pressable
-              onPress={() => setTiming(kind, { skippable: false })}
-              style={[localStyles.timingPill, !timing.skippable && localStyles.timingPillOn]}
-            >
-              <Text
-                style={[
-                  localStyles.timingPillText,
-                  !timing.skippable && localStyles.timingPillTextOn,
-                ]}
-              >
-                When they join
+            <View style={[localStyles.timingPill, localStyles.timingPillOn]}>
+              <Text style={[localStyles.timingPillText, localStyles.timingPillTextOn]}>
+                {timing.skippable ? 'Optional — they can skip' : 'Required to join'}
               </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setTiming(kind, { skippable: true })}
-              style={[localStyles.timingPill, timing.skippable && localStyles.timingPillOn]}
-            >
-              <Text
-                style={[
-                  localStyles.timingPillText,
-                  timing.skippable && localStyles.timingPillTextOn,
-                ]}
-              >
-                They can skip
-              </Text>
-            </Pressable>
+            </View>
           </View>
 
           {timing.skippable ? (
@@ -2465,15 +2461,8 @@ export default function CreateTripFlowA({
       }
     };
 
-    const toggle = (kind: RequirementKind) => {
-      const on = state.requirementKinds.includes(kind);
-      update(
-        'requirementKinds',
-        on
-          ? state.requirementKinds.filter(k => k !== kind)
-          : [...state.requirementKinds, kind],
-      );
-    };
+    // (There used to be a `toggle` here. The requirement set is fixed now —
+    // ONBOARDING_REQUIREMENT_SPEC — so there is nothing to turn on or off.)
 
     return (
       <View style={localStyles.reqStack}>
@@ -2515,7 +2504,11 @@ export default function CreateTripFlowA({
 
         {DOCUMENT_REQUIREMENT_ORDER.map(kind => {
           const c = REQUIREMENT_CATALOG[kind];
-          const on = state.requirementKinds.includes(kind);
+          // Always on. The set is fixed for every operator trip — see
+          // ONBOARDING_REQUIREMENT_SPEC. Kept as a const rather than deleting
+          // the styling branches so this reads as "the answer is always yes"
+          // instead of leaving half-applied "selected" styles behind.
+          const on = true;
           return (
             // One card per requirement — header AND its settings live in the same
             // container. They used to be siblings separated by a left rail, which
@@ -2523,20 +2516,11 @@ export default function CreateTripFlowA({
             // cards. Containment is what stops the list feeling crowded: six
             // selections still means six blocks, never eighteen.
             <View key={kind} style={[localStyles.reqCard, on && localStyles.reqCardOn]}>
-              <Pressable
-                onPress={() => toggle(kind)}
-                // Tint on press, not scale. The card border is drawn by the
-                // parent, so scaling this row would read as the content shrinking
-                // inside a fixed frame. The tint paints exactly the tappable
-                // region, which is the whole card when collapsed and just the
-                // header once it is open.
-                style={({ pressed }) => [
-                  localStyles.reqHeader,
-                  pressed && (on ? localStyles.reqHeaderPressedOn : localStyles.reqHeaderPressed),
-                ]}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: on }}
-              >
+              {/* A View, not a Pressable — same treatment the pay cards above
+                  get. Nothing here responds to a tap now that the set is fixed,
+                  and a pressable that does nothing invites the operator to keep
+                  trying it. */}
+              <View style={localStyles.reqHeader} accessibilityRole="text">
                 <View style={localStyles.reqIconWrap}>
                   {kind === 'passport' ? (
                     <TripIcon name="passport" size={22} color="#212121" strokeWidth={1.5} />
@@ -2548,22 +2532,18 @@ export default function CreateTripFlowA({
                   <Text style={localStyles.reqTitle}>{c.operatorTitle}</Text>
                   <Text style={localStyles.reqSub}>{c.operatorSub}</Text>
                 </View>
-                <View style={[localStyles.reqCheck, on && localStyles.reqCheckOn]}>
-                  {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
-                </View>
-              </Pressable>
+              </View>
 
-              {/* When is it due? Two timings only (workbench, 22 Jul): must-have
-                  during onboarding, or skippable until a deadline counted back
-                  from departure. Deadlines are stored RELATIVE to departure and
-                  shown as the real date — moving or duplicating a trip then
-                  keeps every deadline correct.
+              {/* Whether it is required is fixed; WHEN a skippable one is due
+                  is still the operator's call. Deadlines are stored RELATIVE to
+                  departure and shown as the real date — moving or duplicating a
+                  trip then keeps every deadline correct.
 
-                  Revealed with a short ease-out fade: selecting a requirement is
-                  occasional, so an entrance is worth it, but it stays under 200ms
-                  so the wizard never feels slow. */}
+                  Always expanded now: there is no unselected state to collapse
+                  into, so the entrance fade that used to accompany selecting a
+                  requirement would just be a flash on mount. */}
               {on ? (
-                <FadeInView duration={180} translateY={4} style={localStyles.reqExpand}>
+                <View style={localStyles.reqExpand}>
                   <View style={localStyles.reqDivider} />
 
                   {renderTimingControls(kind)}
@@ -2617,7 +2597,7 @@ export default function CreateTripFlowA({
                       )}
                     </View>
                   ) : null}
-                </FadeInView>
+                </View>
               ) : null}
             </View>
           );

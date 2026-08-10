@@ -156,6 +156,10 @@ import {
   type TripRequirement,
 } from '../../services/trips/tripDocumentsService';
 import {
+  fetchOnboardingPlan,
+  activateTripMembership,
+} from '../../services/trips/tripOnboardingService';
+import {
   amountDue,
   amountOutstanding,
   startCheckout,
@@ -218,6 +222,9 @@ interface TripDetailScreenProps {
   /** Open a 1:1 chat with someone on the trip. Used by the Dashboard tab's
    *  per-traveler actions; absent means the button is not offered. */
   onMessageUser?: (userId: string, name?: string, avatar?: string | null) => void;
+  /** Push the traveler-onboarding flow. Operator trips only — the only route
+   *  from "approved" to actually being on the trip. */
+  onStartOnboarding?: (tripId: string, tripTitle: string | null) => void;
 }
 
 /** Stable empty list for the requirements editor. An inline `?? []` would be a
@@ -394,7 +401,7 @@ const DangerRow: React.FC<{
 );
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
@@ -842,16 +849,91 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [savingUpdate, setSavingUpdate] = useState(false);
 
   const isHost = isHostDerived;
+
+  /**
+   * Approved for an operator trip, but not through onboarding yet.
+   *
+   * They have a participant row — that is what lets them read the requirement
+   * list, sign the waiver and upload anything at all — but they hold no seat,
+   * are absent from participant_count, and must be shown the PUBLIC trip page.
+   * Not a special locked screen: literally what someone who never asked to join
+   * sees, plus a "Start onboarding" button.
+   *
+   * Spec: docs/specs/operator-trips/traveler-onboarding.md
+   */
+  const isOnboardingTraveler = useMemo(
+    () =>
+      !!currentUserId &&
+      participants.some(p => p.user_id === currentUserId && p.status === 'onboarding'),
+    [participants, currentUserId]
+  );
+
+  /**
+   * ⚠️ This one boolean IS the member/non-member line for the whole screen —
+   * the Plan tab, the group-chat button, the member list, the itinerary all
+   * hang off it. `status !== 'onboarding'` is therefore the entire gate, and it
+   * is why traveler onboarding needed no new locked screen.
+   *
+   * Peer trips and every row that predates the status column read 'active', so
+   * nothing outside operator trips can observe this.
+   */
   const isApprovedMember = useMemo(
     () =>
       !!currentUserId &&
-      participants.some(p => p.user_id === currentUserId && p.role !== 'host'),
+      participants.some(
+        p => p.user_id === currentUserId && p.role !== 'host' && p.status !== 'onboarding',
+      ),
     [participants, currentUserId]
   );
   const hasNonHostMembers = useMemo(
     () => participants.some(p => p.role !== 'host'),
     [participants]
   );
+
+  /**
+   * How many required steps are left, for the CTA's "— 2 left". Null while
+   * unknown; the button just says "Start onboarding" rather than lying with a 0.
+   */
+  const [onboardingLeft, setOnboardingLeft] = useState<number | null>(null);
+
+  /**
+   * Heal a traveler who finished everything but never got activated.
+   *
+   * The common case is a Stripe webhook that landed after they closed the app:
+   * the deposit is paid, every must-have is satisfied, and yet they are still
+   * 'onboarding' because nothing has asked the server to promote them. Without
+   * this they would have to re-enter the flow to be let into a trip they have
+   * already paid for.
+   *
+   * Safe to fire on every open — `activate_trip_membership` is idempotent, is a
+   * no-op the moment anything is outstanding, and can only ever move someone
+   * forwards. The `full` case is deliberately silent here: the onboarding
+   * screen has a whole screen explaining it, and an alert on trip-open would
+   * ambush someone who was only looking.
+   */
+  const activationTriedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOnboardingTraveler || !currentUserId) return;
+    const key = `${tripId}:${currentUserId}`;
+    if (activationTriedRef.current === key) return;
+    activationTriedRef.current = key;
+
+    let cancelled = false;
+    (async () => {
+      const plan = await fetchOnboardingPlan(tripId).catch(() => null);
+      if (cancelled || !plan) return;
+      setOnboardingLeft(plan.blocking.length);
+      if (plan.blocking.length > 0) return; // genuinely not done
+
+      const result = await activateTripMembership(tripId);
+      if (cancelled || result.status !== 'active') return;
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+      queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnboardingTraveler, currentUserId, tripId, queryClient]);
 
   // ── Which tabs exist ──────────────────────────────────────────────────────
   // Computed up here, above the loading/not-found early returns, because the
@@ -974,6 +1056,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     appliedFocusRef.current = token;
 
     const locked = trip.status === 'cancelled' || trip.status === 'completed' || isTripPast(trip);
+
+    // 'onboarding' is not a Plan section — it pushes the whole flow on top.
+    // Checked BEFORE the canSeePlan gate below, because the traveler it is for
+    // is precisely the one who cannot see the Plan tab.
+    if (initialFocus === 'onboarding') {
+      if (isOnboardingTraveler && !locked) {
+        onStartOnboarding?.(trip.id, trip.title ?? null);
+      }
+      // Already in (the overlay sat unseen while they finished elsewhere) —
+      // the trip itself is the right place to land. Nothing more to do.
+      return;
+    }
+
     const canSeePlanNow = (isHost || isApprovedMember) && !locked;
     if (initialFocus === 'overview' || !canSeePlanNow) return; // fallback: Overview
 
@@ -1005,7 +1100,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     return () => {
       cancelled = true;
     };
-  }, [trip, tripId, initialFocus, isHost, isApprovedMember, membershipKnown]);
+  }, [trip, tripId, initialFocus, isHost, isApprovedMember, isOnboardingTraveler, membershipKnown, onStartOnboarding]);
   const meParticipant = useMemo(
     () => participants.find(p => p.user_id === currentUserId),
     [participants, currentUserId]
@@ -1163,6 +1258,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       const newParticipant: EnrichedParticipant = {
         ...approved.requester,
         role: 'member',
+        // Must match what the approval trigger actually writes. On an operator
+        // trip approval creates an 'onboarding' row — the person is not in the
+        // trip yet — and claiming 'active' here would show the host a full
+        // member for the second until the refetch lands, and would count them
+        // against capacity in the UI when the server does not.
+        status: isOperatorTrip ? 'onboarding' : 'active',
         joined_at: new Date().toISOString(),
         committed: false,
         commitment_status: 'none',
@@ -2291,7 +2392,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // isHost derives from trip.host_id, which the placeholder DOES carry — hosts
   // get their chat CTA immediately; members wait one fetch.
   const showChatCta = (isHost || (membershipKnown && isApprovedMember)) && !isCancelled;
-  const stickyCtaVisible = showJoinCta || showChatCta;
+  /**
+   * Approved for this operator trip but not through onboarding. Everything else
+   * on this screen already treats them as a stranger; this is the one thing
+   * that tells them they are not, and the only way in.
+   *
+   * Hidden on a cancelled or finished trip — there is nothing left to onboard
+   * for, and a live "Start onboarding" on a cancelled trip would be a request
+   * to pay a deposit for a trip that is not happening.
+   */
+  const showOnboardingCta = membershipKnown && isOnboardingTraveler && !isLocked;
+  const stickyCtaVisible = showJoinCta || showChatCta || showOnboardingCta;
 
   // Has the trip started yet? Gates "Mark as completed" — a host can close a
   // trip that's underway, not an upcoming one.
@@ -2919,6 +3030,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             onRequest={handleRequestToJoin}
             onWithdraw={handleWithdraw}
           />
+        </Reanimated.View>
+      )}
+
+      {/* Approved, but not in yet. The one affordance that separates them from
+          someone who never asked to join. */}
+      {showOnboardingCta && (
+        <Reanimated.View
+          entering={FadeInUp.duration(220)}
+          style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}
+        >
+          <TouchableOpacity
+            style={[styles.ctaBtn, styles.ctaChat]}
+            onPress={() => onStartOnboarding?.(trip.id, trip.title ?? null)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+            <Text style={styles.ctaPrimaryText}>
+              {onboardingLeft != null && onboardingLeft > 0
+                ? `Start onboarding — ${onboardingLeft} left`
+                : 'Start onboarding'}
+            </Text>
+          </TouchableOpacity>
         </Reanimated.View>
       )}
 

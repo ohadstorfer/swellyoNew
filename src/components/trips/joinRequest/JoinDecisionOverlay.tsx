@@ -29,6 +29,9 @@ interface Props {
   decision: UnseenJoinDecision | null;
   /** Called when the user taps the primary CTA (Enter Trip / Explore trips). */
   onPrimaryAction: (decision: UnseenJoinDecision) => void;
+  /** Operator trips only — straight into the onboarding flow. Without it the
+   *  overlay falls back to the peer-trip CTA, which is wrong but harmless. */
+  onStartOnboarding?: (decision: UnseenJoinDecision) => void;
   /** Called when the user dismisses without taking the primary action (back). */
   onDismiss: (decision: UnseenJoinDecision) => void;
 }
@@ -84,6 +87,7 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
   visible,
   decision,
   onPrimaryAction,
+  onStartOnboarding,
   onDismiss,
 }) => {
   const insets = useSafeAreaInsets();
@@ -91,6 +95,9 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
   if (!decision) return null;
 
   const approved = decision.status === 'approved';
+  // Falls back to the peer-trip CTA when the handler is missing or the style is
+  // unknown — a wrong-but-working button beats a dead end.
+  const isOperatorTrip = decision.trip.hosting_style === 'C' && !!onStartOnboarding;
   const trip = decision.trip;
   const tripTitle = trip.title?.trim() || 'this trip';
   const location = trip.destination_label;
@@ -248,7 +255,33 @@ export const JoinDecisionOverlay: React.FC<Props> = ({
             style={styles.footerFade}
             pointerEvents="none"
           />
-          {approved ? (
+          {approved && isOperatorTrip ? (
+            /* Operator trip: being approved is NOT being in the trip. "Share
+               your trip" would be wrong twice over — it is not theirs yet, and
+               the thing they actually need to do is the onboarding. The share
+               affordance is not lost, it just belongs after they are in. */
+            <>
+              <TouchableOpacity
+                style={styles.cta}
+                onPress={() => onStartOnboarding?.(decision)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Start onboarding"
+              >
+                <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
+                <Text style={styles.ctaText}>Start onboarding</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryBtn}
+                onPress={() => onPrimaryAction(decision)}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Later"
+              >
+                <Text style={styles.secondaryText}>Later</Text>
+              </TouchableOpacity>
+            </>
+          ) : approved ? (
             <>
               <TouchableOpacity
                 style={styles.cta}

@@ -29,6 +29,7 @@ import ManageGearScreen from '../screens/trips/ManageGearScreen';
 import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import OperatorTripEditScreen from '../screens/operator/OperatorTripEditScreen';
+import TravelerOnboardingScreen from '../screens/trips/TravelerOnboardingScreen';
 import OperatorEditDestinationScreen from '../screens/operator/OperatorEditDestinationScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -124,6 +125,14 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       // Same handler the Members list uses, so "Message" behaves identically
       // wherever an operator taps it.
       onMessageUser={tripCard.onStartConversation}
+      onStartOnboarding={(onboardTripId, onboardTitle) =>
+        navigation.dispatch(
+          StackActions.push('TravelerOnboarding', {
+            tripId: onboardTripId,
+            tripTitle: onboardTitle,
+          }),
+        )
+      }
       onViewAllUpdates={() => navigation.dispatch(StackActions.push('TripUpdates', { tripId }))}
       onViewAllMembers={() => navigation.dispatch(StackActions.push('TripMembers', { tripId }))}
       onViewAllGroupGear={() => navigation.dispatch(StackActions.push('PackingAndGear', { tripId }))}
@@ -203,6 +212,47 @@ function TripMembersCardScreen({ route, navigation }: NativeStackScreenProps<Roo
           StackActions.push('ProfileCard', { userId, joinRequest: { tripId, requestId } })
         )
       }
+    />
+  );
+}
+
+/**
+ * Traveler onboarding on an operator trip.
+ *
+ * Finishing it changes membership, participant_count and what the trip screen
+ * is allowed to render — so everything that reads any of those is invalidated
+ * before we go back, or the traveler lands on the trip they were just let into
+ * and still sees the stranger's view of it.
+ */
+function TravelerOnboardingCardScreen({
+  route,
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'TravelerOnboarding'>) {
+  const { user } = useOnboarding();
+  const currentUserId = user?.id?.toString() ?? null;
+  const { tripId, tripTitle, devMode } = route.params;
+
+  // No user id means no way to read their own documents or medical form. Going
+  // back is the only honest option — every step would fail.
+  if (!currentUserId) {
+    navigation.goBack();
+    return null;
+  }
+
+  return (
+    <TravelerOnboardingScreen
+      tripId={tripId}
+      userId={currentUserId}
+      tripTitle={tripTitle ?? null}
+      devMode={!!devMode}
+      onClose={() => navigation.goBack()}
+      onFinished={() => {
+        queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+        queryClient.invalidateQueries({ queryKey: tripsKeys.detailDocuments(tripId) });
+        queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+        queryClient.invalidateQueries({ queryKey: ['trips', 'explore'] });
+        navigation.goBack();
+      }}
     />
   );
 }
@@ -797,6 +847,14 @@ export default function RootNavigator() {
         name="OperatorEditDestination"
         component={OperatorEditDestinationScreen}
         options={{ presentation: 'card' }}
+      />
+      {/* A card, NOT a modal — see the note on the route in navigationRef.ts.
+          `gestureEnabled: false` because a half-swipe out of a payment step is
+          not a thing anyone means to do; the header's × is the way out. */}
+      <RootStack.Screen
+        name="TravelerOnboarding"
+        component={TravelerOnboardingCardScreen}
+        options={{ presentation: 'card', gestureEnabled: false }}
       />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripMembers" component={TripMembersCardScreen} options={{ presentation: 'card' }} />
