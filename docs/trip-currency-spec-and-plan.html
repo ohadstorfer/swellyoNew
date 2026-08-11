@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip currency display — spec &amp; plan</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --wait:#5b5bb0; --wait-bg:#eeeefb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:0 0 14px}
+  .rule b{color:var(--cyan-dark)}
+  .rule.ok{background:var(--ok-bg)} .rule.ok b{color:var(--ok)}
+  .rule.warn{background:var(--open-bg)} .rule.warn b{color:var(--open)}
+  .rule ul{margin-top:6px}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:660;margin:0 0 6px}
+  .part{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:48px 0 4px;
+    padding:10px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  p.lead{font-size:14px;color:#3a3a36;margin-bottom:14px}
+
+  ul{list-style:none}
+  ul li{padding-left:16px;position:relative;margin-bottom:5px}
+  ul li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;
+    border-radius:99px;background:var(--line)}
+  ul li b{font-weight:640}
+  ol{margin-left:18px}
+  ol li{margin-bottom:7px}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead strong{font-size:14px;font-weight:660}
+  .chead span{font-size:13px;color:var(--muted)}
+  .cbody{padding:12px 16px;font-size:14px}
+  .cbody p+p,.cbody p+ul,.cbody ul+p{margin-top:8px}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-wait{color:var(--wait);background:var(--wait-bg)}
+
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  .tscroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:14px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:680;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 16px;border-top:1px solid var(--line);vertical-align:top}
+  td:first-child{font-weight:620;white-space:nowrap}
+
+  .ex{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:10px 14px;margin:10px 0;font-size:13.5px}
+  .ex .good{color:var(--ok);font-weight:640}
+  .ex .bad{color:var(--open);font-weight:640}
+
+  .quote{border-left:3px solid var(--cyan);background:var(--cyan-tint);
+    padding:8px 14px;border-radius:0 8px 8px 0;font-size:13.5px;margin:10px 0;font-style:italic}
+
+  a{color:var(--cyan-dark)}
+  .srclist{font-size:13px}
+  .srclist li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Trip currency display — spec &amp; plan</h1>
+  <p class="sub">10 August 2026 · rev 4 · operator trips (type C)</p>
+
+  <div class="rule">
+    <b>What we are building, in one breath.</b>
+    <ul>
+      <li>The operator types the price in <b>their</b> currency (₪ $ € £).</li>
+      <li>Every traveler <b>sees</b> prices in their own currency — auto from their country, with a picker to override.</li>
+      <li>Everyone still <b>pays in US$</b>. The app says so clearly, the Booking.com way.</li>
+      <li>Every price is a <b>clean number</b>. The caveat is words at checkout, not a symbol on the figure.</li>
+    </ul>
+  </div>
+
+  <div class="rule ok">
+    <b>Status: BUILT + MIGRATION APPLIED (10 Aug).</b> All 6 steps implemented.
+    <code>npx tsc</code> 179 errors — the same 179 as before this work, none in any file it touched.
+    <code>npx jest</code> 589 passing, 9 failing in 3 suites that were already failing and have no
+    currency dependency. Currency suites green.
+    <b>Migration applied to prod in 3 atomic parts and verified</b> — see the rev-4 card.
+    Client code is <b>uncommitted</b>; still needs a device check.
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Rev 4 — the "≈" is gone, and the migration is live</strong> <span class="tag t-open">1 correction, 1 apply</span></div>
+    <div class="cbody">
+      <p><b>Ohad was right and rev 2 was wrong about the "≈".</b> A real Booking.com search
+      screenshot shows a converted price rendered plainly — <code>AR$ 1,372,979</code> — with an ⓘ
+      beside it and "Additional charges may apply" underneath. No marker on the number anywhere.
+      Rev 2 kept "≈" arguing our cards mix real and converted prices; that reasoning was wrong,
+      because every price on a screen is in the viewer's one currency, so there is nothing for the
+      reader to tell apart. The marker only made the app look unsure of itself.</p>
+      <ul>
+        <li>Removed from <code>formatTripPrice</code>, <code>formatTripPriceRange</code>,
+          <code>formatApproxLocal</code> and the Explore budget chips.</li>
+        <li>Kept where it belongs: the word "about" beside a payment hint, and the full sentence at
+          checkout. Those are the disclosure.</li>
+        <li>New <code>isConvertedPrice(trip, viewer)</code> still reports which prices are
+          conversions — for an ⓘ affordance later, never for decorating the number.</li>
+        <li>A test now asserts <b>no formatter output can ever contain the glyph</b>.</li>
+      </ul>
+      <p><b>Correction to something I claimed repeatedly:</b> I said the hardcoded
+      <code>FALLBACK_USD_TO_ILS = 3.0</code> made prices "~15% wrong". <b>That was wrong</b> — I
+      assumed a ~3.5 rate without checking. Live USD/ILS is <b>2.9987</b>, so 3.0 was nearly exact,
+      and production data agrees (15 of 23 trips carry 3.0; real fetched rates on other rows run
+      3.004–3.078). Removing it is still right — it is a constant standing in for a moving number
+      with no signal when it drifts — but it was not mispricing anything today.</p>
+      <p><b>Migration applied</b> in 3 atomic parts (column → <code>explore_feed</code> →
+      <code>my_trips_feed</code>). Before applying, both live function bodies were re-fetched and
+      diffed programmatically to prove the migration was live-plus-exactly-one-column. After:
+      both functions have <b>one overload each</b>, ACLs byte-identical to the pre-state
+      (<code>{postgres, authenticated, service_role}</code> — no PUBLIC, no anon), SECURITY DEFINER
+      and pinned <code>search_path</code> intact, and both execute returning
+      <code>budget_currency</code>.</p>
+    </div>
+    <div class="note">Only ONE trip in prod is priced in ILS — that is the single row that exercises display case 2 on device.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Rev 3 — what changed while building it</strong> <span class="tag t-wait">10 deltas from the plan</span></div>
+    <div class="cbody">
+      <p><b>Better than planned:</b></p>
+      <ul>
+        <li><b>Rounding solved properly.</b> Neither rev-1 coarse steps nor plain conversion. New
+          <code>snapToRound</code> snaps to the coarsest round number <i>within the known round-trip
+          drift</i>, so ₪4,501→₪4,500 but ₪4,550 stays ₪4,550. Safe by construction, not by taste.</li>
+        <li><b>Root cause removed.</b> <code>fromTripCurrency</code> now keeps cents. Whole-dollar
+          storage was what made ₪4,500 come back as ₪4,501 in the first place.</li>
+        <li><b>Payment surfaces got simpler, not more complex.</b> Because hints use the daily rate,
+          <code>budgetFxRate</code>/<code>viewerCountry</code> prop threading was deleted from
+          <code>PayAmountSheet</code>, <code>PlanSections</code> and 3 call sites — they call
+          <code>useViewer()</code> directly.</li>
+      </ul>
+      <p><b>Decisions the plan didn't cover:</b></p>
+      <ul>
+        <li><b>Operator currency is LOCKED in edit mode.</b> Switching after publish would
+          reinterpret the frozen rate and silently re-price everyone already joined.</li>
+        <li><b>Switching currency mid-create CONVERTS what's typed.</b> Leaving "4500" alone when
+          ₪→$ is tapped would redefine it as $4,500 — a 3.5× price change with no visible cause.</li>
+        <li><b>USD trips now store <code>budget_fx_rate = 1</code></b>, not the ILS rate. A USD row
+          carrying an ILS number is exactly the ambiguity the display rule has to defend against.</li>
+        <li><b><code>TravelerPriceSheet</code> follows the TRIP's currency</b>, not the operator's
+          country. An Israeli operator who priced a trip in € negotiates in €.</li>
+        <li><b>14 currencies, not 13</b> — added NZD. AUD without NZD was a real gap.</li>
+      </ul>
+      <p><b>Deliberate deviation from the spec:</b></p>
+      <ul>
+        <li><b>Hand-rolled symbol table, not <code>Intl.NumberFormat</code>.</b> Hermes resolves Intl
+          against the platform's ICU, so the same amount renders "$1,200" on iOS, "US$1,200" on
+          Android and a third way in jest. Prices sit next to each other in lists and must be
+          byte-identical. The spec's <i>intent</i> (right symbol, right decimals) lives in the table.</li>
+      </ul>
+      <p><b>Bugs found and fixed on the way:</b></p>
+      <ul>
+        <li><b>The create-flow PREVIEW priced ₪ as $.</b> It passed the raw typed number through as
+          USD, so a ₪4,500 trip previewed as "$4,500". Never caught because it only shows pre-publish.</li>
+        <li><b>Two more <code>3.0</code> call sites</b> beyond the four in the plan —
+          <code>BudgetTierCards</code> and <code>BudgetTierCardsBig</code>. Six total, all gone.</li>
+        <li><b>Late-loading profile defaulted operators to USD.</b> The old code re-derived every
+          render; making it state exposed the race. Fixed with an adopt-until-touched effect.</li>
+      </ul>
+    </div>
+    <div class="note">Files: 20 modified, 4 new (<code>useViewer.ts</code>, <code>ratesService.ts</code>, <code>CurrencySheet.tsx</code>, the migration). ~1,100 insertions.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Rev 2 — what the self-review changed</strong> <span class="tag t-open">4 changes, 2 holds</span> <span class="tag t-wait">partly superseded by rev 4</span></div>
+    <div class="cbody">
+      <p style="color:#6b6b66"><i>Historical record. Every "≈" decision below was overturned in rev 4 — prices carry no marker at all.</i></p>
+      <p>I re-checked the spec against Booking.com's real behavior and independent UX research. Verbatim, their checkout line is:</p>
+      <div class="quote">"This price is converted to show you the approximate cost in US$. You'll pay in&nbsp;€. The exchange rate may change before you pay."</div>
+      <p>Three promises: it's approximate · here's the real currency · <b>the rate can move</b>. Rev 1 had the first two and missed the third. Changes:</p>
+      <ul>
+        <li><b>Changed — estimate rounding.</b> Rev 1 rounded estimates to coarse steps (€10, ¥1,000) — that's Apple's way, not Booking's. Booking shows the <i>precise</i> converted amount (whole units) and marks it approximate. Now: <b>estimates are exact whole-unit conversions with "≈"</b>. Coarse steps survive only where they recover the operator's typed price (§2 case 1).</li>
+        <li><b>Changed — payment-surface copy.</b> Now uses all three Booking clauses, including "the exchange rate may change before you pay."</li>
+        <li><b>Changed — payment-surface hints.</b> Always "≈", even in the trip's own currency, and computed at the <b>daily</b> rate, not the trip's frozen one — at pay time the honest estimate is what the bank will do today, not what the operator froze months ago.</li>
+        <li><b>Changed — found a missed surface.</b> The Explore budget chips (<code>TripsScreen.tsx:861</code>) build their ₪ label with the hardcoded 3.0 fallback. Added to the sweep; another 3.0 call site dies.</li>
+        <li><b>Held — auto + override.</b> Research agrees: auto-detection alone gets people wrong (Baymard: 18% abandon without local currency; geolocation misfires are the known failure), so a manual switcher is required. Our "profile country + settings override" is the textbook answer.</li>
+        <li><b>Held — "≈" on cards.</b> <s>Booking's cards omit a marker and rely on a site-wide disclaimer. We keep the one-character "≈".</s> <b>OVERTURNED in rev 4</b> — see the card above. Booking shows no marker and neither do we.</li>
+      </ul>
+    </div>
+    <div class="note">Sources: <a href="https://www.caminodesantiago.me/community/threads/payment-on-booking-com.80215/">Booking.com checkout wording (user-documented)</a> · <a href="https://strspecialist.com/quick-guide-change-currency-booking-com-app">Booking.com currency behavior</a> · <a href="https://baymard.com/">Baymard research</a> · <a href="https://seahawkmedia.com/woocommerce/woocommerce-multi-currency-setup/">auto-detect + manual switcher guidance</a></div>
+  </div>
+
+  <div class="rule ok">
+    <b>Decisions locked with Ohad (10 Aug):</b> auto currency from profile country <b>plus</b> a settings override ·
+    ~10+ display currencies at launch · operator picks the input currency from a short list.
+    Booking.com itself fixes the currency by property location — that doesn't fit surf trips
+    (nobody prices a Morocco camp in MAD), so the operator picks instead.
+  </div>
+
+
+  <div class="part">Part 1 · Spec</div>
+
+  <h2>1 · The three currencies of one trip</h2>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Role</th><th>What it is</th><th>Where it lives</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Stored currency</td>
+        <td>Always <b>USD</b>. Every amount column stays USD. Nothing changes here.</td>
+        <td><code>group_trips.cost_per_person</code>, <code>budget_min/max</code>, <code>deposit_amount</code>, <code>trip_payment_events.amount_usd</code></td>
+      </tr>
+      <tr>
+        <td>Trip currency</td>
+        <td>What the operator typed the price in. Frozen rate, set once, never re-frozen on edit.</td>
+        <td><code>budget_currency</code> (text, no constraint — verified live) + <code>budget_fx_rate</code> (now means: units of trip currency per 1 USD)</td>
+      </tr>
+      <tr>
+        <td>Viewer currency</td>
+        <td>What the traveler sees. Auto from country, or their override.</td>
+        <td>New: <code>surfers.display_currency</code> (null = auto)</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>2 · What a price looks like — the display rule</h2>
+
+  <p class="lead">One function decides every browse price. Three cases, checked in order:</p>
+
+  <ol>
+    <li><b>Viewer currency = trip currency</b> → show the operator's <b>real</b> price (via the trip's frozen rate). An Israeli looking at an Israeli trip sees the exact ₪ the operator meant. This is what happens today for ₪ — it stays. <code>snapToRound</code> undoes round-trip drift: the operator typed ₪4,500, stored USD gives back ₪4,501, and it restores ₪4,500 — but never moves a number further than that drift, so a real ₪4,550 stays ₪4,550.</li>
+    <li><b>Viewer currency = USD</b> → show the exact $ amount. This IS the charge currency.</li>
+    <li><b>Anything else</b> → convert USD at the cached daily rate and show the <b>precise whole-unit</b> amount, clean and unmarked (the Booking.com way — see rev 4). No rate available → fall back to plain $.</li>
+  </ol>
+
+  <div class="ex">
+    Trip priced ₪4,500 by an Israeli operator (stored: $1,286, rate 3.5, currency ILS):<br><br>
+    <span class="good">Israeli viewer</span> &nbsp;<b>₪4,500</b> — the operator's real price<br>
+    <span class="good">US viewer</span> &nbsp;<b>$1,286</b> — the charge currency<br>
+    <span class="good">French viewer</span> &nbsp;<b>€1,187</b> — precise conversion at today's rate<br>
+    <span class="good">No rate cached</span> &nbsp;<b>$1,286</b> — never a guessed number
+  </div>
+
+  <h3>Payment surfaces play by a stricter rule</h3>
+  <ul>
+    <li>The headline number is always the <b>exact USD</b> being charged (<code>formatExactUsd</code> stays; never converted, never rounded).</li>
+    <li>The local-currency hint reads "<b>about ₪X</b>" — even for the trip's own currency — and uses the <b>daily</b> rate, not the trip's frozen one. The frozen rate says what the operator meant months ago; the bank charges at today's. Booking.com's estimate at checkout is today's rate for the same reason.</li>
+    <li>One line, Booking.com's three clauses in our words: <b>"The ₪ price is approximate. You'll pay in US$. The exchange rate may change before you pay."</b></li>
+    <li><b>One price per screen.</b> The hint is smaller and grey, never equal weight with the real number.</li>
+  </ul>
+
+  <h2>3 · Launch currencies</h2>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Currency</th><th>Why it's in</th></tr></thead>
+    <tbody>
+      <tr><td>USD $</td><td>Charge currency — always the exact amount</td></tr>
+      <tr><td>ILS ₪</td><td>Home market (input + display)</td></tr>
+      <tr><td>EUR € · GBP £</td><td>European surfers, UK (input + display)</td></tr>
+      <tr><td>AUD · CAD</td><td>Big surf nations (show as AU$ / CA$ — "$" alone is ambiguous)</td></tr>
+      <tr><td>CHF</td><td>Swiss travelers</td></tr>
+      <tr><td>BRL R$</td><td>Brazil</td></tr>
+      <tr><td>JPY ¥</td><td>Japan — 0-decimal currency, <code>Intl.NumberFormat</code> handles it</td></tr>
+      <tr><td>SEK · NOK · DKK</td><td>Scandinavian surf crowd (all "kr" — show the code)</td></tr>
+      <tr><td>ZAR R</td><td>South Africa</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <ul>
+    <li>13 display currencies + USD. Adding one later = one row in the map; the rates API returns every currency in a single call.</li>
+    <li>Estimates are whole units in every currency — no decimals, no coarse steps, no marker.</li>
+    <li><b>Deliberately skipped:</b> ARS, TRY and other fast-moving currencies — a daily rate can be wrong by evening, and a wrong price is worse than $.</li>
+  </ul>
+
+  <h2>4 · Operator input (create flow)</h2>
+
+  <ul>
+    <li>The price step gets a small currency selector: <b>₪ · $ · € · £</b>. Default pre-picked from the operator's country (Israel → ₪, eurozone → €, UK → £, else $).</li>
+    <li>Input list is short on purpose — it's what real surf operators price in. The <i>display</i> list (13) is separate and longer.</li>
+    <li>On save: convert typed amount → USD at today's rate; store <code>budget_currency</code> + <code>budget_fx_rate</code>. Exactly the ₪ mechanism today, two more currencies.</li>
+    <li><b>Edit never re-freezes.</b> The existing <code>saveRate</code> pattern (edit reuses the trip's stored rate) stays law. It already prevented a re-pricing bug once.</li>
+    <li>The input field shows the chosen symbol (fixes the known "₪ input with a $ icon" minor).</li>
+  </ul>
+
+  <h2>5 · The exchange rate — where it comes from</h2>
+
+  <div class="rule ok">
+    <b>No new DB table, no cron.</b> The client fetches ALL rates in one free call
+    (<code>open.er-api.com/v6/latest/USD</code> — already used by the create flow), caches them in AsyncStorage
+    with a timestamp, refreshes when older than 12h, and keeps the last good copy forever.
+  </div>
+
+  <ul>
+    <li><b><code>FALLBACK_USD_TO_ILS = 3.0</code> dies.</b> The fallback chain is now: fresh rate → last good cached rate → <b>show USD</b>. Not because 3.0 is far off — <b>USD/ILS is 2.9987 today</b>, so it is nearly right — but because it is a constant pretending to be a live number, and nothing signals when it drifts. Call sites: <code>currency.ts</code>, <code>CreateTripFlowA</code> (×3), the Explore budget chips, and both Budget-tier cards. Six total.</li>
+    <li>Rate ladder by use:
+      <b>display estimates</b> → cached daily rate;
+      <b>trip's own currency, browse</b> → the trip's frozen rate, exact;
+      <b>payment hints</b> → daily rate, worded "about";
+      <b>operator save</b> → fresh fetch, else cached if ≤48h old, else <b>block non-USD input</b> with a friendly error ("We can't get today's rate — try again or price in $"). A wrong rate frozen into a trip is forever.</li>
+    <li>First launch offline: no cache → everything shows $ — correct, never wrong.</li>
+    <li>Two devices may cache slightly different daily rates. Fine for estimates — the charge is USD either way.</li>
+  </ul>
+
+  <h2>6 · Viewer override (settings)</h2>
+
+  <ul>
+    <li>New row in <code>SettingsScreen.tsx</code>: "Currency · Auto (₪)". Opens a <code>BottomSheetShell</code> list: <b>Auto (recommended)</b> + the 14 currencies.</li>
+    <li>Saved to <code>surfers.display_currency</code> (null = auto) so it follows the user across devices — Booking.com likewise remembers "the last currency you used".</li>
+    <li>Auto = country → currency map from <code>country_from</code>. Unknown country → USD. Auto-detection alone is not enough (it misfires); the override is what makes it safe — this is the finding behind "auto + override".</li>
+  </ul>
+
+  <h2>7 · Scope &amp; non-goals</h2>
+
+  <ul>
+    <li><b>Display applies to all group trips</b> — the formatter is shared; a type-C-only rule would show ₪ on one card and € on the next. <b>Payment copy applies to type C surfaces</b> (only type C takes payments).</li>
+    <li><b>Not in this project:</b> charging in local currency (Stripe Adaptive Pricing — separate, later step), operator payouts in local currency, changing anything about the money pipeline. <code>payments-checkout</code> stays 100% untouched.</li>
+    <li><b>Notifications and push copy keep USD amounts</b> for now (payment reminders etc.). Localizing amounts inside templates is a follow-up, not this project.</li>
+    <li>All client work is JS-only → OTA-able. No native, no rebuild.</li>
+    <li>Operator dashboard stays USD-only for now (it adds nothing to the DB by its own rule; its exports already say USD).</li>
+  </ul>
+
+  <h2>8 · Facts verified against the live DB &amp; code (10 Aug)</h2>
+  <ul>
+    <li><code>budget_currency</code> is <b>text, nullable, no CHECK constraint</b> — EUR/GBP need no column migration.</li>
+    <li>Live <code>explore_feed</code> / <code>my_trips_feed</code> return <code>budget_fx_rate</code> but <b>NOT <code>budget_currency</code></b> — cards can't apply rule 1 without it → both RPCs must change (Part 2, step 1).</li>
+    <li><code>surfers</code> has no currency column — <code>display_currency</code> is new.</li>
+    <li>Explore budget chips hardcode the 3.0 fallback into their ₪ label (<code>TripsScreen.tsx:861</code>).</li>
+  </ul>
+
+
+  <div class="part">Part 2 · Plan</div>
+
+  <p class="lead" style="margin-top:10px">Six steps, in order. Steps 2–6 are OTA-able client work. Step 1 is the only DB touch, applied manually by Ohad in the SQL editor.</p>
+
+  <div class="card">
+    <div class="chead"><strong>Step 1 — Database migration</strong> <span class="tag t-open">manual, SQL editor</span> <span>one migration file</span></div>
+    <div class="cbody">
+      <ul>
+        <li>Write <code>supabase/migrations/&lt;ts&gt;_trip_display_currency.sql</code>:</li>
+        <li><b>a.</b> <code>ALTER TABLE surfers ADD COLUMN display_currency text;</code> (nullable, no default, optional CHECK on the 14 codes).</li>
+        <li><b>b.</b> Add <code>budget_currency</code> to <b>both</b> card RPCs — <code>explore_feed</code> and <code>my_trips_feed</code>: RETURNS TABLE <b>and</b> inner SELECT.</li>
+      </ul>
+      <p><b>⚠️ The RPC dance (this bit a whole debugging session last time):</b></p>
+      <ul>
+        <li>First <b>diff the live definitions</b> with <code>pg_get_functiondef</code> — live is ahead of the repo; never start from the repo copy.</li>
+        <li>RETURNS TABLE change needs <b>DROP + CREATE</b>, not CREATE OR REPLACE.</li>
+        <li>Recreate re-grants PUBLIC → <b>re-REVOKE</b> from PUBLIC/anon, <b>re-GRANT</b> to authenticated, re-pin <code>search_path</code>.</li>
+        <li>Check the SQL editor is on project <code>rfdhtvcmagsbxqntnepv</code> before running.</li>
+      </ul>
+      <p>Old clients ignore the new column — safe to apply before the client ships.</p>
+    </div>
+    <div class="note">Detail screens use <code>select('*')</code> so they get <code>budget_currency</code> already — "detail right, cards wrong" is the symptom if this step is skipped.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Step 2 — Currency core</strong> <span>utils rewrite + tests</span></div>
+    <div class="cbody">
+      <ul>
+        <li><code>src/utils/currency.ts</code> — rewrite around a <code>CURRENCIES</code> table: <code>{ code, symbol, decimals, recoveryStep? }</code> for the 14 (recovery steps only for input currencies: ₪100, €10, £10). Add <code>COUNTRY_TO_CURRENCY</code> map and <code>viewerCurrency(profile)</code> = override ?? map ?? USD.</li>
+        <li>New <code>formatTripPrice(usd, trip, viewer)</code> implementing the 3-case rule (exact / exact-$ / converted whole-unit), and a range version. <code>isIsraeli</code> / <code>usdToIls</code> generalize to <code>toTripCurrency(usd, rate)</code>; keep old names as thin wrappers until step 3 removes the callers.</li>
+        <li><b>Delete <code>FALLBACK_USD_TO_ILS</code>.</b> Compile errors from this deletion are the checklist of call sites to fix (includes the Explore chips).</li>
+        <li><code>src/utils/exchangeRate.ts</code> — <code>fetchUsdToIls</code> becomes <code>fetchAllRates()</code> (one call, full map). New tiny <code>ratesService</code>: AsyncStorage cache <code>{ rates, fetchedAt }</code>, refresh &gt;12h, last-good forever, <code>null</code> when empty.</li>
+        <li>Extend <code>src/utils/__tests__/currency.test.ts</code>: the 3 cases, whole-unit estimates, recovery-step round-trip (₪4,500 typed → ₪4,500 shown), JPY 0-decimals, no-rate → $, unknown country → USD.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Step 3 — Wire every price surface</strong> <span>mechanical sweep</span></div>
+    <div class="cbody">
+      <ul>
+        <li>Replace <code>formatPrice</code>/<code>formatPriceRange</code>/<code>isIsraeli</code> call sites with the new API. Known list (grep-verified): <code>TripsScreen</code>, <code>TripDetailViewRedesigned</code>, <code>TripDetailView</code>, <code>TripPreviewCard</code>, <code>PriceSheetContent</code>, <code>PlanSections</code>, <code>TravelerPriceSheet</code>, <code>PayAmountSheet</code>.</li>
+        <li><b>Explore budget chips</b> (<code>TripsScreen.tsx</code> <code>buildExploreChips</code>): label localizes to the viewer's currency at the cached daily rate ("Below ₪15k"); server-side USD filtering unchanged. No rate → "$5k" labels.</li>
+        <li>Load rates once near the top (trips screens already have react-query — a <code>useRates()</code> hook with a long staleTime fits the house style).</li>
+        <li>Card + detail must use the same helper and the same rates object — that kills the "cards say $, detail says ₪" class of bug at the root.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Step 4 — Settings picker</strong> <span>viewer override</span></div>
+    <div class="cbody">
+      <ul>
+        <li><code>SettingsScreen.tsx</code>: "Currency" row showing the current effective currency — "Auto (₪)" or "EUR €".</li>
+        <li>Opens a <code>BottomSheetShell</code> list (global sheet rule): Auto first, then the 14. Selecting writes <code>surfers.display_currency</code> and updates the profile cache so prices flip immediately.</li>
+        <li>UI work → use the <code>emilkowalski/skill</code> guidance, fonts via <code>ff()</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Step 5 — Operator input currency</strong> <span>create flow, type C</span></div>
+    <div class="cbody">
+      <ul>
+        <li><code>CreateTripFlowA.tsx</code>: <code>operatorCurrency</code> type widens <code>'ILS'|'USD'</code> → <code>'ILS'|'USD'|'EUR'|'GBP'</code>; selector on the price step, default from operator country.</li>
+        <li>Save path: generalize the <code>ilsToUsd(v, saveRate)</code> conversions (lines ~1675/1988/2008) to the chosen currency. <b>Keep the <code>saveRate</code> edit-reuse rule exactly as is</b> — edit uses the trip's stored rate, never a fresh one.</li>
+        <li>Replace the two <code>?? FALLBACK_USD_TO_ILS</code> saves with the §5 rate ladder: fresh → cached ≤48h → block non-USD save (friendly error via <code>showErrorAlert</code>).</li>
+        <li>Input shows the chosen symbol. <code>OperatorTripEditScreen.tsx</code>'s <code>formatTripAmount(amount, budget_currency)</code> just needs € / £ in its symbol map.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Step 6 — Payment surfaces say the rule</strong> <span>type C copy, the Booking.com sentence</span></div>
+    <div class="cbody">
+      <ul>
+        <li><code>PlanSections.tsx</code> Payment section: grey "(about ₪X)" hints beside the USD figures (daily rate), plus the one line: <b>"The ₪ price is approximate. You'll pay in US$. The exchange rate may change before you pay."</b> Shown once, where the money is, not on every row.</li>
+        <li><code>PayAmountSheet.tsx</code>: the ₪-only hint generalizes to any viewer currency, switched to the daily rate. The typed amount stays USD (the server clamps it; nothing changes there).</li>
+        <li><code>TravelerPriceSheet.tsx</code> + the deposit row in trip detail: same hint; the sentence appears before Checkout opens.</li>
+        <li>Exact USD numbers stay the headline everywhere. <b>No edge function changes. No Stripe changes.</b></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Verify</strong> <span class="tag t-wait">Ohad on device</span></div>
+    <div class="cbody">
+      <ul>
+        <li><code>npx tsc</code> zero new errors · <code>npx jest</code> green (currency tests grown, not shrunk).</li>
+        <li>On-device (no simulator): Israeli profile sees exact ₪ on the one ILS-priced trip, unchanged (regression check) · Israeli viewing a $-priced trip sees a clean whole-unit ₪ at today's rate (was frozen-rate, ₪100-rounded — expected change) · switch override to EUR → cards, detail, chips, pay sheet all flip · airplane-mode fresh install → $ everywhere · create a €-priced trip → detail shows exact €, US viewer sees $ · pay sheet shows the three-clause sentence.</li>
+        <li>Ohad reviews the diff and commits — nothing is committed by Claude, migration applied by hand.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Order &amp; risk</h2>
+  <ul>
+    <li><b>Order:</b> 1 (DB, safe early) → 2 → 3 → 4/5/6 in any order. 2+3 are the heart; 4–6 are each small and independent.</li>
+    <li><b>Biggest risk:</b> the RPC recreate (step 1b). It's the one place with a bad history — the migration file must contain the REVOKE/GRANT/search_path block, written from the <i>live</i> definition.</li>
+    <li><b>Quiet regression to watch:</b> Israelis are the users with an opinion about today's behavior. Case 2 keeps the one ILS-priced trip pixel-identical for them; the visible change is on $-priced trips, which now convert at today's rate in whole units instead of the frozen rate rounded to ₪100 — deliberate, Booking-style.</li>
+    <li><b>Rollout:</b> one OTA after all steps land. No native gate anywhere in this project.</li>
+  </ul>
+
+</div>
+</body>
+</html>

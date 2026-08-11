@@ -21,6 +21,20 @@ import { AnalyticsDashboardScreen } from './AnalyticsDashboardScreen';
 import { ReportBugOverlay } from '../components/ReportBugOverlay';
 import { isCurrentUserAdmin } from '../services/analytics/analyticsDashboardService';
 import { useOnboarding } from '../context/OnboardingContext';
+import { useUserProfile } from '../context/UserProfileContext';
+import { CurrencySheet } from '../components/settings/CurrencySheet';
+import { CancellationPolicySheet } from '../components/settings/CancellationPolicySheet';
+import { ConnectStripeCard } from '../components/trips/ConnectStripeCard';
+import { isCurrencyCode, resolveViewerCurrency, type CurrencyCode } from '../utils/currency';
+import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
+import {
+  EMPTY_OPERATOR_SETTINGS,
+  fetchIsOperator,
+  fetchOperatorSettings,
+  saveOperatorSettings,
+  type OperatorSettings,
+} from '../services/trips/operatorSettingsService';
+import { PRESET_LABEL, summarise } from '../services/trips/cancellationPolicy';
 
 // Settings menu icons
 const iconPrivacyPreferences = require('../assets/icons/privacy-preferences.png');
@@ -43,7 +57,35 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
   const [showPrivacyPreferences, setShowPrivacyPreferences] = useState(false);
   const [showReportBug, setShowReportBug] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showCurrency, setShowCurrency] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+
+  // ── Operator settings ────────────────────────────────────────────────────
+  // Only an account with surfers.operator = true sees any of this. The flag is
+  // read from the server rather than the cached profile: an admin can turn it
+  // on while the app is open, and a profile cached before the column existed
+  // has no `operator` key at all.
+  const [isOperator, setIsOperator] = useState(false);
+  const [opSettings, setOpSettings] = useState<OperatorSettings>(EMPTY_OPERATOR_SETTINGS);
+  const [showOpCurrency, setShowOpCurrency] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
+  const [showStripe, setShowStripe] = useState(false);
+
+  // Display currency. Stored on the profile so it follows the user to their
+  // other devices, the same way Booking.com remembers the last currency used.
+  const { profile, updateProfile } = useUserProfile();
+  const storedCurrency: CurrencyCode | null = isCurrencyCode(profile?.display_currency)
+    ? profile.display_currency
+    : null;
+  const effectiveCurrency = resolveViewerCurrency(profile?.country_from, storedCurrency);
+
+  const handleSelectCurrency = (next: CurrencyCode | null) => {
+    // Optimistic: prices across the app flip on the next render rather than
+    // after a round trip. The write is display-only — nothing about money
+    // depends on it — so a failure costs a re-tap, not a wrong charge.
+    if (profile) updateProfile({ ...profile, display_currency: next });
+    void supabaseDatabaseService.updateDisplayCurrency(next);
+  };
   const { resetOnboarding, setCurrentStep, setUser, setIsDemoUser } = useOnboarding();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
@@ -61,6 +103,46 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
   useEffect(() => {
     isCurrentUserAdmin().then(setIsAdmin);
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetchIsOperator().then(async yes => {
+      if (!alive || !yes) return;
+      setIsOperator(true);
+      // Only fetched once we know they are an operator — nobody else has a row
+      // to read, and RLS would return nothing anyway.
+      try {
+        const s = await fetchOperatorSettings();
+        if (alive) setOpSettings(s);
+      } catch (e) {
+        console.warn('[Settings] operator settings read failed:', e);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Both savers write through and re-render from the value the server accepted,
+  // not from the draft — the database normalises custom rules (sorts them, and
+  // clears them when the preset is not custom), so trusting the draft would
+  // show a policy that is not the stored one.
+  const handleOperatorCurrency = async (next: CurrencyCode | null) => {
+    const before = opSettings;
+    setOpSettings({ ...opSettings, defaultCurrency: next });
+    try {
+      await saveOperatorSettings({ defaultCurrency: next });
+      setOpSettings(await fetchOperatorSettings());
+    } catch (e: any) {
+      setOpSettings(before);
+      Alert.alert('Could not save', e?.message ?? 'Please try again.');
+    }
+  };
+
+  const handleSavePolicy = async (next: OperatorSettings['policy']) => {
+    await saveOperatorSettings({ policy: next });
+    setOpSettings(await fetchOperatorSettings());
+  };
 
   // Account actions — moved here from the old Lineup header 3-dots menu.
   const handleLogout = async () => {
@@ -216,6 +298,14 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
             <Text style={[styles.menuRowText, styles.linkText]}>About us</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowCurrency(true)}>
+            <Ionicons name="cash-outline" size={22} color="#333" style={styles.menuIcon} />
+            <Text style={styles.menuRowText}>Currency</Text>
+            <Text style={styles.menuRowValue}>
+              {storedCurrency ? storedCurrency : `Auto (${effectiveCurrency})`}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowReportBug(true)}>
             <Image source={iconReportBug} style={styles.menuIcon} resizeMode="contain" />
             <Text style={styles.menuRowText}>Report bug</Text>
@@ -231,6 +321,51 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               <Ionicons name="stats-chart-outline" size={22} color="#333" style={styles.menuIcon} />
               <Text style={styles.menuRowText}>Analytics (admin)</Text>
             </TouchableOpacity>
+          )}
+
+          {/* Operator — only for accounts a Swellyo admin has turned on. These
+              are DEFAULTS reused on every trip they create, not settings that
+              change a trip already published. */}
+          {isOperator && (
+            <>
+              <View style={styles.menuSectionDivider} />
+              <Text style={styles.sectionTitle}>Operator</Text>
+
+              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowStripe(v => !v)}>
+                <Ionicons name="card-outline" size={22} color="#333" style={styles.menuIcon} />
+                <Text style={styles.menuRowText}>Payments (Stripe)</Text>
+                <Ionicons
+                  name={showStripe ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color="#9A9A9A"
+                />
+              </TouchableOpacity>
+
+              {/* Inline rather than a row with a value: the card already says
+                  which of the six Connect states the account is in, and any
+                  one-word summary of that would be a lie in at least two. */}
+              {showStripe && (
+                <View style={styles.operatorInset}>
+                  <ConnectStripeCard />
+                </View>
+              )}
+
+              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowOpCurrency(true)}>
+                <Ionicons name="pricetag-outline" size={22} color="#333" style={styles.menuIcon} />
+                <Text style={styles.menuRowText}>Default price currency</Text>
+                <Text style={styles.menuRowValue}>
+                  {opSettings.defaultCurrency ?? `Auto (${effectiveCurrency})`}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowPolicy(true)}>
+                <Ionicons name="document-text-outline" size={22} color="#333" style={styles.menuIcon} />
+                <Text style={styles.menuRowText}>Cancellation policy</Text>
+                <Text style={styles.menuRowValue}>{PRESET_LABEL[opSettings.policy.preset]}</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.operatorNote}>{summarise(opSettings.policy)}</Text>
+            </>
           )}
 
           {/* Account actions — moved here from the old Lineup header menu */}
@@ -256,6 +391,33 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
           </TouchableOpacity>
         </ScrollView>
       </Animated.View>
+      <CurrencySheet
+        visible={showCurrency}
+        onClose={() => setShowCurrency(false)}
+        value={storedCurrency}
+        country={profile?.country_from}
+        onSelect={handleSelectCurrency}
+      />
+      {isOperator && (
+        <>
+          <CurrencySheet
+            visible={showOpCurrency}
+            onClose={() => setShowOpCurrency(false)}
+            value={isCurrencyCode(opSettings.defaultCurrency) ? opSettings.defaultCurrency : null}
+            country={profile?.country_from}
+            onSelect={handleOperatorCurrency}
+            title="Default price currency"
+            subtitle="New trips start priced in this currency. You can change it on any trip."
+            autoLabel="Follow my country"
+          />
+          <CancellationPolicySheet
+            visible={showPolicy}
+            onClose={() => setShowPolicy(false)}
+            value={opSettings.policy}
+            onSave={handleSavePolicy}
+          />
+        </>
+      )}
       <ReportBugOverlay visible={showReportBug} onClose={() => setShowReportBug(false)} />
     </View>
   );
@@ -383,8 +545,25 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     flex: 1,
   },
+  // Current value, right-aligned — the row states what it is set to without
+  // making the user open the sheet to find out.
+  menuRowValue: {
+    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',
+    fontSize: 14,
+    fontWeight: '400' as const,
+    color: '#7B7B7B',
+    lineHeight: 18,
+  },
   linkText: {
     color: '#0788B0',
+  },
+  operatorInset: { paddingHorizontal: 4, paddingBottom: 8 },
+  operatorNote: {
+    paddingHorizontal: 4,
+    paddingBottom: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#8A8A84',
   },
   menuSectionDivider: {
     height: 1,

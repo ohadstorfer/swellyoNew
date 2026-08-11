@@ -29,6 +29,7 @@ export interface SupabaseSurfer {
   date_of_birth?: string; // date, nullable, ISO date string format (YYYY-MM-DD)
   pronoun?: string; // varchar(50), nullable
   country_from?: string; // varchar(255), nullable
+  display_currency?: string | null; // text, nullable — ISO 4217. NULL = "Auto" (derive from country_from). Display only; all stored money is USD.
   surfboard_type?: string; // surfboard_type enum, nullable
   surf_level?: number; // integer, nullable, check 1-5
   surf_level_description?: string; // text, nullable - board-specific description (e.g., "Snapping", "Cross Stepping")
@@ -531,6 +532,31 @@ class SupabaseDatabaseService {
   }
 
   /**
+   * Set the traveler's display currency. `null` means "Auto" — derive it from
+   * country_from. Display only: it never touches a stored amount, and every
+   * charge stays in USD.
+   *
+   * Reads the id from getSession(), not getUser(): getUser() has no timeout and
+   * has hung long enough to blank a screen, and a currency tap must never be
+   * the thing that wedges settings.
+   */
+  async updateDisplayCurrency(currency: string | null): Promise<boolean> {
+    if (!isSupabaseConfigured()) return false;
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    if (!userId) return false;
+    const { error } = await supabase
+      .from('surfers')
+      .update({ display_currency: currency })
+      .eq('user_id', userId);
+    if (error) {
+      console.warn('updateDisplayCurrency failed:', error);
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Mark the Swelly welcome guide as shown to the current user. Idempotent —
    * the chat trigger calls this the moment the tutorial fires, so subsequent
    * opens of Swelly chat do not re-fire it. NULL → timestamp transition is
@@ -763,7 +789,7 @@ class SupabaseDatabaseService {
       // destinations_map does NOT exist - only destinations_array exists
       const { data, error } = await supabase
         .from('surfers')
-        .select('user_id, name, age, date_of_birth, pronoun, country_from, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, profile_photo_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, welcome_guide_seen_at, surftrips_tip_seen_at, created_at, updated_at, finished_onboarding')
+        .select('user_id, name, age, date_of_birth, pronoun, country_from, display_currency, surfboard_type, surf_level, surf_level_description, surf_level_category, travel_experience, bio, profile_image_url, cover_image_url, profile_video_url, profile_video_thumbnail_url, profile_photo_url, destinations_array, lifestyle_keywords, lifestyle_image_urls, wave_type_keywords, travel_buddies, home_break_place_id, home_break_full, home_break_short, home_break_locality, home_break_country, home_break_lat, home_break_lng, welcome_guide_seen_at, surftrips_tip_seen_at, created_at, updated_at, finished_onboarding')
         .eq('user_id', userId)
         .single();
 

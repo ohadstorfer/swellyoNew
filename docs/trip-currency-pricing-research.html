@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Showing trip prices in different currencies</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --wait:#5b5bb0; --wait-bg:#eeeefb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:0 0 14px}
+  .rule b{color:var(--cyan-dark)}
+  .rule.ok{background:var(--ok-bg)} .rule.ok b{color:var(--ok)}
+  .rule.warn{background:var(--open-bg)} .rule.warn b{color:var(--open)}
+  .rule ul{margin-top:6px}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:660;margin:0 0 6px}
+  p.lead{font-size:14px;color:#3a3a36;margin-bottom:14px}
+
+  ul{list-style:none}
+  ul li{padding-left:16px;position:relative;margin-bottom:5px}
+  ul li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;
+    border-radius:99px;background:var(--line)}
+  ul li b{font-weight:640}
+  ol{margin-left:18px}
+  ol li{margin-bottom:7px}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead strong{font-size:14px;font-weight:660}
+  .chead span{font-size:13px;color:var(--muted)}
+  .cbody{padding:12px 16px;font-size:14px}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-wait{color:var(--wait);background:var(--wait-bg)}
+
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+
+  .tscroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:14px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:680;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 16px;border-top:1px solid var(--line);vertical-align:top}
+  td:first-child{font-weight:620;white-space:nowrap}
+
+  .ex{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:10px 14px;margin:10px 0;font-size:13.5px}
+  .ex .good{color:var(--ok);font-weight:640}
+  .ex .bad{color:var(--open);font-weight:640}
+
+  a{color:var(--cyan-dark)}
+  .srclist{font-size:13px}
+  .srclist li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Showing trip prices in different currencies</h1>
+  <p class="sub">Research · 10 August 2026 · for Swellyo operator trips (type C)</p>
+
+  <div class="rule">
+    <b>The one rule every big travel site follows:</b>
+    <ul>
+      <li>The price you <b>show</b> and the price you <b>charge</b> are two different things.</li>
+      <li>Show it in the traveler's currency, so they understand it fast.</li>
+      <li>Charge it in one fixed currency, so your money and your books stay clean.</li>
+      <li>Say clearly which one is the real number.</li>
+    </ul>
+  </div>
+
+
+  <h2>1 · What Swellyo does today</h2>
+  <p class="lead">Facts from the code, not from memory.</p>
+
+  <ul>
+    <li>All money is stored in <b>USD</b>. One number, one currency. This is good and should stay.</li>
+    <li>Stripe always charges in USD — <code>price_data[currency] = 'usd'</code> in <code>payments-checkout</code>.</li>
+    <li>Israeli users see <b>₪</b> on trip cards and trip price. Everyone else sees <b>$</b>.</li>
+    <li>The ₪ rate is <b>frozen once per trip</b> (<code>budget_fx_rate</code>) and never changes after that. Good idea — the price does not wobble day to day.</li>
+    <li>₪ browse prices are rounded to the nearest ₪100. Good.</li>
+    <li>The pay sheet shows the exact <b>$</b> amount plus a ₪ hint next to it.</li>
+  </ul>
+
+  <div class="rule warn">
+    <b>Two real gaps.</b>
+    <ul>
+      <li>An Israeli traveler browses in ₪, pays in $, and then sees a <b>third number</b> on the card statement (their bank's rate + their bank's fee). Three numbers for one trip.</li>
+      <li><code>FALLBACK_USD_TO_ILS = 3.0</code>. A hardcoded rate standing in for a moving number, with nothing to signal when it drifts. <b>Checked against live: USD/ILS is 2.9987 today, so 3.0 is nearly right</b> — the risk is not today's error, it is that this constant will still be trusted in three years. A wrong price is worse than no price, and no user can spot one.</li>
+    </ul>
+  </div>
+
+
+  <h2>2 · What the big platforms do</h2>
+
+  <div class="card">
+    <div class="chead"><strong>Booking.com</strong> <span>display-only conversion</span> <span class="tag t-wait">closest to us today</span></div>
+    <div class="cbody">
+      <ul>
+        <li>The hotel sets its price in <b>its own local currency</b>. That currency cannot be changed by the hotel.</li>
+        <li>The guest picks a display currency. It only changes what they <b>see</b>.</li>
+        <li>The charge still happens in the hotel's currency.</li>
+        <li>Booking.com says the converted number is <b>only an estimate</b>, at today's rate.</li>
+      </ul>
+      <div class="ex">Lesson: converting for display is normal and accepted — <b>as long as you say it is an estimate.</b></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Airbnb</strong> <span>display, charge and payout are three separate settings</span></div>
+    <div class="cbody">
+      <ul>
+        <li>Host picks a listing currency. Host separately picks a <b>payout</b> currency.</li>
+        <li>Guest picks a display currency, and can actually pay in it.</li>
+        <li>If guest currency ≠ listing currency, Airbnb adds a <b>currency fee</b> — and says so.</li>
+        <li>Airbnb also says clearly: your own bank may add its own fee, and that is not ours.</li>
+      </ul>
+      <div class="ex">Lesson: name the fee out loud. Do not hide it inside the rate.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>GetYourGuide / Viator</strong> <span>tours &amp; activities — closest product to ours</span></div>
+    <div class="cbody">
+      <ul>
+        <li>Both let the traveler pay in their own currency.</li>
+        <li>Comparison sites measure the markup at about <b>2% over market for GetYourGuide</b> and <b>3–4% for Viator</b>. (Not official numbers — reported by review sites.)</li>
+        <li>GetYourGuide shows the <b>full price including fees</b> up front. That is the part reviewers praise.</li>
+      </ul>
+      <div class="ex">Lesson: a 2–4% FX markup is normal in this industry. Hiding the total is what people complain about.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Apple App Store</strong> <span>real local price lists, not conversion</span></div>
+    <div class="cbody">
+      <ul>
+        <li>You pick one base price. Apple builds a real price for each of 175 storefronts.</li>
+        <li>Prices are <b>rounded to what feels normal there</b> — $9.99 in the US, ¥1,000 in Japan, ₹699 in India.</li>
+        <li>No user ever sees an ugly converted number like ₪3,842.17.</li>
+      </ul>
+      <div class="ex">Lesson: rounding is not cosmetic. A clean number reads as a <b>real price</b>; a converted one reads as a machine guess.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Stripe</strong> <span>the payment layer we already use</span> <span class="tag t-ok">has a ready feature</span></div>
+    <div class="cbody">
+      <p style="margin-bottom:8px">Stripe's <b>Adaptive Pricing</b> does the whole job for us:</p>
+      <ul>
+        <li>Keeps our prices in USD. Stripe shows the traveler ₪ / € / £ at checkout.</li>
+        <li>Rate is <b>mid-market</b>, and <b>guaranteed for 24 hours</b>.</li>
+        <li>Fee is <b>2–4%, paid by the traveler</b>. We pay <b>0%</b>.</li>
+        <li>The traveler can still choose to pay in USD if they prefer.</li>
+        <li><b>Refunds go back in the currency they paid, at the original rate.</b> They get back exactly what they paid.</li>
+        <li>Works with Connect (our operator payouts). Israel is on the supported list.</li>
+      </ul>
+    </div>
+    <div class="note">Also unlocks local payment methods that only work in local currency — iDEAL, Bancontact, BLIK, SEPA, PayPal, Klarna.</div>
+  </div>
+
+
+  <h2>3 · The four models — pick one</h2>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Model</th><th>What the traveler sees</th><th>Good</th><th>Bad</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>1. One currency<br>for everyone</td>
+        <td>Always $</td>
+        <td>Simplest. No FX bugs.</td>
+        <td>Worst conversion. Traveler does maths in their head.</td>
+      </tr>
+      <tr>
+        <td>2. Convert for<br>display only</td>
+        <td>₪ while browsing,<br>$ at checkout</td>
+        <td>Easy. This is Booking.com. <b>This is us today.</b></td>
+        <td>Must say "about". Traveler sees 3 different numbers.</td>
+      </tr>
+      <tr>
+        <td>3. Charge in<br>their currency</td>
+        <td>₪ everywhere,<br>₪ on the card bill</td>
+        <td>Highest trust. Stripe does it for free. Clean refunds.</td>
+        <td>Traveler pays a 2–4% FX fee.</td>
+      </tr>
+      <tr>
+        <td>4. Real price lists<br>per market</td>
+        <td>Clean local prices</td>
+        <td>Feels most professional. Apple's model.</td>
+        <td>Most work. Operator must set many prices.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="rule ok">
+    <b>For type C: model 3, keeping model 2 for browsing.</b>
+    Browse price stays a frozen, rounded ₪ / $ estimate. Checkout switches to the traveler's real currency via Stripe.
+    That removes the third number and costs us nothing.
+  </div>
+
+
+  <h2>4 · Rounding and formatting rules</h2>
+
+  <ul>
+    <li><b>Never round the amount you charge.</b> Round only browse prices. We do this right today.</li>
+    <li><b>Round to the local habit</b>, not to a formula. $1,200 · €1,150 · ₪4,500 · ¥120,000.</li>
+    <li>Some countries like prices ending in 9 (US, Europe). Some like round numbers (Japan). It is cultural, not universal.</li>
+    <li><b>Use "≈" or "about"</b> on every converted number. Never on the real one.</li>
+    <li><b>"$" is ambiguous.</b> US$, CA$, AU$ are different money. Write the code when more than one currency is on screen.</li>
+    <li>Use <code>Intl.NumberFormat</code>, not hand-built strings. It knows where the symbol goes and how many decimals each currency has (JPY has 0, USD has 2).</li>
+    <li><b>Never show two currencies at the same weight.</b> One is the price. The other is a hint, smaller and grey.</li>
+  </ul>
+
+  <div class="ex">
+    <span class="bad">Bad</span> &nbsp;₪4,217.44 &nbsp;·&nbsp; <span style="color:#6b6b66">looks like a machine did it</span><br>
+    <span class="bad">Bad</span> &nbsp;$1,200 / ₪4,200 &nbsp;·&nbsp; <span style="color:#6b6b66">which one am I paying?</span><br>
+    <span class="good">Good</span> &nbsp;<b>₪4,200</b> <span style="color:#6b6b66">≈ US$1,200 · charged in US$</span>
+  </div>
+
+
+  <h2>5 · The exchange rate itself</h2>
+
+  <ul>
+    <li><b>Freeze one rate per trip.</b> Already done. It keeps the price stable while people decide.</li>
+    <li><b>Never re-freeze on edit.</b> Already done — an edit must reuse the trip's own stored rate.</li>
+    <li><b>Refresh the browse rate every 12–24 hours.</b> Faster than that adds nothing for a trip price.</li>
+    <li><b>Keep the last good rate.</b> If the API is down, use yesterday's real rate — not a hardcoded guess.</li>
+    <li><b>The rate you charge at must be guaranteed.</b> Stripe guarantees it for 24h. A rate you invent is a rate you carry the risk on.</li>
+    <li>If we ever carry the FX risk ourselves, add a buffer. The industry norm is 2–4%.</li>
+  </ul>
+
+
+  <h2>6 · Refunds — the part people forget</h2>
+
+  <ul>
+    <li><b>Refund in the currency they paid, at the original rate.</b> This is the whole rule.</li>
+    <li>If you refund at today's rate, the traveler gets back less than they paid, for no reason they can see.</li>
+    <li>They will not blame the exchange rate. They will blame us.</li>
+    <li>Stripe Adaptive Pricing handles this automatically. That alone is a strong reason to use it.</li>
+  </ul>
+
+
+  <h2>7 · Rules we have to follow</h2>
+
+  <div class="card">
+    <div class="chead"><strong>EU — Package Travel Directive</strong> <span class="tag t-open">applies to our trips</span></div>
+    <div class="cbody">
+      <ul>
+        <li>A surf trip with accommodation + activity <b>is a package</b>. These rules apply.</li>
+        <li>You may raise the price for exchange rate changes <b>only if the contract says so</b>.</li>
+        <li>Maximum <b>8%</b>. Above that the traveler can cancel for free and get everything back.</li>
+        <li>You must tell them <b>at least 20 days before travel</b>, with the reason.</li>
+      </ul>
+    </div>
+    <div class="note">Practical result: if we do not write an FX clause into the trip terms, we cannot pass on a currency swing at all.</div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>UK — DMCCA (drip pricing)</strong></div>
+    <div class="cbody">
+      <ul>
+        <li>The <b>total price, with all required fees</b>, must be shown up front.</li>
+        <li>An FX fee added later at checkout is exactly the pattern they are fining.</li>
+        <li>First fine came April 2026 — £4.2m. Travel is named as a focus area.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>Israel</strong> <span class="tag t-wait">check with a lawyer</span></div>
+    <div class="cbody">
+      <ul>
+        <li>Israeli consumer law expects prices to Israeli consumers <b>in shekels</b>.</li>
+        <li>The clear cases are physical shops, but a 2026 draft bill would apply Israeli consumer law to any foreign business that markets to Israelis in Hebrew or in shekels.</li>
+        <li>We already show ₪ to Israelis, so we are on the right side. Just do not go back to $-only for them.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="rule warn">
+    <b>Never do a DCC-style surprise.</b> DCC is when a merchant converts for you without asking, at a bad rate.
+    Markups of 5–18% have been found. Card networks now ban the silent version. Always let the traveler
+    see both options and say what the fee is.
+  </div>
+
+
+  <h2>8 · What I would do for type C</h2>
+
+  <ol>
+    <li><b>Keep USD as the single stored currency.</b> Do not add per-currency amount columns. One truth.</li>
+    <li><b>The operator types the price in their own currency.</b> We convert once and store USD + the rate used. Already how it works for Israeli operators — extend it to EUR, GBP, IDR, etc.</li>
+    <li><b>Turn on Stripe Adaptive Pricing</b> in Connect settings. The traveler pays in ₪ / € at checkout. We pay 0%. Refunds become exact.</li>
+    <li><b>Until that is on:</b> put "≈" on every converted number and write "charged in US$" next to the pay button. One line of copy removes most of the confusion.</li>
+    <li><b>Kill the 3.0 fallback for real prices.</b> Store the last good rate in the DB. If we have no rate at all, show $ — never a guessed ₪.</li>
+    <li><b>Round browse prices, never charged ones.</b> Already correct — keep it that way.</li>
+    <li><b>Put the currency in the operator dashboard exports</b> so the operator's accountant is never guessing.</li>
+  </ol>
+
+
+  <h2>9 · Checks before turning Adaptive Pricing on</h2>
+
+  <div class="rule">
+    <ul>
+      <li><b>Settlement currency.</b> Stripe requires our integration currency (USD) to be a settlement currency of the merchant of record. We use destination charges without <code>on_behalf_of</code>, so the merchant of record is the <b>platform</b> — confirm the platform account settles USD.</li>
+      <li><b>Checkout, not Elements.</b> Adaptive Pricing does not work with Elements + Payment Intents. We use Checkout Sessions. ✔</li>
+      <li><b>No custom amounts.</b> Our partial payments compute the number on the server and send a fixed <code>unit_amount</code>, not Stripe's "pay what you want". ✔</li>
+      <li><b>No manual capture.</b> We do not use it. ✔</li>
+      <li><b>Israel supported.</b> IL is on Stripe's list. ✔</li>
+      <li><b>Webhook change needed.</b> The event keeps <code>currency: usd</code> and adds a <code>presentment_details</code> block with what they really paid. Store it, or the support answer to "why does my bill say ₪4,380" is a shrug.</li>
+    </ul>
+  </div>
+
+
+  <h2>10 · Open questions for you</h2>
+  <ul>
+    <li>Which currencies do we actually need first — ILS, EUR, USD, GBP? Anything else?</li>
+    <li>Does the operator want to be <b>paid</b> in their own currency, or is USD fine for them?</li>
+    <li>Do we want to take FX risk ourselves (and keep the 2–4%), or hand it to Stripe (and keep 0%)? Handing it over is the safer start.</li>
+    <li>Do the trip terms have an FX clause? Without one, EU rules say we cannot raise a price for currency reasons at all.</li>
+  </ul>
+
+
+  <h2>Sources</h2>
+  <ul class="srclist">
+    <li><a href="https://docs.stripe.com/payments/currencies/localize-prices/adaptive-pricing">Stripe — Adaptive Pricing</a> · <a href="https://docs.stripe.com/connect/currencies/adaptive-pricing">Adaptive Pricing with Connect</a> · <a href="https://docs.stripe.com/connect/multicurrency-settlement">Multi-currency settlement for Connect</a></li>
+    <li><a href="https://www.airbnb.com/help/article/95">Airbnb — Supported currencies and currency fees</a> · <a href="https://www.airbnb.com/help/article/1516/can-i-choose-my-payout-currency">Can I choose my payout currency</a></li>
+    <li><a href="https://partner.booking.com/en-us/help/rates-availability/extranet-calendar/updating-your-rates-and-availability">Booking.com for Partners — rates and currency</a></li>
+    <li><a href="https://europa.eu/youreurope/business/selling-in-eu/selling-goods-services/package-travel/index_en.htm">EU — Package travel: organiser obligations</a> · <a href="https://www.euronews.com/travel/2026/05/01/explained-the-rules-around-package-holiday-surcharges-and-which-operators-wont-be-adding-t">Euronews — package holiday surcharge rules (2026)</a></li>
+    <li><a href="https://www.reedsmith.com/articles/full-price-no-surprises-cma-s-final-price-transparency-guidance-arrives/">Reed Smith — CMA price transparency guidance</a> · <a href="https://www.palisis.com/resources/what-uk-tour-operators-need-to-know-about-pricing-law/">Palisis — pricing law for UK tour operators</a></li>
+    <li><a href="https://barlaw.co.il/practice_areas/regulation/client_updates/israel-steps-up-enforcement-on-retail-price-marking-violations/">Barnea — Israeli price marking enforcement</a> · <a href="https://www.chamber.org.il/38991/39013/39077/">Israeli Consumer Law summary</a></li>
+    <li><a href="https://onemileatatime.com/guides/dynamic-currency-conversion/">One Mile at a Time — Dynamic Currency Conversion</a> · <a href="https://www.felloh.com/resources/glossary/dynamic-currency-conversion-dcc">Felloh — DCC in travel payments</a></li>
+    <li><a href="https://blog.mirava.io/p/how-does-localized-pricing-work-in-app-store">Mirava — how App Store localized pricing works</a> · <a href="https://pricepush.app/blog/real-localized-pricing-ppp-baselines-prices-that-feel-local">PricePush — localized pricing beyond FX conversion</a></li>
+    <li><a href="https://www.frontiersin.org/journals/behavioral-economics/articles/10.3389/frbhe.2025.1296207/full">Frontiers — cultural differences in price endings</a> · <a href="https://uxpickle.com/guidelines-for-currency-formatting-with-iso-4217-table/">UX Pickle — currency formatting guidelines</a></li>
+    <li><a href="https://aloha.co/en/blog/cross-border-refunds-travel/">Aloha — cross-border refunds for travel</a> · <a href="https://allratestoday.com/blog/how-to-cache-exchange-rates-avoid-rate-limits/">Caching exchange rates</a></li>
+    <li><a href="https://automate.travel/blog/viator-vs-getyourguide-for-operators/">Viator vs GetYourGuide for operators</a> · <a href="https://compares.cheap/posts/klook-vs-getyourguide-vs-viator-2026/">Klook vs GetYourGuide vs Viator (FX markups)</a></li>
+    <li><a href="https://www.bokun.io/payment-processing-for-travel-industry">Bókun — payment processing for tour operators</a></li>
+  </ul>
+
+</div>
+</body>
+</html>

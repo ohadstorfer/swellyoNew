@@ -284,6 +284,17 @@ export default function TravelerOnboardingScreen({
     };
   }, []);
 
+  /**
+   * Which checkout run is the current one. The payment confirm loop in
+   * runCheckout polls for up to PAYMENT_CONFIRM_ATTEMPTS × PAYMENT_CONFIRM_INTERVAL_MS
+   * and `aliveRef` alone does not stop it — that only flips on unmount. So a
+   * Reset pressed while a poll was still in flight WOULD clear the banner, and
+   * then the orphaned loop would time out and set it straight back. Reset bumps
+   * this; a loop whose epoch no longer matches drops everything it was going to
+   * write.
+   */
+  const checkoutEpochRef = useRef(0);
+
   const loadPlan = useCallback(async (): Promise<OnboardingPlan | null> => {
     try {
       const [next, priceData, paid] = await Promise.all([
@@ -391,12 +402,16 @@ export default function TravelerOnboardingScreen({
   const runCheckout = useCallback(
     async (amountUsd?: number) => {
       if (!step) return;
+      // Anything this run is about to write is discarded once the epoch moves —
+      // see checkoutEpochRef. Captured BEFORE the first await.
+      const epoch = ++checkoutEpochRef.current;
+      const stale = () => !aliveRef.current || checkoutEpochRef.current !== epoch;
       setSheet(null);
       setBusy(true);
       setPaymentNote(null);
       try {
         const outcome = await startCheckout(step.requirement.requirementId, amountUsd);
-        if (!aliveRef.current) return;
+        if (stale()) return;
 
         // They pressed back inside Checkout. Nothing was charged and nothing is
         // in flight, so there is nothing to confirm and nothing to say.
@@ -411,9 +426,9 @@ export default function TravelerOnboardingScreen({
         setConfirming(true);
         for (let attempt = 0; attempt < PAYMENT_CONFIRM_ATTEMPTS; attempt++) {
           await new Promise(r => setTimeout(r, PAYMENT_CONFIRM_INTERVAL_MS));
-          if (!aliveRef.current) return;
+          if (stale()) return;
           const next = await fetchOnboardingPlan(tripId).catch(() => null);
-          if (!aliveRef.current) return;
+          if (stale()) return;
           const settled =
             next &&
             !next.remaining.some(
@@ -436,7 +451,7 @@ export default function TravelerOnboardingScreen({
           "Your payment is still being confirmed. This usually takes a moment — you can close this and come back, nothing is lost.",
         );
       } catch (e) {
-        if (!aliveRef.current) return;
+        if (stale()) return;
         setBusy(false);
         setConfirming(false);
         hapticError();
@@ -527,6 +542,12 @@ export default function TravelerOnboardingScreen({
           text: 'Reset',
           style: 'destructive',
           onPress: async () => {
+            // Orphan any checkout still polling. Without this the loop times
+            // out ~20s later and paints the "still being confirmed" banner back
+            // over a flow that was just reset.
+            checkoutEpochRef.current++;
+            setConfirming(false);
+            setBusy(false);
             setResetting(true);
             try {
               const summary = await devResetOnboarding(tripId, userId);

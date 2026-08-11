@@ -38,7 +38,8 @@ import { ff } from '../../../theme/fonts';
 import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../../assets/images';
-import { formatPrice, isIsraeli } from '../../../utils/currency';
+import { approxPaymentNote, formatApproxLocal } from '../../../utils/currency';
+import { useViewer } from '../../../hooks/useViewer';
 import { isPayKind, actionForRequirement } from '../../../services/trips/tripDocumentsService';
 import type {
   AdminUpdate,
@@ -999,11 +1000,6 @@ export const TripDocumentsCard: React.FC<{
   /** host mode only — open the editor for what this trip asks for. Its presence
    *  is also what keeps the card alive on a trip that asks for nothing yet. */
   onManage?: () => void;
-  /** member mode only — the trip's frozen USD→₪ rate, for `formatPrice`. Read
-   *  from screen state, not fetched here — this file stays pure presentation. */
-  budgetFxRate?: number | null;
-  /** member mode only — the viewer's own country, for `formatPrice`'s ₪/$ switch. */
-  viewerCountry?: string | null;
 }> = ({
   rows,
   mode,
@@ -1013,9 +1009,11 @@ export const TripDocumentsCard: React.FC<{
   onPressRow,
   onReviewAll,
   onManage,
-  budgetFxRate,
-  viewerCountry,
 }) => {
+  // The local-currency hint. Read from the viewer, not from the trip: the
+  // charge is USD and the traveler's bank converts at TODAY's rate, so the
+  // trip's frozen rate would be the wrong number to whisper here.
+  const viewer = useViewer();
   // ── Move-to-wallet animation state ──────────────────────────────────────
   // Hooks first: the early return below is conditional, the hooks cannot be.
   //
@@ -1221,13 +1219,7 @@ export const TripDocumentsCard: React.FC<{
           // whole-dollar rounding fire as a bogus "(about $1,393)" next to
           // "$1,392.50": the same real-vs-rounded confusion I1 exists to kill,
           // just smaller.
-          const hasLocalCurrency =
-            isIsraeli(viewerCountry) &&
-            typeof budgetFxRate === 'number' &&
-            Number.isFinite(budgetFxRate) &&
-            budgetFxRate > 0;
-          const approxLocal =
-            exactUsd && hasLocalCurrency ? formatPrice(row.amountUsd!, budgetFxRate, viewerCountry) : null;
+          const approxLocal = exactUsd ? formatApproxLocal(row.amountUsd!, viewer) : null;
           const showApprox = !!approxLocal;
 
           return (
@@ -1414,27 +1406,23 @@ export const PaymentSection: React.FC<{
    * the breakdown would just restate the line above it.
    */
   steps?: PaymentStep[];
-  /** The trip's frozen USD→₪ rate + viewer country, for the same secondary
-   *  "about ₪X" hint the pay rows show. See TripDocumentsCard. */
-  budgetFxRate?: number | null;
-  viewerCountry?: string | null;
   onPayNow: () => void;
-}> = ({ totalUsd, paidUsd, payState, steps = [], budgetFxRate, viewerCountry, onPayNow }) => {
+}> = ({ totalUsd, paidUsd, payState, steps = [], onPayNow }) => {
+  const viewer = useViewer();
   const paid = Math.min(paidUsd, totalUsd);
   const remaining = Math.max(0, totalUsd - paidUsd);
   const allPaid = payState === 'paid';
   const fillPct = totalUsd > 0 ? Math.max(0, Math.min(1, paid / totalUsd)) : 0;
   const showSteps = steps.length > 1;
 
-  // Same gate as the task rows: the ₪ hint only for a viewer who genuinely
-  // thinks in a different currency, never as a bogus rounding echo.
-  const hasLocalCurrency =
-    isIsraeli(viewerCountry) &&
-    typeof budgetFxRate === 'number' &&
-    Number.isFinite(budgetFxRate) &&
-    budgetFxRate > 0;
-  const approxRemaining =
-    !allPaid && hasLocalCurrency ? formatPrice(remaining, budgetFxRate!, viewerCountry) : null;
+  // Same gate as the task rows: the hint only for a viewer who genuinely
+  // thinks in another currency, never as a bogus rounding echo of the USD.
+  const approxRemaining = !allPaid ? formatApproxLocal(remaining, viewer) : null;
+  // Booking.com's three promises, said once per screen where the money is:
+  // this number is approximate, here is what you will actually be charged,
+  // and the rate can still move. Null for USD viewers — none of it is true
+  // for them.
+  const currencyNote = allPaid ? null : approxPaymentNote(viewer);
 
   return (
     <View style={styles.ygBlock}>
@@ -1520,6 +1508,10 @@ export const PaymentSection: React.FC<{
             )}
           </PressableScale>
         ) : null}
+
+        {/* Said once, under the button that starts the charge — the last thing
+            read before Checkout opens, which is where Booking.com puts it too. */}
+        {currencyNote ? <Text style={styles.payCurrencyNote}>{currencyNote}</Text> : null}
       </View>
     </View>
   );
@@ -2028,6 +2020,17 @@ const styles = StyleSheet.create({
   },
   payRemainingApprox: { fontFamily: ff('Inter', '400'), fontWeight: '400', color: T.muted },
   payRemainingDone: { color: T.done },
+  // Quiet by design: it must be readable before paying, never compete with the
+  // figure or the button.
+  payCurrencyNote: {
+    marginTop: 10,
+    fontFamily: ff('Inter', '400'),
+    fontWeight: '400',
+    fontSize: 12,
+    lineHeight: 16,
+    color: T.muted,
+    textAlign: 'center',
+  },
   // The split. Sits between the summary line and the button, separated by a
   // hairline so it reads as a breakdown OF the number above rather than as
   // more of the same sentence.

@@ -68,8 +68,18 @@ import { useTripWizardDraft } from '../../hooks/useTripWizardDraft';
 import { useFieldErrors } from '../../hooks/useFieldErrors';
 import { useDiscardConfirm } from '../../hooks/useDiscardConfirm';
 import { showErrorAlert } from '../../utils/friendlyError';
-import { fetchUsdToIls } from '../../utils/exchangeRate';
-import { FALLBACK_USD_TO_ILS, isIsraeli, ilsToUsd, usdToIls } from '../../utils/currency';
+import {
+  currencyForCountry,
+  formatAmount,
+  fromTripCurrency,
+  isCurrencyCode,
+  OPERATOR_CURRENCIES,
+  snapToRound,
+  toTripCurrency,
+  type CurrencyCode,
+} from '../../utils/currency';
+import { ratesService } from '../../services/currency/ratesService';
+import { useRates } from '../../hooks/useViewer';
 import { useUserProfile } from '../../context/UserProfileContext';
 
 // Stream A — bottom sheet shell + the new wave-shape slider + big budget cards
@@ -640,12 +650,16 @@ const pickImage = async (aspect: [number, number] = [12, 5]): Promise<string | n
 // -----------------------------------------------------------------------------
 // State <-> GroupTrip mapping
 // -----------------------------------------------------------------------------
-const stateFromTrip = (trip: GroupTrip, operatorCurrency: 'ILS' | 'USD'): WizardState => {
-  // Israeli operators edit in ₪; stored values are USD, so convert up using the
-  // trip's frozen rate (falling back to today's default if the trip predates rate capture).
-  const editRate = trip.budget_fx_rate ?? FALLBACK_USD_TO_ILS;
+const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardState => {
+  // Stored values are USD; the operator edits in the currency THIS TRIP was
+  // priced in, using the trip's OWN frozen rate. No fallback rate exists here
+  // on purpose — `resolveEditCurrency` already refused to pick a non-USD
+  // currency without a valid rate, so if we are converting, the rate is real.
+  const editRate = trip.budget_fx_rate;
   const toEditCurrency = (usd: number | null): number | null =>
-    usd == null ? null : operatorCurrency === 'ILS' ? usdToIls(usd, editRate) : usd;
+    usd == null || operatorCurrency === 'USD' || !editRate
+      ? usd
+      : snapToRound(toTripCurrency(usd, editRate), editRate);
   const months = trip.date_months ?? [];
   const sorted = [...months].sort();
   const skillLevels = (trip.target_surf_levels ?? []).filter(l =>
@@ -1339,9 +1353,39 @@ export default function CreateTripFlowA({
 }: CreateTripFlowAProps): React.ReactElement {
   const editMode = !!initialTrip;
   const { profile } = useUserProfile();
-  // Israeli operators price in ₪; everyone else prices in $. Non-Israeli
-  // operators still store the frozen rate so Israeli VIEWERS can later see ₪.
-  const operatorCurrency: 'ILS' | 'USD' = isIsraeli(profile?.country_from) ? 'ILS' : 'USD';
+  // The currency the operator TYPES the price in. Defaults to their country
+  // (clamped to the short list operators actually price in), and they can
+  // change it while creating.
+  //
+  // In EDIT mode it is the trip's own currency and it is LOCKED. Switching it
+  // after publish would reinterpret the frozen `budget_fx_rate` against a
+  // different currency and silently re-price everyone who already joined —
+  // the same class of bug the edit-reuses-saveRate rule exists to prevent.
+  // A non-USD currency is only adopted when a real frozen rate came with it;
+  // otherwise we edit in USD rather than convert through a guess.
+  const lockedEditCurrency: CurrencyCode | null = useMemo(() => {
+    if (!initialTrip) return null;
+    const code = initialTrip.budget_currency;
+    const rate = initialTrip.budget_fx_rate;
+    const rateOk = typeof rate === 'number' && Number.isFinite(rate) && rate > 0;
+    return isCurrencyCode(code) && code !== 'USD' && rateOk ? code : 'USD';
+  }, [initialTrip]);
+
+  const defaultOperatorCurrency: CurrencyCode = useMemo(() => {
+    const fromCountry = currencyForCountry(profile?.country_from);
+    return OPERATOR_CURRENCIES.includes(fromCountry) ? fromCountry : 'USD';
+  }, [profile?.country_from]);
+
+  const [pickedCurrency, setPickedCurrency] = useState<CurrencyCode>(defaultOperatorCurrency);
+  // The profile often resolves AFTER this screen mounts, so the initial state
+  // value can be a USD guess made before we knew the operator was Israeli. Adopt
+  // the country default when it arrives — but only until the operator touches
+  // the picker, or a late-loading profile would yank their choice back.
+  const currencyTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!currencyTouchedRef.current) setPickedCurrency(defaultOperatorCurrency);
+  }, [defaultOperatorCurrency]);
+  const operatorCurrency: CurrencyCode = lockedEditCurrency ?? pickedCurrency;
   const effectiveStyle: HostingStyle = initialTrip?.hosting_style ?? hostingStyle;
   const ageWindow = AGE_WINDOW_BY_STYLE[effectiveStyle];
   // Flow B is the "leader" flow: it adds the 'aboutYou' step and requires a
@@ -1512,18 +1556,21 @@ export default function CreateTripFlowA({
     }
   }, [isFixedFlow, state.datesMode, setState]);
 
-  // Frozen USD->ILS rate for this session. Used both for in-flow ₪ display and
-  // to convert manual ₪ entries to canonical USD at save time.
-  const [fxRate, setFxRate] = useState<number>(FALLBACK_USD_TO_ILS);
-  useEffect(() => {
-    let cancelled = false;
-    fetchUsdToIls().then(r => {
-      if (!cancelled) setFxRate(r);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Today's rate for the operator's chosen currency, for in-flow display.
+  // `null` means we have no rate: the flow then shows and stores USD rather
+  // than converting through an invented number. (This used to default to a
+  // hardcoded 3.0. It happens to be close to today's real rate, but a price
+  // frozen through a stale constant is wrong for that trip's whole life, and
+  // nothing downstream can detect it.)
+  //
+  // The rate actually FROZEN onto the trip is fetched again at save time via
+  // ratesService.rateForSave — see handleSubmit.
+  const rates = useRates();
+  const fxRate: number | null = useMemo(() => {
+    if (operatorCurrency === 'USD') return 1;
+    const r = rates?.[operatorCurrency];
+    return typeof r === 'number' && Number.isFinite(r) && r > 0 ? r : null;
+  }, [rates, operatorCurrency]);
 
   // Flow C, managed payments — what Stripe currently thinks of this operator's
   // payout account. Gates publish (see validateStep, 'budget' case). The same
@@ -1555,6 +1602,49 @@ export default function CreateTripFlowA({
       }
     },
     [setState, hasBeenTouched, editMode, startSaving],
+  );
+
+  /**
+   * Switch the currency the operator is typing in, CONVERTING what they have
+   * already typed.
+   *
+   * Leaving the digits alone would silently redefine them: "4500" typed as ₪
+   * would become $4,500 the instant they tapped USD, a 3.5x price change with
+   * no visible cause. Converting keeps their intent and, because the number on
+   * screen visibly changes, it is a change they can see and undo.
+   *
+   * Needs a rate for both sides; without one the amounts are left untouched
+   * (and the picker already disables currencies we have no rate for).
+   */
+  const chooseCurrency = useCallback(
+    (code: CurrencyCode) => {
+      currencyTouchedRef.current = true;
+      const from = pickedCurrency;
+      if (code === from) return;
+      const rateOf = (c: CurrencyCode): number | null => {
+        if (c === 'USD') return 1;
+        const r = rates?.[c];
+        return typeof r === 'number' && Number.isFinite(r) && r > 0 ? r : null;
+      };
+      const fromRate = rateOf(from);
+      const toRate = rateOf(code);
+      setPickedCurrency(code);
+      if (fromRate == null || toRate == null) return;
+
+      const convert = (raw: string): string => {
+        const n = parseInt(raw, 10);
+        if (!Number.isFinite(n) || n <= 0) return raw;
+        return String(snapToRound((n / fromRate) * toRate, toRate));
+      };
+      setState(prev => ({
+        ...prev,
+        costPerPerson: convert(prev.costPerPerson),
+        depositAmount: convert(prev.depositAmount),
+        budgetManualMin: convert(prev.budgetManualMin),
+        budgetManualMax: convert(prev.budgetManualMax),
+      }));
+    },
+    [pickedCurrency, rates, setState],
   );
 
   const startDateObj = useMemo(() => parseISODate(state.startDateISO), [state.startDateISO]);
@@ -1647,17 +1737,16 @@ export default function CreateTripFlowA({
     state.manualBudget,
   ]);
 
-  const resolveBudget = useCallback((): {
+  const resolveBudget = useCallback((saveRate: number | null): {
     min: number | null;
     max: number | null;
-    currency: 'ILS' | 'USD' | null;
-    fxRate: number;
+    currency: CurrencyCode | null;
+    fxRate: number | null;
   } => {
-    // Edit mode must convert/save using the trip's OWN frozen rate (same one the
-    // prefill in stateFromTrip used) — never the live mount-time rate — so an
-    // untouched edit round-trips without silently drifting the canonical USD.
-    // Create mode has no frozen rate yet, so it uses the live mount rate.
-    const saveRate = editMode ? (initialTrip?.budget_fx_rate ?? FALLBACK_USD_TO_ILS) : fxRate;
+    // `saveRate` is decided by the caller and is load-bearing: in EDIT mode it
+    // must be the trip's OWN frozen rate (the same one stateFromTrip prefilled
+    // with), never a live one, or an untouched edit silently re-prices the
+    // trip. In CREATE mode it is a freshly fetched rate. See handleSubmit.
     // AI tier ranges are already USD — store as-is regardless of operator currency.
     if (budgetEstimate && state.budgetTier && !state.manualBudget) {
       const r = budgetEstimate.ranges[state.budgetTier];
@@ -1672,7 +1761,9 @@ export default function CreateTripFlowA({
     const rawMin = state.budgetManualMin ? parseInt(state.budgetManualMin, 10) : null;
     const rawMax = state.budgetManualMax ? parseInt(state.budgetManualMax, 10) : null;
     const toUsd = (v: number | null): number | null =>
-      v == null ? null : operatorCurrency === 'ILS' ? ilsToUsd(v, saveRate) : v;
+      v == null || operatorCurrency === 'USD' || saveRate == null
+        ? v
+        : fromTripCurrency(v, saveRate);
     const min = toUsd(rawMin);
     const max = toUsd(rawMax);
     return {
@@ -1688,9 +1779,6 @@ export default function CreateTripFlowA({
     state.budgetManualMin,
     state.budgetManualMax,
     operatorCurrency,
-    fxRate,
-    editMode,
-    initialTrip,
   ]);
 
   // -----------------------------------------------------------------------
@@ -1972,21 +2060,42 @@ export default function CreateTripFlowA({
         : (['all'] as SurfLevel[]);
       // Edit mode must save against the trip's OWN frozen rate (matches the
       // prefill in stateFromTrip) so budget_fx_rate never drifts on an
-      // untouched edit; create mode has no frozen rate yet, so it uses the
-      // live mount-time rate.
-      const saveRate = editMode ? (initialTrip?.budget_fx_rate ?? FALLBACK_USD_TO_ILS) : fxRate;
+      // untouched edit.
+      //
+      // Create mode freezes a rate onto this trip FOREVER, so it is the one
+      // place that refuses to guess: a fresh fetch, or a cached rate under 48h
+      // old, or we stop and say so. A wrong rate frozen here misprices this
+      // trip for its whole life, and nothing downstream can detect it.
+      let saveRate: number | null;
+      if (editMode) {
+        saveRate = initialTrip?.budget_fx_rate ?? null;
+      } else if (operatorCurrency === 'USD') {
+        // A USD trip's rate against its own currency is 1. It used to store
+        // the ILS rate instead, so that a USD row carried an ILS number — the
+        // exact ambiguity `priceParts` now has to defend against.
+        saveRate = 1;
+      } else {
+        saveRate = await ratesService.rateForSave(operatorCurrency);
+        if (saveRate == null) {
+          setSubmitting(false);
+          showErrorAlert(
+            'Price',
+            null,
+            `We couldn't get today's exchange rate. Try again in a moment, or set the price in USD.`,
+          );
+          return;
+        }
+      }
       // Flow C uses a fixed per-person price + rich inclusions, no budget range.
       const budget = isFixedFlow
         ? { min: null, max: null, currency: operatorCurrency, fxRate: saveRate }
-        : resolveBudget();
+        : resolveBudget(saveRate);
       const rawFixed =
         isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null;
       const fixedPrice =
-        rawFixed == null
-          ? null
-          : operatorCurrency === 'ILS'
-            ? ilsToUsd(rawFixed, saveRate)
-            : rawFixed;
+        rawFixed == null || operatorCurrency === 'USD' || saveRate == null
+          ? rawFixed
+          : fromTripCurrency(rawFixed, saveRate);
       // Same USD-canonical rule as cost_per_person above — deposit_amount is
       // never stored in the operator's input currency, or a ₪ deposit would be
       // charged through Stripe (USD-only) as if it were dollars.
@@ -2002,11 +2111,9 @@ export default function CreateTripFlowA({
           : null;
       const rawDeposit = rawDepositInput != null && rawDepositInput > 0 ? rawDepositInput : null;
       const depositAmountUsd =
-        rawDeposit == null
-          ? null
-          : operatorCurrency === 'ILS'
-            ? ilsToUsd(rawDeposit, saveRate)
-            : rawDeposit;
+        rawDeposit == null || operatorCurrency === 'USD' || saveRate == null
+          ? rawDeposit
+          : fromTripCurrency(rawDeposit, saveRate);
       const priceInclusions = isFixedFlow
         ? normalizePriceInclusions(state.priceInclusions)
         : null;
@@ -2242,7 +2349,6 @@ export default function CreateTripFlowA({
     endDateObj,
     resolveBudget,
     operatorCurrency,
-    fxRate,
     clearDraft,
     onCreated,
   ]);
@@ -2280,14 +2386,12 @@ export default function CreateTripFlowA({
   const subtitle =
     step === 'budget'
       ? isFixedFlow
-        ? operatorCurrency === 'ILS'
-          ? 'A fixed price per person, in ₪.'
-          : 'A fixed price per person, in USD.'
+        ? `A fixed price per person, in ${operatorCurrency}.`
         : editMode
           ? 'Confirm the range for your trip.'
-          : operatorCurrency === 'ILS'
-            ? 'Per person, in ₪.'
-            : meta.subtitle
+          : operatorCurrency === 'USD'
+            ? meta.subtitle
+            : `Per person, in ${operatorCurrency}.`
       : step === 'aboutYou' && isFixedFlow
         ? 'Why surfers can trust your operation.'
         : meta.subtitle;
@@ -2435,7 +2539,7 @@ export default function CreateTripFlowA({
       const dep = Number.isFinite(depRaw) ? depRaw : 0;
       const n = kind === 'deposit' ? dep : price - dep;
       if (!Number.isFinite(n) || n < 0) return null;
-      return `${operatorCurrency === 'ILS' ? '₪' : '$'}${n.toLocaleString('en-US')}`;
+      return formatAmount(n, operatorCurrency);
     };
 
     const pickWaiverFile = async () => {
@@ -3204,6 +3308,55 @@ export default function CreateTripFlowA({
     setOpenSheet(null);
   };
 
+  /**
+   * Which currency the operator types the price in.
+   *
+   * Hidden in EDIT mode: the trip's frozen rate belongs to its currency, so
+   * switching after publish would reinterpret every stored amount and re-price
+   * everyone who already joined.
+   *
+   * A currency with no rate today is shown but not selectable — we would have
+   * nothing to convert it to USD with, and USD is what actually gets charged.
+   */
+  const renderCurrencyPicker = () => {
+    if (lockedEditCurrency) return null;
+    return (
+      <View style={localStyles.currencyRow}>
+        {OPERATOR_CURRENCIES.map(code => {
+          const active = operatorCurrency === code;
+          const unavailable = code !== 'USD' && !rates?.[code];
+          return (
+            <Pressable
+              key={code}
+              onPress={() => {
+                if (!unavailable) chooseCurrency(code);
+              }}
+              disabled={unavailable}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active, disabled: unavailable }}
+              accessibilityLabel={`Set the price in ${code}`}
+              style={[
+                localStyles.currencyChip,
+                active && localStyles.currencyChipActive,
+                unavailable && localStyles.currencyChipOff,
+              ]}
+            >
+              <Text
+                style={[
+                  localStyles.currencyChipText,
+                  active && localStyles.currencyChipTextActive,
+                  unavailable && localStyles.currencyChipTextOff,
+                ]}
+              >
+                {code}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  };
+
   const renderPricingStep = () => {
     const inc = state.priceInclusions;
     const customItems = customList;
@@ -3225,8 +3378,9 @@ export default function CreateTripFlowA({
 
     return (
       <View>
+        {renderCurrencyPicker()}
         <Text style={localStyles.fieldLabel}>
-          Price per person · {operatorCurrency === 'ILS' ? '₪' : 'USD'}
+          Price per person · {operatorCurrency}
         </Text>
         <View style={localStyles.priceRow}>
           <View style={localStyles.priceIconBubble}>
@@ -3297,7 +3451,7 @@ export default function CreateTripFlowA({
                 <ConnectStripeCard />
 
                 <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
-                  Deposit · {operatorCurrency === 'ILS' ? '₪' : 'USD'}
+                  Deposit · {operatorCurrency}
                 </Text>
                 <Text style={localStyles.helper}>
                   Leave this blank to take one single payment.
@@ -3426,8 +3580,9 @@ export default function CreateTripFlowA({
             </Text>
           ) : null}
 
+          {renderCurrencyPicker()}
           <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>
-            Budget per person · {operatorCurrency === 'ILS' ? '₪' : 'USD'}
+            Budget per person · {operatorCurrency}
           </Text>
           <View style={localStyles.row}>
             <TextInput
@@ -3689,6 +3844,16 @@ export default function CreateTripFlowA({
   // STEP 5 — PREVIEW (identical to the live non-member view: TripDetailViewRedesigned)
   // -----------------------------------------------------------------------
   const renderPreviewStep = () => {
+    // The preview must price exactly like the published trip will. In edit mode
+    // that is the trip's own frozen rate; in create mode today's rate for the
+    // chosen currency. Handing the raw typed number straight through (as this
+    // did) labelled a ₪4,500 price as "$4,500".
+    const previewRate = lockedEditCurrency ? (initialTrip?.budget_fx_rate ?? null) : fxRate;
+    const previewBudget = resolveBudget(previewRate);
+    const toPreviewUsd = (v: number | null): number | null =>
+      v == null || operatorCurrency === 'USD' || previewRate == null
+        ? v
+        : fromTripCurrency(v, previewRate);
     const previewVM: TripDetailVM = {
       heroImageUri: state.heroImageUri,
       title: state.title || null,
@@ -3727,12 +3892,18 @@ export default function CreateTripFlowA({
           ? state.accommodationUrl || null
           : null,
       costPerPerson:
-        isFixedFlow && state.costPerPerson ? parseInt(state.costPerPerson, 10) : null,
+        isFixedFlow && state.costPerPerson
+          ? toPreviewUsd(parseInt(state.costPerPerson, 10))
+          : null,
       priceInclusions: isFixedFlow
         ? normalizePriceInclusions(state.priceInclusions)
         : null,
-      budgetMin: isFixedFlow ? null : resolveBudget().min,
-      budgetMax: isFixedFlow ? null : resolveBudget().max,
+      budgetMin: isFixedFlow ? null : previewBudget.min,
+      budgetMax: isFixedFlow ? null : previewBudget.max,
+      // So the preview can show the operator their own typed number back
+      // instead of a conversion of it.
+      budgetCurrency: operatorCurrency,
+      budgetFxRate: previewRate,
       budgetTier: isFixedFlow || state.manualBudget ? null : state.budgetTier,
       hostingStyle: effectiveStyle,
       leader: hasAboutYou
@@ -4676,6 +4847,28 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 4,
   },
+  // Currency selector — a quiet row of codes above the price field. Codes, not
+  // symbols: "$" is three different currencies and the operator is choosing
+  // which one their number means.
+  currencyRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  currencyChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.borderField,
+    backgroundColor: COLORS.surfaceCard,
+  },
+  currencyChipActive: { borderColor: COLORS.inkBody, backgroundColor: COLORS.inkBody },
+  currencyChipOff: { opacity: 0.4 },
+  currencyChipText: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.inkBody,
+  },
+  currencyChipTextActive: { color: '#FFFFFF' },
+  currencyChipTextOff: { color: COLORS.textPlaceholder },
   fieldLabel: {
     fontFamily: FONT_INTER,
     fontSize: 16,

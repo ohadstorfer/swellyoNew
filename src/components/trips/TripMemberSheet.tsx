@@ -41,6 +41,9 @@ interface Props {
   paymentMode: string | null;
   /** `group_trips.budget_fx_rate` — passed straight through to the price sheet. */
   budgetFxRate: number | null;
+  /** `group_trips.budget_currency` — ditto. Decides which currency the operator
+   *  edits this traveler's price in. */
+  budgetCurrency?: string | null;
   /** Every requirement row on the trip, active or not — passed straight
    *  through to the price sheet, which reads the pay rows out of it to decide
    *  whether a Deposit field may be shown. `null` means not yet loaded (or
@@ -68,7 +71,7 @@ const joinedAgo = (iso: string | null): string => {
 
 export function TripMemberSheet({
   visible, member, viewerIsHost, isSelf, tripId, viewerIsOperator, ownerUserId, paymentMode,
-  budgetFxRate, requirements, onClose,
+  budgetFxRate, budgetCurrency, requirements, onClose,
   onViewProfile, onMessage, onSetAdmin, onRemoveAdmin, onRemove,
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -154,6 +157,7 @@ export function TripMemberSheet({
           userId={m.user_id}
           travelerName={m.name ?? 'This traveler'}
           budgetFxRate={budgetFxRate}
+          budgetCurrency={budgetCurrency}
           requirements={requirements}
           onClose={() => setPriceOpen(false)}
           onSaved={() => {

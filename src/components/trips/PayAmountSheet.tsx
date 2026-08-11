@@ -34,7 +34,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { formatExactUsd } from './plan/PlanSections';
 import { ff } from '../../theme/fonts';
-import { formatPrice, isIsraeli } from '../../utils/currency';
+import { approxPaymentNote, formatApproxLocal } from '../../utils/currency';
+import { useViewer } from '../../hooks/useViewer';
 
 const ACCENT = '#05BCD3';
 
@@ -52,10 +53,6 @@ export const PayAmountSheet: React.FC<{
   stepTitle: string;
   /** Still owed on this step, canonical USD. */
   outstandingUsd: number;
-  /** Trip's frozen USD→₪ rate + viewer country — the same secondary "about ₪X"
-   *  hint the pay rows show. */
-  budgetFxRate?: number | null;
-  viewerCountry?: string | null;
   /** Called with the chosen amount; `undefined` means the full outstanding
    *  amount. The caller owns closing + the checkout flow. */
   onPay: (amountUsd?: number) => void;
@@ -64,11 +61,10 @@ export const PayAmountSheet: React.FC<{
   onClose,
   stepTitle,
   outstandingUsd,
-  budgetFxRate,
-  viewerCountry,
   onPay,
 }) => {
   const insets = useSafeAreaInsets();
+  const viewer = useViewer();
   const [mode, setMode] = useState<'full' | 'partial'>('full');
   const [amount, setAmount] = useState('');
 
@@ -81,13 +77,11 @@ export const PayAmountSheet: React.FC<{
     }
   }, [visible]);
 
-  const hasLocalCurrency =
-    isIsraeli(viewerCountry) &&
-    typeof budgetFxRate === 'number' &&
-    Number.isFinite(budgetFxRate) &&
-    budgetFxRate > 0;
-  const approx = (usd: number) =>
-    hasLocalCurrency ? formatPrice(usd, budgetFxRate!, viewerCountry) : null;
+  // The hint is an ESTIMATE at TODAY's rate, never the trip's frozen one: the
+  // charge is in USD and the traveler's bank will convert it at whatever the
+  // rate is on the day, not at one frozen when the operator set the price.
+  const approx = (usd: number) => formatApproxLocal(usd, viewer);
+  const currencyNote = approxPaymentNote(viewer);
 
   const typed = parseInt(amount, 10);
   const typedValid = Number.isFinite(typed) && typed >= 1;
@@ -188,6 +182,10 @@ export const PayAmountSheet: React.FC<{
         >
           <Text style={styles.continueText}>Continue to payment</Text>
         </Pressable>
+
+        {/* Repeated here, not just on the Plan tab: this sheet covers that
+            note, and this button is the last thing tapped before Checkout. */}
+        {currencyNote ? <Text style={styles.currencyNote}>{currencyNote}</Text> : null}
       </View>
     </BottomSheetShell>
   );
@@ -200,6 +198,14 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 20,
+  },
+  currencyNote: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#717680',
+    textAlign: 'center',
+    marginTop: 10,
   },
   grabWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 4 },
   grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E4E4E4' },

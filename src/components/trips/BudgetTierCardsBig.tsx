@@ -13,7 +13,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../Text';
-import { FALLBACK_USD_TO_ILS, usdToIlsDisplay } from '../../utils/currency';
+import { formatOperatorAmount, type CurrencyCode } from '../../utils/currency';
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 
@@ -50,10 +50,10 @@ export interface BudgetTierCardsBigProps {
   derivation?: string;
   onManualOverride?: () => void;
   error?: string;
-  /** Israeli operators see ₪ (converted via fxRate); everyone else sees $. Defaults to USD. */
-  currency?: 'ILS' | 'USD';
-  /** USD -> ILS rate, used only when currency === 'ILS'. Defaults to FALLBACK_USD_TO_ILS. */
-  fxRate?: number;
+  /** The currency the operator is typing in. Defaults to USD. */
+  currency?: CurrencyCode;
+  /** USD -> `currency` rate. Without it the cards show USD — never a guessed rate. */
+  fxRate?: number | null;
 }
 
 const TIER_ORDER: BudgetTier[] = ['low', 'medium', 'high'];
@@ -85,10 +85,7 @@ export const BudgetTierCardsBig: React.FC<BudgetTierCardsBigProps> = ({
 }) => {
   const formatMoney = (usd: number): string => {
     if (!Number.isFinite(usd)) return '-';
-    if (currency === 'ILS') {
-      return '₪' + usdToIlsDisplay(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
-    }
-    return '$' + Math.round(usd).toLocaleString('en-US');
+    return formatOperatorAmount(usd, currency ?? 'USD', fxRate);
   };
 
   const formatRange = (r: BudgetTierRange): string => {

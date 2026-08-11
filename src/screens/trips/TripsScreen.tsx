@@ -35,7 +35,13 @@ import {
 import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_TAG } from '../../services/trips/tripVocabulary';
 import { BUDGET_THRESHOLD } from '../../services/trips/exploreFilterPredicates';
 import { COUNTRY_NAMES } from '../../data/countryNames';
-import { formatPrice, formatPriceRange, FALLBACK_USD_TO_ILS, isIsraeli, usdToIls } from '../../utils/currency';
+import {
+  formatAmount,
+  formatTripPrice as formatTripPriceIn,
+  formatTripPriceRange,
+  type Viewer,
+} from '../../utils/currency';
+import { useViewer } from '../../hooks/useViewer';
 import { useUserProfile } from '../../context/UserProfileContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExploreTrips, useMyTrips, tripsKeys, type ExploreFilterKey } from '../../hooks/trips/useTripQueries';
@@ -396,11 +402,11 @@ const TRIP_TYPE: Record<
   C: { label: TRIP_TYPE_PILL.C, icon: 'briefcase-outline' },
 };
 
-const formatTripPrice = (trip: GroupTrip, viewerCountry: string | null): string | null => {
+const formatTripPrice = (trip: GroupTrip, viewer: Viewer): string | null => {
   if (trip.cost_per_person != null) {
-    return formatPrice(trip.cost_per_person, trip.budget_fx_rate, viewerCountry);
+    return formatTripPriceIn(trip.cost_per_person, trip, viewer);
   }
-  return formatPriceRange(trip.budget_min, trip.budget_max, trip.budget_fx_rate, viewerCountry);
+  return formatTripPriceRange(trip.budget_min, trip.budget_max, trip, viewer);
 };
 
 const ExploreTripCard: React.FC<{
@@ -409,8 +415,7 @@ const ExploreTripCard: React.FC<{
   onPress?: () => void;
   userId?: string | null;
 }> = ({ trip, meta, onPress, userId }) => {
-  const { profile } = useUserProfile();
-  const viewerCountry = profile?.country_from ?? null;
+  const viewer = useViewer();
   const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
   const typeTag = TRIP_TYPE_TAG[trip.hosting_style] ?? TRIP_TYPE_TAG.A;
   const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
@@ -418,7 +423,7 @@ const ExploreTripCard: React.FC<{
   const max = trip.max_participants;
   const spotsLeft = max != null ? Math.max(0, max - count) : null;
   const occupancy = max != null ? `${count}/${max}` : `${count}`;
-  const price = formatTripPrice(trip, viewerCountry);
+  const price = formatTripPrice(trip, viewer);
 
   // Tiny (~24px) transform thumbnail used as a blur-up placeholder. Supabase
   // image transforms are enabled (already used in NotificationCenter). For
@@ -845,7 +850,7 @@ interface ExploreChip {
 // Three rolling month chips derived from the device clock, so the labels move
 // forward on their own every month. First two read "This/Next Month"; the third
 // shows the literal month name (e.g. "August").
-const buildExploreChips = (now: Date, viewerCountry: string | null): ExploreChip[] => {
+const buildExploreChips = (now: Date, viewer: Viewer): ExploreChip[] => {
   const ymOffset = (offset: number) => {
     const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
     const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -856,10 +861,18 @@ const buildExploreChips = (now: Date, viewerCountry: string | null): ExploreChip
   const m1 = ymOffset(1);
   const m2 = ymOffset(2);
   // Label only — the RPC still filters against BUDGET_THRESHOLD in USD.
-  // Approximate conversion via the fallback rate (no single trip rate applies here).
-  const budgetChipUnit = isIsraeli(viewerCountry)
-    ? `₪${Math.round(usdToIls(BUDGET_THRESHOLD, FALLBACK_USD_TO_ILS) / 1000)}k`
-    : `$${BUDGET_THRESHOLD / 1000}k`;
+  //
+  // No trip is involved here (the chip spans the whole catalogue), so there is
+  // no frozen rate to use: it is today's cached rate or nothing. It used to be
+  // a hardcoded 3.0 — close to the real rate today, but a constant pretending to
+  // be a live one, so the chip's label would drift away from the threshold it
+  // actually filters on with nothing to flag it. With no rate cached we now say
+  // "$5k" — the real threshold in the currency we charge — rather than a guess.
+  const rate = viewer.currency === 'USD' ? null : viewer.rates?.[viewer.currency];
+  const budgetChipUnit =
+    rate != null && Number.isFinite(rate) && rate > 0
+      ? `${formatAmount(Math.round((BUDGET_THRESHOLD * rate) / 1000), viewer.currency)}k`
+      : `$${BUDGET_THRESHOLD / 1000}k`;
   return [
     { id: `m:${m0.ym}`, label: 'This Month', kind: 'month', value: m0.ym },
     { id: `m:${m1.ym}`, label: 'Next Month', kind: 'month', value: m1.ym },
@@ -955,14 +968,14 @@ const ExploreTripsView: React.FC<{
   onDeckScroll?: () => void;
   userId: string | null;
 }> = ({ onOpenTrip, onNavScroll, onDeckScroll, userId }) => {
-  // Viewer's country decides the budget chip label currency (₪ for Israel, $ otherwise);
-  // the RPC filter value itself stays in USD (see deriveExploreFilterKey below).
-  const { profile } = useUserProfile();
-  const viewerCountry = profile?.country_from ?? null;
+  // The viewer decides the budget chip label currency; the RPC filter value
+  // itself stays in USD (see deriveExploreFilterKey below).
+  const viewer = useViewer();
 
-  // Month chips roll off the device clock; re-derived if the viewer's country changes
-  // (e.g. profile finishes loading after mount) so the budget label currency updates.
-  const chips = useMemo(() => buildExploreChips(new Date(), viewerCountry), [viewerCountry]);
+  // Month chips roll off the device clock; re-derived if the viewer changes
+  // (profile finishing its load, a rate landing, or a currency override) so the
+  // budget label follows.
+  const chips = useMemo(() => buildExploreChips(new Date(), viewer), [viewer]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const toggleChip = useCallback((id: string) => {
     setSelected(prev => {

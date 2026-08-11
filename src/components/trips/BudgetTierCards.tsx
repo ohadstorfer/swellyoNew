@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { FALLBACK_USD_TO_ILS, usdToIlsDisplay } from '../../utils/currency';
+import { formatOperatorAmount, type CurrencyCode } from '../../utils/currency';
 
 // --------------------------------------------------------------------------
 // BudgetTierCards — 3-card tier picker for the budget step.
@@ -69,10 +69,10 @@ export interface BudgetTierCardsProps {
    * use it to reveal the manual min/max inputs sitting in the parent.
    */
   onManualOverride?: () => void;
-  /** Currency shown next to ranges. Israeli operators see ₪ (converted via fxRate); defaults to USD. */
-  currency?: 'ILS' | 'USD';
-  /** USD -> ILS rate, used only when currency === 'ILS'. Defaults to FALLBACK_USD_TO_ILS. */
-  fxRate?: number;
+  /** The currency the operator is typing in. Defaults to USD. */
+  currency?: CurrencyCode;
+  /** USD -> `currency` rate. Without it the cards show USD — never a guessed rate. */
+  fxRate?: number | null;
 }
 
 const TIER_ORDER: BudgetTier[] = ['low', 'medium', 'high'];
@@ -106,16 +106,12 @@ export const BudgetTierCards: React.FC<BudgetTierCardsProps> = ({
 
   const [pressedTier, setPressedTier] = useState<BudgetTier | null>(null);
 
-  const formatMoney = (usd: number): string => {
-    if (!Number.isFinite(usd)) return currency === 'ILS' ? '₪—' : '$—';
-    if (currency === 'ILS') {
-      return '₪' + usdToIlsDisplay(usd, fxRate ?? FALLBACK_USD_TO_ILS).toLocaleString('en-US');
-    }
-    return '$' + Math.round(usd).toLocaleString('en-US');
-  };
+  const formatMoney = (usd: number): string => formatOperatorAmount(usd, currency, fxRate);
 
   const formatRange = (r: BudgetTierRange): string => {
-    if (r.min === r.max) return `${formatMoney(r.min)} ${currency}`;
+    // No trailing currency code: formatMoney's symbol is already unambiguous
+    // (AU$ / CA$ / SEK …), so appending it produced "$1,200 USD".
+    if (r.min === r.max) return formatMoney(r.min);
     return `${formatMoney(r.min)} – ${formatMoney(r.max)}`;
   };
 

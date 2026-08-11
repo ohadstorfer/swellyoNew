@@ -42,7 +42,15 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
 
 ## 2. Rules
 
-1. **Use what already exists.** No new database tables, no new functions, no migrations. Every read this site does is already live and already permitted.
+1. **Use what already exists.** No new database tables, no new functions, no migrations *driven by this site*. Every read it does is already live and already permitted.
+
+   **Amended 2026-08-10.** The rule used to end "this project adds nothing to the database", and that was true until operator settings landed. It now writes, and the boundary is narrow on purpose:
+
+   - **One table, `operator_settings`.** Its RLS allows the owner and nobody else, so the worst a bug here can reach is one operator's own defaults.
+   - **Own row only.** No write anywhere else, ever. If a feature needs to change a trip, a traveler, a document or money, it belongs in the app — that is still the line.
+   - **The table was added by the app's migration set** (`20260810000700_operator_settings.sql`), not by this project. This site consumes it. Rule 1 still means "do not invent schema here".
+
+   The point of the original rule was that a read-only site cannot break the product. That is now "a site that can only damage its own operator's defaults", which is a real weakening — so it is written down rather than quietly dropped.
 2. **The database is the security boundary.** Row Level Security decides what an operator can see. The website cannot see a trip it does not host, even if the code asks for it.
 3. **No backend.** The browser talks to Supabase directly. Netlify serves static files only.
 4. **Files are private.** Every view or download uses a short-lived signed link. There are no public file URLs.
@@ -155,10 +163,12 @@ The purge deletes the file and leaves the row.
 
 ## 6. Data
 
-Everything below is already live. **This project adds nothing to the database.**
+Everything below is already live. **This project reads only — with exactly one exception, `operator_settings`, which it also writes. See Rule 1.**
 
 | What | Where it comes from |
 |---|---|
+| Operator defaults (currency, cancellation policy) | `operator_settings` — **read and write**, owner's row only |
+| Stripe payout state | `operator_payout_accounts` (read only; onboarding runs in the app) |
 | Trips list | `group_trips` + `group_trip_participants` (role `host`) |
 | Received / approved counts | `organized_trip_document_counts(trip_id)` |
 | Requirements | `organized_trip_requirements_resolved` |

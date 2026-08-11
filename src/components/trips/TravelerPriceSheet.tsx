@@ -12,7 +12,15 @@ import {
 import { showErrorAlert } from '../../utils/friendlyError';
 import { ff } from '../../theme/fonts';
 import { useUserProfile } from '../../context/UserProfileContext';
-import { FALLBACK_USD_TO_ILS, formatPrice, ilsToUsd, isIsraeli, usdToIls } from '../../utils/currency';
+import {
+  currencyForCountry,
+  formatOperatorAmount,
+  fromTripCurrency,
+  isCurrencyCode,
+  snapToRound,
+  toTripCurrency,
+  type CurrencyCode,
+} from '../../utils/currency';
 
 /**
  * One traveler's own price.
@@ -39,21 +47,29 @@ import { FALLBACK_USD_TO_ILS, formatPrice, ilsToUsd, isIsraeli, usdToIls } from 
  * leaves, so the operator has to settle it outside the app knowingly rather
  * than discover it later.
  *
- * Inputs are shown in the OPERATOR's own currency (₪ for an Israeli operator,
- * same rule `CreateTripFlowA` uses for the trip's own price step), converted
- * to/from the canonical USD columns with the trip's frozen `budget_fx_rate` —
- * exactly like that wizard's edit-mode path. The database never sees
- * anything but USD; only this input layer converts.
+ * Inputs are shown in the currency THIS TRIP was priced in (`budget_currency`),
+ * converted to/from the canonical USD columns with the trip's frozen
+ * `budget_fx_rate` — exactly like CreateTripFlowA's edit-mode path. The
+ * database never sees anything but USD; only this input layer converts.
+ *
+ * The trip's currency, not the operator's country: an Israeli operator who
+ * priced a trip in € negotiates in €, and showing them ₪ here would mean the
+ * number they type is not the number their traveler was quoted. Legacy trips
+ * with no `budget_currency` fall back to the operator's own country currency,
+ * which is what the old country-based rule always did.
  */
 export const TravelerPriceSheet: React.FC<{
   visible: boolean;
   tripId: string;
   userId: string;
   travelerName: string;
-  /** `group_trips.budget_fx_rate` — the trip's frozen USD→₪ rate. Null (no
-   *  price ever set / legacy trip) falls back to FALLBACK_USD_TO_ILS, same as
-   *  CreateTripFlowA's edit-mode path. */
+  /** `group_trips.budget_fx_rate` — units of `budgetCurrency` per 1 USD, frozen
+   *  when the price was set. Null (legacy trip, or price never set) means the
+   *  inputs stay in USD rather than convert through a guessed rate. */
   budgetFxRate: number | null;
+  /** `group_trips.budget_currency` — what the operator typed the price in.
+   *  Null on legacy rows; falls back to the operator's country currency. */
+  budgetCurrency?: string | null;
   /** Every requirement row on the trip, active or not — the same list the
    *  requirements editor reads. Only the pay rows are looked at, and only to
    *  decide whether a Deposit field may be shown at all.
@@ -78,6 +94,7 @@ export const TravelerPriceSheet: React.FC<{
   userId,
   travelerName,
   budgetFxRate,
+  budgetCurrency,
   requirements,
   onClose,
   onSaved,
@@ -85,8 +102,17 @@ export const TravelerPriceSheet: React.FC<{
 }) => {
   const insets = useSafeAreaInsets();
   const { profile } = useUserProfile();
-  const operatorCurrency: 'ILS' | 'USD' = isIsraeli(profile?.country_from) ? 'ILS' : 'USD';
-  const rate = budgetFxRate ?? FALLBACK_USD_TO_ILS;
+  // What the trip was priced in wins; the operator's country is only the
+  // legacy fallback. Without a usable rate we stay in USD — the old code
+  // multiplied by a hardcoded 3.0 here, quoting a traveler a number derived
+  // from a constant rather than from this trip's own frozen rate.
+  const rate = budgetFxRate != null && Number.isFinite(budgetFxRate) && budgetFxRate > 0
+    ? budgetFxRate
+    : null;
+  const preferred: CurrencyCode = isCurrencyCode(budgetCurrency)
+    ? budgetCurrency
+    : currencyForCountry(profile?.country_from);
+  const operatorCurrency: CurrencyCode = preferred !== 'USD' && rate != null ? preferred : 'USD';
 
   /**
    * Is there anything to collect a deposit AGAINST?
@@ -150,18 +176,15 @@ export const TravelerPriceSheet: React.FC<{
           fetchPaidByRequirement(tripId, userId),
         ]);
         if (cancelled) return;
-        const totalDisplay =
-          prices.totalUsd != null
-            ? operatorCurrency === 'ILS'
-              ? usdToIls(prices.totalUsd, rate)
-              : prices.totalUsd
-            : null;
-        const depositDisplay =
-          prices.depositUsd != null
-            ? operatorCurrency === 'ILS'
-              ? usdToIls(prices.depositUsd, rate)
-              : prices.depositUsd
-            : null;
+        // Snap on the way in so a price the operator typed as ₪4,500 does not
+        // come back out of USD storage as ₪4,501 and look like someone edited
+        // it. snapToRound only moves a number inside its own round-trip drift.
+        const toDisplay = (usd: number) =>
+          operatorCurrency === 'USD' || rate == null
+            ? usd
+            : snapToRound(toTripCurrency(usd, rate), rate);
+        const totalDisplay = prices.totalUsd != null ? toDisplay(prices.totalUsd) : null;
+        const depositDisplay = prices.depositUsd != null ? toDisplay(prices.depositUsd) : null;
         setTotal(totalDisplay != null ? String(totalDisplay) : '');
         setDeposit(depositDisplay != null ? String(depositDisplay) : '');
         setOriginalTotalUsd(prices.totalUsd);
@@ -181,7 +204,9 @@ export const TravelerPriceSheet: React.FC<{
   const toUsd = (displayVal: string): number | null => {
     const n = parseInt(displayVal, 10);
     if (!Number.isFinite(n)) return null;
-    return operatorCurrency === 'ILS' ? ilsToUsd(n, rate) : n;
+    // Keeps cents: whole-dollar rounding here is what made ₪4,500 round-trip
+    // back as ₪4,501.
+    return operatorCurrency === 'USD' || rate == null ? n : fromTripCurrency(n, rate);
   };
 
   const commit = async (t: number, d: number | null) => {
@@ -248,14 +273,18 @@ export const TravelerPriceSheet: React.FC<{
   });
   // amountDue returns null (not 0) on purpose — zero reads as "fully paid" to
   // every consumer. Mirror that here instead of collapsing it back to 0.
-  const balanceLabel = formatPrice(balanceUsd, rate, profile?.country_from) ?? '—';
-  const paidLabel = formatPrice(paid, rate, profile?.country_from) ?? '—';
+  // Every figure in this sheet is in the operator's editing currency, so the
+  // summary line and the inputs agree.
+  const inOperatorCurrency = (usd: number | null): string =>
+    usd == null ? '—' : formatOperatorAmount(usd, operatorCurrency, rate);
+  const balanceLabel = inOperatorCurrency(balanceUsd);
+  const paidLabel = inOperatorCurrency(paid);
   // What the traveler would be owed back at the currently-typed total. Shown
   // live, not only at the confirm step: `amountOutstanding` clamps at zero, so
   // this figure exists nowhere else in the app once the price is saved.
   const overpaidUsd = typedTotalUsd != null && paid > typedTotalUsd ? paid - typedTotalUsd : 0;
-  const overpaidLabel = formatPrice(overpaidUsd, rate, profile?.country_from) ?? '—';
-  const currencyUnit = operatorCurrency === 'ILS' ? '₪' : 'USD';
+  const overpaidLabel = inOperatorCurrency(overpaidUsd);
+  const currencyUnit = operatorCurrency === 'USD' ? 'USD' : operatorCurrency;
 
   return (
     // No `title` prop exists on BottomSheetShell — the heading is rendered

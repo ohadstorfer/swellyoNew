@@ -313,6 +313,7 @@ const buildTripDetailVM = (
   priceInclusions: trip.price_inclusions,
   budgetMin: trip.budget_min,
   budgetMax: trip.budget_max,
+  budgetCurrency: trip.budget_currency,
   budgetFxRate: trip.budget_fx_rate,
   budgetTier: (trip.budget_tier as 'low' | 'medium' | 'high' | null) ?? null,
   hostingStyle: trip.hosting_style,
@@ -406,7 +407,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
   const currentUserId = contextUser?.id?.toString() ?? null;
-  const viewerCountry = profile?.country_from ?? null;
   const queryClient = useQueryClient();
 
   // Data from react-query cache (survives screen unmount → instant reopen).
@@ -2894,8 +2894,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 setReviewOpen(true);
               }}
               onManage={canManageRequirements ? openManageRequirements : undefined}
-              budgetFxRate={trip?.budget_fx_rate}
-              viewerCountry={viewerCountry}
             />
           </View>
         )}
@@ -2916,8 +2914,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 paidUsd={totalPaidUsd}
                 payState={payState}
                 steps={paySteps}
-                budgetFxRate={trip?.budget_fx_rate}
-                viewerCountry={viewerCountry}
                 onPayNow={handlePayNow}
               />
             </View>
@@ -3186,6 +3182,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 reviewTravelers.find(t => t.userId === pricingUserId)?.name ?? 'Traveler'
               }
               budgetFxRate={trip?.budget_fx_rate ?? null}
+              budgetCurrency={trip?.budget_currency ?? null}
               requirements={
                 requirementsQuery.data
                   ? requirementsQuery.data.map(r => ({ kind: r.kind, isActive: r.isActive }))
@@ -3322,8 +3319,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onClose={() => setPayAmountSheetOpen(false)}
         stepTitle={payTarget?.title ?? 'This payment'}
         outstandingUsd={payTarget?.amountUsd ?? 0}
-        budgetFxRate={trip?.budget_fx_rate}
-        viewerCountry={viewerCountry}
         onPay={handlePayAmountChosen}
       />
 

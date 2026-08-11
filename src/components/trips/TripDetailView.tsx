@@ -34,8 +34,8 @@ import {
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { Images } from '../../assets/images';
-import { formatPrice, formatPriceRange } from '../../utils/currency';
-import { useUserProfile } from '../../context/UserProfileContext';
+import { formatTripPrice, formatTripPriceRange } from '../../utils/currency';
+import { useViewer } from '../../hooks/useViewer';
 
 // Upright (standing) board PNGs for the Surf style section.
 export const BOARD_IMAGE: Partial<Record<SurfStyle, ReturnType<typeof require>>> = {
@@ -144,7 +144,11 @@ export interface TripDetailVM {
   // Flow A/B — approximate budget range (for the overview "Budget" card).
   budgetMin?: number | null;
   budgetMax?: number | null;
-  // Frozen ILS-per-USD rate at price-set time — null for legacy USD-only trips.
+  // The currency the operator TYPED the price in, plus the rate frozen at that
+  // moment (units of that currency per 1 USD). Together they let a viewer on
+  // the same currency see the operator's real price instead of a conversion.
+  // Both null on legacy USD-only trips.
+  budgetCurrency?: string | null;
   budgetFxRate?: number | null;
   // The AI tier the host picked — drives the "paying vibe" tag.
   budgetTier?: 'low' | 'medium' | 'high' | null;
@@ -539,8 +543,8 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
   afterHeroSlot,
   bodyHidden,
 }) => {
-  const { profile } = useUserProfile();
-  const viewerCountry = profile?.country_from ?? null;
+  const viewer = useViewer();
+  const pricing = { budget_currency: vm.budgetCurrency, budget_fx_rate: vm.budgetFxRate };
   const [showIncludes, setShowIncludes] = useState(false);
   const [showBudgetInfo, setShowBudgetInfo] = useState(false);
   const dateRange = formatDateRange(vm);
@@ -568,14 +572,14 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
   const showAccommodation =
     !!vm.accommodationName || !!vm.accommodationKindLabel || vm.specificStaySelected != null;
 
-  const priceLabel = formatPrice(vm.costPerPerson ?? null, vm.budgetFxRate ?? null, viewerCountry);
+  const priceLabel = formatTripPrice(vm.costPerPerson ?? null, pricing, viewer);
   const includeSections = priceInclusionSections(vm.priceInclusions);
   const addOns = priceInclusionAddOns(vm.priceInclusions);
   const hasPriceDetail = includeSections.length > 0 || addOns.length > 0;
 
   // Horizontal overview cards below the countdown — fixed order, each shown only
   // when it has data. (Spec: screenshot 2026-06-01 154101.)
-  const budgetLabel = formatPriceRange(vm.budgetMin ?? null, vm.budgetMax ?? null, vm.budgetFxRate ?? null, viewerCountry);
+  const budgetLabel = formatTripPriceRange(vm.budgetMin ?? null, vm.budgetMax ?? null, pricing, viewer);
   const budgetVibe = vm.budgetTier ? BUDGET_VIBE[vm.budgetTier] : null;
   const tripTypeLabel = vm.hostingStyle ? TRIP_TYPE_LABEL[vm.hostingStyle] : null;
   const overviewCards: {
@@ -591,7 +595,7 @@ export const TripDetailView: React.FC<TripDetailViewProps> = ({
     overviewCards.push({
       icon: 'cash-outline',
       label: 'Price',
-      value: formatPrice(vm.costPerPerson ?? null, vm.budgetFxRate ?? null, viewerCountry) ?? '',
+      value: priceLabel ?? '',
       highlight: true,
       footer: hasPriceDetail ? 'See what’s included' : undefined,
       onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,

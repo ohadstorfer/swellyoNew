@@ -37,6 +37,9 @@ export function Shell({ children }: { children: ReactNode }) {
 
           {user && (
             <div className="row" style={{ gap: 12 }}>
+              <Link to="/settings" className="small">
+                Settings
+              </Link>
               <span className="muted small">{user.email}</span>
               <button className="btn btn-sm" onClick={() => void signOut()}>
                 Sign out
