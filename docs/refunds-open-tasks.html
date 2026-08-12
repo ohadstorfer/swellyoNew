@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refunds & Merchant of Record — open tasks</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --panel: #f7f7f5;
+    --panel-2: #f0f0ec;
+    --line: #e3e3de;
+    --line-strong: #d4d4cd;
+    --text: #1c1c1a;
+    --muted: #6b6b66;
+    --cyan: #066b8c;
+    --cyan-tint: #e6f4f8;
+    --ok: #1f7a4d;
+    --ok-bg: #e8f5ee;
+    --warn: #8a6100;
+    --warn-bg: #fdf3dc;
+    --danger: #b3261e;
+    --danger-bg: #fdecea;
+    --wait: #5b5bb0;
+    --wait-bg: #eeeefb;
+    --ease-out: cubic-bezier(.23, 1, .32, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a;
+      --panel: #1e1e23;
+      --panel-2: #26262c;
+      --line: #303038;
+      --line-strong: #3d3d47;
+      --text: #ececed;
+      --muted: #9a9aa2;
+      --cyan: #4fc9e3;
+      --cyan-tint: #10333d;
+      --ok: #6ddba4;
+      --ok-bg: #12301f;
+      --warn: #e8bd6b;
+      --warn-bg: #33270d;
+      --danger: #f08a82;
+      --danger-bg: #3a1a17;
+      --wait: #a9a9ee;
+      --wait-bg: #22224a;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 20px 100px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  header { margin-bottom: 28px; }
+  h1 { font-size: 27px; letter-spacing: -.022em; font-weight: 680; line-height: 1.2; }
+  .sub { color: var(--muted); font-size: 14px; margin-top: 7px; }
+
+  h2 {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: .09em;
+    font-weight: 700; color: var(--muted); margin: 34px 0 12px;
+  }
+  h3 { font-size: 15px; font-weight: 650; margin-bottom: 9px; }
+
+  .status {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 10px; margin-bottom: 8px;
+  }
+  .stat {
+    border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px;
+    background: var(--panel);
+  }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; }
+  .stat .v { font-size: 14px; margin-top: 5px; line-height: 1.45; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+
+  .card {
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    overflow: hidden;
+  }
+  .card-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    background: var(--panel-2); display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  }
+  .card-head strong { font-size: 15px; font-weight: 660; }
+  .card-body { padding: 14px 16px; }
+
+  .group { margin-bottom: 18px; }
+  .group:last-child { margin-bottom: 0; }
+  .group > .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    font-weight: 700; color: var(--muted); margin-bottom: 8px; display: block;
+  }
+
+  ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+  li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.5; }
+  li input[type=checkbox] {
+    appearance: none; -webkit-appearance: none;
+    width: 17px; height: 17px; min-width: 17px; margin-top: 2px;
+    border: 1.5px solid var(--line-strong); border-radius: 5px;
+    background: var(--bg); cursor: pointer;
+    transition: background-color .16s ease, border-color .16s ease, transform .14s var(--ease-out);
+  }
+  li input[type=checkbox]:active { transform: scale(.9); }
+  li input[type=checkbox]:checked {
+    background: var(--cyan); border-color: var(--cyan);
+  }
+  li input[type=checkbox]:checked::after {
+    content: "✓"; display: block; color: var(--bg);
+    font-size: 12px; line-height: 14px; text-align: center; font-weight: 700;
+  }
+  li input[type=checkbox]:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  li label { cursor: pointer; }
+  li input[type=checkbox]:checked + label { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+  li .why { color: var(--muted); display: block; font-size: 13px; margin-top: 2px; }
+
+  .tag {
+    display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 8px;
+    border-radius: 99px; white-space: nowrap; letter-spacing: .02em;
+  }
+  .t-ok { color: var(--ok); background: var(--ok-bg); }
+  .t-warn { color: var(--warn); background: var(--warn-bg); }
+  .t-danger { color: var(--danger); background: var(--danger-bg); }
+  .t-wait { color: var(--wait); background: var(--wait-bg); }
+
+  .callout {
+    border: 1px solid var(--line); border-left: 3px solid var(--danger);
+    background: var(--danger-bg); border-radius: 8px; padding: 13px 15px; margin-top: 12px;
+  }
+  .callout strong { display: block; margin-bottom: 4px; font-size: 14px; }
+  .callout p { font-size: 13.5px; line-height: 1.55; }
+
+  .note { font-size: 13px; color: var(--muted); margin-top: 10px; line-height: 1.55; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px; background: var(--panel-2); padding: 1px 5px; border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Refunds &amp; Merchant of Record — open tasks</h1>
+  <p class="sub">
+    12 Aug 2026 · rev 8 — committed and pushed. Nothing is outstanding on either side;
+    what remains is two decisions and a lawyer
+    · spec: <code>docs/specs/operator-trips/refunds-and-merchant-of-record.md</code>
+    · ticks are saved in this browser
+  </p>
+</header>
+
+<h2>Where things stand</h2>
+<div class="status">
+  <div class="stat">
+    <div class="k"><span class="tag t-ok">Live &amp; verified</span></div>
+    <div class="v">The operator is the legal seller. Refunds work end to end in the operator's own currency — clicked through by hand, dashboard and app both. The policy tick showed and recorded on <strong>El Salvador 26</strong>. Migrations are all on prod.</div>
+  </div>
+  <div class="stat">
+    <div class="k"><span class="tag t-ok">Consent, proven</span></div>
+    <div class="v">A fresh signup left a real row in <code>user_terms_acceptances</code> — with <code>ip_address</code> and <code>user_agent</code> both filled, which was the one thing no amount of code reading could settle. The audit trail works.</div>
+  </div>
+  <div class="stat">
+    <div class="k"><span class="tag t-ok">Operator synced</span></div>
+    <div class="v"><code>country = US</code>, <code>default_currency = usd</code>. Filled by the live edge function on its own, no backfill and no guess — which is what the column was designed to prove.</div>
+  </div>
+  <div class="stat">
+    <div class="k"><span class="tag t-ok">Committed</span></div>
+    <div class="v">All 72 files are in <code>fe7a167</code> on <code>ohad</code>, pushed. The working tree is clean for the first time since 10 Aug.</div>
+  </div>
+  <div class="stat">
+    <div class="k"><span class="tag t-danger">The gap</span></div>
+    <div class="v">Chargebacks still land on Swellyo. That is Phase&nbsp;3, and deferring it is free only while nothing is livemode.</div>
+  </div>
+</div>
+
+<div class="cols" style="margin-top:26px">
+
+  <!-- ─────────────── OHAD ─────────────── -->
+  <div class="card">
+    <div class="card-head"><strong>Yours — Ohad</strong></div>
+    <div class="card-body">
+
+      <div class="group">
+        <span class="label">Right now</span>
+        <p class="note" style="margin:0">
+          Nothing. The work is committed and pushed — <code>fe7a167</code> on <code>ohad</code>,
+          72 files. Next time you open operator setup you will land on the terms step, because
+          the version bump reopened it; that sheet type-checks but nobody has watched it render,
+          so give it a look while you are there.
+        </p>
+      </div>
+
+      <div class="group">
+        <span class="label">Decisions waiting on you</span>
+        <ul>
+          <li><input type="checkbox" id="o4"><label for="o4">The Stripe processing fee on refunds (~2.9%) — absorb it, or charge the operator like WeTravel?
+            <span class="why">My rec: absorb now, but write the right to recover into the Operator Agreement.</span></label></li>
+          <li><input type="checkbox" id="o5"><label for="o5">Pick a connected account so I can read <code>controller.losses.payments</code>.
+            <span class="why">Says who Stripe holds responsible for a negative balance. Needed before Phase&nbsp;3.</span></label></li>
+        </ul>
+        <p class="note" style="margin:10px 0 0">
+          <span class="tag t-ok">closed 12 Aug</span> The policy-less trips question is settled.
+          There were never 23 operator trips — 23 was <em>all</em> trips; only 4 are type C, and
+          A and B never take payment. Three of the four had no policy, and one of those
+          (<strong>El Salvador 26 (Eyal test)</strong>) was already <code>managed</code>, i.e. able
+          to take real money with no terms attached. All three were given the <strong>standard</strong>
+          preset on prod. Type C is now 0 without a policy; A and B untouched.
+        </p>
+      </div>
+
+      <div class="group">
+        <span class="label">Lawyer <span class="tag t-wait">blocks my Phase 4</span></span>
+        <p class="note" style="margin:0 0 8px">Interim decision, 12 Aug: until these exist, the UI <em>behaves as if they do</em> — travelers and operators see the full flow with placeholder documents, and the lawyer's text replaces them wholesale later. Nothing waits on this list to ship UX.</p>
+        <ul>
+          <li><input type="checkbox" id="o7"><label for="o7">Swellyo Operator Agreement.
+            <span class="why">Must say he is the seller and pays us back for refunds and chargebacks. Put the 12% in it — today it lives only in the database.</span></label></li>
+          <li><input type="checkbox" id="o8"><label for="o8">Traveler Terms of Service.</label></li>
+          <li><input type="checkbox" id="o9"><label for="o9">Host both at a public URL.
+            <span class="why">Stripe's consent tick box needs a link.</span></label></li>
+          <li><input type="checkbox" id="o10"><label for="o10">Ask about EU Package Travel and US seller-of-travel registration.</label></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <span class="label">Before flipping Stripe to live mode</span>
+        <ul>
+          <li><input type="checkbox" id="o11"><label for="o11">Read the Phase&nbsp;3 box in the spec.</label></li>
+          <li><input type="checkbox" id="o12"><label for="o12">Run one test-mode trip <em>per operator country</em>.
+            <span class="why"><code>on_behalf_of</code> changes settlement currency and fee structure per country.</span></label></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─────────────── CLAUDE ─────────────── -->
+  <div class="card">
+    <div class="card-head"><strong>Mine — Claude</strong></div>
+    <div class="card-body">
+
+
+      <div class="group">
+        <span class="label">Deferred by you <span class="tag t-warn">documented</span></span>
+        <ul>
+          <li><input type="checkbox" id="c4"><label for="c4">Phase&nbsp;3 — <code>charge.dispute.created</code> / <code>.closed</code> cases in the webhook.
+            <span class="why">There are none today. A dispute would arrive and we would never know.</span></label></li>
+          <li><input type="checkbox" id="c5"><label for="c5">Transfer reversal when a dispute is <em>lost</em>.
+            <span class="why">Not when it opens — if we win, cross-border rules may stop us sending it back.</span></label></li>
+          <li><input type="checkbox" id="c6"><label for="c6"><code>debit_negative_balances</code> at account creation.</label></li>
+          <li><input type="checkbox" id="c7"><label for="c7">Migration: <code>event_type</code> <code>'disputed'</code> / <code>'dispute_lost'</code>.</label></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <span class="label">Next, once the builds in the field carry the tick</span>
+        <ul>
+          <li><input type="checkbox" id="c10"><label for="c10">Refuse checkout server-side when a trip has a policy and no consent row.
+            <span class="why">Today the app fails open: if the record cannot be written the payment still goes through, because a traveler must not be blocked by our audit table. Turning this on before every shipped build records consent would break payments for the old ones.</span></label></li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <span class="label">Blocked on the lawyer</span>
+        <ul>
+          <li><input type="checkbox" id="c8"><label for="c8">Swap the placeholder for the real Operator Agreement text, bump the version.
+            <span class="why">Every operator then gets an unfinished setup step automatically. That mechanism is already built.</span></label></li>
+          <li><input type="checkbox" id="c9"><label for="c9">Stripe <code>consent_collection[terms_of_service]</code> — needs the hosted URL.</label></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<div class="callout">
+  <strong>Why Phase 3 matters the day Stripe goes live</strong>
+  <p>
+    A refund is the operator <em>choosing</em> to give money back — that works now, and it comes out
+    of his balance. A chargeback is the traveler phoning <em>their own bank</em>, which takes the
+    money by force. Stripe debits that from <strong>Swellyo's</strong> account — with or without
+    <code>on_behalf_of</code>. On a $1,000 trip: Swellyo ends at about <strong>−$895</strong>, the
+    operator keeps <strong>+$880</strong>. Recovering it is code we have not written yet.
+  </p>
+</div>
+
+<footer>
+  Full detail, including the money tables and the Stripe quotes, is in
+  <code>docs/specs/operator-trips/refunds-and-merchant-of-record.md</code>.
+  Removed as done: the refund flow on device, the El Salvador policy tick, the fresh-signup ToS
+  row (<code>ip_address</code> and <code>user_agent</code> both landed), the operator
+  country/currency sync, the policy backfill, the operator agreement summary
+  (<code>services/terms/operatorAgreement.ts</code> — swap that one file and set
+  <code>IS_DRAFT = false</code> when the lawyer delivers), and the build items behind them.
+  Committed and pushed as <code>fe7a167</code> on <code>ohad</code>.
+</footer>
+
+</div>
+
+<script>
+  // Ticks persist per browser. A checklist that forgets what you did between
+  // two refreshes is worse than a static list — you stop trusting it.
+  const KEY = 'swellyo-refunds-tasks-v1';
+  const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+  document.querySelectorAll('input[type=checkbox]').forEach(box => {
+    if (saved[box.id]) box.checked = true;
+    box.addEventListener('change', () => {
+      saved[box.id] = box.checked;
+      localStorage.setItem(KEY, JSON.stringify(saved));
+    });
+  });
+</script>
+</body>
+</html>
