@@ -25,6 +25,14 @@ export type OperatorTrip = {
   /** Trip-wide defaults. A traveler's own frozen price wins over these. */
   costPerPerson: number | null;
   depositAmount: number | null;
+  /**
+   * The trip's own frozen cancellation terms, exactly as stored. Passed through
+   * `policyFromTrip()` to become a policy — never cast, because a legacy or
+   * NULL preset must read as "not specified", not as a default.
+   */
+  cancellationPreset: string | null;
+  cancellationRules: unknown;
+  cancellationNotes: string | null;
 };
 
 export type TripMember = {
@@ -38,7 +46,11 @@ export type TripMember = {
 
 const TRIP_COLUMNS =
   'id, title, start_date, end_date, status, max_participants, hosting_style, ' +
-  'host_id, payment_mode, cost_per_person, deposit_amount';
+  'host_id, payment_mode, cost_per_person, deposit_amount, ' +
+  // The trip's FROZEN cancellation terms, taken at publish. Read so the refund
+  // dialog can show the operator the terms they are applying — never read from
+  // `operator_settings`, which is today's default and may have changed since.
+  'cancellation_preset, cancellation_rules, cancellation_notes';
 
 function toTrip(t: any): OperatorTrip {
   return {
@@ -53,6 +65,9 @@ function toTrip(t: any): OperatorTrip {
     paymentMode: t.payment_mode ?? null,
     costPerPerson: toNumber(t.cost_per_person),
     depositAmount: toNumber(t.deposit_amount),
+    cancellationPreset: t.cancellation_preset ?? null,
+    cancellationRules: t.cancellation_rules ?? null,
+    cancellationNotes: t.cancellation_notes ?? null,
   };
 }
 

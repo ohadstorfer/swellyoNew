@@ -51,6 +51,14 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
    - **The table was added by the app's migration set** (`20260810000700_operator_settings.sql`), not by this project. This site consumes it. Rule 1 still means "do not invent schema here".
 
    The point of the original rule was that a read-only site cannot break the product. That is now "a site that can only damage its own operator's defaults", which is a real weakening — so it is written down rather than quietly dropped.
+
+   **Amended again 2026-08-11, for operator setup.** The boundary widened once more, in the same shape:
+
+   - **Storage, not just a table.** The site can now upload one PDF to `defaults/<user_id>/` in the `group-trip-documents` bucket — the operator's default waiver. The policies for that prefix (added by the app's `20260811000000_operator_onboarding.sql`, not by this project) allow only the owner to insert, read and delete.
+   - **Still own-data only.** It cannot touch `<trip_id>/` — the traveler documents and the per-trip waivers — which is where every sensitive file lives.
+   - **Why it is here at all:** setup is four steps, and three of them are already on this site. Sending an operator to their phone for one PDF, on the screen where they do everything else, is the kind of gap that makes people give up halfway.
+
+   **Stripe is the exception and stays one.** Connect onboarding needs the secret key and lives behind an edge function the app calls. Step 1 of setup reports the state and points at the app. Do not build a second onboarding path here.
 2. **The database is the security boundary.** Row Level Security decides what an operator can see. The website cannot see a trip it does not host, even if the code asks for it.
 3. **No backend.** The browser talks to Supabase directly. Netlify serves static files only.
 4. **Files are private.** Every view or download uses a short-lived signed link. There are no public file URLs.
@@ -75,7 +83,20 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
 /trips/:id/money              every traveler's price, what they paid, the ledger
 /trips/:id/d/:requirementId   one requirement, everyone, with export
 /trips/:id/t/:userId          one traveler
+/settings                     defaults: currency, cancellation policy, payments
+/setup                        operator onboarding — the four things, once
 ```
+
+### 4.0 Setup
+
+The four things an operator settles before they can sell a trip: Stripe, price currency, cancellation policy, default waiver. Added 11 August 2026, mirroring the app's `OperatorSetupScreen`.
+
+- **A checklist, not a wizard.** The steps are independent, Stripe review can take days, and people leave and come back. A checklist reopens showing what is left.
+- **Three of four can be finished here.** Stripe cannot — see the exception in Rule 1. That step reports its state and points at the app.
+- **Confirming counts as doing.** Currency and policy both have working defaults, so an operator can finish those without changing anything. What setup asks is that they *looked* — recorded in `currency_confirmed_at` / `policy_confirmed_at`. A null-check on the values would call an untouched operator finished, which is the whole reason those columns exist.
+- **A banner sits above every page** until setup is done, naming the next step with a 4-segment progress bar. Not dismissable: while it shows, the operator cannot sell a trip, and burying it would hide the only explanation. It renders nothing until both reads settle, so a finished operator never sees it flash.
+
+The shared rule lives in `src/domain/operatorSetup.ts`. It is **not** a byte copy of the app's, because the two learn about Stripe differently — the app reads Stripe's live `requirements` arrays through an edge function, this site reads four booleans off `operator_payout_accounts`. The steps and their meaning are shared; only the Stripe input differs. Anything else that drifts is a bug.
 
 ### 4.1 Trips list
 

@@ -941,15 +941,6 @@ export async function publishWaiverPdf(
   tripId: string,
   localUri: string,
 ): Promise<string> {
-  const { data: latest } = await supabase
-    .from('organized_trip_operator_documents')
-    .select('version')
-    .eq('trip_id', tripId)
-    .eq('kind', 'waiver')
-    .order('version', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
   const documentId = Crypto.randomUUID();
   // Must match the operator-materials policy regex exactly:
   //   ^<uuid>/operator/<uuid>\.(jpg|jpeg|png|heic|pdf)$
@@ -962,6 +953,67 @@ export async function publishWaiverPdf(
   if (upErr) throw upErr;
 
   const documentHash = await sha256OfFile(localUri);
+  return recordWaiverDocument(tripId, storagePath, documentHash);
+}
+
+/**
+ * Publish the operator's DEFAULT waiver onto one trip, by copying it.
+ *
+ * The default is a template living at `defaults/<user_id>/<uuid>.pdf`, and it
+ * stays there. Copying rather than referencing is the whole design:
+ *
+ *  · The storage policy for `<trip_id>/operator/...` gates on
+ *    `is_trip_host(trip_id)`. A user-keyed path cannot satisfy it, and widening
+ *    that policy so one object could serve many trips would mean travelers on
+ *    every trip could read it.
+ *  · `organized_trip_operator_documents.trip_id` is NOT NULL, and the agreement
+ *    check matches a traveler's acknowledgement to the CURRENT document id.
+ *    One shared row across trips has no coherent version number.
+ *  · Replacing the default later must not silently rewrite the terms already
+ *    agreed on a live trip. A copy is frozen; a reference would not be.
+ *
+ * So each trip ends up with its own object and its own row, exactly as if the
+ * operator had uploaded the file by hand — every downstream rule is untouched.
+ *
+ * The hash is carried across rather than recomputed: it is the hash of the same
+ * bytes, and we cannot read a remote object cheaply to re-derive it.
+ */
+export async function publishWaiverFromDefault(
+  tripId: string,
+  waiver: { path: string; hash: string },
+): Promise<string> {
+  const documentId = Crypto.randomUUID();
+  const storagePath = `${tripId}/operator/${documentId}.pdf`;
+
+  const { error: copyErr } = await supabase.storage
+    .from(BUCKET)
+    .copy(waiver.path, storagePath);
+  if (copyErr) throw copyErr;
+
+  return recordWaiverDocument(tripId, storagePath, waiver.hash);
+}
+
+/**
+ * The row + requirement promotion shared by both publish paths.
+ *
+ * Extracted so an uploaded waiver and a copied one cannot drift: the version
+ * numbering and the must_have promotion are the rules that make a waiver
+ * satisfiable at all, and having them written twice is how one of them ends up
+ * missing from the newer path.
+ */
+async function recordWaiverDocument(
+  tripId: string,
+  storagePath: string,
+  documentHash: string | null,
+): Promise<string> {
+  const { data: latest } = await supabase
+    .from('organized_trip_operator_documents')
+    .select('version')
+    .eq('trip_id', tripId)
+    .eq('kind', 'waiver')
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   const { data, error } = await supabase
     .from('organized_trip_operator_documents')
@@ -1006,6 +1058,126 @@ export async function publishWaiverPdf(
   }
 
   return data.id as string;
+}
+
+/**
+ * Upload (or replace) the operator's default waiver template.
+ *
+ * Returns the metadata for `operator_settings`; the caller writes the row. The
+ * OLD object is deleted only AFTER the new one is up — a failed upload must
+ * never leave an operator with no waiver at all, and an orphan is cheaper than
+ * a gap. Nothing else points at the old object: trips hold their own copies.
+ *
+ * The hash is REQUIRED here, unlike on the trip path where a missing hash is
+ * survivable. This file is copied into every future trip, so an unhashable
+ * template would quietly produce unprovable waivers on all of them.
+ */
+export async function uploadDefaultWaiver(
+  localUri: string,
+  previousPath?: string | null,
+): Promise<{ path: string; hash: string; sizeBytes: number }> {
+  const { data: sess } = await supabase.auth.getSession();
+  const uid = sess.session?.user?.id;
+  if (!uid) throw new Error('Not signed in');
+
+  const documentHash = await sha256OfFile(localUri);
+  if (!documentHash) {
+    throw new Error('Could not read that file. Try choosing it again.');
+  }
+
+  const documentId = Crypto.randomUUID();
+  // Must match the default-waiver policy regex exactly:
+  //   ^defaults/<uuid>/<uuid>\.pdf$
+  const storagePath = `defaults/${uid}/${documentId}.pdf`;
+
+  const body = await toUploadBody(localUri, 'application/pdf');
+  const { error: upErr } = await supabase.storage
+    .from(BUCKET)
+    .upload(storagePath, body, { contentType: 'application/pdf', upsert: false });
+  if (upErr) throw upErr;
+
+  const sizeBytes = await byteSizeOf(localUri);
+
+  if (previousPath && previousPath !== storagePath) {
+    const { error: rmErr } = await supabase.storage.from(BUCKET).remove([previousPath]);
+    // An orphan template is invisible and harmless — it is owner-only and
+    // referenced by nothing. Failing the upload over it would not be.
+    if (rmErr) {
+      console.warn('[tripDocumentsService] old default waiver not removed:', rmErr.message);
+    }
+  }
+
+  return { path: storagePath, hash: documentHash, sizeBytes };
+}
+
+/**
+ * Upload (or replace) the operator's insurance certificate.
+ *
+ * PHOTO OR PDF, unlike the waiver. Insurance certificates arrive as a
+ * photograph of a paper document at least as often as a file, and refusing
+ * that would send an operator away to find a scanner. The storage policy for
+ * `defaults/` accepts the bucket's whole allowlist (jpg/jpeg/png/heic/pdf) —
+ * widened for exactly this in `20260811000200_operator_insurance_and_terms.sql`.
+ *
+ * No hash, unlike the waiver: nothing is copied onto a trip and nobody agrees
+ * to this file, so there is nothing to prove it against later.
+ */
+export async function uploadOperatorInsurance(
+  localUri: string,
+  fileName: string,
+  previousPath?: string | null,
+): Promise<{ path: string; mime: string; sizeBytes: number }> {
+  const { data: sess } = await supabase.auth.getSession();
+  const uid = sess.session?.user?.id;
+  if (!uid) throw new Error('Not signed in');
+
+  // Extension drives BOTH the object name and the content type. The storage
+  // policy matches on the extension, and the bucket's allowed_mime_types
+  // matches on the content type — a mismatch between them is a 400 that reads
+  // like a permissions error.
+  const ext = (fileName.split('.').pop() ?? '').toLowerCase();
+  const MIME: Record<string, string> = {
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    heic: 'image/heic',
+  };
+  const mime = MIME[ext];
+  if (!mime) {
+    throw new Error('Use a PDF or a photo (JPG, PNG or HEIC).');
+  }
+
+  const documentId = Crypto.randomUUID();
+  const storagePath = `defaults/${uid}/${documentId}.${ext}`;
+
+  const body = await toUploadBody(localUri, mime);
+  const { error: upErr } = await supabase.storage
+    .from(BUCKET)
+    .upload(storagePath, body, { contentType: mime, upsert: false });
+  if (upErr) throw upErr;
+
+  const sizeBytes = await byteSizeOf(localUri);
+
+  if (previousPath && previousPath !== storagePath) {
+    const { error: rmErr } = await supabase.storage.from(BUCKET).remove([previousPath]);
+    // An orphan is owner-only and invisible. Failing the upload over it is not.
+    if (rmErr) {
+      console.warn('[tripDocumentsService] old insurance not removed:', rmErr.message);
+    }
+  }
+
+  return { path: storagePath, mime, sizeBytes };
+}
+
+/** A short-lived signed URL for the operator to check their own template. */
+export async function signDefaultWaiverUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60);
+  if (error) {
+    console.warn('[tripDocumentsService] could not sign default waiver:', error.message);
+    return null;
+  }
+  return data?.signedUrl ?? null;
 }
 
 /** SHA-256 of a local file, as lowercase hex. Hashes the real bytes, not a

@@ -51,6 +51,9 @@ export const fromCents = (cents: number): number => cents / 100;
 // ---------------------------------------------------------------------------
 
 export type PaymentEvent = {
+  /** The row id. `payments-refund` takes this — a refund is issued against one
+   *  recorded payment, never against a traveler or a running total. */
+  id: string;
   userId: string;
   requirementId: string | null;
   /** 'paid' | 'refunded' | 'failed'. A refund carries a negative amount. */
@@ -150,6 +153,7 @@ export function buildTripMoney(input: TripMoneyInput): TripMoney {
   const counted: PaymentEvent[] = events
     .filter(e => e.eventType !== 'failed' && e.isLivemode === liveMode)
     .map(e => ({
+      id: e.id,
       userId: e.userId,
       requirementId: e.requirementId,
       eventType: e.eventType,
@@ -247,7 +251,7 @@ export async function fetchTripMoney(tripId: string): Promise<TripMoney> {
       .eq('is_active', true),
     supabase
       .from('organized_trip_payment_events')
-      .select('user_id, requirement_id, event_type, amount_usd, is_livemode, created_at')
+      .select('id, user_id, requirement_id, event_type, amount_usd, is_livemode, created_at')
       .eq('trip_id', tripId)
       .order('created_at', { ascending: false }),
   ]);
@@ -282,6 +286,7 @@ export async function fetchTripMoney(tripId: string): Promise<TripMoney> {
       paymentMode: (tripRes.data?.payment_mode as string | null) ?? null,
     },
     events: (eventRes.data ?? []).map((e: any) => ({
+      id: e.id as string,
       userId: e.user_id as string,
       requirementId: (e.requirement_id as string | null) ?? null,
       eventType: (e.event_type as string) ?? 'paid',

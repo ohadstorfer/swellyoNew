@@ -79,7 +79,7 @@ export async function fetchPaySteps(tripId: string): Promise<PayStep[]> {
 export async function fetchPaymentEvents(tripId: string): Promise<PaymentEvent[]> {
   const { data, error } = await supabase
     .from('organized_trip_payment_events')
-    .select('user_id, requirement_id, event_type, amount_usd, is_livemode, created_at')
+    .select('id, user_id, requirement_id, event_type, amount_usd, is_livemode, created_at')
     .eq('trip_id', tripId)
     .order('created_at', { ascending: false });
 
@@ -87,6 +87,7 @@ export async function fetchPaymentEvents(tripId: string): Promise<PaymentEvent[]
 
   return (data ?? []).map(
     (r: any): PaymentEvent => ({
+      id: r.id,
       userId: r.user_id,
       requirementId: r.requirement_id ?? null,
       eventType: r.event_type ?? 'paid',

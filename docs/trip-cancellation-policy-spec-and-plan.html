@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cancellation policy on the trip — spec &amp; plan</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --wait:#5b5bb0; --wait-bg:#eeeefb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:0 0 14px}
+  .rule b{color:var(--cyan-dark)}
+  .rule.ok{background:var(--ok-bg)} .rule.ok b{color:var(--ok)}
+  .rule.warn{background:var(--open-bg)} .rule.warn b{color:var(--open)}
+  .rule ul{margin-top:6px}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:660;margin:0 0 6px}
+  .part{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:48px 0 4px;
+    padding:10px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  p.lead{font-size:14px;color:#3a3a36;margin-bottom:14px}
+
+  ul{list-style:none}
+  ul li{padding-left:16px;position:relative;margin-bottom:5px}
+  ul li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;
+    border-radius:99px;background:var(--line)}
+  ul li b{font-weight:640}
+  ol{margin-left:18px}
+  ol li{margin-bottom:7px}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead strong{font-size:14px;font-weight:660}
+  .chead span{font-size:13px;color:var(--muted)}
+  .cbody{padding:12px 16px;font-size:14px}
+  .cbody p+p,.cbody p+ul,.cbody ul+p{margin-top:8px}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-wait{color:var(--wait);background:var(--wait-bg)}
+
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;overflow-x:auto;margin:10px 0;
+    font:12.5px/1.5 ui-monospace,Menlo,monospace}
+  pre code{background:none;padding:0}
+
+  .tscroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:14px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:680;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 16px;border-top:1px solid var(--line);vertical-align:top}
+  td:first-child{font-weight:620;white-space:nowrap}
+
+  .ex{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:10px 14px;margin:10px 0;font-size:13.5px}
+  .ex .good{color:var(--ok);font-weight:640}
+  .ex .bad{color:var(--open);font-weight:640}
+
+  .quote{border-left:3px solid var(--cyan);background:var(--cyan-tint);
+    padding:8px 14px;border-radius:0 8px 8px 0;font-size:13.5px;margin:10px 0;font-style:italic}
+
+  a{color:var(--cyan-dark)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Cancellation policy on the trip — spec &amp; plan</h1>
+  <p class="sub">11 August 2026 · rev 1 · operator trips (type C)</p>
+
+  <div class="rule">
+    <b>What we are building, in one breath.</b>
+    <ul>
+      <li>The operator's policy is copied onto the trip <b>when it is published</b>, and frozen there.</li>
+      <li>The traveler <b>reads it before they pay</b> — in the app, and on the Stripe page itself.</li>
+      <li>Changing your default later never touches a trip you already sold.</li>
+    </ul>
+  </div>
+
+  <h2>Why this is needed</h2>
+  <p class="lead">
+    Today the policy exists only as an operator's private default. No trip carries one and
+    no traveler screen reads one. So an operator can pick "No refunds", and the person paying
+    a $500 deposit is never told.
+  </p>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="part">Part 1 — The spec</div>
+
+  <h2>The rule</h2>
+
+  <div class="card">
+    <div class="chead"><strong>Frozen at publish, never read live</strong></div>
+    <div class="cbody">
+      <p>The trip keeps its <b>own copy</b> of the policy. Nothing ever reads
+      <code>operator_settings</code> to show a traveler anything.</p>
+      <p>Same reasoning as the default waiver: an operator who switches their default to
+      "No refunds" in March must not silently rewrite what someone agreed to in January.</p>
+      <div class="ex">
+        <span class="good">Right:</span> trip stores <code>standard</code> → traveler sees "Full refund up to 60 days before".<br>
+        <span class="bad">Wrong:</span> trip reads the operator's current default → the terms change under the traveler's feet.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chead"><strong>No policy is a real state</strong> <span>NULL ≠ "no refunds"</span></div>
+    <div class="cbody">
+      <p>Type A and B trips have no policy at all, and so do the 23 operator trips that already
+      exist. <code>cancellation_preset = NULL</code> means <b>not specified</b>.</p>
+      <p>The traveler UI shows <b>nothing</b> in that case — no section, no line at checkout.
+      We do not backfill old trips from the operator's current default: that would be inventing
+      terms for trips already sold.</p>
+    </div>
+  </div>
+
+  <h2>Where the traveler sees it</h2>
+
+  <div class="tscroll">
+  <table>
+    <thead><tr><th>Moment</th><th>Surface</th><th>What shows</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Browsing</td>
+        <td>—</td>
+        <td><b>Nothing.</b> No new section on the Plan tab (Ohad, 11 Aug). The policy is shown
+          at the moment money moves, not while browsing.</td>
+      </tr>
+      <tr>
+        <td>Paying the <b>deposit</b></td>
+        <td><b>Stripe Checkout page</b></td>
+        <td>The policy above the Pay button. <b>The only place it can go</b> — see below.</td>
+      </tr>
+      <tr>
+        <td>Paying the <b>balance</b></td>
+        <td><code>PayAmountSheet</code> + Stripe page</td>
+        <td>One line in the sheet, full text on the Stripe page.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="rule warn">
+    <b>The deposit has no in-app payment sheet.</b>
+    <ul>
+      <li>From <code>TravelerOnboardingScreen</code>: <i>"the deposit has no sheet, it goes straight to Checkout"</i>.</li>
+      <li>A deposit is all-or-nothing, so <code>PayAmountSheet</code> is <b>never</b> opened for it.</li>
+      <li>That means the Stripe page is the <b>only</b> surface between the traveler and the
+        first, largest payment. Putting the policy there is not a nice-to-have.</li>
+    </ul>
+  </div>
+
+  <h2>What the Stripe page shows</h2>
+  <p class="lead">
+    Stripe Checkout takes <code>custom_text[submit][message]</code> — free text rendered
+    directly above the Pay button. Max 1200 characters.
+  </p>
+
+  <div class="ex">
+    <b>Example rendered on the Stripe page:</b><br>
+    <span style="color:#6b6b66">Cancellation policy — Cancel 60+ days before: 100% back · Less than 60 days before: nothing.
+    Refunds are paid by the trip operator, not Swellyo.</span>
+  </div>
+
+  <ul>
+    <li>Built from the same <code>explain()</code> the app uses, joined with " · ".</li>
+    <li><b>Truncated to 1200 chars</b>, because a long "Notes" field can blow the limit and
+      Stripe would reject the whole session — no payment at all.</li>
+    <li>Ends with who pays refunds. On an operator trip the money is in the operator's Stripe
+      account and Swellyo has no refund path, so the page must not imply we do.</li>
+    <li>Omitted entirely when the trip has no policy. No empty label.</li>
+  </ul>
+
+  <h3>Considered and rejected: a required tick-box</h3>
+  <p>Stripe also offers <code>consent_collection[terms_of_service] = required</code>, which
+  forces a checkbox and records consent on the session. Rejected for now:</p>
+  <ul>
+    <li>It needs a <b>hosted URL</b> for the terms. We have no public page per trip.</li>
+    <li>The traveler already signs a waiver in onboarding — a second forced agreement at the
+      till is friction on the step where people abandon.</li>
+    <li>Worth revisiting when there is a real terms page.</li>
+  </ul>
+
+  <h2>Where the operator sets it</h2>
+  <ul>
+    <li>One card on the <b>budget step</b> of the wizard (already titled "Pricing" for operator trips).</li>
+    <li>Pre-filled from their onboarding default. Leaving it alone <b>is</b> the skip.</li>
+    <li>"Change" opens the existing <code>CancellationPolicySheet</code> — the same control as
+      Settings, so the two cannot drift.</li>
+    <li>Not a new wizard step. It is a term of sale, like the price, and it belongs next to the price.</li>
+  </ul>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="part">Part 2 — The plan</div>
+
+  <h2>Step 1 — Migration <span class="tag t-open">needs applying by hand</span></h2>
+  <pre><code>alter table public.group_trips
+  add column if not exists cancellation_preset text,
+  add column if not exists cancellation_rules  jsonb not null default '[]'::jsonb,
+  add column if not exists cancellation_notes  text;</code></pre>
+  <ul>
+    <li>Same column names as <code>operator_settings</code>, so <code>toPreset</code>,
+      <code>rulesFromWire</code>, <code>explain</code> and <code>summarise</code> all work on a
+      trip with <b>no new code</b>.</li>
+    <li>Additive and nullable — safe on the 23 live trips.</li>
+    <li>Plus a CHECK on the preset values, matching the one on <code>operator_settings</code>.</li>
+  </ul>
+
+  <div class="rule warn">
+    <b>The trap: do NOT reuse <code>normalise_operator_cancellation</code> on this table.</b>
+    <ul>
+      <li>It opens with <code>if new.cancellation_preset &lt;&gt; 'custom'</code>.</li>
+      <li>When the preset is <code>NULL</code>, that comparison is <code>NULL</code> — not true —
+        so it falls through to the custom branch and raises
+        <i>"A custom cancellation policy needs at least one rule"</i>.</li>
+      <li>That would <b>break creating every type A and B trip</b>.</li>
+      <li>Fix: a separate trigger function for trips that returns early on <code>NULL</code>,
+        then runs the same checks. Do not edit the shared one —
+        <code>operator_settings</code> depends on it.</li>
+    </ul>
+  </div>
+
+  <h2>Step 2 — Types <span class="tag t-ok">tiny</span></h2>
+  <ul>
+    <li>Three fields on <code>GroupTrip</code> and <code>CreateGroupTripInput</code>.</li>
+    <li><code>createGroupTrip</code> does <code>.insert({ ...input })</code> — a spread — so
+      <b>no service change</b>.</li>
+    <li><code>getTripById</code> does <code>select('*')</code> — so the detail screen gets the
+      columns with <b>no query change</b>.</li>
+    <li>The feed RPCs (<code>explore_feed</code>, <code>my_trips_feed</code>) are
+      <b>untouched</b>. The policy is not card data.</li>
+  </ul>
+
+  <h2>Step 3 — Wizard</h2>
+  <ul>
+    <li>Add the policy to <code>WizardState</code>, seeded from the operator's default.</li>
+    <li>Read it defensively so <b><code>WIZARD_STATE_VERSION</code> does not need bumping</b> —
+      an old saved draft simply lacks the field and falls back to the default.</li>
+    <li>One card on the budget step; "Change" opens <code>CancellationPolicySheet</code>.</li>
+    <li>At publish, the three values go into the create input.</li>
+  </ul>
+
+  <h2>Step 4 — Traveler, in the app</h2>
+  <ul>
+    <li>One summary line in <code>PayAmountSheet</code> (balance payments only — the deposit
+      never opens it). Hidden when the trip has no policy.</li>
+    <li><b>No Plan-tab section.</b> Cut deliberately: it is one more block of small print on a
+      screen that already has plenty, and the place a refund rule actually needs reading is the
+      screen where money is about to move — which is the Stripe page, covered in Step 5.</li>
+  </ul>
+
+  <h2>Step 5 — Traveler, on the Stripe page</h2>
+  <p class="lead">Two edits in <code>supabase/functions/payments-checkout/index.ts</code>.</p>
+  <ol>
+    <li>Add the three columns to the trip select. It currently reads
+      <code>'id, title, host_id, payment_mode, max_participants'</code> — an <b>explicit list</b>,
+      so the new columns will not arrive on their own.</li>
+    <li>Add <code>custom_text[submit][message]</code>, built from <code>explain()</code> and
+      capped at 1200 chars.</li>
+  </ol>
+
+  <div class="rule warn">
+    <b>Bump the idempotency key.</b>
+    <ul>
+      <li>The file says: <i>"BUMP THIS STRING whenever any field of the create call below changes."</i></li>
+      <li><code>checkout:m2:</code> → <code>checkout:m3:</code>.</li>
+      <li>A key reused with different parameters is a <b>400 from Stripe, not a replay</b>.
+        The comment records that this exact mistake <b>took the whole payment flow down</b> once.</li>
+    </ul>
+  </div>
+
+  <h2>Deploy order</h2>
+  <ol>
+    <li>Migration by hand.</li>
+    <li>Deploy <code>payments-checkout</code> — safe before the client ships: with no policy on
+      any trip yet, the new text is simply omitted.</li>
+    <li>Ship the client.</li>
+  </ol>
+
+  <h2>Out of scope, on purpose</h2>
+  <ul>
+    <li><b>Editing the policy on a published trip.</b> Changing terms after people have paid is
+      its own decision — who gets told, and whether old participants keep the old terms.
+      <code>OperatorTripEditScreen</code> stays as it is.</li>
+    <li><b>Actually processing refunds.</b> Swellyo has no refund path. The policy is a promise
+      the operator makes and pays from their own Stripe account. Every string we write must keep
+      saying that.</li>
+    <li><b>Backfilling the 23 existing trips.</b> They stay NULL.</li>
+  </ul>
+
+  <h2>How we will know it worked</h2>
+  <ul>
+    <li>Publish an operator trip with "No refunds" → the Plan tab shows it.</li>
+    <li>Start a deposit payment → the Stripe page shows it above the Pay button.</li>
+    <li>Change the operator default afterwards → the published trip is <b>unchanged</b>.</li>
+    <li>Create a type A trip → still works (the NULL-preset trigger trap).</li>
+  </ul>
+
+</div>
+</body>
+</html>

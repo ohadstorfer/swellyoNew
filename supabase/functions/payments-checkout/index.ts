@@ -78,6 +78,73 @@ const toCents = (usd: number) => Math.round(usd * 100);
 const feeCents = (total: number, bps: number) =>
   Math.min(total, Math.round((total * bps) / 10000));
 
+/**
+ * The refund terms as one line, for `custom_text[submit][message]`.
+ *
+ * A deliberate hand-rolled copy of `explain()` from
+ * `src/services/trips/cancellationPolicy.ts`. Edge functions cannot import from
+ * `src/`, and the alternative — the client sending the text — would let the app
+ * decide what a traveler is promised. Keep the two in step.
+ *
+ * Returns '' when the trip has no policy. NULL preset is a real state: every
+ * type A/B trip, and every operator trip published before these columns
+ * existed. It must render nothing, never a default — inventing terms for a trip
+ * that never stated any is the exact failure this feature prevents.
+ */
+const STRIPE_CUSTOM_TEXT_MAX = 1200;
+
+function buildPolicyLine(trip: {
+  cancellation_preset?: unknown;
+  cancellation_rules?: unknown;
+  cancellation_notes?: unknown;
+}): string {
+  const preset = trip?.cancellation_preset;
+  if (preset !== 'standard' && preset !== 'non_refundable' && preset !== 'custom') return '';
+
+  // Mirrors PRESET_RULES: 'standard' is [{60,100}], 'non_refundable' is [].
+  let rules: { days: number; pct: number }[] = [];
+  if (preset === 'standard') {
+    rules = [{ days: 60, pct: 100 }];
+  } else if (preset === 'custom') {
+    const raw = Array.isArray(trip.cancellation_rules) ? trip.cancellation_rules : [];
+    rules = raw
+      .map((r: any) => ({ days: Number(r?.days_before), pct: Number(r?.refund_pct) }))
+      .filter(r => Number.isFinite(r.days) && Number.isFinite(r.pct))
+      .sort((a, b) => b.days - a.days);
+  }
+
+  const steps =
+    rules.length === 0
+      ? ['No refund at any time.']
+      : [
+          ...rules.map(r => `Cancel ${r.days}+ days before: ${r.pct}% back.`),
+          // The tail is the case people are actually caught by, so it is stated
+          // rather than left as the absence of a rule.
+          ...(rules[rules.length - 1].days > 0
+            ? [`Less than ${rules[rules.length - 1].days} days before: nothing.`]
+            : []),
+        ];
+
+  const notes =
+    typeof trip.cancellation_notes === 'string' && trip.cancellation_notes.trim()
+      ? ` ${trip.cancellation_notes.trim()}`
+      : '';
+
+  // "Paid by the operator" is not filler. On an operator trip the money lands in
+  // the operator's own Stripe account and Swellyo has no refund path at all, so
+  // this page must not let a traveler read the terms as our promise.
+  const line =
+    `Cancellation policy — ${steps.join(' ')}${notes}` +
+    ` Refunds are paid by the trip operator, not Swellyo.`;
+
+  // Stripe REJECTS the whole session over an oversized custom_text, which would
+  // mean no payment at all. A free-text note is operator-supplied and can be up
+  // to 2000 chars on its own, so this cap is load-bearing, not defensive.
+  return line.length <= STRIPE_CUSTOM_TEXT_MAX
+    ? line
+    : `${line.slice(0, STRIPE_CUSTOM_TEXT_MAX - 1)}…`;
+}
+
 serve(async req => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
@@ -184,7 +251,16 @@ serve(async req => {
     //      receive. Re-checked here because the client is not trustworthy.
     const { data: trip } = await supabase
       .from('group_trips')
-      .select('id, title, host_id, payment_mode, max_participants')
+      // ⚠️ Explicit list — a new column does NOT arrive on its own. The three
+      // cancellation_* columns are here so the Stripe page can state the refund
+      // terms; see `policyLine` below for why that page matters so much.
+      //
+      // ⚠️ ONE STRING LITERAL, never a concatenation. supabase-js parses this
+      // argument at the TYPE level to build the row type, and it can only do
+      // that for a literal — splitting it across a `+` collapses the whole row
+      // to `GenericStringError` and every `trip.<field>` below stops compiling.
+      // eslint-disable-next-line max-len
+      .select('id, title, host_id, payment_mode, max_participants, cancellation_preset, cancellation_rules, cancellation_notes')
       .eq('id', req_.trip_id)
       .single();
 
@@ -373,6 +449,18 @@ serve(async req => {
     // this also has to survive the missing row.
     const commission = routeToOperator ? feeCents(amountCents, host!.commission_bps) : 0;
 
+    // ── The cancellation policy, for the Stripe page ────────────────────────
+    //
+    // THIS IS THE ONLY SURFACE A DEPOSIT EVER SEES. `PayAmountSheet` is never
+    // opened for a deposit — a deposit is all-or-nothing, so the app sends the
+    // traveler straight from a button to Stripe. That makes this text the sole
+    // thing standing between someone and their first, largest payment.
+    //
+    // Built here rather than sent by the client: what a traveler is told the
+    // refund terms are must come from the trip row, not from whatever the app
+    // happened to have cached.
+    const policyLine = buildPolicyLine(trip);
+
     // I9: the ledger only moves once the webhook fires, so two checkouts
     // opened back to back both compute the full outstanding amount and both
     // could be paid. Stripe's list endpoint has no server-side metadata
@@ -527,7 +615,12 @@ serve(async req => {
     // Safe to bump: the open-session lookup above already early-returns a
     // matching live session, so a new key does not mint a duplicate payable
     // session — it only takes effect where no fresh session existed anyway.
-    const idempotencyKey = `checkout:m2:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
+    // m2 → m3: `custom_text[submit][message]` joined the create call. Reusing a
+    // key with different parameters is a 400 from Stripe, NOT a replay — the
+    // note above records that this exact mistake took the whole payment flow
+    // down once.
+    // m3 → m4: `payment_intent_data[on_behalf_of]` joined the create call.
+    const idempotencyKey = `checkout:m4:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
     const session = await stripe(
       'checkout/sessions',
       {
@@ -544,6 +637,43 @@ serve(async req => {
           ? {
               'payment_intent_data[application_fee_amount]': String(commission),
               'payment_intent_data[transfer_data][destination]': host!.stripe_account_id as string,
+              // ⚠️ THIS LINE IS WHAT MAKES THE OPERATOR THE MERCHANT OF RECORD.
+              // Phase 1 of docs/specs/operator-trips/refunds-and-merchant-of-record.md.
+              //
+              // Without it, a destination charge settles on the PLATFORM: the
+              // traveler's statement says Swellyo, and Stripe treats us as the
+              // legal seller of a surf trip we do not run. With it, the
+              // operator is the settlement merchant — which is the whole point
+              // of the model (we are the payment rail, he is the seller).
+              //
+              // Allowed on Express accounts: the gate is the CAPABILITY, not
+              // the account type. Stripe: "supported only for connected
+              // accounts with a payments capability such as card_payments.
+              // Accounts under the recipient service agreement can't request
+              // card_payments". `stripe-connect-onboard` requests
+              // card_payments at creation, and `routeToOperator` above already
+              // requires `charges_enabled`, so by here the capability is live.
+              // (The separate `merchant` configuration requirement applies only
+              // to accounts created with the Accounts v2 API; ours are v1
+              // `type: 'express'`.)
+              //
+              // KNOWN, ACCEPTED SIDE EFFECTS — all documented by Stripe, none
+              // of them bugs:
+              //   • the charge settles in the OPERATOR's country and settlement
+              //     currency, and their country's fee structure applies;
+              //   • their statement descriptor, address and phone show on the
+              //     traveler's card statement;
+              //   • the Stripe Checkout page uses THEIR branding, not ours —
+              //     signed off 2026-08-11, because the payment flow has to
+              //     identify the seller;
+              //   • payout timing follows their `delay_days`, not ours.
+              //
+              // WHAT IT DOES NOT DO: it does not move chargebacks. Stripe
+              // debits disputes from the PLATFORM account "with or without
+              // on_behalf_of". Recovering them is a transfer reversal we still
+              // have to build — Phase 3 of the spec. Do not read this line as
+              // dispute protection.
+              'payment_intent_data[on_behalf_of]': host!.stripe_account_id as string,
             }
           : {}),
         // The webhook reads these back. They are the only link from a Stripe
@@ -562,6 +692,10 @@ serve(async req => {
         // 400, not a replay. That mistake took the whole payment flow down.
         success_url: withMarker(returnUrl, 'success'),
         cancel_url: withMarker(returnUrl, 'cancel'),
+        // The refund terms, rendered by Stripe directly above the Pay button.
+        // Omitted entirely when the trip has no policy — an empty custom_text
+        // would print a bare heading with nothing under it.
+        ...(policyLine ? { 'custom_text[submit][message]': policyLine } : {}),
       },
       idempotencyKey,
     );

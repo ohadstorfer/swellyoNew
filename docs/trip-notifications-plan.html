@@ -305,15 +305,6 @@ const ITEMS = [
   bell:['Passport expires {date}','Most countries want 6 months left after you travel.'],
   note:'We already store <code>expiry_date</code> from the passport scan. Nothing looks at it. This is the cheapest real-value notification on the page.' },
 
-{ group:'Documents', id:'DOC-7', on:true, status:'new', aud:'Traveler',
-  key:'operator_last_call',
-  title:'Last call before departure',
-  who:'Anything at all still missing, and the trip starts very soon.',
-  timing:'-3, -1 days before departure',
-  push:['{count} things still missing for {trip}','The trip starts in {days} days'],
-  bell:['{count} things still missing','{trip} starts in {days} days. Open your list.'],
-  note:'The one bundled message. Ignores each item’s own due date — departure is the real deadline.' },
-
 /* ── MONEY ───────────────────────────────────────────── */
 { group:'Money', id:'PAY-1', on:false, status:'new', aud:'Traveler',
   key:'operator_payment_due_soon:deposit',
@@ -429,11 +420,11 @@ const ITEMS = [
 { group:'Personal gear', id:'PRS-2', on:true, status:'new', aud:'Traveler',
   key:'personal_gear_unchecked',
   title:'Personal gear not ticked off',
-  who:'The host listed items and this person ticked none of them.',
+  who:'How many items on the host’s list this person has not ticked yet. Any number above zero, not only “ticked nothing”.',
   timing:'-3, -1 days before departure',
   push:['Packing for {trip}','{count} things on your list are not ticked'],
   bell:['{count} things not ticked','Open your packing list for {trip}.'],
-  note:'We store the host list and the personal list separately, so we can already tell. Nothing reads it yet.' },
+  note:'<b>Counts what is left, item by item.</b> Ticked 6 of 8 → “2 things not ticked”. Ticked all 8 → nothing sent. We store the host list and the personal list separately, so we can already tell. Nothing reads it yet.<br><br><b>DOC-7 was folded into this one</b> (Ohad, 2026-08-09): “Last call before departure” was a bundle of everything missing, and scoping it to personal gear made it the same notification as this one — same days, same count, same words.' },
 
 /* ── TRIP ────────────────────────────────────────────── */
 { group:'The trip itself', id:'TRP-1', on:true, status:'live', aud:'Everyone',
@@ -541,12 +532,11 @@ const ITEMS = [
    Render
    ───────────────────────────────────────────────────────── */
 const MYNOTES = {
-  'DOC-7':'what area the things it counts? sounds a bit too general unless you have something specific in mind',
   'PAY-1':'irrelevant if deposit is the blocker from getting into a trip',
   'PAY-5':'irrelevant if we have the payment reminder to anyone that havent completed the full payment',
   'PAY-6':'idk..... but if a payment actually didnt go through for any reason, we should diffidently notify about it',
   'FRM-2':'irrelevant if waiver is mandatory to sign before getting into the trip',
-  'PRS-2':'it says "..... ticket *none of them" - so which is it? the travler didnt tick any of them at all so he gets notified? or if he has some left that he did not tick yet so he gets notified for it?',
+  'PRS-2':'Q (Eyal): none of them, or some left? → A (Ohad): the amount of items not ticked yet, not "if none of them". Also absorbed DOC-7 — "last call" scoped to personal gear was this same notification.',
   'OPS-7':'not something we should tackle at V1',
 };
 

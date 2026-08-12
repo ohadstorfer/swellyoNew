@@ -10,13 +10,16 @@ import { downloadAll, downloadOne, safeFileName } from '../services/files';
 import { useTripMoney } from '../services/useTripMoney';
 import { STEP_STATE_LABEL } from '../domain/money';
 import { useAuth } from '../lib/auth';
-import { fileNameFor, formatDate, formatUsd, plural } from '../lib/format';
+import { fileNameFor, formatDate, formatDateTime, formatUsd, plural } from '../lib/format';
 import { friendlyError } from '../lib/errors';
 import { ErrorBox, Loading, StateTag } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { RejectDialog } from '../components/RejectDialog';
+import { RefundDialog } from '../components/RefundDialog';
 import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
+import { fetchRefunds } from '../services/refunds';
+import { explain, policyFromTrip } from '../domain/cancellation';
 
 export function TravelerPage() {
   const { tripId = '', userId = '' } = useParams();
@@ -292,6 +295,27 @@ function TravelerMoneyCard({
 
   const [pricing, setPricing] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** The payment currently being refunded, or null. */
+  const [refunding, setRefunding] = useState<{ id: string; amountUsd: number } | null>(null);
+  /**
+   * The refund just issued, so the page can confirm it.
+   *
+   * `seenRefunds` is how many refund rows were on screen at that moment. The
+   * ledger row is written by `stripe-webhook`, not by us, so it arrives a
+   * second or two later — comparing the count tells us whether it has landed
+   * without a timer that could lie in either direction.
+   */
+  const [justRefunded, setJustRefunded] = useState<
+    { amountUsd: number; seenRefunds: number } | null
+  >(null);
+
+  // Refund attempts, including the ones that never moved money. Kept out of
+  // useTripMoney on purpose: that hook feeds three pages' totals, and a blocked
+  // attempt is not money — folding it in would make it look like one.
+  const refunds = useQuery({
+    queryKey: ['refunds', tripId],
+    queryFn: () => fetchRefunds(tripId),
+  });
 
   const save = useMutation({
     mutationFn: (args: { totalUsd: number; depositUsd: number | null }) =>
@@ -309,6 +333,34 @@ function TravelerMoneyCard({
 
   const me = money?.travelers.find(t => t.userId === userId) ?? null;
   const canSetPrice = !!user && !!trip && trip.hostId === user.id;
+  // Same test as the price button, and for the same reason: the server gate is
+  // `money.manage`, which the operator of record always holds. Hiding the
+  // button is UX — `payments-refund` re-checks the capability, so a hidden
+  // button is not the security boundary.
+  const canRefund = canSetPrice && !isOffline;
+
+  // The trip's own frozen terms. `policyFromTrip` returns null for a NULL or
+  // legacy preset — "not specified", never a coerced default.
+  const policy = policyFromTrip(
+    trip
+      ? {
+          cancellation_preset: trip.cancellationPreset,
+          cancellation_rules: trip.cancellationRules,
+          cancellation_notes: trip.cancellationNotes,
+        }
+      : null,
+  );
+  const policyLines = policy ? explain(policy) : [];
+
+  const refundedRows = (me?.events ?? []).filter(e => e.eventType === 'refunded').length;
+  /** Issued, but Stripe's own row has not reached the ledger yet. */
+  const refundLanding = !!justRefunded && refundedRows <= justRefunded.seenRefunds;
+
+  const myRefunds = (refunds.data ?? []).filter(r => r.userId === userId);
+  // Only the ones that did NOT move money. A succeeded refund already shows up
+  // in the events list below as Stripe's own `refunded` row; printing it twice
+  // would read as two refunds.
+  const failedAttempts = myRefunds.filter(r => r.status !== 'succeeded');
 
   return (
     <>
@@ -328,6 +380,35 @@ function TravelerMoneyCard({
           )}
         </div>
         <div className="card-body">
+          {/* Money moved and cannot be taken back. Saying so is not a nicety:
+              the ledger row below is written by Stripe's webhook a second or
+              two later, and for that gap a dialog that simply closed was
+              indistinguishable from a button that did nothing. */}
+          {justRefunded && (
+            <div
+              className="enter"
+              role="status"
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
+                background: 'var(--ok-bg)',
+                border: '1px solid var(--ok)',
+                color: 'var(--ok)',
+                borderRadius: 'var(--r-sm)',
+                padding: '9px 11px',
+                marginBottom: 12,
+                fontSize: 13,
+              }}
+            >
+              <span aria-hidden>✓</span>
+              <span>
+                Refunded {formatUsd(justRefunded.amountUsd)} to {name}.
+                {refundLanding && ' Stripe is confirming it — the record appears below in a moment.'}
+              </span>
+            </div>
+          )}
+
           {isPending && <span className="muted small">Loading…</span>}
           {!isPending && !me && <p className="muted small">Not on this trip.</p>}
           {me && (
@@ -363,9 +444,70 @@ function TravelerMoneyCard({
               {me.events.length > 0 && (
                 <div style={{ marginTop: 6 }}>
                   {me.events.map((e, i) => (
-                    <p key={`${e.createdAt}-${i}`} className="muted" style={{ fontSize: 12 }}>
-                      {formatDate(e.createdAt)} ·{' '}
-                      {e.eventType === 'refunded' ? 'Refund' : 'Payment'} {formatUsd(e.amountUsd)}
+                    <div
+                      key={`${e.id}-${i}`}
+                      className="row"
+                      style={{ gap: 8, minHeight: 24 }}
+                    >
+                      {/* A refund is money going the other way, and it used to
+                          render in the same muted grey as a payment — the one
+                          line in the list that reverses the others was the
+                          hardest to spot. It is marked structurally rather than
+                          with a state colour: green would read "good" and red
+                          "failed", and a completed refund is neither. The
+                          orange lines below are refunds that did NOT happen,
+                          so a warning colour here would collide with them. */}
+                      {e.eventType === 'refunded' ? (
+                        <span
+                          className="row"
+                          style={{ gap: 6, fontSize: 12, color: 'var(--text)' }}
+                        >
+                          <span
+                            style={{
+                              background: 'var(--panel-2)',
+                              border: '1px solid var(--line)',
+                              borderRadius: 99,
+                              padding: '1px 7px',
+                              fontSize: 11,
+                              color: 'var(--text-2)',
+                            }}
+                          >
+                            Refund
+                          </span>
+                          <strong>{formatUsd(e.amountUsd)}</strong>
+                          <span className="muted">{formatDateTime(e.createdAt)}</span>
+                        </span>
+                      ) : (
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {formatDateTime(e.createdAt)} · Payment {formatUsd(e.amountUsd)}
+                        </span>
+                      )}
+                      {canRefund && e.eventType === 'paid' && (
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          style={{ padding: '2px 8px', fontSize: 12 }}
+                          onClick={() => setRefunding({ id: e.id, amountUsd: e.amountUsd })}
+                        >
+                          Refund
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Attempts that did not move money. An operator who was blocked
+                  and sees nothing will assume the refund went through. */}
+              {failedAttempts.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {failedAttempts.map(r => (
+                    <p key={r.id} style={{ fontSize: 12, color: 'var(--warn)' }}>
+                      {formatDate(r.createdAt)} · Refund of {formatUsd(r.amountUsd)}{' '}
+                      {r.status === 'blocked_insufficient_balance'
+                        ? 'was not sent — your balance did not cover it'
+                        : r.status === 'pending'
+                          ? 'is still in progress — check Stripe'
+                          : 'failed'}
                     </p>
                   ))}
                 </div>
@@ -389,6 +531,29 @@ function TravelerMoneyCard({
             setSaveError(null);
           }}
           onSave={(totalUsd, depositUsd) => save.mutate({ totalUsd, depositUsd })}
+        />
+      )}
+
+      {refunding && (
+        <RefundDialog
+          travelerName={name}
+          paymentEventId={refunding.id}
+          paidUsd={refunding.amountUsd}
+          policyLines={policyLines}
+          onCancel={() => setRefunding(null)}
+          onDone={amountUsd => {
+            setRefunding(null);
+            setJustRefunded({
+              amountUsd,
+              seenRefunds: (me?.events ?? []).filter(e => e.eventType === 'refunded').length,
+            });
+            // Both, and in this order of importance: `refunds` shows the
+            // attempt immediately, while `payEvents` only changes once Stripe's
+            // webhook lands — so the refetch may legitimately return nothing new
+            // for a second or two.
+            void qc.invalidateQueries({ queryKey: ['refunds', tripId] });
+            void qc.invalidateQueries({ queryKey: ['payEvents', tripId] });
+          }}
         />
       )}
     </>

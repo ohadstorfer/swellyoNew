@@ -36,7 +36,7 @@ import {
   type CancellationRule,
 } from '../domain/cancellation';
 
-const PRESETS: CancellationPreset[] = ['flexible', 'standard', 'non_refundable', 'custom'];
+const PRESETS: CancellationPreset[] = ['standard', 'non_refundable', 'custom'];
 
 export function SettingsPage() {
   const { user } = useAuth();

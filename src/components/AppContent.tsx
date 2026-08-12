@@ -547,6 +547,23 @@ export const AppContent: React.FC = () => {
     }
   }, [user, isDemoUser, isRestoringSession, isSupabaseConfigured, resetOnboarding, setUser, setCurrentStep, setIsDemoUser]);
 
+  // File the Terms of Service tick, which was taken BEFORE there was a user to
+  // attach it to (WelcomeScreen parks it on the device; the server stamps IP
+  // and user-agent when it arrives). No-op unless something is parked, so the
+  // usual boot costs one AsyncStorage read.
+  //
+  // Deliberately gated on a VALIDATED session and not on `isComplete`: the RPC
+  // reads auth.uid(), and someone who signs up and abandons onboarding has
+  // still accepted the terms. Not gated on the main app either, for the same
+  // reason. Fire-and-forget — it never blocks anyone from using the app, and
+  // a failed send stays parked and retries next boot.
+  useEffect(() => {
+    if (!user || isDemoUser || !hasValidatedSession) return;
+    import('../services/terms/termsService')
+      .then(({ syncPendingTermsAcceptance }) => syncPendingTermsAcceptance())
+      .catch(err => console.warn('[AppContent] terms sync failed (non-blocking):', err));
+  }, [user, isDemoUser, hasValidatedSession]);
+
   // Recover from inconsistent state: signed-in user with currentStep stuck at
   // STEP_WELCOME (-1) and onboarding not complete. Gated on isOnboardingLoaded
   // so we wait for the DB-backed isComplete check to finish — otherwise

@@ -232,6 +232,16 @@ serve(async req => {
       // recorded at all (with no Stripe redelivery to ever recover it, since
       // the outer handler would have returned 200).
       let applicationFeeUsd: number | null = null;
+      // Who was the merchant of record for this charge. Read from Stripe's own
+      // record of the PaymentIntent rather than from our metadata, because a
+      // dispute two years from now is answered by what Stripe says the charge
+      // was, not by what we claim we sent.
+      //
+      // NULL when the fetch below fails — that means UNKNOWN, not 'platform'.
+      // The column's CHECK allows null for exactly this case. Guessing
+      // 'platform' here would put a wrong seller on a row that a chargeback
+      // response might one day quote.
+      let settlementMerchant: 'platform' | 'operator' | null = null;
       try {
         // Redacted label: this catch logs on failure, and safeMessage(feeErr)
         // would otherwise read back `Stripe payment_intents/pi_… failed` —
@@ -242,9 +252,10 @@ serve(async req => {
         const pi = await stripeGet(`payment_intents/${s.payment_intent}`, 'payment_intents/<redacted>');
         applicationFeeUsd =
           pi.application_fee_amount != null ? Number(pi.application_fee_amount) / 100 : null;
+        settlementMerchant = pi.on_behalf_of ? 'operator' : 'platform';
       } catch (feeErr) {
         console.error(
-          '[stripe-webhook] could not enrich application_fee_usd, recording the payment without it',
+          '[stripe-webhook] could not enrich application_fee_usd / settlement_merchant, recording the payment without them',
           safeMessage(feeErr),
         );
       }
@@ -261,6 +272,7 @@ serve(async req => {
         amount_charged: Number(s.amount_total) / 100,
         currency_charged: currency.toUpperCase(),
         application_fee_usd: applicationFeeUsd,
+        settlement_merchant: settlementMerchant,
         // Stripe test-mode events must never be mistaken for real money.
         is_livemode: !!event.livemode,
       };

@@ -99,6 +99,14 @@ export type RootStackParamList = {
   };
   /** Settings card — opened from the gear icon on the own-profile root. */
   Settings: undefined;
+  /**
+   * Operator onboarding — the four things settled once before selling a trip.
+   *
+   * A CARD, not a modal: the waiver step opens the OS document picker, and a
+   * picker fired while a Modal is tearing down hangs the main thread. Same
+   * reason as TravelerOnboarding above.
+   */
+  OperatorSetup: undefined;
 };
 
 /**

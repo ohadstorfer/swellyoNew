@@ -31,13 +31,19 @@ function input(over: Partial<TripMoneyInput> = {}): TripMoneyInput {
   };
 }
 
+let eventSeq = 0;
+
 function paid(
   userId: string,
   requirementId: string | null,
   amountUsd: number,
-  over: { eventType?: string; isLivemode?: boolean } = {},
+  over: { eventType?: string; isLivemode?: boolean; id?: string } = {},
 ) {
   return {
+    // Nothing here exercises the id — it exists so a refund can name ONE
+    // payment. Auto-incremented rather than constant so that a future test
+    // asserting on a specific event is not silently matching all of them.
+    id: over.id ?? `pe-${++eventSeq}`,
     userId,
     requirementId,
     eventType: over.eventType ?? 'paid',

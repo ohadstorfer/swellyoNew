@@ -51,6 +51,13 @@ export type NotificationType =
   // NotificationCenter already refuses to navigate a row with no trip_id, so
   // it renders as an unpressable status line, which is exactly right.
   | 'operator_stripe_ready'
+  // A Swellyo admin turned on someone's `surfers.operator` flag. Written by
+  // `trg_notify_operator_setup_required` — the ONLY producer, and it fires on
+  // the false→true edge only, so there is no cron and nothing that can repeat.
+  // Like `operator_stripe_ready` this is about the ACCOUNT, so `trip_id` is
+  // null; unlike it, this one has somewhere to go, which is why
+  // NotificationCenter routes it by type rather than by trip.
+  | 'operator_setup_required'
   // An operator asked someone to join their trip's crew, from inside the app.
   // Written by `invite_staff_member`. Like `trip_invite_received`, this row is
   // a QUESTION, not news: tapping it opens the accept sheet rather than the
@@ -86,6 +93,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   operator_document_rejected: true,
   operator_requirement_due_soon: true,
   operator_stripe_ready: true,
+  operator_setup_required: true,
   operator_staff_invited: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
@@ -618,6 +626,14 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: 'time-outline',
       };
     }
+    case 'operator_setup_required':
+      // Says what they GET, not what we need. "Finish your setup" is a chore;
+      // being told you can now sell trips is the reason to open it.
+      return {
+        title: 'You can now run trips on Swellyo',
+        body: 'Four quick things to set up before you create your first one.',
+        icon: 'rocket-outline',
+      };
     case 'operator_stripe_ready':
       // Not about a trip, so no trip name and nothing to tap through to. The
       // point of the row is to end the waiting: an operator who connected

@@ -155,6 +155,22 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
 };
 
 /**
+ * Types that go somewhere WITHOUT a trip.
+ *
+ * The rule used to be simply "has a trip_id", which was right while every
+ * destination was a trip. `operator_setup_required` is about the account, so it
+ * carries no trip_id and would be rendered as an unpressable status line — the
+ * same treatment `operator_stripe_ready` correctly gets, but wrong here,
+ * because this row's entire job is to be tapped.
+ */
+const TRIPLESS_PRESSABLE: ReadonlySet<string> = new Set(['operator_setup_required']);
+
+function isPressableRow(n: NotificationRow, canOpenTrip: boolean): boolean {
+  if (TRIPLESS_PRESSABLE.has(n.type)) return true;
+  return canOpenTrip && !!n.trip_id;
+}
+
+/**
  * The notifications screen, rendered as a plain CARD route (see
  * RootNavigator). The navigator owns the slide-in/out and the edge-swipe
  * back gesture. Actionable notifications carry inline Approve / Decline
@@ -327,6 +343,13 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
       // not the named invitee even if the token leaks.
       if (n.type === 'operator_staff_invited' && n.data?.staff_token) {
         setActiveStaffToken(n.data.staff_token as string);
+        return;
+      }
+      // Operator setup → the checklist. Routed by TYPE, not by trip: this row
+      // is about the account and carries no trip_id at all, so it would fall
+      // through the guard below and be silently unpressable.
+      if (n.type === 'operator_setup_required') {
+        pushRootCard('OperatorSetup', undefined);
         return;
       }
       if (!onOpenTrip || !n.trip_id) return;
@@ -566,7 +589,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                     onDeclineCommit={handleDeclineCommit}
                     onSeeSuggestion={handleSeeSuggestion}
                     onDeclineGear={handleDeclineGear}
-                    onPress={onOpenTrip && n.trip_id ? handleRowPress : undefined}
+                    onPress={isPressableRow(n, !!onOpenTrip) ? handleRowPress : undefined}
                   />
                 ))}
               </ScrollView>

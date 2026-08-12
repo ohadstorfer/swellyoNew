@@ -5,6 +5,7 @@ import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useQueryClient } from '@tanstack/react-query';
 // Native uses the real @bottom-tabs bar. On web, metro.config.js redirects this
 // exact module specifier to src/navigation/bottomTabsWebShim.tsx (a JS bar),
 // because @bottom-tabs imports RN internals that can't bundle for web.
@@ -16,6 +17,8 @@ import { DirectGroupChat } from '../screens/DirectGroupChat';
 import { TripPlanningChatScreen } from '../screens/TripPlanningChatScreen';
 import SurftripDetailScreen from '../screens/surftrips/SurftripDetailScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { OperatorSetupScreen } from '../screens/operator/OperatorSetupScreen';
+import { operatorSetupKey } from '../hooks/trips/useOperatorSetup';
 import { swellyServiceCopy, swellyServiceCopyCopy } from '../services/swelly/swellyServiceCopy';
 import { useMessaging } from '../context/MessagingProvider';
 import TripsScreen from '../screens/trips/TripsScreen';
@@ -424,6 +427,19 @@ function SettingsCardScreen({ navigation }: NativeStackScreenProps<RootStackPara
       userName={settings.userName}
       userAvatar={settings.userAvatar}
       userEmail={settings.userEmail}
+    />
+  );
+}
+
+function OperatorSetupCardScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'OperatorSetup'>) {
+  const queryClient = useQueryClient();
+  return (
+    <OperatorSetupScreen
+      onBack={() => navigation.goBack()}
+      // Drops the cached "needs setup" answer so the Trips card and the Create
+      // gate re-read it. Without this the operator finishes setup and the card
+      // telling them to finish setup is still sitting there.
+      onComplete={() => queryClient.invalidateQueries({ queryKey: operatorSetupKey })}
     />
   );
 }
@@ -869,6 +885,7 @@ export default function RootNavigator() {
       <RootStack.Screen name="SurftripCard" component={SurftripCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="ProfileCard" component={ProfileCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="Settings" component={SettingsCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="OperatorSetup" component={OperatorSetupCardScreen} options={{ presentation: 'card' }} />
       {/* Plain card. The panel is full-screen and opaque, so transparency
           bought nothing and modal presentations broke z-order/gestures
           (two strikes: native modal context → sheets+crashes; contained →

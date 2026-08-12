@@ -16,6 +16,9 @@ import { formatUsd } from '../lib/format';
 const TRIP: TripPrice = { costPerPerson: 3000, depositAmount: 1000 };
 
 const event = (o: Partial<PaymentEvent> = {}): PaymentEvent => ({
+  // Nothing in this file exercises the id — it exists so a refund can name one
+  // payment. Overridable, so a test that ever needs two distinct events can.
+  id: 'pe-1',
   userId: 'u1',
   requirementId: 'r-deposit',
   eventType: 'paid',

@@ -49,6 +49,9 @@ export type TripPrice = {
 };
 
 export type PaymentEvent = {
+  /** The row id. `payments-refund` takes this — a refund is issued against one
+   *  recorded payment, never against a traveler or a total. */
+  id: string;
   userId: string;
   requirementId: string | null;
   /** 'paid' | 'refunded' | 'failed'. Refunds carry a negative amount. */

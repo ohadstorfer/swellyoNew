@@ -48,6 +48,9 @@ import { useExploreTrips, useMyTrips, tripsKeys, type ExploreFilterKey } from '.
 import { fetchTripCore, TRIP_DETAIL_GC_MS } from '../../hooks/trips/useTripDetail';
 import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
+import { OperatorSetupBanner } from '../../components/trips/OperatorSetupBanner';
+import { useOperatorSetup } from '../../hooks/trips/useOperatorSetup';
+import { pushRootCard } from '../../navigation/navigationRef';
 import { ff, fs } from '../../theme/fonts';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
 import NoTripsEmptyState from '../../components/trips/NoTripsEmptyState';
@@ -1316,6 +1319,9 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
 
   const queryClient = useQueryClient();
   const reduceMotion = useReducedMotion();
+  // Cached and shared with the Create gate below — both must give the same
+  // answer, or the banner and the chooser end up disagreeing on screen.
+  const operatorSetup = useOperatorSetup();
 
   // Keep Explore + My Trips live while this screen is mounted — new trips,
   // card edits, member counts. Per-trip realtime is useTripRealtime in detail.
@@ -1416,6 +1422,13 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
   };
 
   const onPickStyle = async (key: HostingStyle) => {
+    // Only style C is gated. The other two are ordinary group trips that need
+    // no Stripe account, no waiver and no refund policy — blocking those would
+    // punish an operator for being promoted (Ohad, 2026-08-11).
+    if (key === 'C' && operatorSetup.needsSetup) {
+      pushRootCard('OperatorSetup', undefined);
+      return;
+    }
     const draft = await peekTripWizardDraft();
     const hasResumableDraft =
       !!draft && draft.version === WIZARD_STATE_VERSION && draft.hostingStyle === key;
@@ -1491,6 +1504,17 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
         title={<Text style={styles.tripsHeaderTitle}>Trips</Text>}
         below={<TripsHeaderTabs active={activeTab} onChange={goToTab} />}
       />
+
+      {/* Above the pager, so it shows on all three tabs — see the component
+          header for why it is not confined to Create. */}
+      {operatorSetup.needsSetup && (
+        <OperatorSetupBanner
+          summary={operatorSetup.summary}
+          total={operatorSetup.steps.length}
+          done={operatorSetup.steps.length - operatorSetup.outstanding.length}
+          onPress={() => pushRootCard('OperatorSetup', undefined)}
+        />
+      )}
 
       <View
         style={styles.body}

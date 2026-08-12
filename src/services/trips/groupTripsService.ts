@@ -146,6 +146,22 @@ export interface GroupTrip {
   budget_tier: string | null; // 'low' | 'medium' | 'high' — the tier the host picked
   budget_fx_rate: number | null; // ILS per 1 USD, frozen at price-set time (null = legacy USD-only)
 
+  // The cancellation policy, frozen at publish. Same column names as
+  // `operator_settings`, so `toPreset`/`rulesFromWire`/`explain` read a trip
+  // with no conversion.
+  //
+  // OPTIONAL, unlike every other column here, and deliberately so: the feed
+  // RPCs (`explore_feed`, `my_trips_feed`) do NOT return these — a policy is
+  // not card data — so a trip that came from the feed genuinely does not carry
+  // them. Marking them required would be a type that lies. It also keeps
+  // `CreateGroupTripInput` (an Omit of this) from breaking every existing
+  // create call.
+  //
+  // null preset = not specified. NOT the same as 'non_refundable'.
+  cancellation_preset?: string | null;
+  cancellation_rules?: unknown;
+  cancellation_notes?: string | null;
+
   // Multi-select tag columns (text[] with DB CHECK constraints). Replaces the
   // legacy single-value `trip_vibe` column dropped in the May 2026 migration.
   trip_structure: string[] | null;

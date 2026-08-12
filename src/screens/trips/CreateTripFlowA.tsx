@@ -100,6 +100,7 @@ import { formatFileSize } from '../../utils/videoValidation';
 import {
   createRequirements,
   publishWaiverPdf,
+  publishWaiverFromDefault,
   resolveDeadlineDate,
   stepDeadline,
   isDeadlineAtEnd,
@@ -115,6 +116,14 @@ import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeShee
 import { SpecificStaySheetContent } from '../../components/trips/sheets/SpecificStaySheetContent';
 import { ConnectStripeCard } from '../../components/trips/ConnectStripeCard';
 import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
+import { useOperatorSetup } from '../../hooks/trips/useOperatorSetup';
+import { CancellationPolicySheet } from '../../components/settings/CancellationPolicySheet';
+import {
+  PRESET_LABEL,
+  rulesToWire,
+  summarise,
+  type CancellationPolicy,
+} from '../../services/trips/cancellationPolicy';
 
 // Existing dependencies still used (preview card)
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
@@ -335,7 +344,9 @@ type SheetKey =
   | 'incVideoAnalysis'
   | 'incActivities'
   | 'incWellness'
-  | 'incCustom';
+  | 'incCustom'
+  // Flow C — the trip's cancellation policy, on the Pricing step.
+  | 'cancellation';
 
 // -----------------------------------------------------------------------------
 // Wizard state shape (serializable so it round-trips through AsyncStorage).
@@ -418,6 +429,20 @@ interface WizardState extends Record<string, unknown> {
 
   // Step 6 — preview
   visibility: Visibility;
+
+  /**
+   * The cancellation policy this trip is published with, frozen at publish.
+   *
+   * OPTIONAL, so `WIZARD_STATE_VERSION` does not need bumping: a draft saved
+   * before this field existed simply lacks it, reads as `undefined`, and falls
+   * back to the operator's default — which is exactly what a fresh wizard does
+   * anyway. Bumping the version would have thrown away every in-progress draft
+   * to gain nothing.
+   *
+   * `undefined` means "not touched — use my default". A value here means the
+   * operator changed it FOR THIS TRIP, and their default is left alone.
+   */
+  cancellation?: CancellationPolicy;
 }
 
 const INITIAL_STATE: WizardState = {
@@ -1371,10 +1396,20 @@ export default function CreateTripFlowA({
     return isCurrencyCode(code) && code !== 'USD' && rateOk ? code : 'USD';
   }, [initialTrip]);
 
+  // What the operator settled during onboarding: their price currency and the
+  // waiver every trip starts from. Cached, so this costs nothing here.
+  const operatorSetup = useOperatorSetup();
+  const defaultWaiver = operatorSetup.settings.defaultWaiver;
+
   const defaultOperatorCurrency: CurrencyCode = useMemo(() => {
+    // Their own setting wins over the country guess — a Brazilian operator who
+    // chose to price in EUR meant it, and re-deriving from the passport every
+    // time would quietly hand them BRL on every new trip.
+    const saved = operatorSetup.settings.defaultCurrency;
+    if (isCurrencyCode(saved) && OPERATOR_CURRENCIES.includes(saved)) return saved;
     const fromCountry = currencyForCountry(profile?.country_from);
     return OPERATOR_CURRENCIES.includes(fromCountry) ? fromCountry : 'USD';
-  }, [profile?.country_from]);
+  }, [operatorSetup.settings.defaultCurrency, profile?.country_from]);
 
   const [pickedCurrency, setPickedCurrency] = useState<CurrencyCode>(defaultOperatorCurrency);
   // The profile often resolves AFTER this screen mounts, so the initial state
@@ -1438,6 +1473,13 @@ export default function CreateTripFlowA({
       tripId: initialTrip?.id ?? null,
       resume: resumeDraft,
     });
+
+  // What this trip publishes with: the operator's per-trip override if they
+  // touched it, otherwise their onboarding default. Read through one name so
+  // the card and the publish write cannot disagree. Declared here rather than
+  // beside `operatorSetup` because it depends on `state`.
+  const effectivePolicy: CancellationPolicy =
+    state.cancellation ?? operatorSetup.settings.policy;
 
   // ---- Validation registry ------------------------------------------------
   const { errors, setError, clearErrors, firstErrorField } = useFieldErrors<FieldKey>();
@@ -1926,7 +1968,9 @@ export default function CreateTripFlowA({
         // at 'not_started' forever, and since it is must_have that means NOBODY
         // CAN EVER JOIN THE TRIP. Publishing without the PDF would ship a trip
         // that silently accepts nobody.
-        if (state.requirementKinds.includes('waiver') && !state.waiverFile) {
+        // `waiverFile` null with a default stored means "use my default" — the
+        // skip. Only an operator with NEITHER is blocked.
+        if (state.requirementKinds.includes('waiver') && !state.waiverFile && !defaultWaiver) {
           fail('waiverText', 'Upload your waiver PDF — travelers cannot join the trip until they can agree to it');
         }
         return ok;
@@ -2234,6 +2278,21 @@ export default function CreateTripFlowA({
           deposit_amount:
             isFixedFlow && state.paymentMode === 'managed' ? depositAmountUsd : null,
 
+          // The policy is FROZEN here and never read live again, so changing a
+          // default later cannot rewrite terms someone already agreed to.
+          //
+          // Operator trips only. A and B have no policy concept, and leaving the
+          // preset NULL is what keeps `normalise_trip_cancellation` on its
+          // early-return path — see that function's header for why a non-null
+          // value there would break creating every A/B trip.
+          ...(isFixedFlow
+            ? {
+                cancellation_preset: effectivePolicy.preset,
+                cancellation_rules: rulesToWire(effectivePolicy.rules),
+                cancellation_notes: effectivePolicy.notes,
+              }
+            : {}),
+
           // Whether the host picked a specific stay (the step-3 Yes/No gate).
           // Guaranteed non-null by the time this saves (vibez-step validation).
           specific_stay_selected: requiresSpecificStay ? true : state.accommodationLocked,
@@ -2274,8 +2333,16 @@ export default function CreateTripFlowA({
           try {
             // The waiver DOCUMENT goes first. A waiver requirement whose
             // document does not exist can never be satisfied.
-            if (state.requirementKinds.includes('waiver') && state.waiverFile) {
-              await publishWaiverPdf(trip.id, state.waiverFile.uri);
+            if (state.requirementKinds.includes('waiver')) {
+              // A file picked for THIS trip wins; otherwise the operator's
+              // default template is copied in. Both end with an identical
+              // document row — see publishWaiverFromDefault for why the default
+              // is copied rather than referenced.
+              if (state.waiverFile) {
+                await publishWaiverPdf(trip.id, state.waiverFile.uri);
+              } else if (defaultWaiver) {
+                await publishWaiverFromDefault(trip.id, defaultWaiver);
+              }
             }
             await createRequirements(trip.id, allKinds, state.requirementTiming);
           } catch (reqErr) {
@@ -2673,6 +2740,23 @@ export default function CreateTripFlowA({
                           </View>
                           <Pressable onPress={pickWaiverFile} hitSlop={8}>
                             <Text style={localStyles.waiverReplace}>Replace</Text>
+                          </Pressable>
+                        </View>
+                      ) : defaultWaiver ? (
+                        // The onboarding default, already in place. This IS the
+                        // skip: nothing to do, and a different PDF is one tap
+                        // away if this trip needs one. Picking one here only
+                        // affects THIS trip — the default is left alone.
+                        <View style={localStyles.waiverFileRow}>
+                          <Ionicons name="document-text-outline" size={20} color="#212121" />
+                          <View style={localStyles.waiverFileText}>
+                            <Text style={localStyles.waiverFileName} numberOfLines={1}>
+                              {defaultWaiver.name}
+                            </Text>
+                            <Text style={localStyles.waiverFileSize}>Your default waiver</Text>
+                          </View>
+                          <Pressable onPress={pickWaiverFile} hitSlop={8}>
+                            <Text style={localStyles.waiverReplace}>Change</Text>
                           </Pressable>
                         </View>
                       ) : (
@@ -3549,6 +3633,30 @@ export default function CreateTripFlowA({
             <Ionicons name="add" size={24} color="#05BCD3" />
           </View>
         </TouchableOpacity>
+
+        {/* Cancellation policy — last on Pricing, because it is a term of sale
+            like the price, not a requirement like a passport. Pre-filled from
+            the operator's onboarding default: leaving it alone IS the skip.
+
+            Changing it here changes THIS TRIP ONLY. The operator's default is
+            never written from the wizard — an operator pricing one unusual trip
+            must not silently re-terms every future one. */}
+        <View style={localStyles.cancelPolicyCard}>
+          <View style={localStyles.cancelPolicyHead}>
+            <Text style={localStyles.cancelPolicyLabel}>Cancellation policy</Text>
+            <Pressable onPress={() => setOpenSheet('cancellation')} hitSlop={8}>
+              <Text style={localStyles.cancelPolicyChange}>Change</Text>
+            </Pressable>
+          </View>
+          <Text style={localStyles.cancelPolicyValue}>
+            {PRESET_LABEL[effectivePolicy.preset]}
+          </Text>
+          <Text style={localStyles.cancelPolicySub}>{summarise(effectivePolicy)}</Text>
+          <Text style={localStyles.cancelPolicyFoot}>
+            Travelers see this when they pay. You refund from your own Stripe
+            account.
+          </Text>
+        </View>
       </View>
     );
   };
@@ -4563,6 +4671,18 @@ export default function CreateTripFlowA({
         />
       </WizardBottomSheet>
 
+      {/* The SAME sheet Settings and operator onboarding use. Its onSave writes
+          nowhere here — the policy lands in wizard state and is written with the
+          trip at publish, so an abandoned wizard leaves no trace. */}
+      <CancellationPolicySheet
+        visible={openSheet === 'cancellation'}
+        onClose={() => setOpenSheet(null)}
+        value={effectivePolicy}
+        onSave={async next => {
+          update('cancellation', next);
+        }}
+      />
+
       {/* Flow B — edit-profile takeover (slides over the wizard). */}
       {hostSurfer ? (
         <ProfileEditPanel
@@ -4725,6 +4845,54 @@ const localStyles = StyleSheet.create({
   },
   waiverPickBtnPressed: { backgroundColor: '#F6F6F6', transform: [{ scale: 0.985 }] },
   waiverPickText: { fontFamily: FONT_INTER, fontSize: 14, fontWeight: '600', color: '#212121' },
+  cancelPolicyCard: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
+  },
+  cancelPolicyHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cancelPolicyLabel: {
+    fontFamily: FONT_INTER,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: '#7B7B7B',
+  },
+  cancelPolicyChange: {
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#05BCD3',
+  },
+  cancelPolicyValue: {
+    marginTop: 8,
+    fontFamily: FONT_INTER,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#212121',
+  },
+  cancelPolicySub: {
+    marginTop: 2,
+    fontFamily: FONT_INTER,
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#7B7B7B',
+  },
+  cancelPolicyFoot: {
+    marginTop: 8,
+    fontFamily: FONT_INTER,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: '#9A9A9A',
+  },
   waiverFileRow: {
     flexDirection: 'row',
     alignItems: 'center',

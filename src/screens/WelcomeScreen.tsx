@@ -32,6 +32,7 @@ import { friendlyErrorMessage } from '../utils/friendlyError';
 import { ONBOARDING_WELCOME_IMAGE_URLS } from './OnboardingWelcomeScreen';
 import { calculateAgeFromDOB, dateToISOString } from '../utils/ageCalculation';
 import { ageGateService } from '../services/ageGate/ageGateService';
+import { setTermsAgreed, TERMS_URL, PRIVACY_URL } from '../services/terms/termsService';
 
 interface WelcomeScreenProps {
   onGetStarted: () => void;
@@ -144,8 +145,6 @@ const CheckboxIcon: React.FC<{ checked: boolean }> = ({ checked }) => {
   return <View style={welcomeStyles.checkboxUnchecked} />;
 };
 
-const TERMS_URL = 'https://www.swellyo.com/terms-and-conditions';
-const PRIVACY_URL = 'https://www.swellyo.com/privacy-policy';
 const AGE_PICKER_ITEM_HEIGHT = 50;
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDemoChat, onSkipDemo, isCheckingAuth = false, showDemoByDefault = false }) => {
@@ -180,13 +179,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
     });
   }, []);
 
-  // Save terms agreement when user checks the box
+  // Save terms agreement when user checks the box.
+  //
+  // `setTermsAgreed` writes the device flag this screen reads back AND parks a
+  // versioned record for the server. There is no user to file it against yet —
+  // the tick happens before sign-in — so AppContent sends it once a session
+  // exists. See services/terms/termsService.
+  //
+  // Unticking now clears both, where before nothing was ever written on the
+  // way down: a withdrawn agreement must not survive as a record.
   const handleToggleTerms = () => {
     const newValue = !agreedToTerms;
     setAgreedToTerms(newValue);
-    if (newValue) {
-      AsyncStorage.setItem('agreedToTerms', 'true');
-    }
+    setTermsAgreed(newValue).catch(err =>
+      console.warn('[WelcomeScreen] could not save terms agreement:', err),
+    );
   };
 
   // Use responsive hook for accurate mobile detection

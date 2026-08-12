@@ -71,6 +71,12 @@ type AccountStatus = {
   pastDue: string[];
   pendingVerification: string[];
   disabledReason: string | null;
+  /** ISO 3166-1 alpha-2, e.g. 'US'. Null until Stripe reports it. */
+  country: string | null;
+  /** Lowercase ISO 4217 the account SETTLES in, e.g. 'usd'. Need not match the
+   *  currency a charge was taken in — since `on_behalf_of`, it is the operator's
+   *  currency that a charge settles into. Null until Stripe reports it. */
+  defaultCurrency: string | null;
 };
 
 /**
@@ -96,6 +102,10 @@ function readAccountStatus(acct: Record<string, unknown>): AccountStatus {
     pastDue: list(req.past_due),
     pendingVerification: list(req.pending_verification),
     disabledReason: (req.disabled_reason as string | null) ?? null,
+    // Free — they ride on the Account object we already fetched. Normalised
+    // here so the DB never holds 'USD' and 'usd' as two different answers.
+    country: acct.country ? String(acct.country).toUpperCase() : null,
+    defaultCurrency: acct.default_currency ? String(acct.default_currency).toLowerCase() : null,
   };
 }
 
@@ -108,6 +118,11 @@ function statusColumns(s: AccountStatus) {
     requirements_due: s.currentlyDue,
     requirements_past_due: s.pastDue,
     disabled_reason: s.disabledReason,
+    // ⚠️ Written only when Stripe actually told us. A brand-new account can come
+    // back without them, and overwriting a known country with null on the next
+    // poll would lose a fact we already had.
+    ...(s.country ? { country: s.country } : {}),
+    ...(s.defaultCurrency ? { default_currency: s.defaultCurrency } : {}),
     status_checked_at: new Date().toISOString(),
   };
 }

@@ -42,6 +42,28 @@ export function formatUsd(usd: number | null | undefined): string {
   });
 }
 
+/**
+ * '5 Aug 2026, 18:37' — date AND time, in the reader's own timezone.
+ *
+ * The time is not decoration. Two payments can land on the same day for the
+ * same amount and be completely different things — on 5 Aug 2026 this trip
+ * took two $1,000 charges an hour apart, one routed to the operator and one to
+ * the platform, and only the second could be refunded. Printed as bare dates
+ * they were indistinguishable, and the operator picked the wrong one.
+ *
+ * Built entirely from the Date object rather than slicing the ISO string the
+ * way `formatDate` does: mixing a UTC date with a local time disagrees either
+ * side of midnight.
+ */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return formatDate(iso);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+}
+
 /** 'Nothing', '1 thing', 'N things' — avoids "1 documents". */
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;

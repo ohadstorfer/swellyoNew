@@ -1406,8 +1406,31 @@ export const PaymentSection: React.FC<{
    * the breakdown would just restate the line above it.
    */
   steps?: PaymentStep[];
+  /**
+   * Money that has come BACK to this traveler, canonical USD. Zero when none
+   * has.
+   *
+   * It is not deducted here — `paidUsd` already nets it off, because the
+   * ledger it is summed from carries the refund as a negative row. Without
+   * this line that subtraction is invisible: "Paid so far" simply drops by
+   * $500 one day and the only explanation is an email from the operator.
+   */
+  refundedUsd?: number;
+  /** When the most recent refund was issued, ISO. */
+  lastRefundAt?: string | null;
+  /** How many refunds make up `refundedUsd` — the date only names the last. */
+  refundCount?: number;
   onPayNow: () => void;
-}> = ({ totalUsd, paidUsd, payState, steps = [], onPayNow }) => {
+}> = ({
+  totalUsd,
+  paidUsd,
+  payState,
+  steps = [],
+  refundedUsd = 0,
+  lastRefundAt = null,
+  refundCount = 0,
+  onPayNow,
+}) => {
   const viewer = useViewer();
   const paid = Math.min(paidUsd, totalUsd);
   const remaining = Math.max(0, totalUsd - paidUsd);
@@ -1423,6 +1446,22 @@ export const PaymentSection: React.FC<{
   // and the rate can still move. Null for USD viewers — none of it is true
   // for them.
   const currencyNote = allPaid ? null : approxPaymentNote(viewer);
+
+  // "Refunded $500 on 12 Aug". One line, past tense, no explanation attached:
+  // by the time this renders the money has already left the operator's Stripe
+  // balance, and the traveler's question is only "is that the amount, and
+  // when". The date is the LAST one, so it is named as such once there is
+  // more than one refund rather than quietly standing for all of them.
+  const refundLine =
+    refundedUsd > 0
+      ? (() => {
+          const when = lastRefundAt ? formatDue(lastRefundAt) : null;
+          if (refundCount > 1) {
+            return `Refunded ${formatExactUsd(refundedUsd)} across ${refundCount} refunds${when ? ` · last ${when}` : ''}`;
+          }
+          return `Refunded ${formatExactUsd(refundedUsd)}${when ? ` on ${when}` : ''}`;
+        })()
+      : null;
 
   return (
     <View style={styles.ygBlock}>
@@ -1462,6 +1501,11 @@ export const PaymentSection: React.FC<{
             </>
           )}
         </Text>
+
+        {/* Directly under the two figures it explains, and above the step
+            breakdown: the breakdown's numbers are ALSO net of the refund, so
+            the reason has to be read before them, not after. */}
+        {refundLine ? <Text style={styles.payRefund}>{refundLine}</Text> : null}
 
         {/* How the total splits. Two short rows, no prose — this is the whole
             answer to "where did the deposit come from?", and it is why the pay
@@ -2020,6 +2064,17 @@ const styles = StyleSheet.create({
   },
   payRemainingApprox: { fontFamily: ff('Inter', '400'), fontWeight: '400', color: T.muted },
   payRemainingDone: { color: T.done },
+  // Muted, not red: money coming back is not an error state. It sits one step
+  // below the "left to pay" line it explains — same size, lighter weight, so
+  // it reads as a footnote to the figures rather than as a fourth figure.
+  payRefund: {
+    fontFamily: ff('Inter', '400'),
+    fontWeight: '400',
+    fontSize: 12,
+    lineHeight: 18,
+    color: T.muted,
+    marginTop: 4,
+  },
   // Quiet by design: it must be readable before paying, never compete with the
   // figure or the button.
   payCurrencyNote: {

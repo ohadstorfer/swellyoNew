@@ -88,6 +88,8 @@ import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggl
 import { TripDashboardTab } from '../../components/trips/dashboard/TripDashboardTab';
 import { TravelerExtras } from '../../components/trips/dashboard/TravelerExtras';
 import { TravelerPriceSheet } from '../../components/trips/TravelerPriceSheet';
+import { RefundSheet } from '../../components/trips/RefundSheet';
+import { fetchTripRefunds } from '../../services/trips/refundsService';
 import { fetchTripMoney } from '../../services/trips/operatorDashboardService';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import type { TripDetailFocus } from '../../services/notifications/notificationsService';
@@ -120,6 +122,9 @@ import {
   type DocumentRow,
 } from '../../components/trips/plan/PlanSections';
 import { PayAmountSheet } from '../../components/trips/PayAmountSheet';
+import { TripPolicyConsentSheet } from '../../components/trips/TripPolicyConsentSheet';
+import { useTripPolicyConsent } from '../../hooks/useTripPolicyConsent';
+import { policyFromTrip } from '../../services/trips/cancellationPolicy';
 import { RequirementUploadFlow } from '../../components/trips/RequirementUploadFlow';
 import { WaiverAgreeSheet } from '../../components/trips/WaiverAgreeSheet';
 import { MedicalFormSheet } from '../../components/trips/MedicalFormSheet';
@@ -165,9 +170,11 @@ import {
   startCheckout,
   fetchTravelerPrices,
   fetchPaidByRequirement,
+  fetchMyRefunds,
   type PayStep,
   type CheckoutOutcome,
   type TravelerPrices,
+  type MyRefunds,
 } from '../../services/trips/tripPaymentsService';
 import { PaymentStatusSheet, type PaymentStatusMode } from '../../components/trips/PaymentStatusSheet';
 import {
@@ -401,6 +408,21 @@ const DangerRow: React.FC<{
   </TouchableOpacity>
 );
 
+/**
+ * What `tripsKeys.payments` holds.
+ *
+ * Named rather than written inline because four places downstream read it back
+ * out with `getQueryData`, whose generic is an unchecked assertion — a shape
+ * spelled out by hand in five places drifts silently the first time one of
+ * them gains a field, and the reader gets `undefined` at runtime with a clean
+ * type-check.
+ */
+type PaymentsCache = {
+  prices: TravelerPrices;
+  paid: Record<string, number>;
+  refunds: MyRefunds;
+};
+
 // ---------------------------------------------------------------------------
 export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
@@ -474,18 +496,39 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // card never renders amounts, so this would just be a wasted round trip on
   // every operator trip open. staleTime 0: money must never be read from a
   // stale cache.
-  const paymentsQuery = useQuery({
+  const paymentsQuery = useQuery<PaymentsCache>({
     queryKey: tripsKeys.payments(tripId, currentUserId ?? ''),
     enabled: !!tripId && !!currentUserId && !isHostDerived && trip?.payment_mode === 'managed',
     queryFn: async () => {
-      const [prices, paid] = await Promise.all([
+      const [prices, paid, refunds] = await Promise.all([
         fetchTravelerPrices(tripId, currentUserId as string),
         fetchPaidByRequirement(tripId, currentUserId as string),
+        // Third read, same query: `paid` is already NET of refunds (they are
+        // negative ledger rows), so without this the Payment card can only
+        // show a number that silently went down. Failure is not fatal — the
+        // card still adds up without the explanation, so a refunds read that
+        // errors must not take the whole money section down with it.
+        fetchMyRefunds(tripId, currentUserId as string).catch(() => ({
+          totalUsd: 0,
+          lastAt: null,
+          count: 0,
+        })),
       ]);
-      return { prices, paid };
+      return { prices, paid, refunds };
     },
     staleTime: 0,
   });
+
+  // The cancellation-policy tick, in front of every checkout this screen can
+  // start. Same gate as the payments read above: a host never pays, and a trip
+  // that takes no money has nothing to agree to. See the hook's header for why
+  // it fails open.
+  const { ensureConsent: ensurePolicyConsent, sheetProps: policyConsentSheetProps } =
+    useTripPolicyConsent(
+      tripId,
+      currentUserId ?? null,
+      !!currentUserId && !isHostDerived && trip?.payment_mode === 'managed',
+    );
 
   // Checkout just closed and we're polling for the webhook to land (see
   // `handlePressDocumentRow`). Set only for the row being confirmed, cleared
@@ -663,6 +706,26 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [reviewWaiting, setReviewWaiting] = useState(false);
   /** Who the price sheet is open for, launched from inside the review screen. */
   const [pricingUserId, setPricingUserId] = useState<string | null>(null);
+  /** The payment currently being refunded, plus who it belongs to. */
+  const [refundTarget, setRefundTarget] = useState<{
+    userId: string;
+    name: string;
+    paymentEventId: string;
+    amountUsd: number;
+  } | null>(null);
+  /**
+   * The refund just issued, so the traveler's block can confirm it.
+   *
+   * Lives here rather than in TravelerExtras because the sheet does, and it
+   * survives that block re-rendering. `seenRefunds` is the refund-row count at
+   * the moment it succeeded — Stripe's webhook writes the real row a second or
+   * two later, so comparing counts says whether it has landed.
+   */
+  const [justRefunded, setJustRefunded] = useState<{
+    userId: string;
+    amountUsd: number;
+    seenRefunds: number;
+  } | null>(null);
 
   /**
    * Trip-wide money, shared with the Dashboard tab through the query cache.
@@ -680,6 +743,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     // `hosting_style === 'C'` inline rather than the `isOperatorTrip` alias:
     // that is declared below this point, and hoisting this query above it
     // would be a temporal-dead-zone crash on first render.
+    enabled: isHostDerived && trip?.hosting_style === 'C',
+  });
+
+  /**
+   * Refund attempts, including the ones that never moved money.
+   *
+   * Deliberately NOT folded into `dashboardMoney`: that read feeds every total
+   * on the Dashboard, and a blocked attempt is not money — counting it would
+   * make a refund that never happened look like one that did.
+   */
+  const tripRefunds = useQuery({
+    queryKey: ['operatorDashboard', 'refunds', tripId],
+    queryFn: () => fetchTripRefunds(tripId),
     enabled: isHostDerived && trip?.hosting_style === 'C',
   });
 
@@ -1805,7 +1881,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             tripsKeys.detailDocuments(tripId),
           );
           const paidNow = currentUserId
-            ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+            ? queryClient.getQueryData<PaymentsCache>(
                 tripsKeys.payments(tripId, currentUserId),
               )?.paid?.[row.requirementId]
             : undefined;
@@ -1910,7 +1986,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // reaches `approved`, so without this second check a confirmed partial
       // would sit in "Processing" until the 30-minute window aged it out).
       const freshPaid = currentUserId
-        ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+        ? queryClient.getQueryData<PaymentsCache>(
             tripsKeys.payments(tripId, currentUserId),
           )?.paid
         : undefined;
@@ -2014,7 +2090,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // full payment, "paid more than when the checkout started" for a partial.
       const attempt = paymentAttemptsRef.current[issue.requirementId];
       const paidNow = currentUserId
-        ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+        ? queryClient.getQueryData<PaymentsCache>(
             tripsKeys.payments(tripId, currentUserId),
           )?.paid?.[issue.requirementId]
         : undefined;
@@ -2083,12 +2159,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           return;
         }
 
+        // The policy tick, before the Stripe session exists. Dismissing it is
+        // a "no": nothing is charged and nothing is said, exactly like backing
+        // out of Checkout itself. Ahead of the baseline read below so the
+        // snapshot is taken as close to the charge as possible.
+        if (!(await ensurePolicyConsent())) return;
+
         // Snapshot BEFORE Checkout opens: the confirm poll's "did a partial
         // land?" signal is "paid is now more than this". Read from the cache,
         // not the paymentsQuery closure — this callback can be re-entered via
         // a ref in the same tick a refetch resolves.
         const baselinePaidUsd = currentUserId
-          ? queryClient.getQueryData<{ prices: TravelerPrices; paid: Record<string, number> }>(
+          ? queryClient.getQueryData<PaymentsCache>(
               tripsKeys.payments(tripId, currentUserId),
             )?.paid?.[row.requirementId] ?? 0
           : 0;
@@ -2167,7 +2249,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         showErrorAlert('Something went wrong', e, 'Could not open this document.');
       }
     },
-    [currentUserId, tripId, queryClient, confirmPayment],
+    [currentUserId, tripId, queryClient, confirmPayment, ensurePolicyConsent],
   );
   handlePressDocumentRowRef.current = handlePressDocumentRow;
 
@@ -2183,7 +2265,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         ? 'processing'
         : 'ready';
 
-  const handlePayNow = useCallback(() => {
+  const handlePayNow = useCallback(async () => {
     if (!payTarget) return;
     // A payment already in doubt goes straight to the explanation through the
     // SAME gates a task-row tap runs — never to a sheet whose only exit is a
@@ -2204,8 +2286,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       void handlePressDocumentRow(payTarget);
       return;
     }
+    // Asked BEFORE the amount sheet, not after it. The pay path would ask
+    // anyway (it is the same gate), but that puts two sheets back to back on
+    // the balance flow — this way the question comes first and the amount
+    // sheet is the last thing before Stripe, as it reads today.
+    if (!(await ensurePolicyConsent())) return;
     setPayAmountSheetOpen(true);
-  }, [payTarget, handlePressDocumentRow]);
+  }, [payTarget, handlePressDocumentRow, ensurePolicyConsent]);
 
   // Hoisted so the JSX condition narrows on a plain const (an optional chain
   // in the condition would not narrow the member access in the props).
@@ -2914,6 +3001,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 paidUsd={totalPaidUsd}
                 payState={payState}
                 steps={paySteps}
+                refundedUsd={paymentsQuery.data?.refunds.totalUsd ?? 0}
+                lastRefundAt={paymentsQuery.data?.refunds.lastAt ?? null}
+                refundCount={paymentsQuery.data?.refunds.count ?? 0}
                 onPayNow={handlePayNow}
               />
             </View>
@@ -3155,6 +3245,25 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                     ? () => setPricingUserId(userId)
                     : undefined
                 }
+                // Same test as pricing, and for the same reason: `money.manage`
+                // belongs to the operator of record, not to every promoted
+                // admin. The edge function re-checks it, so this only decides
+                // whether the row is offered.
+                onRefund={
+                  trip?.host_id && trip.host_id === currentUserId
+                    ? (paymentEventId, amountUsd) =>
+                        setRefundTarget({ userId, name, paymentEventId, amountUsd })
+                    : undefined
+                }
+                blockedRefunds={(tripRefunds.data ?? []).filter(
+                  r => r.userId === userId && r.status !== 'succeeded',
+                )}
+                // Only for the person it was issued against — otherwise
+                // opening the next traveler would show them someone else's
+                // confirmation.
+                justRefunded={
+                  justRefunded?.userId === userId ? justRefunded : null
+                }
                 onMessage={() => {
                   // Close the review Modal FIRST. Pushing a chat card from
                   // under a presented Modal leaves it stranded on top of the
@@ -3173,6 +3282,42 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
              the traveler. It is the same sheet the Members list uses, so the
              two can never price someone differently. */
           renderOverlay={() => (
+            <>
+            {/* `inline` for the same reason as the price sheet below: a sheet
+                mounted as a SIBLING of a presented Modal is resolved to the
+                root view controller, which UIKit refuses — it only appears once
+                the operator leaves the traveler. */}
+            <RefundSheet
+              inline
+              visible={!!refundTarget}
+              travelerName={refundTarget?.name ?? 'Traveler'}
+              paymentEventId={refundTarget?.paymentEventId ?? ''}
+              paidUsd={refundTarget?.amountUsd ?? 0}
+              cancellation={policyFromTrip(trip)}
+              onClose={() => setRefundTarget(null)}
+              onRefunded={amountUsd => {
+                if (refundTarget) {
+                  setJustRefunded({
+                    userId: refundTarget.userId,
+                    amountUsd,
+                    seenRefunds: (
+                      dashboardMoney.data?.travelers.find(
+                        m => m.userId === refundTarget.userId,
+                      )?.events ?? []
+                    ).filter(e => e.eventType === 'refunded').length,
+                  });
+                }
+                // Both: the refund row appears at once, while the money numbers
+                // only change when Stripe's webhook lands — so this refetch may
+                // legitimately return nothing new for a second or two.
+                void queryClient.invalidateQueries({
+                  queryKey: ['operatorDashboard', 'refunds', tripId],
+                });
+                void queryClient.invalidateQueries({
+                  queryKey: ['operatorDashboard', 'money', tripId],
+                });
+              }}
+            />
             <TravelerPriceSheet
               inline
               visible={!!pricingUserId}
@@ -3198,6 +3343,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 });
               }}
             />
+            </>
           )}
           onChanged={() => reviewQuery.refetch()}
         />
@@ -3309,6 +3455,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         }
       />
 
+      {/* The cancellation-policy tick. In front of the amount sheet on the
+          balance flow and in front of Checkout everywhere else — the hook owns
+          which, so both screens that can start a payment ask the same
+          question in the same words. */}
+      <TripPolicyConsentSheet {...policyConsentSheetProps} />
+
       {/* How much of what's left to pay — full or partial. ALWAYS mounted,
           closed by `visible` — the same rule ManageRequirementsSheet documents
           above: `payTarget` goes null the moment a payment lands (possibly
@@ -3320,6 +3472,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         stepTitle={payTarget?.title ?? 'This payment'}
         outstandingUsd={payTarget?.amountUsd ?? 0}
         onPay={handlePayAmountChosen}
+        cancellation={policyFromTrip(trip)}
       />
 
       {/* Document viewer — mints its own ~60s signed URL per open and never

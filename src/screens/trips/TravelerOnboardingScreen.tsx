@@ -79,6 +79,8 @@ import {
   type PayStep,
   type TravelerPrices,
 } from '../../services/trips/tripPaymentsService';
+import { TripPolicyConsentSheet } from '../../components/trips/TripPolicyConsentSheet';
+import { useTripPolicyConsent } from '../../hooks/useTripPolicyConsent';
 
 /** The RPC already resolves `deadline_days_before` into a real date, so this
  *  only has to render it. Matches the "Feb 21" the Plan tab shows. */
@@ -275,6 +277,14 @@ export default function TravelerOnboardingScreen({
   // No 'pay' variant — the deposit has no sheet, it goes straight to Checkout.
   const [sheet, setSheet] = useState<'medical' | 'upload' | null>(null);
 
+  // The cancellation-policy tick. This screen is where it matters most: the
+  // deposit is the first and largest payment, and it never opens an amount
+  // sheet, so without a gate here the biggest charge on Swellyo is the one
+  // nobody agrees to any terms for. Always enabled — this screen only ever
+  // runs on an operator trip, which is the only kind that takes money.
+  const { ensureConsent: ensurePolicyConsent, sheetProps: policyConsentSheetProps } =
+    useTripPolicyConsent(tripId, userId, true);
+
   // Guards a fetch that resolves after the screen is gone.
   const aliveRef = useRef(true);
   useEffect(() => {
@@ -407,6 +417,12 @@ export default function TravelerOnboardingScreen({
       const epoch = ++checkoutEpochRef.current;
       const stale = () => !aliveRef.current || checkoutEpochRef.current !== epoch;
       setSheet(null);
+      // The policy tick, before anything else in this run. Ahead of `setBusy`
+      // on purpose: the traveler is being asked a question, not waiting on us,
+      // and a spinner behind the sheet reads as the step already running.
+      // Dismissing it leaves the step exactly as it was.
+      if (!(await ensurePolicyConsent())) return;
+      if (stale()) return;
       setBusy(true);
       setPaymentNote(null);
       try {
@@ -460,7 +476,7 @@ export default function TravelerOnboardingScreen({
         );
       }
     },
-    [step, tripId, advance],
+    [step, tripId, advance, ensurePolicyConsent],
   );
 
   // ── Activation ───────────────────────────────────────────────────────────
@@ -1003,7 +1019,15 @@ export default function TravelerOnboardingScreen({
       ) : null}
 
       {/* No sheet for the pay step — see openSheet(). It goes straight to
-          Stripe Checkout for the full outstanding amount. */}
+          Stripe Checkout for the full outstanding amount.
+
+          One thing does come between: the cancellation policy, asked once per
+          trip by the same hook the Plan tab uses, so the deposit and the
+          balance are agreed in identical words. Not gated on the pay step the
+          way the sheets above are gated on theirs: `step` advances the moment
+          a payment lands, and unmounting a Modal mid-dismiss is the iOS
+          stranded-touch-layer bug. */}
+      <TripPolicyConsentSheet {...policyConsentSheetProps} />
 
       {/* Mounted ONLY while it is the live sheet, and unmounted from its own
           onClose — never from a button press. The flow has to outlive its own

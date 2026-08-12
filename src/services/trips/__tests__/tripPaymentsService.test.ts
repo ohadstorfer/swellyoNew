@@ -233,6 +233,90 @@ describe('fetchPaidByRequirement', () => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// fetchMyRefunds — what the traveler is told came back
+//
+// Two filters carry the meaning, and both are easy to drop by accident:
+//   • `status = 'succeeded'` — a refund the balance guardrail BLOCKED is a row
+//     on this table and is not money anybody received. Showing it as
+//     "Refunded $500" would be a promise nobody kept.
+//   • `is_livemode` — the same mode filter the paid figure uses. Without it the
+//     two numbers on the Payment card would come from different worlds.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('fetchMyRefunds', () => {
+  /** The refunds chain, ending in `.order()` — that is what the service
+   *  awaits, so that is what resolves. */
+  const mockRefunds = (rows: unknown[]) => {
+    const calls: { fn: string; args: unknown[] }[] = [];
+    const record = (fn: string) => (...args: unknown[]) => {
+      calls.push({ fn, args });
+      return chain;
+    };
+    const chain: Record<string, unknown> = {
+      select: record('select'),
+      eq: record('eq'),
+      order: (...args: unknown[]) => {
+        calls.push({ fn: 'order', args });
+        return Promise.resolve({ data: rows, error: null });
+      },
+    };
+    return { chain, calls };
+  };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('reads only succeeded refunds, in this build\'s Stripe mode, for this user', async () => {
+    const { supabase } = require('../../../config/supabase');
+    const { fetchMyRefunds, STRIPE_LIVEMODE } = require('../tripPaymentsService');
+    const { chain, calls } = mockRefunds([]);
+    (supabase.from as jest.Mock).mockReturnValue(chain);
+
+    await fetchMyRefunds('t1', 'u1');
+
+    expect(supabase.from).toHaveBeenCalledWith('organized_trip_refunds');
+    expect(calls).toContainEqual({ fn: 'eq', args: ['status', 'succeeded'] });
+    expect(calls).toContainEqual({ fn: 'eq', args: ['is_livemode', STRIPE_LIVEMODE] });
+    // Explicit, even though RLS scopes a traveler to their own rows: staff on
+    // the trip can read everybody's, and an operator paying for their own seat
+    // would otherwise sum the whole trip's refunds into their own card.
+    expect(calls).toContainEqual({ fn: 'eq', args: ['user_id', 'u1'] });
+  });
+
+  it('sums numeric amounts and reports the most recent date', async () => {
+    const { supabase } = require('../../../config/supabase');
+    const { fetchMyRefunds } = require('../tripPaymentsService');
+    // Postgres `numeric` arrives as a STRING. '200' + '150' is '200150', which
+    // is why the service coerces before adding.
+    const { chain } = mockRefunds([
+      { amount_usd: '200', created_at: '2026-08-12T10:00:00Z' },
+      { amount_usd: '150.50', created_at: '2026-08-01T10:00:00Z' },
+    ]);
+    (supabase.from as jest.Mock).mockReturnValue(chain);
+
+    await expect(fetchMyRefunds('t1', 'u1')).resolves.toEqual({
+      totalUsd: 350.5,
+      // The query orders newest first, so the head is the last refund.
+      lastAt: '2026-08-12T10:00:00Z',
+      count: 2,
+    });
+  });
+
+  it('reports nothing rather than null when there are no refunds', async () => {
+    const { supabase } = require('../../../config/supabase');
+    const { fetchMyRefunds } = require('../tripPaymentsService');
+    const { chain } = mockRefunds([]);
+    (supabase.from as jest.Mock).mockReturnValue(chain);
+
+    // Zero, not null: the Payment card renders the line on `> 0`, and a null
+    // total would have to be defended at every call site instead.
+    await expect(fetchMyRefunds('t1', 'u1')).resolves.toEqual({
+      totalUsd: 0,
+      lastAt: null,
+      count: 0,
+    });
+  });
+});
+
 // ── startCheckout's outcome ─────────────────────────────────────────────────
 // The decode is three lines, and every one of them is load-bearing: it is what
 // separates "they pressed back in Checkout" from "they paid", which the app

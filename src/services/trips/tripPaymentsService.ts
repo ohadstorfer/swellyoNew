@@ -183,6 +183,58 @@ export async function fetchPaidByRequirement(
   return out;
 }
 
+/** What has come back to this traveler on this trip. */
+export type MyRefunds = {
+  /** Total refunded, canonical USD. Zero when nothing has been. */
+  totalUsd: number;
+  /** When the most recent one was issued, ISO. Null when there are none. */
+  lastAt: string | null;
+  count: number;
+};
+
+/**
+ * Refunds issued to ME on this trip.
+ *
+ * Reads `organized_trip_refunds` — OUR record of the decision — rather than
+ * the `refunded` rows in `organized_trip_payment_events`. Both describe the
+ * same money, but this one carries `status`, and that distinction is the whole
+ * point: a refund the balance guardrail blocked, or one Stripe rejected, is a
+ * row on this table and is NOT money the traveler got back. Only `succeeded`
+ * is shown, because "Refunded $500" for an attempt that never reached Stripe
+ * is a promise nobody kept.
+ *
+ * `is_livemode` is filtered the same way `fetchPaidByRequirement` filters it —
+ * a test-mode refund must not appear next to real money, or the two figures on
+ * this card would come from different worlds.
+ *
+ * RLS already scopes this to the caller's own rows (`trip_refunds_select_own`);
+ * the explicit `user_id` filter is belt-and-braces, and what makes this correct
+ * if the caller is also staff on the trip and can therefore see everyone's.
+ */
+export async function fetchMyRefunds(
+  tripId: string,
+  userId: string,
+): Promise<MyRefunds> {
+  const { data, error } = await supabase
+    .from('organized_trip_refunds')
+    .select('amount_usd, created_at')
+    .eq('trip_id', tripId)
+    .eq('user_id', userId)
+    .eq('status', 'succeeded')
+    .eq('is_livemode', STRIPE_LIVEMODE)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+
+  const rows = data ?? [];
+  return {
+    // `numeric` arrives as a string; `+` on two of those would concatenate.
+    totalUsd: rows.reduce((sum, r: any) => sum + Number(r.amount_usd ?? 0), 0),
+    lastAt: (rows[0] as any)?.created_at ?? null,
+    count: rows.length,
+  };
+}
+
 /** `functions.invoke` throws on any non-2xx response with a fixed generic
  *  message ("Edge Function returned a non-2xx status code") and `data: null`
  *  — the real message the edge function composed ("Already paid", "You are
