@@ -20,6 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Path } from 'react-native-svg';
 import { LinearGradient } from 'expo-linear-gradient';
+import type { DeliveredDocument } from '../../../services/trips/deliveredDocumentsService';
 // Aliased: this file already uses RN's own `Animated` for PressableScale.
 import Reanimated, {
   FadeIn,
@@ -1000,6 +1001,17 @@ export const TripDocumentsCard: React.FC<{
   /** host mode only — open the editor for what this trip asks for. Its presence
    *  is also what keeps the card alive on a trip that asks for nothing yet. */
   onManage?: () => void;
+  /**
+   * Documents the OPERATOR handed to this traveler — tickets, itineraries.
+   *
+   * Passed in rather than fetched, because this component is presentational and
+   * takes its rows the same way. Kept as a separate list rather than merged
+   * into `rows`: a delivered document has no requirement, no state and nothing
+   * to approve, and flattening it into a DocumentRow would mean inventing all
+   * three.
+   */
+  deliveredDocuments?: DeliveredDocument[];
+  onPressDelivered?: (doc: DeliveredDocument) => void;
 }> = ({
   rows,
   mode,
@@ -1009,6 +1021,8 @@ export const TripDocumentsCard: React.FC<{
   onPressRow,
   onReviewAll,
   onManage,
+  deliveredDocuments = [],
+  onPressDelivered,
 }) => {
   // The local-currency hint. Read from the viewer, not from the trip: the
   // charge is USD and the traveler's bank converts at TODAY's rate, so the
@@ -1351,6 +1365,54 @@ export const TripDocumentsCard: React.FC<{
           ))
         )}
       </View>
+
+      {/* ── From your operator ────────────────────────────────────────────────
+          Same wallet, separate group, explicitly labelled. A traveler has to be
+          able to tell "this is mine, I gave it" from "this is theirs, they gave
+          it to me" at a glance: the first is evidence they satisfied something,
+          the second is a ticket. Merging them into one list would blur exactly
+          the distinction the delivery feature is built around. */}
+      {deliveredDocuments.length > 0 ? (
+        <>
+          <View style={styles.deliveredHead}>
+            <Ionicons name="mail-open-outline" size={14} color="#7B7B7B" />
+            <Text style={styles.deliveredHeadText}>From your operator</Text>
+          </View>
+          <View style={styles.ygCard}>
+            {deliveredDocuments.map((doc, i) => (
+              <Pressable
+                key={doc.id}
+                onPress={onPressDelivered ? () => onPressDelivered(doc) : undefined}
+                disabled={!onPressDelivered}
+                style={({ pressed }) => [
+                  styles.ygRow,
+                  i === deliveredDocuments.length - 1 && styles.ygRowLast,
+                  pressed && onPressDelivered && styles.deliveredPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${doc.title}, from your operator`}
+              >
+                <View style={styles.walletIcon}>
+                  <Ionicons name="document-text-outline" size={18} color="#5A5A5A" />
+                </View>
+                <View style={styles.deliveredText}>
+                  <Text style={styles.ygItem} numberOfLines={1}>
+                    {doc.title}
+                  </Text>
+                  {doc.note ? (
+                    <Text style={styles.deliveredNote} numberOfLines={2}>
+                      {doc.note}
+                    </Text>
+                  ) : null}
+                </View>
+                {onPressDelivered ? (
+                  <Ionicons name="chevron-forward" size={18} color="#C4C4C4" />
+                ) : null}
+              </Pressable>
+            ))}
+          </View>
+        </>
+      ) : null}
     </View>
     </>
   );
@@ -1952,6 +2014,31 @@ const styles = StyleSheet.create({
   // Header count + progress bar (traveler view).
   docCount: { fontFamily: ff('Inter', '600'), fontSize: 12, fontWeight: '600', color: T.muted },
   docCountDone: { color: T.done },
+
+  // ── Delivered by the operator ───────────────────────────────────────────
+  deliveredHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  deliveredHeadText: {
+    fontFamily: ff('Inter', '600'),
+    fontWeight: '600',
+    fontSize: 12,
+    color: '#7B7B7B',
+  },
+  deliveredText: { flex: 1 },
+  deliveredNote: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#8A8A8A',
+    marginTop: 1,
+  },
+  deliveredPressed: { opacity: 0.6 },
 
   // ── Travel wallet ───────────────────────────────────────────────────────
   // A filed document, not a task: the checklist's 20px checkbox is replaced by

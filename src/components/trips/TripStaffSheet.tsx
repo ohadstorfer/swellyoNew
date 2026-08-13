@@ -35,6 +35,7 @@ import {
 } from '../../services/trips/tripStaffService';
 import { uploadCrewPhoto } from '../../services/storage/storageService';
 import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
+import { StaffPaperworkSection } from './StaffPaperworkSection';
 
 interface Props {
   visible: boolean;
@@ -806,6 +807,15 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
         }
         ListFooterComponent={
           <View style={styles.formFooter}>
+            {/* Under the tier picker, because "what may this person do" and
+                "what do I need from them" are the same conversation, and split
+                across two screens the second one never gets opened. */}
+            <StaffPaperworkSection
+              tripId={tripId}
+              staffId={mode.member.id}
+              hasAccount={mode.member.user_id !== null}
+              canManage
+            />
             <TouchableOpacity
               // A Listed credit with a blank name would write display_name =
               // null, which the ots_listed_needs_name CHECK rejects — the row

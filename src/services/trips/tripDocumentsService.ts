@@ -1695,7 +1695,7 @@ function mapDocument(row: any): TravelerDocument {
  * URI straight out of FormData, which avoids materialising the whole image in
  * JS memory. Web falls back to a Blob.
  */
-async function toUploadBody(uri: string, contentType: string): Promise<Blob | FormData> {
+export async function toUploadBody(uri: string, contentType: string): Promise<Blob | FormData> {
   const isNativeFile =
     Platform.OS !== 'web' &&
     (uri.startsWith('file://') || uri.startsWith('content://') || uri.startsWith('ph://'));
@@ -1723,7 +1723,7 @@ async function toUploadBody(uri: string, contentType: string): Promise<Blob | Fo
 }
 
 /** Best-effort size for the metadata row. Never worth failing an upload over. */
-async function byteSizeOf(uri: string): Promise<number> {
+export async function byteSizeOf(uri: string): Promise<number> {
   try {
     if (Platform.OS === 'web') {
       const res = await fetch(uri);
