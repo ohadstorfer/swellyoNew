@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Staff requirements &amp; wallet delivery — spec &amp; plan</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f7f5; --panel2:#f0f0ec; --text:#1c1c1a; --muted:#6b6b66;
+    --line:#e3e3de; --cyan:#05BCD3; --cyan-dark:#066B8C; --cyan-tint:#E6F4F8;
+    --ok:#1f7a4d; --ok-bg:#e8f5ee;
+    --open:#b8532b; --open-bg:#fdf0e9;
+    --wait:#5b5bb0; --wait-bg:#eeeefb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 100px}
+
+  h1{font-size:26px;letter-spacing:-.02em;font-weight:680;margin-bottom:8px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:20px}
+
+  .rule{background:var(--cyan-tint);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;font-size:14px;margin:0 0 14px}
+  .rule b{color:var(--cyan-dark)}
+  .rule.ok{background:var(--ok-bg)} .rule.ok b{color:var(--ok)}
+  .rule.warn{background:var(--open-bg)} .rule.warn b{color:var(--open)}
+  .rule ul{margin-top:6px}
+
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-weight:680;
+    color:var(--muted);margin:40px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:15px;font-weight:660;margin:0 0 6px}
+  .part{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:48px 0 4px;
+    padding:10px 16px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  p.lead{font-size:14px;color:#3a3a36;margin-bottom:14px}
+
+  ul{list-style:none}
+  ul li{padding-left:16px;position:relative;margin-bottom:5px}
+  ul li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;
+    border-radius:99px;background:var(--line)}
+  ul li b{font-weight:640}
+  ol{margin-left:18px}
+  ol li{margin-bottom:7px}
+
+  .card{border:1px solid var(--line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .chead{background:var(--panel);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .chead strong{font-size:14px;font-weight:660}
+  .chead span{font-size:13px;color:var(--muted)}
+  .cbody{padding:12px 16px;font-size:14px}
+  .cbody p+p,.cbody p+ul,.cbody ul+p{margin-top:8px}
+  .note{padding:9px 16px;border-top:1px solid var(--line);background:var(--panel);
+    font-size:12.5px;color:var(--muted)}
+
+  .tag{font-size:11px;font-weight:680;padding:2px 8px;border-radius:99px;white-space:nowrap}
+  .t-ok{color:var(--ok);background:var(--ok-bg)}
+  .t-open{color:var(--open);background:var(--open-bg)}
+  .t-wait{color:var(--wait);background:var(--wait-bg)}
+
+  code{background:var(--panel2);border-radius:4px;padding:1px 5px;
+    font:12.5px ui-monospace,Menlo,monospace}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:12px 14px;overflow-x:auto;margin:10px 0;
+    font:12.5px/1.5 ui-monospace,Menlo,monospace}
+  pre code{background:none;padding:0}
+
+  .tscroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:14px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:680;padding:8px 16px;background:var(--panel);
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:9px 16px;border-top:1px solid var(--line);vertical-align:top}
+  td:first-child{font-weight:620;white-space:nowrap}
+
+  .ex{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:10px 14px;margin:10px 0;font-size:13.5px}
+  .ex .good{color:var(--ok);font-weight:640}
+  .ex .bad{color:var(--open);font-weight:640}
+
+  .quote{border-left:3px solid var(--cyan);background:var(--cyan-tint);
+    padding:8px 14px;border-radius:0 8px 8px 0;font-size:13.5px;margin:10px 0;font-style:italic}
+
+  a{color:var(--cyan-dark)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Staff requirements &amp; wallet delivery — spec &amp; plan</h1>
+  <p class="sub">12 August 2026 · rev 1 · operator trips (type C) · the two gaps left in the feature list</p>
+
+  <div class="rule">
+    <b>What we are building, in one breath.</b>
+    <ul>
+      <li><b>Part A.</b> A staff member can be asked for paperwork — passport, visa, a signed waiver — <b>per person</b>, not per trip. A guide flying in needs a visa; the local driver does not.</li>
+      <li><b>Part B.</b> An operator can put a document <b>into a traveler's wallet</b> — tickets, itineraries, confirmations. Things the operator issues, never things the traveler is supposed to provide.</li>
+    </ul>
+  </div>
+
+  <div class="rule warn">
+    <b>The line that runs through both parts.</b>
+    A document is evidence of <i>who did something</i>. A passport in the wallet means the traveler
+    chose to hand it over; a signed waiver means the person bound by it agreed. Neither statement
+    survives if somebody else can produce the document on their behalf. Both parts below are
+    shaped by that, and Part B is <b>narrower than it first sounds</b> because of it.
+  </div>
+
+  <h2>Where this comes from</h2>
+  <p class="lead">
+    An audit of the operator-trips feature list on 12 Aug found everything built except two
+    items: requirements for staff, and the operator putting documents in a traveler's wallet.
+    Everything else — traveler onboarding, Stripe onboarding, the create-trip flow, the
+    dashboard, staff roles and invites — already exists and is in <code>fe7a167</code>.
+  </p>
+
+  <!-- ─────────────────────────── PART A ─────────────────────────── -->
+  <div class="part">Part A — Requirements for staff</div>
+  <p class="lead">
+    Staff exist (<code>organized_trip_staff</code>, five tiers, invites, promote/demote). What
+    they cannot do is be <i>asked for anything</i>. Requirements today address travelers only.
+  </p>
+
+  <h2>Why per person, not per trip</h2>
+  <p class="lead">
+    Traveler requirements are a property of the trip: everybody who joins is asked the same
+    things. Staff are not like that. On one trip the photographer flies in from abroad and needs
+    a visa, the head guide needs a first-aid certificate that expires, and the local driver needs
+    neither. A trip-wide list would ask all three for all of it, and the operator would train
+    everyone to ignore the list — which is the failure mode that makes a requirements system
+    worthless.
+  </p>
+  <div class="ex">
+    <span class="bad">Trip-wide:</span> "This trip requires a visa" → the driver who lives twenty
+    minutes away is chased for a visa forever.<br>
+    <span class="good">Per person:</span> the operator ticks visa on the photographer only.
+  </div>
+
+  <h2>The rule</h2>
+  <div class="rule">
+    <ul>
+      <li>A requirement row gains an <b>audience</b>: <code>traveler</code> or <code>staff</code>. Existing rows are all <code>traveler</code>.</li>
+      <li>Traveler requirements apply to <b>everyone</b> who joins, as today. Nothing changes.</li>
+      <li>Staff requirements apply to <b>nobody by default</b>. The operator assigns each one to specific people.</li>
+      <li>A staff member fulfils them through the <b>same screens travelers use</b>. One upload path, one approval path, one storage bucket.</li>
+      <li><b>Deposit and balance are never staff requirements.</b> Staff do not pay to work.</li>
+    </ul>
+  </div>
+
+  <h2>Data model</h2>
+  <p class="lead">
+    Two changes. An <code>audience</code> column on the requirement, and a join table saying who
+    a staff requirement is for.
+  </p>
+<pre><code>alter table public.organized_trip_requirements
+  add column if not exists audience text not null default 'traveler'
+    check (audience in ('traveler','staff'));
+
+-- Staff do not pay to work. Enforced here rather than in the UI, because a
+-- 'pay' requirement pointed at staff would reach the checkout gate and try to
+-- charge a member of the crew.
+alter table public.organized_trip_requirements
+  add constraint organized_trip_req_staff_never_pays
+  check (audience = 'traveler' or req_type &lt;&gt; 'pay');
+
+create table if not exists public.organized_trip_staff_requirements (
+  id             uuid primary key default gen_random_uuid(),
+  staff_id       uuid not null references public.organized_trip_staff(id) on delete cascade,
+  requirement_id uuid not null references public.organized_trip_requirements(id) on delete cascade,
+  assigned_by    uuid not null references auth.users(id),
+  assigned_at    timestamptz not null default now(),
+  unique (staff_id, requirement_id)
+);</code></pre>
+  <div class="rule ok">
+    <b>Why a join table and not a column on the staff row.</b>
+    Requirements are a set per person and the set changes — somebody is promoted from driver to
+    guide and now needs the certificate. A join table makes assigning and un-assigning one row
+    each, keeps the history of <i>who</i> assigned it, and means the fulfilment tables
+    (<code>organized_trip_travelers_documents</code>, <code>group_trip_acknowledgements</code>)
+    need no schema change at all — they already key on <code>requirement_id</code> and a user.
+  </div>
+
+  <h2>What we deliberately do not build</h2>
+  <ul>
+    <li><b>A second requirements engine.</b> Staff resolve, upload, and get approved through the paths that already exist. If staff needed their own engine, the two would drift and one of them would rot.</li>
+    <li><b>Staff requirements gating anything.</b> A traveler with unmet requirements cannot join the trip. A guide with an unmet requirement is <b>flagged, not blocked</b> — the operator hired them and knows the situation; a system that locks the guide out of the trip chat two days before departure is worse than the missing document.</li>
+    <li><b>Requirements on the operator themselves.</b> They are the one holding the list.</li>
+  </ul>
+
+  <h2>Step A1 — Migration</h2>
+  <div class="card">
+    <div class="chead"><strong>audience + assignment table</strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+      <p>The SQL above, plus RLS: an operator (or a staff member with <code>staff.manage</code>) may read and write assignments on their own trips; a staff member may read their own.</p>
+      <p>Backfill is a no-op — the default handles it, and every existing row is genuinely a traveler requirement.</p>
+    </div>
+    <div class="note">Follows the pattern in <code>20260807000100_operator_trip_staff_gates.sql</code>.</div>
+  </div>
+
+  <h2>Step A2 — Service</h2>
+  <div class="card">
+    <div class="chead"><strong><code>tripStaffService.ts</code> grows three functions</strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+<pre><code>listStaffRequirements(tripId): Promise&lt;StaffRequirementAssignment[]&gt;
+assignStaffRequirement(staffId, requirementId): Promise&lt;void&gt;
+unassignStaffRequirement(staffId, requirementId): Promise&lt;void&gt;</code></pre>
+      <p>
+        Reading a staff member's own fulfilment state reuses
+        <code>organized_trip_requirements_resolved</code>, which already resolves per user — it
+        only ever needed to be pointed at a staff member.
+      </p>
+    </div>
+  </div>
+
+  <h2>Step A3 — Operator UI</h2>
+  <div class="card">
+    <div class="chead"><strong>Inside <code>TripStaffSheet</code>, on the member</strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+      <p>
+        A <b>Paperwork</b> section under the role picker on a staff member's detail. Lists the
+        trip's staff-audience requirements with a tick each, and the person's current state
+        beside any that are assigned — <i>Not uploaded · Waiting on you · Approved</i>.
+      </p>
+      <p>
+        This lives where promote/demote already lives, because "what is this person's role" and
+        "what do I need from this person" are the same question asked twice, and splitting them
+        across two screens means the second is never opened.
+      </p>
+    </div>
+    <div class="note">Creating a staff-audience requirement itself happens where trip requirements are already edited — the audience is a toggle on the requirement, not a new editor.</div>
+  </div>
+
+  <h2>Step A4 — The staff member's own view</h2>
+  <div class="card">
+    <div class="chead"><strong>Reuse <code>TravelerOnboardingScreen</code></strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+      <p>
+        A staff member with assigned requirements sees the same task list a traveler sees, minus
+        the payment rows, and with the copy softened: <i>"Your operator needs these from
+        you"</i> rather than the joining language. Same upload sheet, same medical form, same
+        waiver agree.
+      </p>
+      <p>
+        No Skip button and no deadline pressure — the timing rules exist to protect a departure
+        the traveler might miss, and a staff member's paperwork is a working arrangement, not a
+        gate.
+      </p>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────── PART B ─────────────────────────── -->
+  <div class="part">Part B — Putting documents in a traveler's wallet</div>
+  <p class="lead">
+    The wallet exists and is traveler-side: approved items land there and stay. What is missing
+    is the operator being able to <i>put something in it</i>.
+  </p>
+
+  <h2>The thing to get right first</h2>
+  <div class="rule warn">
+    <b>"Operator uploads to the wallet" is two features, and only one of them is safe.</b>
+    <ul>
+      <li><b>Delivering a document the operator issues</b> — a flight itinerary, a hotel confirmation, a packing list, an insurance certificate for the trip. Safe, useful, and the actual ask.</li>
+      <li><b>Filling in a document the traveler owes</b> — uploading their passport for them, or ticking their waiver. <b>Not built, on purpose.</b></li>
+    </ul>
+  </div>
+  <p class="lead">
+    The second breaks the evidence. Every requirement record exists to answer "did this person
+    provide this, and when". A waiver especially: an agreement is only worth the record if the
+    person bound by it made it, and an operator-signed waiver is not a waiver, it is a liability
+    with a signature on it. The medical form is the same. So delivery is <b>one-directional</b>:
+    the operator can hand a traveler a document, and can never satisfy a requirement on their
+    behalf.
+  </p>
+  <div class="ex">
+    <span class="good">Allowed:</span> operator uploads "El Salvador 26 — final itinerary.pdf" → appears in every traveler's wallet.<br>
+    <span class="good">Allowed:</span> operator uploads "Maya's flight confirmation.pdf" → appears in Maya's wallet only.<br>
+    <span class="bad">Refused:</span> operator uploads a passport scan to satisfy Maya's passport requirement.
+  </div>
+
+  <h2>The rule</h2>
+  <div class="rule">
+    <ul>
+      <li>A delivered document is its own kind of row. It is <b>never</b> a requirement fulfilment and carries no <code>requirement_id</code>.</li>
+      <li>It is addressed either to <b>the whole trip</b> or to <b>one traveler</b>.</li>
+      <li>It needs no approval — the operator is the source, so there is nobody to approve it.</li>
+      <li>The traveler can open it, download it, and never delete it. It is a record they were given something.</li>
+      <li>Withdrawing one is the operator's action and leaves the row, marked withdrawn, for the same reason refunds keep their row.</li>
+    </ul>
+  </div>
+
+  <h2>Data model</h2>
+<pre><code>create table if not exists public.organized_trip_delivered_documents (
+  id            uuid primary key default gen_random_uuid(),
+  trip_id       uuid not null references public.group_trips(id) on delete cascade,
+  -- NULL = everybody on the trip. A named user = that traveler only.
+  recipient_id  uuid references auth.users(id) on delete cascade,
+  uploaded_by   uuid not null references auth.users(id),
+  title         text not null check (length(title) between 1 and 200),
+  note          text check (note is null or length(note) &lt;= 1000),
+  storage_path  text not null,
+  size_bytes    integer,
+  delivered_at  timestamptz not null default now(),
+  withdrawn_at  timestamptz
+);</code></pre>
+  <div class="rule ok">
+    <b>Why not extend <code>organized_trip_operator_documents</code>.</b>
+    That table holds the operator's <i>own</i> paperwork — their default waiver, their insurance
+    certificate — which travelers never see. Adding a recipient to it would put
+    "documents nobody may read" and "documents delivered to a named traveler" in one table
+    behind one RLS policy, and the first mistake in that policy exposes the insurance
+    certificate. Different audiences deserve different tables.
+  </div>
+
+  <h2>Step B1 — Migration + storage</h2>
+  <div class="card">
+    <div class="chead"><strong>Table, RLS, bucket path</strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+      <p>
+        RLS: the operator and <code>docs.view</code> staff read all rows on their trips and
+        insert; a traveler reads rows on trips they are in where
+        <code>recipient_id is null or recipient_id = auth.uid()</code>, and
+        <code>withdrawn_at is null</code>. Travelers never insert into this table — that is the
+        one-directional rule, held in the database rather than the UI.
+      </p>
+      <p>Reuses the existing documents bucket with a <code>delivered/</code> prefix.</p>
+    </div>
+  </div>
+
+  <h2>Step B2 — Operator UI</h2>
+  <div class="card">
+    <div class="chead"><strong>Dashboard tab and traveler row</strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+      <p>
+        Two entry points, because the two cases are genuinely different:
+      </p>
+      <ul>
+        <li><b>Trip-wide</b> — a <i>Documents</i> section on the dashboard tab: upload, title, optional note, goes to everyone.</li>
+        <li><b>One traveler</b> — a <i>Send document</i> action on the traveler row, next to the existing Set price and refund actions.</li>
+      </ul>
+      <p>Both use the file picker already wired for the waiver.</p>
+    </div>
+  </div>
+
+  <h2>Step B3 — Traveler UI</h2>
+  <div class="card">
+    <div class="chead"><strong>The wallet gains a second source</strong><span class="tag t-open">not started</span></div>
+    <div class="cbody">
+      <p>
+        Delivered documents appear in the wallet alongside approved requirement items, marked
+        <b>From your operator</b> so the two are never confused. A traveler must be able to tell
+        "this is mine, I gave it" from "this is theirs, they gave me it" at a glance — the
+        wallet is the one place both live.
+      </p>
+      <p>A push when one arrives, using the notification plumbing that already exists.</p>
+    </div>
+  </div>
+
+  <h2>Deploy order</h2>
+  <ol>
+    <li><b>A1</b> migration — additive, safe on its own, nothing reads the new column yet.</li>
+    <li><b>A2 + A3 + A4</b> ship together. An assignment nobody can see is worse than no assignment.</li>
+    <li><b>B1</b> migration — additive and independent; can go at any point.</li>
+    <li><b>B2 before B3?</b> No — <b>B3 first</b>. A delivered document with nowhere to appear is a document the traveler never gets, and the operator has no way to know. Ship the reader, then the writer.</li>
+  </ol>
+
+  <h2>Out of scope, on purpose</h2>
+  <ul>
+    <li><b>Expiry on staff certificates.</b> A first-aid certificate that lapses is a real problem and a real feature — dates, reminders, a re-upload flow. It is not this one.</li>
+    <li><b>Staff requirements across trips.</b> Assignment is per trip. The same guide on four trips is asked four times, which is annoying and correct: the paperwork a trip needs is the trip's business.</li>
+    <li><b>Traveler-to-operator delivery.</b> Travelers send documents by fulfilling requirements. A second channel would be a place for a passport to arrive with no record that it was asked for.</li>
+    <li><b>Blocking on staff paperwork</b> — see Part A. Flag, do not gate.</li>
+  </ul>
+
+  <h2>How we will know it worked</h2>
+  <ul>
+    <li>A staff member assigned a visa requirement sees it, uploads it, and the operator approves it — through the traveler screens, with no staff-specific upload code.</li>
+    <li>Assigning a requirement to one crew member leaves the other three untouched.</li>
+    <li>A <code>pay</code> requirement cannot be created with <code>audience = 'staff'</code>; the database refuses it.</li>
+    <li>An operator uploads an itinerary to the trip and every traveler sees it in the wallet, marked as theirs.</li>
+    <li>A document sent to one traveler is invisible to the others — checked by querying as another traveler, not by looking at the screen.</li>
+    <li>There is no code path, anywhere, by which an operator upload sets <code>requirement_id</code>.</li>
+  </ul>
+
+  <h2>Estimate</h2>
+  <div class="tscroll">
+  <table>
+    <tr><th>Part</th><th>Shape</th><th>Risk</th></tr>
+    <tr><td>A — staff requirements</td><td>1 migration, ~3 service functions, 2 UI surfaces</td><td>Low. Reuses the whole requirements engine; the new code is assignment and a list.</td></tr>
+    <tr><td>B — wallet delivery</td><td>1 migration + RLS, 1 service, 3 UI surfaces</td><td>Low-ish. The risk is entirely in the RLS policy — a wrong predicate shows one traveler another's document.</td></tr>
+  </table>
+  </div>
+  <p class="lead">
+    Part A is the larger surface and the smaller risk. Part B is the smaller surface and the
+    sharper edge, and its test is a query run as the wrong user, not a screenshot.
+  </p>
+
+</div>
+</body>
+</html>
