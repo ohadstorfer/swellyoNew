@@ -6,6 +6,8 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "environment": "development",
+      "prebuildCommand": "echo 'Skipping prebuild — committed native folders are the source of truth'",
       "env": {
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }

@@ -10,6 +10,7 @@ import { MessagingProvider } from './src/context/MessagingProvider';
 import { TutorialProvider } from './src/context/TutorialContext';
 import { AppContent } from './src/components/AppContent';
 import { analyticsService } from './src/services/analytics/analyticsService';
+import { initSingular } from './src/services/analytics/singularService';
 import { PostHogErrorBoundary } from './src/components/PostHogErrorBoundary';
 import { registerLogoutHandlers } from './src/utils/registerLogoutHandlers';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -95,6 +96,10 @@ export default Sentry.wrap(function App() {
     // Initialize PostHog analytics (instance-based for tracking)
     analyticsService.initialize();
     registerLogoutHandlers();
+    // Initialize Singular MMP (Meta/TikTok install attribution). Native-only,
+    // fail-open: no-ops on web / Expo Go / when the SDK keys are absent. On iOS
+    // this also requests App Tracking Transparency and enables SKAdNetwork.
+    initSingular();
   }, []);
 
   // react-query has no "window focus" in RN, so wire its focusManager to

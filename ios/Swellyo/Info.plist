@@ -80,6 +80,8 @@
     <array>
       <string>INSendMessageIntent</string>
     </array>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>Swellyo uses this to measure the performance of our ads and to show you more relevant content. Your data is never sold.</string>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UILaunchStoryboardName</key>

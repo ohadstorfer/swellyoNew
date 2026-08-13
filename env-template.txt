@@ -4,4 +4,10 @@
 EXPO_PUBLIC_SUPABASE_URL=your_supabase_project_url_here
 EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
 
+# Singular MMP (mobile measurement / ad attribution for Meta + TikTok installs)
+# Get these from the Singular dashboard: Settings > SDK Keys.
+# Read at runtime via process.env in src/services/analytics/singularService.ts.
+EXPO_PUBLIC_SINGULAR_SDK_KEY=your_singular_sdk_key_here
+EXPO_PUBLIC_SINGULAR_SECRET=your_singular_sdk_secret_here
+
 

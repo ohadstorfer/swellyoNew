@@ -18,6 +18,11 @@ allprojects {
     google()
     mavenCentral()
     maven { url 'https://www.jitpack.io' }
+    // Singular MMP SDK is hosted on Singular's own Maven repo (not mavenCentral).
+    // Added manually because eas.json production build SKIPS prebuild, so the
+    // singular-react-native Expo config plugin (which normally injects this)
+    // never runs. Keep in sync with that plugin.
+    maven { url 'https://maven.singular.net/' }
   }
 }
 

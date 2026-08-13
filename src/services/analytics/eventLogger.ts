@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../config/supabase';
 import { analyticsService } from './analyticsService';
+import { mirrorEventToSingular } from './singularService';
 
 /**
  * Names of events that should only fire once per user. The DB enforces this
@@ -49,6 +50,12 @@ export async function logEvent(
   if (analyticsService.getIsOptedOut()) {
     return;
   }
+
+  // Mirror conversion-relevant events to Singular (Meta/TikTok install
+  // attribution) ALONGSIDE the Supabase write below. Only mapped events are
+  // forwarded (see SINGULAR_EVENT_MAP); everything else is ignored. Fire-and-
+  // forget and fail-open — never blocks or throws into the Supabase path.
+  mirrorEventToSingular(eventName);
 
   // RLS requires user_id = auth.uid(), so derive it when the caller didn't
   // pass one (most service-layer call sites don't have it handy).
