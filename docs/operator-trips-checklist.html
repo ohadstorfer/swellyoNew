@@ -339,14 +339,15 @@
       <span class="built">17 aug</span> tag marks every row that moved.
       That night, a second pass walked the <em>scenarios</em> — the paths one trip
       actually takes, not the parts — and found 8 holes. They are section 4.
+      One is closed; 7 are open.
     </p>
   </div>
 
   <div class="totals">
-    <span class="total is-done"><b>68</b> done</span>
+    <span class="total is-done"><b>69</b> done</span>
     <span class="total is-partly"><b>1</b> partly</span>
-    <span class="total is-gap"><b>8</b> scenario holes</span>
-    <span class="total is-new"><b>15</b> built today</span>
+    <span class="total is-gap"><b>7</b> scenario holes</span>
+    <span class="total is-new"><b>16</b> built</span>
   </div>
 
   <!-- ============ STATUS ============ -->
@@ -1049,7 +1050,7 @@
       <span class="sec-who">night pass · 17 aug</span>
     </div>
     <div class="card">
-      <div class="meter"><i class="m-done" style="width:43%"></i><i class="m-gap" style="width:57%"></i></div>
+      <div class="meter"><i class="m-done" style="width:50%"></i><i class="m-gap" style="width:50%"></i></div>
 
       <div class="row">
         <span class="chip is-gap">hole</span>
@@ -1113,12 +1114,14 @@
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-done">closed</span>
         <div>
-          <p class="what">A new waiver quietly un-signs everyone</p>
-          <p class="note">Replacing the waiver correctly invalidates the old signatures — they are pinned to
-          the exact document version. But nobody is told to sign again, and with no automatic reminders the
-          requirement just sits missing until someone stares at the dashboard.</p>
+          <p class="what">A new waiver quietly un-signs everyone<span class="built">18 aug</span></p>
+          <p class="note">Closed by removing the ability, not by adding a notification: the waiver is now set
+          once and frozen for the life of the trip. A unique index on <code>(trip_id, kind)</code> is the
+          boundary — client, dashboard and direct API alike — and the Replace button is gone. A trip that
+          somehow has no waiver can still get its first one, which is a real repair path and un-signs nobody,
+          because there is nothing to un-sign.</p>
         </div>
       </div>
 

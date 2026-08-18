@@ -1014,21 +1014,57 @@ async function recordWaiverDocument(
   storagePath: string,
   documentHash: string | null,
 ): Promise<string> {
-  const { data: latest } = await supabase
+  // Never leave an unreferenced waiver in the bucket — `purge-group-documents`
+  // skips the operator prefix entirely, so nothing would ever clean it up.
+  const discardUpload = () => supabase.storage.from(BUCKET).remove([storagePath]);
+
+  // One waiver per trip, for the life of the trip.
+  //
+  // Replacing it is not a small edit: an acknowledgement is pinned to the
+  // document id it was given, so a second version silently un-signs every
+  // traveler who already agreed — and nothing in the system would tell them to
+  // sign again, because there is no automatic requirement reminder.
+  //
+  // `20260818000000_waiver_is_frozen_after_publish.sql` is the real boundary
+  // (a unique index on `(trip_id, kind)`); this check exists so the operator
+  // reads a sentence instead of a raw 23505, and so the orphaned upload above
+  // is cleaned up on the way out.
+  //
+  // A trip with NO waiver can still get its first one — see the migration for
+  // why that repair path has to stay open.
+  const { data: existing, error: existingErr } = await supabase
     .from('organized_trip_operator_documents')
-    .select('version')
+    .select('id')
     .eq('trip_id', tripId)
     .eq('kind', 'waiver')
-    .order('version', { ascending: false })
-    .limit(1)
     .maybeSingle();
+
+  // A failed lookup is NOT "no waiver". Reading it that way would let a network
+  // blip carry us into the insert, where the index refuses it anyway — but with
+  // a raw constraint error instead of this one. Refuse here and keep the words.
+  if (existingErr) {
+    await discardUpload();
+    throw new Error('Could not check this trip’s waiver. Try again in a moment.');
+  }
+
+  if (existing) {
+    await discardUpload();
+    throw new Error(
+      'This trip already has a waiver, and it cannot be changed once the trip is published — ' +
+        'replacing it would cancel every signature travelers have already given.',
+    );
+  }
 
   const { data, error } = await supabase
     .from('organized_trip_operator_documents')
     .insert({
       trip_id: tripId,
       kind: 'waiver',
-      version: (latest?.version ?? 0) + 1,
+      // Always 1: the unique index above makes a second version impossible.
+      // The column stays because it is what the acknowledgement records were
+      // written against, and because `(trip_id, kind, version)` still documents
+      // what it was for.
+      version: 1,
       storage_path: storagePath,
       document_hash: documentHash,
     })
@@ -1036,9 +1072,7 @@ async function recordWaiverDocument(
     .single();
 
   if (error) {
-    // Never leave an unreferenced waiver in the bucket — the purge skips this
-    // prefix, so nothing would ever clean it up.
-    await supabase.storage.from(BUCKET).remove([storagePath]);
+    await discardUpload();
     throw error;
   }
 

@@ -347,10 +347,23 @@ export const ManageRequirementsSheet: React.FC<{
       // requirement travelers can see and cannot complete.
       //
       // Only when the waiver is actually staying on. Picking a PDF and then
-      // switching the waiver off would otherwise publish a new version — and
+      // switching the waiver off would otherwise publish a document — and
       // `purge-group-documents` skips the operator prefix entirely, so nothing
       // would ever clean it up.
-      if (waiverFile && wantsWaiver) await publishWaiverPdf(tripId, waiverFile.uri);
+      //
+      // `!waiverOnFile` mirrors the database exactly: a trip gets ONE waiver,
+      // ever. The picker is not even rendered once one is on file, so this is
+      // the belt — and it is the one that matters on a retry, where the first
+      // Save published the document and then `saveRequirementChanges` threw.
+      // Without it, pressing Save again would try to publish a second version
+      // and be refused by the unique index.
+      if (waiverFile && wantsWaiver && !waiverOnFile) {
+        await publishWaiverPdf(tripId, waiverFile.uri);
+        // Published. A retry must not attempt it again, and the box should read
+        // as on-file from here on — which is simply true.
+        setWaiverFile(null);
+        setHasWaiver(true);
+      }
 
       // `on` already contains every pay kind visible here: `seedFrom` pushes
       // any ACTIVE row it finds regardless of whether that kind has a toggle,
@@ -582,9 +595,12 @@ export const ManageRequirementsSheet: React.FC<{
                       )}
 
                       {/* The waiver is the one requirement that needs something
-                          FROM the operator. Uploading again publishes a new
-                          version — travelers who agreed to the old one are asked
-                          to agree again, which is the point of versioning it. */}
+                          FROM the operator — and the one that cannot be changed
+                          afterwards. Once a waiver is on file it is frozen for
+                          the life of the trip, so this box is upload-once and
+                          then read-only. Replacing it would un-sign everyone who
+                          had already agreed, silently, with no reminder to sign
+                          again. See 20260818000000_waiver_is_frozen_after_publish. */}
                       {kind === 'waiver' ? (
                         <View style={styles.waiverBox}>
                           <Text style={styles.waiverLabel}>Your waiver document</Text>
@@ -612,12 +628,9 @@ export const ManageRequirementsSheet: React.FC<{
                                   Waiver published
                                 </Text>
                                 <Text style={styles.waiverFileSize}>
-                                  Travelers agree to this version
+                                  This is what travelers agree to
                                 </Text>
                               </View>
-                              <Pressable onPress={pickWaiverFile} hitSlop={8}>
-                                <Text style={styles.waiverReplace}>Replace</Text>
-                              </Pressable>
                             </View>
                           ) : (
                             <Pressable
@@ -637,7 +650,9 @@ export const ManageRequirementsSheet: React.FC<{
                             <Text style={styles.waiverErrorText}>{waiverError}</Text>
                           ) : (
                             <Text style={styles.waiverHint}>
-                              Replacing it asks everyone to agree again.
+                              {waiverOnFile
+                                ? 'Set for this trip and cannot be changed — swapping it would cancel every signature already given.'
+                                : 'Travelers agree to this before they can join. It cannot be changed once it is published.'}
                             </Text>
                           )}
                         </View>
