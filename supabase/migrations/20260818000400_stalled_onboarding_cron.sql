@@ -1,24 +1,28 @@
 -- Schedule the stalled-onboarding scanner.
 --
--- ⛔ NOT APPLIED. This is the switch that starts sending real pushes to real
---    people, and it is deliberately left for a human to throw.
+-- ✅ APPLIED to prod 2026-08-18, on Ohad's explicit say-so, as jobid 8.
 --
---    Two things must happen FIRST, in this order, or it does nothing useful:
+--    Both prerequisites were deployed first, in this order:
 --
---      1. Deploy `scan-stalled-onboarding` (new function — without it this
---         cron 404s once a day, forever, silently).
---      2. Deploy `dispatch-notification-queue` — its live copy is BEHIND the
---         repo, and it is where the copy for both new types lives. Without the
---         deploy every nudge renders as the default fallback, "You have a new
---         trip update", which is worse than not sending it.
+--      1. `scan-stalled-onboarding` (new — without it this cron would 404 once
+--         a day, forever, silently).
+--      2. `dispatch-notification-queue` — its live copy was BEHIND the repo,
+--         and it holds the copy for both new types. Without the deploy every
+--         nudge would render as the default fallback, "You have a new trip
+--         update", which is worse than not sending it. Checked before
+--         deploying: the only pending change besides the new cases was one
+--         unreachable `operator_requirement_due_soon` fallback from c9ef9a1,
+--         so nothing existing moved. Confirmed healthy afterwards — the
+--         once-a-minute job kept returning 200.
 --
---    Nothing else is waiting: the tables, the RPCs and the push priorities are
---    already applied, and the operator dashboard's to-do banner reads the RPC
---    directly, so that half works with no deploy at all.
+--    Then the function was invoked once by hand, with these exact headers, as
+--    a live smoke test: 200, `{"travelerNudges":0,"operatorDigests":0}`. That
+--    also proves the service-role path end to end — see the `auth.uid() is
+--    null` note in 20260818000300, without which it would have found nobody.
 --
---    On the day it is enabled, prod has ZERO stalled onboarders (all 8
---    participants across the type-C trips are 'active'), so the first runs send
---    nothing. That is the intended way to turn it on: live, and quiet.
+--    It turned on quiet, by design: prod had ZERO stalled onboarders (all 8
+--    participants across the type-C trips were 'active'), so the first runs
+--    send nothing.
 --
 -- ── Why 07:20 UTC ──────────────────────────────────────────────────────────
 -- Daily, and off the hour. `notify-abandoned-onboarding` runs at :00 and the
