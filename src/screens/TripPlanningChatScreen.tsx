@@ -1343,6 +1343,21 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
         setChatId(response.chat_id || null);
       }
 
+      // Message cap reached. The backend answered as Swelly and skipped OpenAI,
+      // so just show that reply and stop — none of the branching below applies:
+      // there is no trip data, and a "yes" typed while awaiting a search
+      // decision must not be read as "search".
+      if (response.limit_reached) {
+        const limitMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: response.return_message,
+          isUser: false,
+          timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        };
+        setMessages(prev => [...prev, limitMessage]);
+        return;
+      }
+
       const hasNextAction = (response.data as any)?.next_action != null;
       const hasSearchSummary = response.data?.search_summary != null && String(response.data.search_summary).trim() !== '';
 

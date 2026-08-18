@@ -22,6 +22,13 @@ export interface SwellyChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  /**
+   * Set when the user hit a message cap (trip-planning only). The backend
+   * answers as Swelly (200, normal return_message) instead of erroring.
+   */
+  limit_reached?: 'conversation' | 'daily';
+  /** ISO timestamp the daily cap resets at. Only sent with limit_reached: 'daily'. */
+  reset_at?: string;
   ui_hints?: {
     show_destination_cards?: boolean;
     destinations?: string[];
@@ -37,6 +44,10 @@ export interface SwellyContinueChatResponse {
   return_message: string;
   is_finished: boolean;
   data?: any;
+  /** See SwellyChatResponse.limit_reached. */
+  limit_reached?: 'conversation' | 'daily';
+  /** ISO timestamp the daily cap resets at. Only sent with limit_reached: 'daily'. */
+  reset_at?: string;
   ui_hints?: {
     show_destination_cards?: boolean;
     destinations?: string[];

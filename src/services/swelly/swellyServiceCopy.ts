@@ -17,6 +17,13 @@ export interface SwellyChatResponse {
   data?: any;
   /** Backend array index of the assistant message just added (for PATCH calls). */
   message_index?: number;
+  /**
+   * Set when the user hit a message cap. The backend answers as Swelly (200,
+   * normal return_message) instead of erroring, and skips the OpenAI call.
+   */
+  limit_reached?: 'conversation' | 'daily';
+  /** ISO timestamp the daily cap resets at. Only sent with limit_reached: 'daily'. */
+  reset_at?: string;
   ui_hints?: {
     show_destination_cards?: boolean;
     destinations?: string[];
@@ -48,6 +55,10 @@ export interface SwellyContinueChatResponse {
   data?: any;
   /** Backend array index of the assistant message just added (for PATCH calls). */
   message_index?: number;
+  /** See SwellyChatResponse.limit_reached. */
+  limit_reached?: 'conversation' | 'daily';
+  /** ISO timestamp the daily cap resets at. Only sent with limit_reached: 'daily'. */
+  reset_at?: string;
   ui_hints?: {
     show_destination_cards?: boolean;
     destinations?: string[];

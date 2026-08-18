@@ -43,6 +43,84 @@ async function checkRateLimit(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Message caps — two more brakes on the OpenAI spend, on top of the
+// requests-per-minute limiter above:
+//   * messages per chat — stops one conversation looping forever.
+//   * messages per day  — caps what one user can spend in 24h.
+// Same Postgres counter, same fail-open behaviour.
+// ---------------------------------------------------------------------------
+const MESSAGE_LIMIT_CONFIG = {
+  perConversation: parseInt(Deno.env.get('SWELLY_MAX_MESSAGES_PER_CHAT') || '40', 10),
+  perDay: parseInt(Deno.env.get('SWELLY_MAX_MESSAGES_PER_DAY') || '100', 10),
+}
+
+const DAY_SECONDS = 86400
+
+/** Messages per day, per user. Only called on routes that actually send a message. */
+async function checkDailyMessageQuota(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+  try {
+    // Bucket prefix is shared with the swelly-trip-planning-copy variants on
+    // purpose: the cap is per user, not per deployed copy of the function.
+    const { data, error } = await supabaseAdmin.rpc('check_rate_limit', {
+      p_bucket: `swelly-trip-planning:daily:${userId}`,
+      p_max: MESSAGE_LIMIT_CONFIG.perDay,
+      p_window_seconds: DAY_SECONDS,
+    })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row) throw new Error('empty rate-limit response')
+    return {
+      allowed: row.allowed,
+      remaining: row.remaining,
+      resetTime: new Date(row.reset_at).getTime(),
+    }
+  } catch (e) {
+    console.error('[message-limit] daily counter failed, allowing request (fail-open):', e)
+    return { allowed: true, remaining: MESSAGE_LIMIT_CONFIG.perDay, resetTime: Date.now() + DAY_SECONDS * 1000 }
+  }
+}
+
+function countUserMessages(messages: Message[]): number {
+  return messages.filter((m) => m.role === 'user').length
+}
+
+/**
+ * A cap was hit. Answer as Swelly instead of as an error: a 200 with a normal
+ * return_message renders in the chat like any other reply and costs nothing —
+ * no OpenAI call is made. is_finished stays false because there is no trip
+ * data to hand to the matching step.
+ */
+function messageLimitResponse(
+  kind: 'conversation' | 'daily',
+  chatId: string | null,
+  resetTime?: number,
+): Response {
+  const returnMessage = kind === 'daily'
+    ? "That's me done for today — you've hit your daily message limit. Come back tomorrow and we'll pick this up. 🤙"
+    : "We've hit the message limit for this chat. Start a new one and we'll keep planning from there. 🤙"
+  console.log(`[message-limit] ${kind} cap reached`, { chatId })
+  return new Response(
+    JSON.stringify({
+      chat_id: chatId ?? undefined,
+      return_message: returnMessage,
+      is_finished: false,
+      limit_reached: kind,
+      ...(resetTime ? { reset_at: new Date(resetTime).toISOString() } : {}),
+    }),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    },
+  )
+}
+
 interface ChatRequest {
   message: string
   chat_id?: string
@@ -1438,7 +1516,13 @@ serve(async (req: Request) => {
     // Route: POST /swelly-trip-planning/new_chat
     if (path.endsWith('/new_chat') && req.method === 'POST') {
       const body: ChatRequest = await req.json()
-      
+
+      // Opening a chat is a message like any other — it counts against the day.
+      const dailyQuota = await checkDailyMessageQuota(supabaseAdmin, user.id)
+      if (!dailyQuota.allowed) {
+        return messageLimitResponse('daily', null, dailyQuota.resetTime)
+      }
+
       // Generate chat ID
       const chatId = crypto.randomUUID()
       
@@ -1632,18 +1716,29 @@ ${getPronounInstructions(userProfile.pronoun, userProfile.name)}`
 
       // Get existing chat history
       let messages = await getChatHistory(chatId, supabaseAdmin)
-      
+
       if (messages.length === 0) {
         return new Response(
           JSON.stringify({ error: 'Chat not found' }),
-          { 
-            status: 404, 
-            headers: { 
+          {
+            status: 404,
+            headers: {
               'Content-Type': 'application/json',
               'Access-Control-Allow-Origin': '*',
-            } 
+            }
           }
         )
+      }
+
+      // Per-chat cap is checked first: it costs nothing, and a user stuck in one
+      // long conversation should not also burn their daily allowance on it.
+      if (countUserMessages(messages) >= MESSAGE_LIMIT_CONFIG.perConversation) {
+        return messageLimitResponse('conversation', chatId)
+      }
+
+      const dailyQuota = await checkDailyMessageQuota(supabaseAdmin, user.id)
+      if (!dailyQuota.allowed) {
+        return messageLimitResponse('daily', chatId, dailyQuota.resetTime)
       }
 
       // Get user's surfer profile for destination discovery flow

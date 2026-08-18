@@ -69,6 +69,104 @@ interface Message {
   metadata?: MessageMetadata
 }
 
+// ---------------------------------------------------------------------------
+// Rate limiting — three separate brakes on the OpenAI spend below:
+//   * requests per minute  — abuse brake.
+//   * messages per chat    — stops one conversation looping forever.
+//   * messages per day     — caps what one user can spend in 24h.
+// All are backed by public.check_rate_limit (fixed window, atomic increment),
+// so they are global across Edge Function isolates. All fail OPEN: this is
+// cost control, not authentication, and a DB hiccup must never lock a real
+// user out of the chat.
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_CONFIG = {
+  maxRequests: parseInt(Deno.env.get('RATE_LIMIT_MAX_REQUESTS') || '100', 10),
+  windowMs: parseInt(Deno.env.get('RATE_LIMIT_WINDOW_MS') || '60000', 10),
+}
+
+const MESSAGE_LIMIT_CONFIG = {
+  perConversation: parseInt(Deno.env.get('SWELLY_MAX_MESSAGES_PER_CHAT') || '40', 10),
+  perDay: parseInt(Deno.env.get('SWELLY_MAX_MESSAGES_PER_DAY') || '100', 10),
+}
+
+const DAY_SECONDS = 86400
+
+async function hitCounter(
+  supabaseAdmin: ReturnType<typeof createClient>,
+  bucket: string,
+  max: number,
+  windowSeconds: number,
+): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('check_rate_limit', {
+      p_bucket: bucket,
+      p_max: max,
+      p_window_seconds: windowSeconds,
+    })
+    if (error) throw error
+    const row = Array.isArray(data) ? data[0] : data
+    if (!row) throw new Error('empty rate-limit response')
+    return {
+      allowed: row.allowed,
+      remaining: row.remaining,
+      resetTime: new Date(row.reset_at).getTime(),
+    }
+  } catch (e) {
+    console.error('[rate-limit] DB limiter failed, allowing request (fail-open):', bucket, e)
+    return { allowed: true, remaining: max, resetTime: Date.now() + windowSeconds * 1000 }
+  }
+}
+
+/** Requests per minute, per user. */
+function checkRateLimit(supabaseAdmin: ReturnType<typeof createClient>, userId: string) {
+  const windowSeconds = Math.max(1, Math.floor(RATE_LIMIT_CONFIG.windowMs / 1000))
+  // Bucket prefix is shared with the other swelly-trip-planning variants on
+  // purpose: the limit is per user, not per deployed copy of the function.
+  return hitCounter(supabaseAdmin, `swelly-trip-planning:${userId}`, RATE_LIMIT_CONFIG.maxRequests, windowSeconds)
+}
+
+/** Messages per day, per user. Only called on routes that actually send a message. */
+function checkDailyMessageQuota(supabaseAdmin: ReturnType<typeof createClient>, userId: string) {
+  return hitCounter(supabaseAdmin, `swelly-trip-planning:daily:${userId}`, MESSAGE_LIMIT_CONFIG.perDay, DAY_SECONDS)
+}
+
+function countUserMessages(messages: Message[]): number {
+  return messages.filter((m) => m.role === 'user').length
+}
+
+/**
+ * A cap was hit. Answer as Swelly instead of as an error: a 200 with a normal
+ * return_message renders in the chat like any other reply and costs nothing —
+ * no OpenAI call is made. is_finished stays false because there is no trip
+ * data to hand to the matching step.
+ */
+function messageLimitResponse(
+  kind: 'conversation' | 'daily',
+  chatId: string | null,
+  resetTime?: number,
+): Response {
+  const returnMessage = kind === 'daily'
+    ? "That's me done for today — you've hit your daily message limit. Come back tomorrow and we'll pick this up. 🤙"
+    : "We've hit the message limit for this chat. Start a new one and we'll keep planning from there. 🤙"
+  console.log(`[message-limit] ${kind} cap reached`, { chatId })
+  return new Response(
+    JSON.stringify({
+      chat_id: chatId ?? undefined,
+      return_message: returnMessage,
+      is_finished: false,
+      limit_reached: kind,
+      ...(resetTime ? { reset_at: new Date(resetTime).toISOString() } : {}),
+    }),
+    {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      },
+    },
+  )
+}
+
 /** First question shown when starting or restarting trip planning. */
 const TRIP_PLANNING_FIRST_QUESTION_TEXT =
   "Yo! Let’s get you connected with some other surf travelers!"
@@ -2059,12 +2157,32 @@ serve(async (req: Request) => {
     if (userError || !user) {
       return new Response(
         JSON.stringify({ error: 'Invalid authentication token' }),
-        { 
-          status: 401, 
-          headers: { 
+        {
+          status: 401,
+          headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
-          } 
+          }
+        }
+      )
+    }
+
+    // Requests-per-minute brake (per user, global across isolates).
+    const rateLimit = await checkRateLimit(supabaseAdmin, user.id)
+    if (!rateLimit.allowed) {
+      const retryAfter = Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
+      return new Response(
+        JSON.stringify({ error: 'Rate limit exceeded', message: 'Too many requests. Please try again later.', retryAfter }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Retry-After': retryAfter.toString(),
+            'X-RateLimit-Limit': RATE_LIMIT_CONFIG.maxRequests.toString(),
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': rateLimit.resetTime.toString(),
+          }
         }
       )
     }
@@ -2075,7 +2193,13 @@ serve(async (req: Request) => {
     // Route: POST /swelly-trip-planning/new_chat
     if (path.endsWith('/new_chat') && req.method === 'POST') {
       const body: ChatRequest = await req.json()
-      
+
+      // Opening a chat is a message like any other — it counts against the day.
+      const dailyQuota = await checkDailyMessageQuota(supabaseAdmin, user.id)
+      if (!dailyQuota.allowed) {
+        return messageLimitResponse('daily', null, dailyQuota.resetTime)
+      }
+
       // Generate chat ID
       const chatId = crypto.randomUUID()
       
@@ -2307,14 +2431,25 @@ ${getPronounInstructions(userProfile.pronoun)}`
       if (messages.length === 0) {
         return new Response(
           JSON.stringify({ error: 'Chat not found' }),
-          { 
-            status: 404, 
-            headers: { 
+          {
+            status: 404,
+            headers: {
               'Content-Type': 'application/json',
               'Access-Control-Allow-Origin': '*',
-            } 
+            }
           }
         )
+      }
+
+      // Per-chat cap is checked first: it costs nothing, and a user stuck in one
+      // long conversation should not also burn their daily allowance on it.
+      if (countUserMessages(messages) >= MESSAGE_LIMIT_CONFIG.perConversation) {
+        return messageLimitResponse('conversation', chatId)
+      }
+
+      const dailyQuota = await checkDailyMessageQuota(supabaseAdmin, user.id)
+      if (!dailyQuota.allowed) {
+        return messageLimitResponse('daily', chatId, dailyQuota.resetTime)
       }
 
       // User profile for destination discovery flow (already fetched above)
