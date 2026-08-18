@@ -207,24 +207,25 @@
   }
   .mark.ok { background: var(--ok); }
 
-  /* A blocker that has been cleared. Kept in place, struck from the count. */
-  .rank.cleared { color: var(--ok); font-size: 15px; }
+  /* The two blockers cleared on 17 August, moved in among the working parts.
+     Full width, because they carry the proof and the others carry one line. */
+  .group.span-2 {
+    grid-column: 1 / -1;
+    background: var(--ok-bg);
+    padding: 18px 20px 19px;
+  }
 
-  .item.cleared h3 { color: var(--muted); }
+  .group.span-2 h3 { border-bottom-color: var(--ok); }
+  .group.span-2 li { color: var(--ink); }
 
-  .tag {
+  .was {
     font-family: var(--mono);
     font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ok);
-    background: var(--ok-bg);
-    padding: 2.5px 6px 1.5px;
-    border-radius: 3px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: none;
+    color: var(--muted);
     margin-left: 9px;
-    vertical-align: 2.5px;
-    white-space: nowrap;
   }
 
   .item h3 {
@@ -398,7 +399,7 @@
   <div class="totals">
     <div class="tot"><div class="tot-n n-stop">3</div><div class="tot-l">Blockers left</div></div>
     <div class="tot"><div class="tot-n n-soon">6</div><div class="tot-l">Fix soon</div></div>
-    <div class="tot"><div class="tot-n n-ok">32</div><div class="tot-l">Already works</div></div>
+    <div class="tot"><div class="tot-n n-ok">37</div><div class="tot-l">Already works</div></div>
     <div class="tot"><div class="tot-n n-plain">5</div><div class="tot-l">Your call</div></div>
   </div>
 
@@ -436,23 +437,6 @@
       </div>
     </div>
 
-    <div class="item cleared">
-      <div class="rank cleared">✓</div>
-      <div>
-        <h3>A late joiner can hold a seat while owing most of the price<span class="tag">done</span></h3>
-        <p>A participant row created on or after the full-payment deadline now freezes <code>deposit_usd</code> at the whole price. One payment, in onboarding, for the full cost — and the balance works out to zero on its own.</p>
-        <p>Applied to production. Proved in a rolled-back transaction: with the deadline 20 days past a new traveler froze at 3000&nbsp;/&nbsp;3000; with it still ahead, 3000&nbsp;/&nbsp;1000. Nobody who already joined moved. The screen says "Full payment" instead of "Deposit".</p>
-      </div>
-    </div>
-
-    <div class="item cleared">
-      <div class="rank cleared">✓</div>
-      <div>
-        <h3>Nothing is committed<span class="tag">done</span></h3>
-        <p>All 82 files are in, as four commits: the operator trips work, the Swelly message caps, the health-check timeout fix, and the late-joiner migration.</p>
-        <p>Tests and typecheck match the baseline at <code>HEAD</code> exactly — same 3 pre-existing failing suites before and after, nothing new.</p>
-      </div>
-    </div>
   </section>
 
   <!-- ══ FIX SOON ══════════════════════════════════════════ -->
@@ -519,6 +503,17 @@
     </div>
 
     <div class="groups">
+
+      <div class="group span-2">
+        <h3>Cleared today <span class="was">was blocker 3 and blocker 5</span></h3>
+        <ul>
+          <li>Past the full-payment deadline, a new traveler now pays the whole price in onboarding — one payment, and the balance works out to zero on its own</li>
+          <li>Proved on production in a rolled-back transaction: deadline 20 days past froze at 3000&nbsp;/&nbsp;3000, deadline still ahead froze at 3000&nbsp;/&nbsp;1000, and nobody who had already joined moved</li>
+          <li>The onboarding screen says "Full payment" instead of "Deposit" — the same word over the full price reads as a bug and stops people paying</li>
+          <li>All 82 files committed, as four commits: operator trips, Swelly message caps, the health-check timeout fix, and this migration</li>
+          <li>Tests match the <code>HEAD</code> baseline exactly — the same 3 pre-existing failing suites before and after, nothing new</li>
+        </ul>
+      </div>
 
       <div class="group">
         <h3>Operator setup</h3>
