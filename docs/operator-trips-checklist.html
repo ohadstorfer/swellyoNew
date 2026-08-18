@@ -107,6 +107,7 @@
   .total b { font-size: 14px; font-variant-numeric: tabular-nums; }
   .total.is-done   { color: var(--done);   background: var(--done-bg);   border-color: #CDE3DF; }
   .total.is-partly { color: var(--partly); background: var(--partly-bg); border-color: #EBDBC2; }
+  .total.is-gap    { color: var(--gap);    background: var(--gap-bg);    border-color: #EDCFCB; }
   .total.is-new    { color: var(--muted);  background: #EAEEED;          border-color: var(--line); }
 
   /* ---------- callout boxes ---------- */
@@ -235,6 +236,7 @@
   .meter i { display: block; height: 100%; }
   .meter .m-done   { background: var(--done); }
   .meter .m-partly { background: var(--partly); }
+  .meter .m-gap    { background: var(--gap); }
 
   /* ---------- rows ---------- */
 
@@ -261,6 +263,7 @@
   }
   .chip.is-done   { color: var(--done);   background: var(--done-bg); }
   .chip.is-partly { color: var(--partly); background: var(--partly-bg); }
+  .chip.is-gap    { color: var(--gap);    background: var(--gap-bg); }
 
   .what {
     font-family: var(--sans);
@@ -334,12 +337,15 @@
       Your list, checked line by line against the code on branch <code>ohad</code>.
       Audited on the morning of 17 August, then built the same day — the
       <span class="built">17 aug</span> tag marks every row that moved.
+      That night, a second pass walked the <em>scenarios</em> — the paths one trip
+      actually takes, not the parts — and found 8 holes. They are section 4.
     </p>
   </div>
 
   <div class="totals">
-    <span class="total is-done"><b>62</b> done</span>
+    <span class="total is-done"><b>68</b> done</span>
     <span class="total is-partly"><b>1</b> partly</span>
+    <span class="total is-gap"><b>8</b> scenario holes</span>
     <span class="total is-new"><b>15</b> built today</span>
   </div>
 
@@ -347,18 +353,11 @@
   <div class="box is-good">
     <h2>Where it stands</h2>
     <p class="lede">
-      Every gap the audit found is closed. The one migration it needed is live on prod.
-      Two things are left, and neither is code.
+      Every gap the audit found is closed. Everything is committed — five commits,
+      <code>f5ff56d</code> through <code>017be14</code> — and both migrations are live on prod,
+      the late-joiner one proved in a rolled-back transaction. One thing is left, and it is not code.
     </p>
     <ol>
-      <li>
-        <div>
-          <strong>Nothing is committed</strong>
-          <p>All of it sits uncommitted on <code>ohad</code>, as usual, for your review.
-          The spec and plan behind the work is
-          <code>docs/specs/operator-trips/staff-gaps-spec-and-plan.md</code>.</p>
-        </div>
-      </li>
       <li>
         <div>
           <strong>Device test pending</strong>
@@ -1040,6 +1039,158 @@
     </div>
   </section>
 
+  <!-- ============ 4 · SCENARIO REVIEW ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">4</span>
+        <h2>Scenario review — the paths one trip takes</h2>
+      </div>
+      <span class="sec-who">night pass · 17 aug</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:43%"></i><i class="m-gap" style="width:57%"></i></div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">A cancelled trip still takes money</p>
+          <p class="note">Cancelling hides the buttons and notifies everyone — but <code>payments-checkout</code>
+          never reads the trip's status. A traveler on a stale screen or an old push link can still pay a
+          cancelled trip, and the server says yes. One <code>status = 'active'</code> check.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">Deadline reminders never fire on their own</p>
+          <p class="note">The due-soon and overdue notifications exist and render — but their only producer is
+          the operator pressing "Remind" on the dashboard. The daily job covers trip start and end, not
+          requirements. A traveler can sail past every document and payment deadline in silence, and the
+          operator is not told either.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">A chargeback is invisible</p>
+          <p class="note">The webhook handles "paid" and "refunded", nothing else. A traveler disputes a card
+          charge → no row is written, nobody is told, and every money total is silently wrong from that day on.
+          Disputes can arrive up to ~18 months after the charge.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">Stripe breaking is silent</p>
+          <p class="note">When an operator's account becomes ready, they get a notification. When it becomes
+          disabled — papers past due, payouts frozen — nothing fires. The operator finds out when a traveler's
+          payment fails, which is the worst possible messenger.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">Removing a paid traveler leaves the money behind</p>
+          <p class="note">Remove works: it notifies them, cleans up the chat, deletes the join request. But
+          nothing points at the refund — that is a separate manual step the operator has to remember. Same for
+          someone kicked mid-onboarding after paying the deposit.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">Deposit paid, onboarding abandoned — and nobody notices</p>
+          <p class="note">They hold no seat (correct), but their money is with the operator and they are half
+          in. No nudge to finish — the abandoned-onboarding push is for profile setup only — and no ping to the
+          operator that someone paid and stalled. The Waiting page shows it, if the operator thinks to look.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">A new waiver quietly un-signs everyone</p>
+          <p class="note">Replacing the waiver correctly invalidates the old signatures — they are pinned to
+          the exact document version. But nobody is told to sign again, and with no automatic reminders the
+          requirement just sits missing until someone stares at the dashboard.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-gap">hole</span>
+        <div>
+          <p class="what">Moving the dates moves every deadline in silence</p>
+          <p class="note">Due dates are counted back from the start date, so changing it reschedules every
+          document and the final payment — and there is no "trip changed" notification at all. Travelers find
+          out if the operator presses Remind.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">holds</span>
+        <div>
+          <p class="what">Refund math is self-correcting</p>
+          <p class="note">Refunds land as negative payment rows, so every "paid" number in the app, the
+          dashboard and the server subtracts them by plain sum. Partial and repeated refunds compute the delta
+          from Stripe's cumulative figure, so a redelivered webhook cannot double-count.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">holds</span>
+        <div>
+          <p class="what">Over-approving is safe end to end</p>
+          <p class="note">Approving takes no seat. The seat is claimed at the end of onboarding under a row
+          lock, and checkout refuses the deposit when the trip is already full — <em>before</em> charging. The
+          operator can approve 14 people for 10 spots and the boat fills in finish order.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">holds</span>
+        <div>
+          <p class="what">Repricing never touches an existing deal</p>
+          <p class="note">Changing the trip's price pins everyone already on it to their current price first,
+          then reprices, then syncs the pay rows — and if the pinning fails, the new price is not written. A
+          per-traveler price set by hand is never second-guessed by anything.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">holds</span>
+        <div>
+          <p class="what">Cancel, leave, remove and decline all notify — from any client</p>
+          <p class="note">They are database triggers, not app code, so cancelling from the web dashboard fires
+          the same notifications as cancelling from the phone.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">holds</span>
+        <div>
+          <p class="what">Refunds still work on a cancelled trip</p>
+          <p class="note">The one payment path that must stay open after cancelling, and it does — checked
+          deliberately, since the checkout hole above is the same missing status read in the other direction.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">holds</span>
+        <div>
+          <p class="what">Signatures are evidence, not checkmarks</p>
+          <p class="note">Waiver and policy consents store the exact text version, a hash, the typed name, IP
+          and timestamp — enough to answer "what exactly did they agree to, and when" years later.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ OUT OF SCOPE ============ -->
   <div class="box is-open">
     <h2>Deliberately not done</h2>
@@ -1082,10 +1233,10 @@
   </div>
 
   <footer>
-    <span>Branch ohad · uncommitted</span>
-    <span>Audited and built 17 August 2026</span>
-    <span>63 items</span>
-    <span>Migration applied to prod</span>
+    <span>Branch ohad · committed</span>
+    <span>Audited, built and scenario-reviewed 17 August 2026</span>
+    <span>77 items</span>
+    <span>Both migrations applied to prod</span>
   </footer>
 
 </div>
