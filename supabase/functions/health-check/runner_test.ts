@@ -8,7 +8,7 @@ import {
 import "./faultcheck_env.ts";
 import { buildReport, httpStatusFor, runCheck, runChecks, withTimeout } from "./runner.ts";
 import { buildAllChecks } from "./checks/index.ts";
-import type { Check, CheckResult } from "./types.ts";
+import type { Check, CheckName, CheckResult } from "./types.ts";
 
 const passing: Check = { name: "supabase_db", critical: true, run: () => Promise.resolve() };
 const failing: Check = {
@@ -75,13 +75,20 @@ Deno.test("runCheck: an overridden timeout still fires when exceeded", async () 
   assertStringIncludes(r.error ?? "", "timeout after 30ms");
 });
 
-Deno.test("storageCheck carries the longer timeout, other checks do not", () => {
+Deno.test("only storage and openai override the runner timeout, by the documented amounts", () => {
   const checks = buildAllChecks();
-  const storage = checks.find((c) => c.name === "supabase_storage");
-  assertEquals(storage?.timeoutMs, 30000);
-  // Every other check must keep the runner default (undefined = no override).
-  for (const c of checks.filter((c) => c.name !== "supabase_storage")) {
-    assertEquals(c.timeoutMs, undefined, `${c.name} unexpectedly overrides the timeout`);
+  // A check may only override when its OWN worst case exceeds the runner
+  // default: storage runs six sequential bucket ops, openai allows a 5s attempt
+  // plus one retry per model. Everything else keeps the default (undefined).
+  // Whenever this fails, reconcile the check's internal budget against
+  // TIMEOUT_MS in index.ts rather than just updating the number here — an
+  // under-budgeted check reports the runner's timeout instead of the real fault.
+  const expected: Partial<Record<CheckName, number>> = {
+    supabase_storage: 30000,
+    openai: 25000,
+  };
+  for (const c of checks) {
+    assertEquals(c.timeoutMs, expected[c.name], `${c.name} has an unexpected timeout override`);
   }
 });
 

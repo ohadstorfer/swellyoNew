@@ -7,6 +7,7 @@ import type { Check } from "../types.ts";
 //     throw with message prefixed "transient:" so it's visible in the report.
 //     The A6 debounce in alert.ts will suppress email for a single transient blip.
 const MODELS = ["gpt-5.2", "gpt-4o-mini"];
+// Per-ATTEMPT abort, not the whole check's budget — see `timeoutMs` below.
 const TIMEOUT_MS = 5000;
 const RETRY_DELAY_MS = 500;
 
@@ -72,14 +73,27 @@ export function openaiCheck(): Check {
   return {
     name: "openai",
     critical: true,
+    // Must exceed this check's OWN worst case, or the runner kills it mid-retry
+    // and reports "timeout after 8000ms" — a failure that says nothing about
+    // OpenAI's health. That is exactly what happened: 10 straight days of 1-3
+    // daily "failures", every one of them the runner's cap, never a 401/404.
+    // Worst case is now one model's two attempts (the models run in parallel):
+    // TIMEOUT_MS + RETRY_DELAY_MS + TIMEOUT_MS = 10.5s. 25s leaves headroom.
+    timeoutMs: 25000,
     run: async () => {
       const key = Deno.env.get("OPENAI_API_KEY");
       if (!key) throw new Error("OPENAI_API_KEY not set");
 
-      // Run model checks sequentially to avoid saturating rate limits
-      for (const model of MODELS) {
-        await checkModel(model, key);
-      }
+      // In parallel: two GETs on /v1/models/{id} carry no rate-limit risk, and
+      // running them sequentially doubled the wall time for no benefit.
+      // allSettled, NOT all — with `all`, the slower model rejecting after the
+      // first one already rejected surfaces as an unhandled rejection, which
+      // Deno treats as fatal to the isolate.
+      const settled = await Promise.allSettled(MODELS.map((m) => checkModel(m, key)));
+      const errors = settled
+        .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+        .map((r) => (r.reason as Error).message);
+      if (errors.length > 0) throw new Error(errors.join("; "));
     },
   };
 }
