@@ -48,10 +48,12 @@ import {
   DEFAULT_TIMING,
   REQUIREMENT_CATALOG,
   REQUIREMENT_ORDER,
+  canReplaceWaiver,
   fetchWaiver,
   isDeadlineAtEnd,
   isPayKind,
   publishWaiverPdf,
+  replaceWaiverPdf,
   resolveDeadlineDate,
   saveRequirementChanges,
   stepDeadline,
@@ -149,6 +151,9 @@ export const ManageRequirementsSheet: React.FC<{
     size: number;
   } | null>(null);
   const [waiverError, setWaiverError] = useState<string | null>(null);
+  // Is the trip still empty enough to swap the waiver? null = not looked yet.
+  // Defaults to "no" on failure — see canReplaceWaiver.
+  const [canReplace, setCanReplace] = useState<boolean | null>(null);
   // Has the operator changed anything yet? Only used to decide whether a late
   // refetch is allowed to reseed — see below.
   const [dirty, setDirty] = useState(false);
@@ -180,6 +185,7 @@ export const ManageRequirementsSheet: React.FC<{
   useEffect(() => {
     if (!visible) {
       setHasWaiver(null);
+      setCanReplace(null);
       return;
     }
     let cancelled = false;
@@ -190,6 +196,12 @@ export const ManageRequirementsSheet: React.FC<{
       .catch(() => {
         if (!cancelled) setHasWaiver(false);
       });
+    // Whether the Replace affordance is offered at all. The trigger re-checks
+    // this inside the UPDATE, so a stale `true` costs an error message, never a
+    // wrongly cancelled signature.
+    canReplaceWaiver(tripId).then(ok => {
+      if (!cancelled) setCanReplace(ok);
+    });
     return () => {
       cancelled = true;
     };
@@ -351,16 +363,19 @@ export const ManageRequirementsSheet: React.FC<{
       // `purge-group-documents` skips the operator prefix entirely, so nothing
       // would ever clean it up.
       //
-      // `!waiverOnFile` mirrors the database exactly: a trip gets ONE waiver,
-      // ever. The picker is not even rendered once one is on file, so this is
-      // the belt — and it is the one that matters on a retry, where the first
-      // Save published the document and then `saveRequirementChanges` threw.
-      // Without it, pressing Save again would try to publish a second version
-      // and be refused by the unique index.
-      if (waiverFile && wantsWaiver && !waiverOnFile) {
-        await publishWaiverPdf(tripId, waiverFile.uri);
-        // Published. A retry must not attempt it again, and the box should read
-        // as on-file from here on — which is simply true.
+      // A trip holds exactly ONE waiver row, so the two cases are different
+      // statements: the first waiver is an insert, a swap is an update of the
+      // row that is already there. Picking the wrong one is a unique-index
+      // violation, not a silent second version.
+      //
+      // Either way the file is consumed here and the state cleared, so a retry
+      // after a later failure in this same Save does not upload it twice.
+      if (waiverFile && wantsWaiver) {
+        if (waiverOnFile) {
+          await replaceWaiverPdf(tripId, waiverFile.uri);
+        } else {
+          await publishWaiverPdf(tripId, waiverFile.uri);
+        }
         setWaiverFile(null);
         setHasWaiver(true);
       }
@@ -631,6 +646,14 @@ export const ManageRequirementsSheet: React.FC<{
                                   This is what travelers agree to
                                 </Text>
                               </View>
+                              {/* Only while nobody has joined and nobody has
+                                  signed. Once anyone has, swapping it would
+                                  cancel their signature. */}
+                              {canReplace === true ? (
+                                <Pressable onPress={pickWaiverFile} hitSlop={8}>
+                                  <Text style={styles.waiverReplace}>Replace</Text>
+                                </Pressable>
+                              ) : null}
                             </View>
                           ) : (
                             <Pressable
@@ -650,9 +673,11 @@ export const ManageRequirementsSheet: React.FC<{
                             <Text style={styles.waiverErrorText}>{waiverError}</Text>
                           ) : (
                             <Text style={styles.waiverHint}>
-                              {waiverOnFile
-                                ? 'Set for this trip and cannot be changed — swapping it would cancel every signature already given.'
-                                : 'Travelers agree to this before they can join. It cannot be changed once it is published.'}
+                              {!waiverOnFile
+                                ? 'Travelers agree to this before they can join. You can change it until someone joins.'
+                                : canReplace === true
+                                  ? 'Nobody has joined yet, so you can still change it. Once someone joins it is fixed.'
+                                  : 'Fixed for this trip — changing it now would cancel every signature already given.'}
                             </Text>
                           )}
                         </View>

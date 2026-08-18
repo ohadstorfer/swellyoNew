@@ -1018,20 +1018,21 @@ async function recordWaiverDocument(
   // skips the operator prefix entirely, so nothing would ever clean it up.
   const discardUpload = () => supabase.storage.from(BUCKET).remove([storagePath]);
 
-  // One waiver per trip, for the life of the trip.
+  // ONE waiver ROW per trip, always — the unique index in
+  // `20260818000000_waiver_is_frozen_after_publish.sql` is the boundary. This
+  // function only ever creates the first one.
   //
-  // Replacing it is not a small edit: an acknowledgement is pinned to the
-  // document id it was given, so a second version silently un-signs every
-  // traveler who already agreed — and nothing in the system would tell them to
+  // Swapping the file later is `replaceWaiverPdf`, which UPDATES this row
+  // instead of inserting a second, and is allowed only while the trip is empty
+  // (`20260818000100`). That split is deliberate: an acknowledgement is pinned
+  // to the document id it was given, so a second document would silently
+  // un-sign everyone who had already agreed — and nothing would tell them to
   // sign again, because there is no automatic requirement reminder.
   //
-  // `20260818000000_waiver_is_frozen_after_publish.sql` is the real boundary
-  // (a unique index on `(trip_id, kind)`); this check exists so the operator
-  // reads a sentence instead of a raw 23505, and so the orphaned upload above
-  // is cleaned up on the way out.
-  //
-  // A trip with NO waiver can still get its first one — see the migration for
-  // why that repair path has to stay open.
+  // So the check below is a routing error, not a policy refusal: whoever called
+  // this wanted the other function. It exists so the operator reads a sentence
+  // instead of a raw 23505, and so the upload above is cleaned up on the way
+  // out.
   const { data: existing, error: existingErr } = await supabase
     .from('organized_trip_operator_documents')
     .select('id')
@@ -1050,8 +1051,9 @@ async function recordWaiverDocument(
   if (existing) {
     await discardUpload();
     throw new Error(
-      'This trip already has a waiver, and it cannot be changed once the trip is published — ' +
-        'replacing it would cancel every signature travelers have already given.',
+      'This trip already has a waiver. Use Replace to swap it — and that is only ' +
+        'possible while nobody has joined, because changing it cancels every ' +
+        'signature already given.',
     );
   }
 
@@ -1270,6 +1272,125 @@ export async function fetchWaiver(tripId: string): Promise<{
     bodyText: data.body_text ?? null,
     storagePath: data.storage_path ?? null,
   };
+}
+
+/**
+ * May the operator still swap this trip's waiver?
+ *
+ * Only while the trip is empty: nobody has joined and nobody has signed. Past
+ * that the waiver is frozen, because replacing it cancels every signature
+ * already given and nothing would tell those people to sign again.
+ *
+ * Advisory ONLY — this decides whether to show a Replace button.
+ * `trg_guard_waiver_replacement` is the authority and re-checks both conditions
+ * inside the UPDATE, so a stale answer here cannot let a bad replace through.
+ *
+ * The host's own participant row is excluded: every type-C trip carries its
+ * host as a participant, so counting it would close the door on every trip.
+ *
+ * On any error this returns FALSE. A failed lookup must read as "frozen" —
+ * showing Replace on a trip that has travelers, and only failing once the
+ * operator has picked a file, is a worse experience than not offering it.
+ */
+export async function canReplaceWaiver(tripId: string): Promise<boolean> {
+  try {
+    const { data: trip, error: tripErr } = await supabase
+      .from('group_trips')
+      .select('host_id')
+      .eq('id', tripId)
+      .single();
+    if (tripErr || !trip) return false;
+
+    const { count: others, error: pErr } = await supabase
+      .from('group_trip_participants')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('trip_id', tripId)
+      .neq('user_id', trip.host_id);
+    if (pErr || (others ?? 0) > 0) return false;
+
+    // Crew sign the same document and are NOT participants, so this is the
+    // check that actually protects people — not the count above.
+    const { count: signed, error: aErr } = await supabase
+      .from('group_trip_acknowledgements')
+      .select('id', { count: 'exact', head: true })
+      .eq('trip_id', tripId)
+      .not('operator_document_id', 'is', null);
+    if (aErr) return false;
+
+    return (signed ?? 0) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Swap the waiver PDF on a trip nobody has joined yet.
+ *
+ * An UPDATE of the row that is already there, not a new version — the unique
+ * index allows exactly one waiver row per trip, and updating in place means
+ * there is never a moment where the trip has a waiver requirement and no
+ * document to satisfy it.
+ *
+ * The row keeps its id and its version. Safe precisely because the trigger
+ * refuses this unless there are zero acknowledgements: with nothing pointing at
+ * the old document, there is no stale reference to leave behind.
+ * `document_hash` moves, and that is the real record of which bytes were shown.
+ *
+ * Throws if the trip is no longer empty — the database decides, not this
+ * function. Someone joining between the button appearing and the file being
+ * picked is exactly the race the trigger exists for.
+ */
+export async function replaceWaiverPdf(
+  tripId: string,
+  localUri: string,
+): Promise<string> {
+  const { data: current, error: readErr } = await supabase
+    .from('organized_trip_operator_documents')
+    .select('id, storage_path')
+    .eq('trip_id', tripId)
+    .eq('kind', 'waiver')
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!current) {
+    // Nothing to replace. The caller wanted `publishWaiverPdf`.
+    return publishWaiverPdf(tripId, localUri);
+  }
+
+  const documentId = Crypto.randomUUID();
+  const storagePath = `${tripId}/operator/${documentId}.pdf`;
+
+  const body = await toUploadBody(localUri, 'application/pdf');
+  const { error: upErr } = await supabase.storage
+    .from(BUCKET)
+    .upload(storagePath, body, { contentType: 'application/pdf', upsert: false });
+  if (upErr) throw upErr;
+
+  const documentHash = await sha256OfFile(localUri);
+
+  const { error: updErr } = await supabase
+    .from('organized_trip_operator_documents')
+    .update({ storage_path: storagePath, document_hash: documentHash })
+    .eq('id', current.id);
+
+  if (updErr) {
+    // Refused (trip no longer empty) or failed. Either way the new object is
+    // unreferenced, and the purge skips this prefix — take it back out.
+    await supabase.storage.from(BUCKET).remove([storagePath]);
+    throw updErr;
+  }
+
+  // The old PDF is now referenced by nothing. Best-effort: the swap is already
+  // committed and must not be reported as failed over a leftover file.
+  if (current.storage_path) {
+    const { error: rmErr } = await supabase.storage
+      .from(BUCKET)
+      .remove([current.storage_path]);
+    if (rmErr) {
+      console.warn('[tripDocumentsService] old waiver file not removed:', rmErr);
+    }
+  }
+
+  return current.id;
 }
 
 /**

@@ -1117,11 +1117,14 @@
         <span class="chip is-done">closed</span>
         <div>
           <p class="what">A new waiver quietly un-signs everyone<span class="built">18 aug</span></p>
-          <p class="note">Closed by removing the ability, not by adding a notification: the waiver is now set
-          once and frozen for the life of the trip. A unique index on <code>(trip_id, kind)</code> is the
-          boundary — client, dashboard and direct API alike — and the Replace button is gone. A trip that
-          somehow has no waiver can still get its first one, which is a real repair path and un-signs nobody,
-          because there is nothing to un-sign.</p>
+          <p class="note">Closed by removing the ability, not by adding a notification. The waiver freezes the
+          moment anyone is affected — but stays swappable while the trip is empty, so an operator who uploaded
+          the wrong PDF is not stuck with it.</p>
+          <p class="note">"Empty" is two tests, and the second is the one that matters: no travelers, <em>and</em>
+          no signatures from anyone. A member count alone would have been wrong twice over — every trip carries
+          its own host as a member, so the door would never open; and crew sign the same document without being
+          members, so a trip with zero travelers can still have a signed photographer. A trigger checks both
+          inside the write, so someone joining while the operator picks a file loses the race safely.</p>
         </div>
       </div>
 
