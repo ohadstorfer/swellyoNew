@@ -207,6 +207,26 @@
   }
   .mark.ok { background: var(--ok); }
 
+  /* A blocker that has been cleared. Kept in place, struck from the count. */
+  .rank.cleared { color: var(--ok); font-size: 15px; }
+
+  .item.cleared h3 { color: var(--muted); }
+
+  .tag {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ok);
+    background: var(--ok-bg);
+    padding: 2.5px 6px 1.5px;
+    border-radius: 3px;
+    margin-left: 9px;
+    vertical-align: 2.5px;
+    white-space: nowrap;
+  }
+
   .item h3 {
     font-family: var(--display);
     font-weight: 600;
@@ -371,12 +391,12 @@
     I walked the whole type-C path — operator setup, selling a trip, taking money,
     travelers, crew, both dashboards — and checked every claim against the
     <strong>live production database</strong>, not against notes.
-    The ground is solid. <strong>Five things stand between it and a real operator</strong>,
-    and only three of them are code.
+    The ground is solid. Five things stood between it and a real operator;
+    <strong>two are now done</strong> and three are left.
   </p>
 
   <div class="totals">
-    <div class="tot"><div class="tot-n n-stop">5</div><div class="tot-l">Blockers</div></div>
+    <div class="tot"><div class="tot-n n-stop">3</div><div class="tot-l">Blockers left</div></div>
     <div class="tot"><div class="tot-n n-soon">6</div><div class="tot-l">Fix soon</div></div>
     <div class="tot"><div class="tot-n n-ok">32</div><div class="tot-l">Already works</div></div>
     <div class="tot"><div class="tot-n n-plain">5</div><div class="tot-l">Your call</div></div>
@@ -410,26 +430,27 @@
     <div class="item">
       <div class="rank">3</div>
       <div>
-        <h3>A late joiner can hold a seat while owing most of the price</h3>
-        <p>Past the full-payment deadline, a new traveler pays only the deposit and walks out of onboarding a full member. The balance is skippable and the deadline is already gone.</p>
-        <p>The fix is written but not applied — <code>20260817000000_full_payment_after_deadline.sql</code>. Confirmed: <code>operator_trip_full_payment_due</code> does not exist in production.</p>
-      </div>
-    </div>
-
-    <div class="item">
-      <div class="rank">4</div>
-      <div>
         <h3>The operator agreement is a summary, not a contract</h3>
         <p>Operators accept <code>summary-2026-08-12</code>. It says nothing about an insurance minimum, indemnity, licence, or a duty to refund.</p>
         <p>The machinery is right — versioned text, timestamp, re-ask on bump. Only the words are missing. The code comment already says so: "when the real agreement lands, bump this once more."</p>
       </div>
     </div>
 
-    <div class="item">
-      <div class="rank">5</div>
+    <div class="item cleared">
+      <div class="rank cleared">✓</div>
       <div>
-        <h3>Nothing is committed</h3>
-        <p>82 changed files sit on branch <code>ohad</code>. Every staff permission, the crew page, the paperwork flow, the traveler onboarding work — all of it lives on one laptop.</p>
+        <h3>A late joiner can hold a seat while owing most of the price<span class="tag">done</span></h3>
+        <p>A participant row created on or after the full-payment deadline now freezes <code>deposit_usd</code> at the whole price. One payment, in onboarding, for the full cost — and the balance works out to zero on its own.</p>
+        <p>Applied to production. Proved in a rolled-back transaction: with the deadline 20 days past a new traveler froze at 3000&nbsp;/&nbsp;3000; with it still ahead, 3000&nbsp;/&nbsp;1000. Nobody who already joined moved. The screen says "Full payment" instead of "Deposit".</p>
+      </div>
+    </div>
+
+    <div class="item cleared">
+      <div class="rank cleared">✓</div>
+      <div>
+        <h3>Nothing is committed<span class="tag">done</span></h3>
+        <p>All 82 files are in, as four commits: the operator trips work, the Swelly message caps, the health-check timeout fix, and the late-joiner migration.</p>
+        <p>Tests and typecheck match the baseline at <code>HEAD</code> exactly — same 3 pre-existing failing suites before and after, nothing new.</p>
       </div>
     </div>
   </section>
@@ -620,15 +641,14 @@
 
   <!-- ══ VERDICT ═══════════════════════════════════════════ -->
   <div class="verdict">
-    <h2>What I would do in this order</h2>
-    <p><strong>Commit today's work</strong>, then apply the late-joiner migration. Both are done, both are one action, and one of them is a money hole.</p>
-    <p><strong>Get the agreement written</strong> and bump the terms version. It has the longest lead time and nothing else depends on you.</p>
+    <h2>What is left, in this order</h2>
+    <p><strong>Get the agreement written</strong> and bump the terms version. Longest lead time, and nothing else waits on you to start it.</p>
     <p><strong>Answer the cancellation question</strong>, then build refund-on-cancel and the payment receipt together — they are the same afternoon.</p>
     <p><strong>Flip Stripe last</strong>, all four switches in one sitting, and run one real trip of your own through it before an outside operator sees it.</p>
   </div>
 
   <footer>
-    Branch ohad · 82 files uncommitted<br>
+    Branch ohad · b4e177f · working tree clean<br>
     Repo read and production database queried 17 August 2026<br>
     Every gap above verified against the live schema, not against notes<br>
     1 operator account · 4 type-C trips · 10 test payments · 0 live
