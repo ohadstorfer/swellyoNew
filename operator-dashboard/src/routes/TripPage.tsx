@@ -6,6 +6,7 @@ import { fetchTripReview } from '../services/review';
 import { fetchCounts, fetchMedicalFlags } from '../services/counts';
 import { fetchProfiles, type SurferProfile } from '../services/travelers';
 import { fetchCrew } from '../services/staff';
+import { fetchStalledOnboarders, STALLED_TODO_DAYS } from '../services/onboarding';
 import type { TripReview } from '../services/review';
 import { isKnownUploadKind, kindLabel } from '../domain/catalog';
 import { isUploadRequirement } from '../domain/requirements';
@@ -25,6 +26,14 @@ export function TripPage() {
   const members = useQuery({ queryKey: ['members', tripId], queryFn: () => fetchMembers(tripId) });
 
   const userIds = useMemo(() => (members.data ?? []).map(m => m.userId), [members.data]);
+
+  // Travelers who paid and stopped. Independent of `members`/`review`, so a
+  // slow document query never delays the one thing on this page that nothing
+  // else in the product would ever have told the operator about.
+  const stalled = useQuery({
+    queryKey: ['stalled', tripId],
+    queryFn: () => fetchStalledOnboarders(tripId),
+  });
 
   const review = useQuery({
     queryKey: ['review', tripId, userIds],
@@ -96,6 +105,34 @@ export function TripPage() {
       />
 
       <div className="stack">
+        {/* ── Paid, then stopped ────────────────────────────────────────── */}
+        {/* Above the document queue on purpose. An unreviewed passport is work
+            the operator knows about; a traveler who paid a week ago and is not
+            on the trip is money and a person nobody was counting.
+
+            Only after a week. Before that the automatic nudges are still
+            working the problem — the traveler gets three (24h, 3 days, 7 days).
+            Surfacing it here on day one would hand the operator a chore that
+            usually resolves itself. Once all three have gone unanswered, there
+            is nothing left to try automatically, and it becomes theirs. */}
+        {(() => {
+          const stuck = (stalled.data ?? []).filter(s => s.stalledDays >= STALLED_TODO_DAYS);
+          if (stuck.length === 0) return null;
+          const worst = Math.max(...stuck.map(s => s.stalledDays));
+          return (
+            <div
+              className="banner enter"
+              style={{ background: 'var(--warn-bg)', color: 'var(--warn)' }}
+            >
+              <span>
+                {plural(stuck.length, 'traveler')} paid but never finished joining
+                {' — '}
+                {worst === 1 ? 'stuck a day' : `stuck up to ${worst} days`}
+              </span>
+            </div>
+          );
+        })()}
+
         {/* ── Needs review ──────────────────────────────────────────────── */}
         {/* Straight to everything that needs a decision — not to the first
             requirement that happens to contain some of it. A banner counting

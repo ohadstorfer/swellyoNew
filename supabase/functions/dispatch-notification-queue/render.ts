@@ -138,6 +138,50 @@ export function renderPush(
         title: 'Stripe approved you 🎉',
         body: 'You can now collect payment for your trips in Swellyo.',
       };
+    case 'onboarding_unfinished': {
+      // Paid the deposit, never finished. Three stages, escalating — see
+      // scan-stalled-onboarding for the timing and why there is no fourth.
+      //
+      // The list of outstanding steps leads the body wherever it fits. Someone
+      // who stopped BECAUSE they were unsure which step it was is not helped by
+      // "you have steps left", and it is the same reasoning that puts the
+      // document name in operator_document_rejected. `missing` is must_have
+      // only, so every item named really does block them.
+      //
+      // No emoji: this is a chore, even when the tone is friendly.
+      const missing: string[] = Array.isArray(data?.missing) ? data.missing : [];
+      const names = missing.length
+        ? missing.slice(0, 2).map(m => String(m).toLowerCase()).join(' and ')
+        : null;
+
+      if (stage === '3d') {
+        return {
+          title: "You're not on the list yet",
+          body: `Your deposit for ${trip} is paid, but your spot isn't held until the last steps are done.`,
+        };
+      }
+      if (stage === '7d') {
+        return {
+          title: `Still want your place on ${trip}?`,
+          body: 'Your deposit is paid and waiting. Finishing up takes a few minutes.',
+        };
+      }
+      return {
+        title: 'Nearly on the trip',
+        body: names
+          ? `Your deposit for ${trip} is paid. Still need your ${names}.`
+          : `Your deposit for ${trip} is paid. A few steps are left before your spot is held.`,
+      };
+    }
+    case 'operator_onboarding_stalled': {
+      // One digest per trip, never one push per stuck traveler. The count is
+      // the whole message; who they are is a tap away on the trip.
+      const n = Number(data?.count) || 0;
+      return {
+        title: n === 1 ? "1 traveler hasn't finished" : `${n} travelers haven't finished`,
+        body: `They've paid for ${trip} but still have steps left. Open the trip to see who.`,
+      };
+    }
     default:
       return { title: trip, body: 'You have a new trip update' };
   }

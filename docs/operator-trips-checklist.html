@@ -339,15 +339,15 @@
       <span class="built">17 aug</span> tag marks every row that moved.
       That night, a second pass walked the <em>scenarios</em> — the paths one trip
       actually takes, not the parts — and found 8 holes. They are section 4.
-      One is closed; 7 are open.
+      One is closed, one is built and waiting on a deploy, 6 are open.
     </p>
   </div>
 
   <div class="totals">
     <span class="total is-done"><b>69</b> done</span>
-    <span class="total is-partly"><b>1</b> partly</span>
-    <span class="total is-gap"><b>7</b> scenario holes</span>
-    <span class="total is-new"><b>16</b> built</span>
+    <span class="total is-partly"><b>2</b> partly</span>
+    <span class="total is-gap"><b>6</b> scenario holes</span>
+    <span class="total is-new"><b>17</b> built</span>
   </div>
 
   <!-- ============ STATUS ============ -->
@@ -1050,7 +1050,7 @@
       <span class="sec-who">night pass · 17 aug</span>
     </div>
     <div class="card">
-      <div class="meter"><i class="m-done" style="width:50%"></i><i class="m-gap" style="width:50%"></i></div>
+      <div class="meter"><i class="m-done" style="width:50%"></i><i class="m-partly" style="width:7%"></i><i class="m-gap" style="width:43%"></i></div>
 
       <div class="row">
         <span class="chip is-gap">hole</span>
@@ -1104,12 +1104,19 @@
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-partly">partly</span>
         <div>
-          <p class="what">Deposit paid, onboarding abandoned — and nobody notices</p>
-          <p class="note">They hold no seat (correct), but their money is with the operator and they are half
-          in. No nudge to finish — the abandoned-onboarding push is for profile setup only — and no ping to the
-          operator that someone paid and stalled. The Waiting page shows it, if the operator thinks to look.</p>
+          <p class="what">Deposit paid, onboarding abandoned — and nobody notices<span class="built">18 aug</span></p>
+          <p class="note">Built. The traveler gets three nudges — 24 hours, 3 days, 7 days — and then silence;
+          they paid, so a reminder is welcome, but money held does not buy unlimited pushes. Each one names the
+          steps actually blocking them, because someone who stopped <em>because</em> they were unsure which step
+          it was is not helped by "you have steps left".</p>
+          <p class="note">The operator gets one digest per trip, never one push per stuck traveler, and after a
+          week the trip page carries it as a to-do — the point where all three nudges have gone unanswered and
+          there is nothing left to try automatically.</p>
+          <p class="note">The clock runs from the traveler's <em>last action</em>, not the deposit, so someone
+          steadily working a long list is never nagged. Database side is applied and the dashboard to-do works
+          today; the two edge functions and the cron are still to deploy, which is what makes the pushes start.</p>
         </div>
       </div>
 
