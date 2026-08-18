@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { fetchProfiles } from '../services/travelers';
-import { setTravelerPrice } from '../services/actions';
+import { setTravelerPrice, updateTripPrice } from '../services/actions';
 import { useTripMoney } from '../services/useTripMoney';
 import { STRIPE_LIVEMODE } from '../services/payments';
 import { STEP_STATE_LABEL, type PayStepState, type TravelerMoney } from '../domain/money';
@@ -12,10 +12,13 @@ import { friendlyError } from '../lib/errors';
 import { ErrorBox, Loading } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
+import { TripPriceDialog } from '../components/TripPriceDialog';
+import { useTripAccess } from '../services/access';
 
 export function MoneyPage() {
   const { tripId = '' } = useParams();
   const { user } = useAuth();
+  const access = useTripAccess(tripId);
   const qc = useQueryClient();
 
   const { money, trip, steps, isOffline, hasDepositStep, isPending, isError, error, refetch } =
@@ -30,6 +33,8 @@ export function MoneyPage() {
 
   const [pricing, setPricing] = useState<TravelerMoney | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [editingTripPrice, setEditingTripPrice] = useState(false);
+  const [tripPriceError, setTripPriceError] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: (args: { userId: string; totalUsd: number; depositUsd: number | null }) =>
@@ -42,15 +47,53 @@ export function MoneyPage() {
     onError: e => setSaveError(friendlyError(e)),
   });
 
+  const saveTripPrice = useMutation({
+    mutationFn: (args: { costPerPerson: number; depositAmount: number | null }) =>
+      updateTripPrice({ tripId, paymentMode: trip?.paymentMode ?? null, ...args }),
+    onSuccess: () => {
+      setEditingTripPrice(false);
+      setTripPriceError(null);
+      // All three change: the trip row carries the new price, the freeze may
+      // have written member rows, and a deposit crossing zero adds or retires
+      // its pay step.
+      void qc.invalidateQueries({ queryKey: ['trip', tripId] });
+      void qc.invalidateQueries({ queryKey: ['members', tripId] });
+      void qc.invalidateQueries({ queryKey: ['paySteps', tripId] });
+    },
+    onError: e => setTripPriceError(friendlyError(e)),
+  });
+
   if (isError) return <ErrorBox error={error} onRetry={refetch} />;
-  if (isPending || !money || !trip) return <Loading what="Loading the money" />;
+  if (isPending || access.isPending || !money || !trip)
+    return <Loading what="Loading the money" />;
+
+  // Reachable by typing the URL — the card that links here is already hidden.
+  // The reads below are refused by the database for anyone without this
+  // capability; this turns that refusal into a sentence.
+  if (access.ready && !access.can('payments.view_status')) {
+    return (
+      <>
+        <PageHead back={`/trips/${tripId}`} backLabel={trip.title} title="Money" />
+        <div className="card">
+          <div className="card-body">
+            <p>You don't have access to this trip's money.</p>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              Payment status is a Manager permission, and moving money is the operator's alone.
+            </p>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const nameOf = (userId: string) => profiles.data?.get(userId)?.name ?? 'Traveler';
 
   // Only the operator of record may price anyone. `role = 'host'` includes
   // every promoted admin, and the database checks host_id — showing them the
-  // button would hand them a raw "not your trip" error.
-  const canSetPrice = !!user && trip.hostId === user.id;
+  // button would hand them a raw "not your trip" error. Crew never qualify:
+  // `money.manage` is not in any tier below operator, and even holding it would
+  // not satisfy operator_set_traveler_price's host_id check.
+  const canSetPrice = !!user && trip.hostId === user.id && access.can('money.manage');
 
   return (
     <>
@@ -63,6 +106,16 @@ export function MoneyPage() {
 
       <div className="stack">
         <ModeNotices hiddenCount={money.hiddenCount} />
+
+        {/* Say it once, at the top. A Manager sees every number on this page and
+            no buttons — without a line explaining that, the page reads as
+            half-loaded rather than as the permission it is. */}
+        {!canSetPrice && (
+          <p className="muted small">
+            You can see this trip's money. Changing a price or issuing a refund is the
+            operator's — they're the account Stripe pays.
+          </p>
+        )}
 
         {/* ── Totals ────────────────────────────────────────────────────── */}
         <div className="card enter">
@@ -101,6 +154,40 @@ export function MoneyPage() {
                 {plural(money.noPriceCount, 'traveler has', 'travelers have')} no price set.
               </p>
             )}
+          </div>
+        </div>
+
+        {/* ── The trip's own price ──────────────────────────────────────── */}
+        <div className="card enter">
+          <div className="card-head">
+            <h2>Trip price</h2>
+            {canSetPrice && (
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  setTripPriceError(null);
+                  setEditingTripPrice(true);
+                }}
+              >
+                {trip.costPerPerson === null ? 'Set price' : 'Edit'}
+              </button>
+            )}
+          </div>
+          <div className="card-body">
+            {trip.costPerPerson === null ? (
+              <p className="muted">No price set for this trip.</p>
+            ) : (
+              <p>
+                <strong>{formatUsd(trip.costPerPerson)}</strong> per person
+                {trip.depositAmount !== null && (
+                  <span className="muted"> · {formatUsd(trip.depositAmount)} deposit</span>
+                )}
+              </p>
+            )}
+            <p className="muted small" style={{ marginTop: 6 }}>
+              The price whoever joins next is quoted. People already on the trip keep their own —
+              change theirs one by one below.
+            </p>
           </div>
         </div>
 
@@ -166,6 +253,23 @@ export function MoneyPage() {
         {/* ── The ledger ────────────────────────────────────────────────── */}
         <PaymentList events={money.events} nameOf={nameOf} isOffline={isOffline} />
       </div>
+
+      {editingTripPrice && (
+        <TripPriceDialog
+          currentCostPerPerson={trip.costPerPerson}
+          currentDepositAmount={trip.depositAmount}
+          isManaged={!isOffline}
+          busy={saveTripPrice.isPending}
+          error={tripPriceError}
+          onCancel={() => {
+            setEditingTripPrice(false);
+            setTripPriceError(null);
+          }}
+          onSave={(costPerPerson, depositAmount) =>
+            saveTripPrice.mutate({ costPerPerson, depositAmount })
+          }
+        />
+      )}
 
       {pricing && (
         <TravelerPriceDialog

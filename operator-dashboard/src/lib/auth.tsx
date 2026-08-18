@@ -8,6 +8,7 @@ import {
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { fetchMyStaffTripIds } from '../services/access';
 
 type AuthValue = {
   session: Session | null;
@@ -24,6 +25,18 @@ type AuthValue = {
    * clear answer instead of a blank dashboard.
    */
   isOperator: boolean | null;
+  /**
+   * Is this account live crew on at least one trip? Same null-means-unknown
+   * rule as `isOperator`.
+   *
+   * A Manager is not an operator — `surfers.operator` is pinned by a trigger and
+   * only an admin can grant it — so without this they would be shown the
+   * "you are not an operator" page while holding the exact permissions this site
+   * is built around.
+   */
+  isCrew: boolean | null;
+  /** The front door: an operator, or crew somewhere. Null while unknown. */
+  hasAccess: boolean | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -34,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [isOperator, setIsOperator] = useState<boolean | null>(null);
+  const [isCrew, setIsCrew] = useState<boolean | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -66,10 +80,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!userId) {
       setIsOperator(null);
+      setIsCrew(null);
       return;
     }
     let alive = true;
     setIsOperator(null);
+    setIsCrew(null);
+
+    // Runs alongside the operator-flag read below rather than after it: the two
+    // are independent answers, and waiting for the first would put a second
+    // round trip in front of every crew member's first paint.
+    fetchMyStaffTripIds(userId)
+      .then(ids => {
+        if (alive) setIsCrew(ids.length > 0);
+      })
+      .catch(e => {
+        // Fail CLOSED, same as the operator flag. A read that errored is not a
+        // permission — and an operator is unaffected, since their own door is
+        // the flag.
+        console.error('[auth] could not read crew memberships:', e);
+        if (alive) setIsCrew(false);
+      });
 
     supabase
       .from('surfers')
@@ -99,6 +130,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       loading,
       isOperator,
+      isCrew,
+      hasAccess:
+        isOperator === null || isCrew === null ? null : isOperator || isCrew,
       signIn: async () => {
         await supabase.auth.signInWithOAuth({
           provider: 'google',
@@ -109,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut();
       },
     }),
-    [session, loading, isOperator],
+    [session, loading, isOperator, isCrew],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

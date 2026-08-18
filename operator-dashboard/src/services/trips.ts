@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { toNumber } from '../domain/money';
+import { fetchMyStaffTripIds } from './access';
 
 export type OperatorTrip = {
   id: string;
@@ -33,6 +34,12 @@ export type OperatorTrip = {
   cancellationPreset: string | null;
   cancellationRules: unknown;
   cancellationNotes: string | null;
+  /**
+   * True when this trip is on the list because the person is CREW, not because
+   * they host it. Display only — what they may do inside is decided per page by
+   * `useTripAccess`, never by this flag.
+   */
+  viaCrew: boolean;
 };
 
 export type TripMember = {
@@ -52,7 +59,7 @@ const TRIP_COLUMNS =
   // `operator_settings`, which is today's default and may have changed since.
   'cancellation_preset, cancellation_rules, cancellation_notes';
 
-function toTrip(t: any): OperatorTrip {
+function toTrip(t: any, viaCrew = false): OperatorTrip {
   return {
     id: t.id,
     title: t.title ?? 'Untitled trip',
@@ -68,6 +75,7 @@ function toTrip(t: any): OperatorTrip {
     cancellationPreset: t.cancellation_preset ?? null,
     cancellationRules: t.cancellation_rules ?? null,
     cancellationNotes: t.cancellation_notes ?? null,
+    viaCrew,
   };
 }
 
@@ -87,36 +95,71 @@ function toTrip(t: any): OperatorTrip {
 const ALLOW_ALL_HOSTED = import.meta.env.VITE_ALLOW_ALL_HOSTED_TRIPS === 'true';
 
 /**
- * Trips this operator hosts.
+ * Trips this person can run from here: the ones they host, and the ones they
+ * are crew on.
  *
  * `hosting_style = 'C'` is what makes a trip an operator trip. A host is a
- * participant row with `role = 'host'` — there can be several per trip.
+ * participant row with `role = 'host'` — there can be several per trip. Crew are
+ * NOT participants at all (a person is one or the other, never both), which is
+ * why they need their own read rather than a wider filter on this one.
  *
- * RLS already stops anyone reading a trip they do not belong to, so the
- * `user_id` filter here is about asking the right question, not about safety.
+ * Two queries and a merge, not a union: they ask different tables different
+ * questions, and PostgREST has no way to express "either of these".
+ *
+ * RLS is not what scopes this. `group_trips` is readable by any signed-in user,
+ * so the filters here are about asking the right question. What actually
+ * protects the trip is every page inside it — documents, medical, money — all
+ * of which check a capability.
  */
 export async function fetchOperatorTrips(userId: string): Promise<OperatorTrip[]> {
-  let query = supabase
+  let hostQuery = supabase
     .from('group_trip_participants')
     .select(`trip_id, group_trips!inner(${TRIP_COLUMNS})`)
     .eq('user_id', userId)
     .eq('role', 'host');
 
   if (!ALLOW_ALL_HOSTED) {
-    query = query.eq('group_trips.hosting_style', 'C');
+    hostQuery = hostQuery.eq('group_trips.hosting_style', 'C');
   }
 
-  const { data, error } = await query;
+  const [hosted, staffTripIds] = await Promise.all([
+    hostQuery,
+    // A failure here must not empty an operator's own list — they are the
+    // common case and their trips do not depend on this read.
+    fetchMyStaffTripIds(userId).catch(e => {
+      console.error('[trips] could not read crew memberships:', e);
+      return [] as string[];
+    }),
+  ]);
 
-  if (error) throw error;
+  if (hosted.error) throw hosted.error;
 
-  const trips = (data ?? [])
-    .map((row: any) => row.group_trips)
-    .filter(Boolean)
-    .map(toTrip);
+  const byId = new Map<string, OperatorTrip>();
+  for (const row of (hosted.data ?? []) as any[]) {
+    if (row.group_trips) {
+      const trip = toTrip(row.group_trips);
+      byId.set(trip.id, trip);
+    }
+  }
+
+  // Crew trips. Fetched by id rather than through a join, because
+  // organized_trip_staff has no foreign key PostgREST can embed group_trips
+  // through — the same reason listTripStaff in the app runs two queries.
+  const missing = staffTripIds.filter(id => !byId.has(id));
+  if (missing.length > 0) {
+    let crewQuery = supabase.from('group_trips').select(TRIP_COLUMNS).in('id', missing);
+    if (!ALLOW_ALL_HOSTED) crewQuery = crewQuery.eq('hosting_style', 'C');
+
+    const { data, error } = await crewQuery;
+    if (error) throw error;
+    for (const row of (data ?? []) as any[]) {
+      const trip = toTrip(row, true);
+      byId.set(trip.id, trip);
+    }
+  }
 
   // Soonest departure first; trips with no date sink to the bottom.
-  return trips.sort((a, b) =>
+  return [...byId.values()].sort((a, b) =>
     String(a.startDate ?? '9999').localeCompare(String(b.startDate ?? '9999')),
   );
 }

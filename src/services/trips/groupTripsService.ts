@@ -177,6 +177,13 @@ export interface GroupTrip {
   payment_mode: 'offline' | 'managed';
   // Deposit amount, USD. Null = one single payment, no deposit row.
   deposit_amount: number | null;
+  // Offline trips' full-payment deadline, days before departure. Managed trips
+  // keep theirs on the `balance` requirement row instead (the DB refuses pay
+  // rows on offline trips, so this column is where their deadline lives).
+  // Informational only — travelers pay the operator outside the app.
+  // Optional for the same reason as cancellation_preset above: the feed RPCs
+  // don't return it, and a required field there would be a type that lies.
+  offline_payment_due_days_before?: number | null;
 
   // Step-3 Yes/No gate: did the host select a specific stay, or none yet?
   // (Renamed from accommodation_status — May 2026. See migration

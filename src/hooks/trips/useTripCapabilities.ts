@@ -42,6 +42,10 @@ export type TripCapability =
   | 'docs.view'
   | 'medical.view'
   | 'trip.edit'
+  // Post an admin update without the whole `trip.edit`. Added for the Guide
+  // tier (migration 20260817000000): their blurb promises updates, but
+  // granting `trip.edit` would hand them the edit screen too.
+  | 'updates.send'
   | 'docs.approve'
   | 'travelers.remove'
   | 'data.export'
@@ -84,6 +88,7 @@ export function useTripCrew(tripId: string | null | undefined, enabled = true) {
           id: s.id,
           name: s.name,
           title: s.title,
+          bio: s.bio,
           avatarUrl: s.photo_url,
         }));
     },

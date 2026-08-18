@@ -30,12 +30,26 @@ import { showErrorAlert } from '../../utils/friendlyError';
 import {
   listStaffRoles, listTripStaff, addTripStaff, updateTripStaffRole, revokeTripStaff,
   createStaffInviteLink, updateTripStaffListed, canChangeTier,
-  searchUsersForStaff, inviteStaffMember,
+  searchUsersForStaff, inviteStaffMember, updateTripStaffProfile, STAFF_PROFESSIONS,
   type StaffRole, type StaffRoleKey, type TripStaffMember, type StaffSearchResult,
 } from '../../services/trips/tripStaffService';
 import { uploadCrewPhoto } from '../../services/storage/storageService';
+import { queryClient } from '../../lib/queryClient';
+import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
-import { StaffPaperworkSection } from './StaffPaperworkSection';
+import {
+  StaffPaperworkSection,
+  StaffPaperworkPicker,
+  StaffPaperworkReceived,
+} from './StaffPaperworkSection';
+import {
+  ensureStaffRequirements,
+  type StaffEvidenceRow,
+  type StaffRequirementKind,
+} from '../../services/trips/staffRequirementsService';
+import { DocumentViewer } from './DocumentViewer';
+import { RejectDocumentSheet } from './RejectDocumentSheet';
+import { approveDocuments, rejectDocument } from '../../services/trips/tripDocumentsService';
 
 interface Props {
   visible: boolean;
@@ -60,6 +74,7 @@ const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'docs.view': 'Documents · flights · passports',
   'medical.view': 'Medical status',
   'trip.edit': 'Edit trip, gear and required docs',
+  'updates.send': 'Post admin updates',
   'docs.approve': 'Approve documents',
   'travelers.remove': 'Remove a traveler',
   'data.export': 'Export traveler data',
@@ -83,11 +98,17 @@ type Mode =
   | { kind: 'list' }
   | { kind: 'add' }
   | { kind: 'listed' }
-  // Search for an account, then pick their tier. Two steps because the tier is
-  // the consequential choice and it should not be buried under a search box.
+  // Search for an account, then pick their tier, then say what you need from
+  // them. Three steps because each one is a decision the operator would
+  // otherwise skip: the tier buried under a search box, and the paperwork left
+  // for a screen nobody reopens once the invite is gone.
   | { kind: 'search' }
   | { kind: 'searchRole'; user: StaffSearchResult }
+  | { kind: 'searchProfile'; user: StaffSearchResult }
+  | { kind: 'searchPaperwork'; user: StaffSearchResult }
   | { kind: 'link' }
+  | { kind: 'linkProfile' }
+  | { kind: 'linkPaperwork' }
   | { kind: 'edit'; member: TripStaffMember };
 
 export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) {
@@ -105,6 +126,14 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
   const [draftName, setDraftName] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
   const [draftRole, setDraftRole] = useState<StaffRoleKey>('crew');
+  // What this invite asks for. Kinds, not requirement ids — the rows are only
+  // created at send time (ensureStaffRequirements), so that an operator who
+  // backs out of the flow does not leave requirements behind on the trip.
+  const [draftKinds, setDraftKinds] = useState<StaffRequirementKind[]>([]);
+  // The line travelers read under their name. Separate from draftTitle because
+  // "Photographer" and "Shooting from the water all week, ten years on this
+  // coast" are different questions with different answers.
+  const [draftBio, setDraftBio] = useState('');
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // Local file URI while picking; becomes an S3 URL on save. Kept apart from
@@ -114,6 +143,53 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<StaffSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  // A failed search used to render as "Nobody found", which hid a server-side
+  // bug for as long as it lived. An error gets its own state now.
+  const [searchFailed, setSearchFailed] = useState(false);
+
+  // Reviewing a crew member's uploaded paperwork, from the edit screen's
+  // "Received" list. The viewer and the reject sheet render INSIDE this
+  // sheet's Modal (both `inline`) — a sibling Modal would be dead on iOS.
+  const [reviewingDoc, setReviewingDoc] = useState<StaffEvidenceRow | null>(null);
+  const [rejectingDoc, setRejectingDoc] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState(false);
+  // Bumped after a decision so the "Received" list re-reads.
+  const [paperworkReload, setPaperworkReload] = useState(0);
+
+  const approveStaffDoc = useCallback(async () => {
+    if (!reviewingDoc?.documentId || decisionBusy) return;
+    setDecisionBusy(true);
+    try {
+      await approveDocuments([reviewingDoc.documentId]);
+      setReviewingDoc(null);
+      setPaperworkReload(n => n + 1);
+    } catch (e) {
+      showErrorAlert('Could not approve', e, 'Please try again.');
+    } finally {
+      setDecisionBusy(false);
+    }
+  }, [reviewingDoc, decisionBusy]);
+
+  const rejectStaffDoc = useCallback(
+    async (note: string) => {
+      if (!reviewingDoc?.documentId || decisionBusy) return;
+      setDecisionBusy(true);
+      try {
+        await rejectDocument(
+          { id: reviewingDoc.documentId, storagePath: reviewingDoc.storagePath ?? '' },
+          note.trim() || undefined,
+        );
+        setRejectingDoc(false);
+        setReviewingDoc(null);
+        setPaperworkReload(n => n + 1);
+      } catch (e) {
+        showErrorAlert('Could not send it back', e, 'Please try again.');
+      } finally {
+        setDecisionBusy(false);
+      }
+    },
+    [reviewingDoc, decisionBusy],
+  );
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -149,6 +225,8 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     setDraftName('');
     setDraftTitle('');
     setDraftRole('crew');
+    setDraftKinds([]);
+    setDraftBio('');
     setInviteUrl(null);
     setCopied(false);
     setDraftPhotoLocal(null);
@@ -165,6 +243,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     const q = searchQuery.trim();
     if (q.length < 2) {
       setSearchResults([]);
+      setSearchFailed(false);
       setSearching(false);
       return;
     }
@@ -172,22 +251,33 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     setSearching(true);
     const t = setTimeout(() => {
       searchUsersForStaff(tripId, q)
-        .then(rows => { if (!stale) setSearchResults(rows); })
-        .catch(() => { if (!stale) setSearchResults([]); })
+        .then(rows => { if (!stale) { setSearchResults(rows); setSearchFailed(false); } })
+        .catch(err => {
+          if (stale) return;
+          console.warn('[TripStaffSheet] staff search failed', err);
+          setSearchResults([]);
+          setSearchFailed(true);
+        })
         .finally(() => { if (!stale) setSearching(false); });
     }, 250);
     return () => { stale = true; clearTimeout(t); };
   }, [searchQuery, mode.kind, tripId]);
 
   const handleInviteInApp = useCallback(async () => {
-    if (mode.kind !== 'searchRole') return;
+    if (mode.kind !== 'searchPaperwork') return;
     setSaving(true);
     try {
+      // The requirement rows are made here, at send, and not while the operator
+      // is ticking: a flow abandoned halfway must not leave "Passport (crew)"
+      // on a trip that never asked anyone for one.
+      const requirementIds = await ensureStaffRequirements(tripId, draftKinds);
       await inviteStaffMember({
         tripId,
         userId: mode.user.user_id,
         roleKey: draftRole as Exclude<StaffRoleKey, 'operator'>,
         title: draftTitle,
+        bio: draftBio,
+        requirementIds,
       });
       setStaff(await listTripStaff(tripId));
       setMode({ kind: 'list' });
@@ -196,7 +286,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     } finally {
       setSaving(false);
     }
-  }, [mode, tripId, draftRole, draftTitle]);
+  }, [mode, tripId, draftRole, draftTitle, draftBio, draftKinds]);
 
   // Only ever offered for a Listed credit: they have no account, so there is no
   // profile photo to fall back on and the operator is the only one who can put
@@ -227,19 +317,24 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
   const handleCreateLink = useCallback(async () => {
     setSaving(true);
     try {
+      const requirementIds = await ensureStaffRequirements(tripId, draftKinds);
       const url = await createStaffInviteLink({
         tripId,
         roleKey: draftRole as Exclude<StaffRoleKey, 'operator'>,
         title: draftTitle,
+        bio: draftBio,
+        requirementIds,
       });
       setInviteUrl(url);
       setCopied(false);
+      // Back to the link screen, which is the one that renders a made link.
+      setMode({ kind: 'link' });
     } catch (e) {
       showErrorAlert("Couldn't make the link", e, 'Please try again.');
     } finally {
       setSaving(false);
     }
-  }, [tripId, draftRole, draftTitle]);
+  }, [tripId, draftRole, draftTitle, draftBio, draftKinds]);
 
   const handleShareLink = useCallback(async () => {
     if (!inviteUrl) return;
@@ -259,6 +354,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
   const openEdit = useCallback((member: TripStaffMember) => {
     setDraftName(member.name);
     setDraftTitle(member.title ?? '');
+    setDraftBio(member.bio ?? '');
     setDraftRole(member.role_key);
     setDraftPhotoLocal(null);
     setDraftPhotoUrl(member.photo_url);
@@ -289,30 +385,40 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
           roleKey: 'listed',
           displayName: draftName,
           title: draftTitle,
+          bio: draftBio,
           photoUrl: photoUrl ?? undefined,
         });
       } else if (mode.kind === 'edit') {
-        // Two different edits behind one Save. Someone with an account gets
-        // their tier changed; a Listed credit has no tier to change, so Save
-        // means their name, title and photo.
+        // How travelers see them is editable on EVERY row — it belongs to the
+        // operator, not to the person, and the same guide is "Head guide" on
+        // one trip and "Photographer" on the next. What differs is the rest:
+        // someone with an account gets their tier changed, and a Listed credit
+        // (nobody to grant anything to) gets their name and photo instead.
+        await updateTripStaffProfile(mode.member.id, {
+          title: draftTitle,
+          bio: draftBio,
+        });
         if (canChangeTier(mode.member)) {
           await updateTripStaffRole(mode.member.id, draftRole);
         } else {
           await updateTripStaffListed(mode.member.id, {
             displayName: draftName,
-            title: draftTitle,
             ...(draftPhotoLocal ? { photoUrl } : {}),
           });
         }
       }
       setStaff(await listTripStaff(tripId));
+      // The Overview's Crew card is a separate react-query entry with a 5-minute
+      // staleTime. Without this the operator saves a blurb, closes the sheet,
+      // and the trip page still shows the old one for five minutes.
+      queryClient.invalidateQueries({ queryKey: [...tripsKeys.capabilities(tripId), 'crew'] });
       setMode({ kind: 'list' });
     } catch (e) {
       showErrorAlert("Couldn't save", e, 'Please try again.');
     } finally {
       setSaving(false);
     }
-  }, [mode, tripId, operatorId, draftRole, draftName, draftTitle, draftPhotoLocal, draftPhotoUrl]);
+  }, [mode, tripId, operatorId, draftRole, draftName, draftTitle, draftBio, draftPhotoLocal, draftPhotoUrl]);
 
   const handleRemove = useCallback(async (member: TripStaffMember) => {
     setSaving(true);
@@ -426,6 +532,61 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     </>
   );
 
+  /**
+   * Who this person is FOR TRAVELERS: what they do, and a line about them.
+   *
+   * The chips are a shortcut for typing, not a fixed set — the field under them
+   * is the real value, and tapping a chip fills it. So an operator with a job
+   * nobody thought of ("Boat captain", "Shaper") is not stuck choosing "Other"
+   * from a list that does not describe anyone.
+   */
+  const profileFields = (
+    <>
+      <Text style={styles.fieldLabel}>What do they do?</Text>
+      <View style={styles.chipWrap}>
+        {STAFF_PROFESSIONS.map(job => {
+          const selected = draftTitle.trim().toLowerCase() === job.toLowerCase();
+          return (
+            <TouchableOpacity
+              key={job}
+              style={[styles.chip, selected && styles.chipOn]}
+              activeOpacity={0.7}
+              onPress={() => setDraftTitle(selected ? '' : job)}
+            >
+              <Text style={[styles.chipText, selected && styles.chipTextOn]}>{job}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <TextInput
+        style={[styles.input, styles.formTopGapSmall]}
+        value={draftTitle}
+        onChangeText={setDraftTitle}
+        placeholder="Or type it — e.g. Boat captain"
+        placeholderTextColor="#B9BEC3"
+        autoCapitalize="sentences"
+        returnKeyType="next"
+      />
+
+      <Text style={styles.fieldLabel}>A line about them</Text>
+      <TextInput
+        style={[styles.input, styles.textArea]}
+        value={draftBio}
+        onChangeText={t => setDraftBio(t.slice(0, 400))}
+        placeholder="e.g. Ten years on this coast. Shoots from the water every session."
+        placeholderTextColor="#B9BEC3"
+        autoCapitalize="sentences"
+        multiline
+        textAlignVertical="top"
+      />
+      <Text style={styles.counter}>{draftBio.length}/400</Text>
+      <Text style={styles.noteText}>
+        Travelers see this on the trip page, under their name. Both are optional, and you can
+        change them later.
+      </Text>
+    </>
+  );
+
   // Tap-to-choose avatar. Shown only where there is no account behind the row,
   // because everyone else already has a profile photo that wins over this one.
   const photoPicker = (
@@ -453,11 +614,17 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     </TouchableOpacity>
   );
 
-  const header = (title: string) => (
+  // `back` defaults to the crew list. The paperwork steps pass their own, so
+  // that the way out of step 2 is step 1 and not the beginning.
+  const header = (title: string, back?: { label: string; onPress: () => void }) => (
     <View style={styles.handleZoneInner}>
-      <TouchableOpacity style={styles.backRow} activeOpacity={0.6} onPress={() => setMode({ kind: 'list' })}>
+      <TouchableOpacity
+        style={styles.backRow}
+        activeOpacity={0.6}
+        onPress={back ? back.onPress : () => setMode({ kind: 'list' })}
+      >
         <Ionicons name="chevron-back" size={18} color="#7B7B7B" />
-        <Text style={styles.backText}>Crew</Text>
+        <Text style={styles.backText}>{back ? back.label : 'Crew'}</Text>
       </TouchableOpacity>
       <Text style={styles.title}>{title}</Text>
     </View>
@@ -474,7 +641,12 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
         <TouchableOpacity
           style={styles.forkCard}
           activeOpacity={0.8}
-          onPress={() => { setSearchQuery(''); setSearchResults([]); setMode({ kind: 'search' }); }}
+          onPress={() => {
+            setSearchQuery('');
+            setSearchResults([]);
+            setSearchFailed(false);
+            setMode({ kind: 'search' });
+          }}
         >
           <View style={styles.forkIcon}><Ionicons name="search-outline" size={20} color="#212121" /></View>
           <View style={styles.forkText}>
@@ -533,16 +705,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
               autoCapitalize="words"
               returnKeyType="next"
             />
-            <Text style={styles.fieldLabel}>Title (optional)</Text>
-            <TextInput
-              style={styles.input}
-              value={draftTitle}
-              onChangeText={setDraftTitle}
-              placeholder="e.g. Head Guide"
-              placeholderTextColor="#B9BEC3"
-              autoCapitalize="words"
-              returnKeyType="done"
-            />
+            {profileFields}
             <Text style={styles.noteText}>
               They'll show on the trip page for travelers to see. They can't sign in, and they
               see nothing.
@@ -588,27 +751,46 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.6}
-            onPress={() => {
-              setDraftRole('crew');
-              setDraftTitle('');
-              setMode({ kind: 'searchRole', user: item });
-            }}
-          >
-            {item.profile_image_url ? (
-              <Thumb uri={item.profile_image_url} size={128} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
-            ) : (
-              <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
-            )}
-            <View style={styles.rowText}>
-              <Text style={styles.name} numberOfLines={1}>{item.name ?? 'Unnamed'}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#B9BEC3" />
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          // Someone already on this trip. Shown rather than hidden — the
+          // operator can read all three of these off their own trip anyway, and
+          // "Nobody found" for a person sitting on the roster reads as a broken
+          // search. Not tappable: the database refuses the pairing either way.
+          const blocked = item.state !== 'available';
+          return (
+            <TouchableOpacity
+              style={[styles.row, blocked && styles.rowBlocked]}
+              activeOpacity={blocked ? 1 : 0.6}
+              disabled={blocked}
+              onPress={() => {
+                setDraftRole('crew');
+                setDraftTitle('');
+                setDraftBio('');
+                setDraftKinds([]);
+                setMode({ kind: 'searchRole', user: item });
+              }}
+            >
+              {item.profile_image_url ? (
+                <Thumb uri={item.profile_image_url} size={128} style={styles.avatar} contentFit="cover" cachePolicy="memory-disk" />
+              ) : (
+                <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
+              )}
+              <View style={styles.rowText}>
+                <Text style={styles.name} numberOfLines={1}>{item.name ?? 'Unnamed'}</Text>
+                {blocked && (
+                  <Text style={styles.meta} numberOfLines={2}>
+                    {item.state === 'traveler'
+                      ? "A traveler on this trip — nobody can be both"
+                      : item.state === 'crew'
+                        ? 'Already on the crew'
+                        : 'Invite already sent'}
+                  </Text>
+                )}
+              </View>
+              {!blocked && <Ionicons name="chevron-forward" size={18} color="#B9BEC3" />}
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.stateBox}>
             {searchQuery.trim().length < 2 ? (
@@ -616,13 +798,34 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
                 <Ionicons name="people-outline" size={28} color="#B9BEC3" />
                 <Text style={styles.stateSub}>Type at least two letters of their name.</Text>
               </>
-            ) : searching ? null : (
+            ) : searching ? null : searchFailed ? (
+              <>
+                <Ionicons name="cloud-offline-outline" size={28} color="#B9BEC3" />
+                <Text style={styles.stateTitle}>Search didn't work</Text>
+                <Text style={styles.stateSub}>
+                  Something went wrong on our side. Try again in a moment, or send a link
+                  instead.
+                </Text>
+                <TouchableOpacity
+                  style={styles.secondaryButton}
+                  activeOpacity={0.7}
+                  onPress={() => setMode({ kind: 'link' })}
+                >
+                  <Ionicons name="link-outline" size={15} color="#212121" />
+                  <Text style={styles.secondaryButtonText}>Send a link</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
               <>
                 <Ionicons name="person-outline" size={28} color="#B9BEC3" />
                 <Text style={styles.stateTitle}>Nobody found</Text>
+                {/* No longer says "or they're already on this trip" — since
+                    20260813210000 those people come back in the list with the
+                    reason on them, so an empty result really does mean nobody
+                    by that name. */}
                 <Text style={styles.stateSub}>
-                  They may not be on Swellyo, or they're already on this trip. You can send a
-                  link instead.
+                  Nobody on Swellyo goes by that name. Check the spelling, or send a link
+                  instead.
                 </Text>
                 <TouchableOpacity
                   style={styles.secondaryButton}
@@ -651,17 +854,52 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View style={styles.formBlock}>
-            <Text style={styles.fieldLabel}>Title (optional)</Text>
-            <TextInput
-              style={styles.input}
-              value={draftTitle}
-              onChangeText={setDraftTitle}
-              placeholder="e.g. Head Guide"
-              placeholderTextColor="#B9BEC3"
-              autoCapitalize="words"
-              returnKeyType="done"
-            />
+            {/* The job title moved to its own step — it is what a TRAVELER
+                reads, and it does not belong under a permission matrix. */}
             <Text style={styles.fieldLabel}>What they'll be able to see</Text>
+          </View>
+        }
+        ListFooterComponent={
+          <View style={styles.formFooter}>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              activeOpacity={0.8}
+              onPress={() => setMode({ kind: 'searchProfile', user: mode.user })}
+            >
+              <Text style={styles.primaryButtonText}>Next</Text>
+            </TouchableOpacity>
+            <Text style={styles.noteText}>
+              Two more steps: how travelers see them, and what you need from them. Nothing is
+              sent until the last one.
+            </Text>
+          </View>
+        }
+      />
+    </>
+  ) : null;
+
+  // Step 2 of an invite. It sits BEFORE "Send invite" on purpose: a person is
+  // asked for their paperwork by the same act that brings them onto the trip,
+  // the way a traveler is. Asked afterwards, from a screen the operator has to
+  // remember to reopen, it is not asked at all.
+  const paperworkScreen = (opts: {
+    title: string;
+    back: { label: string; onPress: () => void };
+    cta: string;
+    onPress: () => void;
+    note: string;
+  }) => (
+    <>
+      {header(opts.title, opts.back)}
+      <FlatList
+        data={[]}
+        keyExtractor={() => 'none'}
+        renderItem={() => null}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <View style={styles.formBlock}>
+            <StaffPaperworkPicker selected={draftKinds} onChange={setDraftKinds} />
           </View>
         }
         ListFooterComponent={
@@ -670,21 +908,89 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
               style={[styles.primaryButton, saving && styles.buttonBusy]}
               activeOpacity={0.8}
               disabled={saving}
-              onPress={handleInviteInApp}
+              onPress={opts.onPress}
             >
               {saving
                 ? <ActivityIndicator size="small" color="#FFFFFF" />
-                : <Text style={styles.primaryButtonText}>Send invite</Text>}
+                : <Text style={styles.primaryButtonText}>{opts.cta}</Text>}
             </TouchableOpacity>
-            <Text style={styles.noteText}>
-              They'll get a notification and can accept or ignore it. Nothing is shared with
-              them until they accept.
-            </Text>
+            <Text style={styles.noteText}>{opts.note}</Text>
           </View>
         }
       />
     </>
-  ) : null;
+  );
+
+  // Step 2 of an invite: who this person is to a traveler. Its own step, and not
+  // a field on the tier screen, because the two answer different questions —
+  // the tier is a permission set the operator reads, and this is the only thing
+  // about the crew a traveler will ever see.
+  const profileScreen = (opts: {
+    title: string;
+    back: { label: string; onPress: () => void };
+    onNext: () => void;
+  }) => (
+    <>
+      {header(opts.title, opts.back)}
+      <FlatList
+        data={[]}
+        keyExtractor={() => 'none'}
+        renderItem={() => null}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={<View style={styles.formBlock}>{profileFields}</View>}
+        ListFooterComponent={
+          <View style={styles.formFooter}>
+            <TouchableOpacity style={styles.primaryButton} activeOpacity={0.8} onPress={opts.onNext}>
+              <Text style={styles.primaryButtonText}>Next</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      />
+    </>
+  );
+
+  const searchProfileScreen = mode.kind === 'searchProfile'
+    ? profileScreen({
+        title: `How will travelers see ${mode.user.name ?? 'them'}?`,
+        back: { label: 'Tier', onPress: () => setMode({ kind: 'searchRole', user: mode.user }) },
+        onNext: () => setMode({ kind: 'searchPaperwork', user: mode.user }),
+      })
+    : null;
+
+  const linkProfileScreen = mode.kind === 'linkProfile'
+    ? profileScreen({
+        title: 'How will travelers see them?',
+        back: { label: 'Tier', onPress: () => setMode({ kind: 'link' }) },
+        onNext: () => setMode({ kind: 'linkPaperwork' }),
+      })
+    : null;
+
+  const searchPaperworkScreen = mode.kind === 'searchPaperwork'
+    ? paperworkScreen({
+        title: 'What do you need from them?',
+        back: {
+          label: 'Back',
+          onPress: () => setMode({ kind: 'searchProfile', user: mode.user }),
+        },
+        cta: 'Send invite',
+        onPress: handleInviteInApp,
+        note:
+          "They'll get a notification and can accept or ignore it. Nothing is shared with " +
+          'them, and nothing is asked of them, until they accept.',
+      })
+    : null;
+
+  const linkPaperworkScreen = mode.kind === 'linkPaperwork'
+    ? paperworkScreen({
+        title: 'What do you need from them?',
+        back: { label: 'Back', onPress: () => setMode({ kind: 'linkProfile' }) },
+        cta: 'Make the link',
+        onPress: handleCreateLink,
+        note: 'Whoever uses the link is asked for these once they join.',
+      })
+    : null;
 
   const linkScreen = (
     <>
@@ -698,16 +1004,6 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
         ListHeaderComponent={
           inviteUrl ? null : (
             <View style={styles.formBlock}>
-              <Text style={styles.fieldLabel}>Title (optional)</Text>
-              <TextInput
-                style={styles.input}
-                value={draftTitle}
-                onChangeText={setDraftTitle}
-                placeholder="e.g. Head Guide"
-                placeholderTextColor="#B9BEC3"
-                autoCapitalize="words"
-                returnKeyType="done"
-              />
               <Text style={styles.fieldLabel}>What they'll be able to see</Text>
             </View>
           )
@@ -739,14 +1035,11 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
               </>
             ) : (
               <TouchableOpacity
-                style={[styles.primaryButton, saving && styles.buttonBusy]}
+                style={styles.primaryButton}
                 activeOpacity={0.8}
-                disabled={saving}
-                onPress={handleCreateLink}
+                onPress={() => setMode({ kind: 'linkProfile' })}
               >
-                {saving
-                  ? <ActivityIndicator size="small" color="#FFFFFF" />
-                  : <Text style={styles.primaryButtonText}>Make the link</Text>}
+                <Text style={styles.primaryButtonText}>Next</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -771,30 +1064,29 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
         renderItem={({ item }) => renderRoleOption(item)}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
+        // Every row gets the traveler-facing fields; a Listed credit also gets
+        // the name and photo, because nobody else owns those for them.
         ListHeaderComponent={
-          editable ? null : (
-            <View style={styles.formBlock}>
-              {photoPicker}
-              <Text style={styles.fieldLabel}>Name</Text>
-              <TextInput
-                style={styles.input}
-                value={draftName}
-                onChangeText={setDraftName}
-                placeholder="e.g. Marta Ruiz"
-                placeholderTextColor="#B9BEC3"
-                autoCapitalize="words"
-                returnKeyType="next"
-              />
-              <Text style={styles.fieldLabel}>Title (optional)</Text>
-              <TextInput
-                style={styles.input}
-                value={draftTitle}
-                onChangeText={setDraftTitle}
-                placeholder="e.g. Head Guide"
-                placeholderTextColor="#B9BEC3"
-                autoCapitalize="words"
-                returnKeyType="done"
-              />
+          <View style={styles.formBlock}>
+            {editable ? null : (
+              <>
+                {photoPicker}
+                <Text style={styles.fieldLabel}>Name</Text>
+                <TextInput
+                  style={styles.input}
+                  value={draftName}
+                  onChangeText={setDraftName}
+                  placeholder="e.g. Marta Ruiz"
+                  placeholderTextColor="#B9BEC3"
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                />
+              </>
+            )}
+            {profileFields}
+            {editable ? (
+              <Text style={styles.fieldLabel}>What they'll be able to see</Text>
+            ) : (
               <View style={styles.lockedNote}>
                 <Ionicons name="information-circle-outline" size={16} color="#7B7B7B" />
                 <Text style={styles.lockedNoteText}>
@@ -802,8 +1094,8 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
                   access to. To make someone crew, invite them by link instead.
                 </Text>
               </View>
-            </View>
-          )
+            )}
+          </View>
         }
         ListFooterComponent={
           <View style={styles.formFooter}>
@@ -815,6 +1107,16 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
               staffId={mode.member.id}
               hasAccount={mode.member.user_id !== null}
               canManage
+            />
+            {/* What they sent back — until now only the web dashboard's Crew
+                page could show this. Tapping an upload opens the viewer below
+                with Approve / Ask again. */}
+            <StaffPaperworkReceived
+              tripId={tripId}
+              staffId={mode.member.id}
+              userId={mode.member.user_id}
+              reloadToken={paperworkReload}
+              onOpenDocument={row => setReviewingDoc(row)}
             />
             <TouchableOpacity
               // A Listed credit with a blank name would write display_name =
@@ -860,13 +1162,43 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
           <View {...panHandlers} style={styles.handleZone}>
             <View style={styles.grabber} />
           </View>
-          {mode.kind === 'list'       ? listScreen
-           : mode.kind === 'add'        ? addScreen
-           : mode.kind === 'listed'     ? listedScreen
-           : mode.kind === 'search'     ? searchScreen
-           : mode.kind === 'searchRole' ? searchRoleScreen
-           : mode.kind === 'link'       ? linkScreen
+          {mode.kind === 'list'            ? listScreen
+           : mode.kind === 'add'             ? addScreen
+           : mode.kind === 'listed'          ? listedScreen
+           : mode.kind === 'search'          ? searchScreen
+           : mode.kind === 'searchRole'      ? searchRoleScreen
+           : mode.kind === 'searchProfile'   ? searchProfileScreen
+           : mode.kind === 'searchPaperwork' ? searchPaperworkScreen
+           : mode.kind === 'link'            ? linkScreen
+           : mode.kind === 'linkProfile'     ? linkProfileScreen
+           : mode.kind === 'linkPaperwork'   ? linkPaperworkScreen
            : editScreen}
+
+          {/* Crew paperwork review — layers INSIDE this sheet's Modal (both
+              `inline`), same stacking rule as DocumentReviewScreen's own
+              viewer: a sibling Modal never presents on iOS. */}
+          <DocumentViewer
+            inline
+            visible={!!reviewingDoc}
+            onClose={() => setReviewingDoc(null)}
+            storagePath={reviewingDoc?.storagePath ?? null}
+            title={reviewingDoc?.title ?? 'Document'}
+            // Decide only while there is a decision: an approved file stays
+            // viewable, read-only.
+            onApprove={reviewingDoc?.state === 'submitted' ? approveStaffDoc : undefined}
+            onReject={
+              reviewingDoc?.state === 'submitted' ? () => setRejectingDoc(true) : undefined
+            }
+            busy={decisionBusy}
+          />
+          <RejectDocumentSheet
+            inline
+            visible={rejectingDoc}
+            onClose={() => setRejectingDoc(false)}
+            title={reviewingDoc?.title ?? 'Document'}
+            busy={decisionBusy}
+            onSend={rejectStaffDoc}
+          />
         </View>
       )}
     </BottomSheetShell>
@@ -886,6 +1218,9 @@ const styles = StyleSheet.create({
   backText: { fontFamily: ff('Inter', '500'), fontSize: 13, color: '#7B7B7B', includeFontPadding: false },
 
   row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 10, gap: 12 },
+  // Dimmed, not hidden: the row is an answer ("they're already on this trip"),
+  // and an answer you cannot read is the state this replaced.
+  rowBlocked: { opacity: 0.45 },
   rowText: { flex: 1 },
   avatar: { width: 44, height: 44, borderRadius: 22 },
   name: { fontFamily: ff('Montserrat', '600'), fontSize: 15, color: '#212121', includeFontPadding: false },
@@ -938,6 +1273,24 @@ const styles = StyleSheet.create({
     marginTop: 10, lineHeight: 17, includeFontPadding: false,
   },
   formTopGap: { marginTop: 16 },
+  formTopGapSmall: { marginTop: 8 },
+
+  // Job chips. A shortcut for typing, not a closed list — the field under them
+  // is the value, so a chip only ever fills it in.
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18,
+    borderWidth: 1, borderColor: '#E2E5E8', backgroundColor: '#FFFFFF',
+  },
+  chipOn: { borderColor: '#05BCD3', backgroundColor: '#F4FCFD' },
+  chipText: { fontFamily: ff('Inter', '500'), fontSize: 13, color: '#4A5057', includeFontPadding: false },
+  chipTextOn: { color: '#0B7C8A' },
+
+  textArea: { minHeight: 92, paddingTop: 11 },
+  counter: {
+    fontFamily: ff('Inter', '400'), fontSize: 11, color: '#B9BEC3',
+    alignSelf: 'flex-end', marginTop: 4, includeFontPadding: false,
+  },
 
   searchBox: {
     flexDirection: 'row', alignItems: 'center', gap: 8,

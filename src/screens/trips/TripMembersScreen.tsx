@@ -34,6 +34,7 @@ import { NotificationCenter } from '../../components/notifications/NotificationC
 import { ff } from '../../theme/fonts';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { isTripHost } from '../../utils/tripRole';
+import { useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
 import { InviteMembersSheet } from '../../components/trips/InviteMembersSheet';
 
 // `target_surf_styles` (SurfStyle: 'shortboard'|'midlength'|'longboard'|'softtop'|'all')
@@ -114,6 +115,19 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
 
   // ── Permission layers ─────────────────────────────────────────────────────
   const isHost = isTripHost(trip, participants, currentUserId);
+  /**
+   * Staff capabilities, same as TripDetailScreen. This screen is one tap from
+   * its Members section ("View all"), so a Manager who can see the roster and
+   * the pending count there has to be able to act on them HERE — otherwise the
+   * count is a number that leads nowhere.
+   *
+   * UX only, as everywhere: RLS decides. Operator trips only.
+   */
+  const { can } = useTripCapabilities(tripId, trip?.hosting_style === 'C');
+  /** Reviewing join requests and editing the roster — `trip.edit` in RLS. */
+  const canManageRoster = isHost || can('trip.edit');
+  /** Removing a traveler is its own capability, deliberately separate. */
+  const canRemoveTravelers = isHost || can('travelers.remove');
   const isMember = useMemo(
     () =>
       !!currentUserId &&
@@ -142,9 +156,9 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   // check and is deliberately NOT reused for this.
   const isOperator = !!currentUserId && trip?.host_id === currentUserId;
 
-  // Pending join requests — host only. Tapping a request opens the requester's
-  // profile to review; Approve / Decline live inside that profile.
-  const requestsQuery = useTripRequests(tripId, isHost);
+  // Pending join requests. Tapping a request opens the requester's profile to
+  // review; Approve / Decline live inside that profile.
+  const requestsQuery = useTripRequests(tripId, canManageRoster);
   const pendingRequests = requestsQuery.data?.pending ?? [];
 
   // Only needed by the per-traveler price sheet, to tell a trip that has a
@@ -281,10 +295,10 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {/* Pending join requests — host only. Same row design as the members
-              card below; tapping (or "View") opens the requester's profile to
-              review, where Approve / Decline live. */}
-          {isHost && pendingRequests.length > 0 ? (
+          {/* Pending join requests. Same row design as the members card below;
+              tapping (or "View") opens the requester's profile to review,
+              where Approve / Decline live. */}
+          {canManageRoster && pendingRequests.length > 0 ? (
             <View style={styles.pendingSection}>
               <Text style={styles.sectionLabel}>
                 {pendingRequests.length} pending request{pendingRequests.length === 1 ? '' : 's'}
@@ -423,6 +437,7 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         visible={!!sheetMember}
         member={sheetMember}
         viewerIsHost={isHost}
+        viewerCanRemove={canRemoveTravelers}
         isSelf={sheetMember?.user_id === currentUserId}
         tripId={tripId}
         viewerIsOperator={isOperator}

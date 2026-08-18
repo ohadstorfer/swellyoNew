@@ -20,6 +20,7 @@ import {
   peekStaffInvite, acceptStaffInvite, listStaffRoles,
   type StaffInvitePreview, type StaffRole,
 } from '../../services/trips/tripStaffService';
+import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
 import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
 
 const CAPABILITY_LABELS: Record<TripCapability, string> = {
@@ -32,6 +33,7 @@ const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'docs.view': 'See documents, flights and passports',
   'medical.view': 'See medical status',
   'trip.edit': 'Edit the trip, gear and required documents',
+  'updates.send': 'Post admin updates',
   'docs.approve': 'Approve documents',
   'travelers.remove': 'Remove a traveler',
   'data.export': 'Export traveler data',
@@ -44,8 +46,15 @@ interface Props {
   visible: boolean;
   token: string;
   onClose: () => void;
-  /** Called with the trip id after a successful accept, so the app can open it. */
-  onAccepted: (tripId: string) => void;
+  /**
+   * Called with the trip id after a successful accept, so the app can open it.
+   *
+   * `hasPaperwork` is true when the operator ticked something on the invite and
+   * it is now waiting for them. The caller decides what to do with that — this
+   * sheet must not navigate, because it is a Modal and pushing a screen that
+   * opens an OS picker while a Modal is tearing down is the PHPicker hang.
+   */
+  onAccepted: (tripId: string, hasPaperwork: boolean) => void;
 }
 
 export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: Props) {
@@ -74,7 +83,15 @@ export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: 
     setAccepting(true);
     try {
       const tripId = await acceptStaffInvite(token);
-      onAccepted(tripId);
+      // Asked here rather than read off the invite: accept_staff_invite skips
+      // any requirement deleted since the invite was sent, so the invite's own
+      // list can promise paperwork that no longer exists. A failure is not
+      // worth blocking a successful join over — they still get the trip, and
+      // the entry in the trip's menu is always there.
+      const outstanding = await fetchMyStaffRequirements(tripId)
+        .then(rows => rows.some(r => !r.fulfilled))
+        .catch(() => false);
+      onAccepted(tripId, outstanding);
       onClose();
     } catch (e) {
       showErrorAlert("Couldn't join", e, 'This invite may have already been used.');
@@ -119,10 +136,19 @@ export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: 
               <Text style={styles.title}>
                 Join the crew of {invite.trip_title ?? 'this trip'}
               </Text>
+              {/* What they were asked to BE comes first — "as Photographer" is
+                  the offer, and "Guide" is the permission tier behind it. The
+                  tier still shows, because accepting hands over real access and
+                  the capability list below is what that access is. */}
               <Text style={styles.roleLine}>
-                as <Text style={styles.roleStrong}>{invite.role_label ?? invite.role_key}</Text>
-                {invite.title ? ` · ${invite.title}` : ''}
+                as <Text style={styles.roleStrong}>{invite.title ?? invite.role_label ?? invite.role_key}</Text>
+                {invite.title ? ` · ${invite.role_label ?? invite.role_key}` : ''}
               </Text>
+              {!!invite.bio && (
+                <Text style={styles.bioLine}>
+                  “{invite.bio}” — how they'll introduce you to travelers.
+                </Text>
+              )}
 
               {!!role?.capabilities?.length && (
                 <View style={styles.capBox}>
@@ -171,6 +197,10 @@ const styles = StyleSheet.create({
   title: { fontFamily: ff('Montserrat', '700'), fontSize: 20, color: '#212121', marginTop: 4, includeFontPadding: false },
   roleLine: { fontFamily: ff('Inter', '400'), fontSize: 14, color: '#4A5057', marginTop: 6, includeFontPadding: false },
   roleStrong: { fontFamily: ff('Montserrat', '600'), color: '#212121' },
+  bioLine: {
+    fontFamily: ff('Inter', '400'), fontSize: 13, lineHeight: 19, color: '#7B7B7B',
+    marginTop: 8, includeFontPadding: false,
+  },
 
   capBox: { backgroundColor: '#F7F8F9', borderRadius: 14, padding: 14, marginTop: 18, gap: 8 },
   capHeading: { fontFamily: ff('Montserrat', '600'), fontSize: 12, color: '#7B7B7B', includeFontPadding: false },

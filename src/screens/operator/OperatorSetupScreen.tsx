@@ -272,7 +272,10 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
         <Pressable onPress={onBack} hitSlop={12} style={styles.backBtn} accessibilityLabel="Back">
           <Ionicons name="chevron-back" size={24} color={C.ink} />
         </Pressable>
-        <Text style={styles.headerTitle}>Set up</Text>
+        {/* Once everything is done this screen is reached from Settings, not
+            the setup banner — so it stops calling itself a setup. Same screen,
+            same steps, now presented as the place these choices live. */}
+        <Text style={styles.headerTitle}>{complete ? 'Operator settings' : 'Set up'}</Text>
         <View style={styles.backBtn} />
       </View>
 

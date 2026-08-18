@@ -10,15 +10,20 @@ import { RequirementPage } from './routes/RequirementPage';
 import { WaitingPage } from './routes/WaitingPage';
 import { TravelerPage } from './routes/TravelerPage';
 import { MoneyPage } from './routes/MoneyPage';
+import { CrewPage } from './routes/CrewPage';
 import { SettingsPage } from './routes/SettingsPage';
 import { SetupPage } from './routes/SetupPage';
 import { SetupBanner } from './components/SetupBanner';
 import { useOperatorSetup } from './services/useOperatorSetup';
 
 export function App() {
-  const { session, loading, isOperator } = useAuth();
+  const { session, loading, isOperator, hasAccess } = useAuth();
   // Hooks cannot sit behind the early returns below, so this runs for everyone
   // and does nothing without a user id — the reads are own-row only anyway.
+  //
+  // Operators only. Setup is the four things the person who SELLS the trip
+  // settles once (Stripe, waiver, terms); a Manager has no Stripe account to
+  // connect and nothing to do about someone else's.
   const setup = useOperatorSetup(isOperator ? (session?.user?.id ?? null) : null);
 
   if (loading) {
@@ -38,10 +43,10 @@ export function App() {
     );
   }
 
-  // Signed in, but we do not know yet whether they are an operator. Keep
-  // waiting rather than guessing — rendering NotOperatorPage on `null` would
-  // flash a rejection at every operator on every page load.
-  if (isOperator === null) {
+  // Signed in, but we do not know yet whether they are an operator or crew.
+  // Keep waiting rather than guessing — rendering NotOperatorPage on `null`
+  // would flash a rejection at everyone on every page load.
+  if (hasAccess === null) {
     return (
       <Shell>
         <Loading what="Checking your access" />
@@ -49,10 +54,9 @@ export function App() {
     );
   }
 
-  // No <Shell> and no <Routes>: every route below is operator-only, so this
-  // replaces the whole app rather than sitting inside its chrome. There is
-  // nothing to navigate to.
-  if (!isOperator) {
+  // No <Shell> and no <Routes>: nobody without a trip has anywhere to navigate
+  // to, so this replaces the whole app rather than sitting inside its chrome.
+  if (!hasAccess) {
     return <NotOperatorPage />;
   }
 
@@ -65,11 +69,26 @@ export function App() {
         <SetupBanner summary={setup.summary} done={setup.done} total={setup.total} />
       )}
       <Routes>
-        <Route path="/setup" element={<SetupPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        {/* Both are about the OPERATOR's own account — their Stripe connection,
+            their default waiver, their cancellation policy. Crew have no such
+            row, so the pages would read someone else's defaults or nothing at
+            all. Redirected rather than 404'd: a stale bookmark should land
+            somewhere useful. */}
+        <Route
+          path="/setup"
+          element={isOperator ? <SetupPage /> : <Navigate to="/trips" replace />}
+        />
+        <Route
+          path="/settings"
+          element={isOperator ? <SettingsPage /> : <Navigate to="/trips" replace />}
+        />
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/trips/:tripId" element={<TripPage />} />
         <Route path="/trips/:tripId/money" element={<MoneyPage />} />
+        {/* Not guarded here: "may I manage the crew" is a question about one
+            trip, and the trip id only exists inside the page. CrewPage asks it
+            and answers in words. */}
+        <Route path="/trips/:tripId/crew" element={<CrewPage />} />
         <Route path="/trips/:tripId/waiting" element={<WaitingPage />} />
         <Route path="/trips/:tripId/d/:requirementId" element={<RequirementPage />} />
         <Route path="/trips/:tripId/t/:userId" element={<TravelerPage />} />

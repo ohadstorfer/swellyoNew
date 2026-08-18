@@ -1,10 +1,12 @@
 /**
- * You are signed in, but this account is not an operator.
+ * You are signed in, but this account neither runs a trip nor works on one.
  *
  * Deliberately a dead end with one way out — sign out. There is no "request
- * access" button because there is no request to make: `surfers.operator` is set
- * by a Swellyo admin through `set_operator_status`, and inventing a self-serve
- * path here would promise something the product cannot do yet.
+ * access" button because there is no request to make. The two ways in are set
+ * elsewhere: `surfers.operator` by a Swellyo admin through
+ * `set_operator_status`, and a crew place by the operator inviting you from the
+ * app. Inventing a self-serve path here would promise something the product
+ * cannot do.
  *
  * It names the account it checked. The most likely reason a real operator lands
  * here is signing in with the wrong Google account, and "you are not an
@@ -36,10 +38,10 @@ export function NotOperatorPage() {
               margin: '0 auto 18px',
             }}
           />
-          <h1 style={{ fontSize: 21, marginBottom: 6 }}>Not an operator account</h1>
+          <h1 style={{ fontSize: 21, marginBottom: 6 }}>Nothing to run here</h1>
           <p className="muted small" style={{ marginBottom: 20, lineHeight: 1.5 }}>
-            This site is for trip operators. Your Swellyo account does not have
-            operator access yet.
+            This site is for people running an operator trip — the operator, or the crew they
+            put on it. This account is neither yet.
           </p>
 
           {user?.email && (

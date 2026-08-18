@@ -239,6 +239,109 @@ h3 {
   color: var(--muted);
   background: var(--panel-2);
 }
+/* The operator's own tier. Brand rather than a state colour — it is who
+ * somebody is, not whether something went well. */
+.tag-brand {
+  color: var(--cyan-dark);
+  background: var(--cyan-tint);
+}
+
+/* ── Choice cards ───────────────────────────────────────────────────────────
+ * A radio group that is a list of cards: the five crew tiers, the capabilities
+ * of the chosen one shown underneath. Only border and background move — the
+ * card must not resize as the selection travels down the list. */
+.choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: #fff;
+  padding: 12px 14px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: transform var(--t-press) var(--ease-out), border-color var(--t-fast) ease,
+    background-color var(--t-fast) ease;
+}
+.choice:active {
+  transform: scale(0.99);
+}
+.choice:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.choice[aria-pressed='true'] {
+  border-color: var(--cyan);
+  background: var(--cyan-tint);
+}
+@media (hover: hover) and (pointer: fine) {
+  .choice:hover {
+    border-color: var(--line-strong);
+  }
+  .choice[aria-pressed='true']:hover {
+    border-color: var(--cyan);
+  }
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────────────
+ * A shortcut for typing, not a closed list — the field under them is the value,
+ * so a chip only ever fills it in. */
+.chip {
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--text-2);
+  border-radius: 99px;
+  padding: 6px 12px;
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out), border-color var(--t-fast) ease,
+    background-color var(--t-fast) ease;
+}
+.chip:active {
+  transform: scale(0.97);
+}
+.chip[aria-pressed='true'] {
+  border-color: var(--cyan);
+  background: var(--cyan-tint);
+  color: var(--cyan-dark);
+}
+.chip:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .chip:hover {
+    background: var(--panel);
+  }
+  .chip[aria-pressed='true']:hover {
+    background: var(--cyan-tint);
+  }
+}
+
+/* A .row-link that is a control rather than a link — a tick box, or a row that
+ * opens a dialog instead of navigating. Same row, same hover; it just has to
+ * shed the browser's button and label defaults first. */
+label.row-link {
+  cursor: pointer;
+}
+button.row-link {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.row-link:last-child {
+  border-bottom: none;
+}
+button.row-link:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
 
 /* ── Tables ─────────────────────────────────────────────────────────────── */
 .tscroll {

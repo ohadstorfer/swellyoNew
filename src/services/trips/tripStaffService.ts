@@ -42,8 +42,14 @@ export interface TripStaffMember {
   /** Null for a Tier 1 "Listed" credit — a name and a face, with no account. */
   user_id: string | null;
   role_key: StaffRoleKey;
-  /** Job title shown to travelers, e.g. "Head Guide". Free text. */
+  /**
+   * What this person DOES, shown to travelers: "Instructor", "Photographer".
+   * Free text, usually one of STAFF_PROFESSIONS. Not the tier — the tier is a
+   * permission set the operator reads, and a traveler meets a person.
+   */
   title: string | null;
+  /** One or two lines introducing them on the trip page. */
+  bio: string | null;
   invited_at: string;
   accepted_at: string | null;
   /** Resolved for display: the surfer's profile if they have one, else the
@@ -55,7 +61,26 @@ export interface TripStaffMember {
 }
 
 const STAFF_COLUMNS =
-  'id, trip_id, user_id, role_key, display_name, photo_url, title, invited_at, accepted_at';
+  'id, trip_id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at';
+
+/**
+ * The jobs an operator picks from when introducing a crew member.
+ *
+ * A list of chips rather than a database enum on purpose: it is a shortcut for
+ * typing, not a set of values anything branches on. `title` stays free text, so
+ * an operator with a job nobody thought of just writes it.
+ */
+export const STAFF_PROFESSIONS = [
+  'Surf instructor',
+  'Surf guide',
+  'Photographer',
+  'Videographer',
+  'Driver',
+  'Cook',
+  'Yoga teacher',
+  'Physio / massage',
+  'Host',
+] as const;
 
 /**
  * The five tier definitions. Cache these — they change roughly never, and every
@@ -110,6 +135,7 @@ export async function listTripStaff(tripId: string): Promise<TripStaffMember[]> 
         user_id: r.user_id,
         role_key: r.role_key as StaffRoleKey,
         title: r.title,
+        bio: r.bio ?? null,
         invited_at: r.invited_at,
         accepted_at: r.accepted_at,
         // The stored display_name wins for Listed rows (they have no profile);
@@ -142,8 +168,9 @@ export async function addTripStaff(params: {
   displayName?: string;
   photoUrl?: string;
   title?: string;
+  bio?: string;
 }): Promise<void> {
-  const { tripId, operatorId, roleKey, userId, displayName, photoUrl, title } = params;
+  const { tripId, operatorId, roleKey, userId, displayName, photoUrl, title, bio } = params;
   if (!userId && !displayName?.trim()) {
     throw new Error('A staff member needs either an account or a name.');
   }
@@ -156,6 +183,7 @@ export async function addTripStaff(params: {
     display_name: displayName?.trim() || null,
     photo_url: photoUrl ?? null,
     title: title?.trim() || null,
+    bio: bio?.trim() || null,
     // A Listed credit has nobody to accept, so it is live immediately.
     // An account has to accept before trip_staff_can() will match them.
     accepted_at: userId ? null : new Date().toISOString(),
@@ -189,6 +217,30 @@ export async function updateTripStaffRole(staffId: string, roleKey: StaffRoleKey
  */
 export function canChangeTier(member: Pick<TripStaffMember, 'user_id'>): boolean {
   return member.user_id !== null;
+}
+
+/**
+ * Edit how travelers see this person: what they do, and the line about them.
+ *
+ * Works for every row, unlike `updateTripStaffListed` — an account-holding
+ * guide's job and blurb belong to the OPERATOR, not to them. They are how this
+ * trip introduces its crew, and the same person can be "Head guide" on one trip
+ * and "Photographer" on the next.
+ */
+export async function updateTripStaffProfile(
+  staffId: string,
+  patch: { title?: string; bio?: string },
+): Promise<void> {
+  const update: Record<string, string | null> = {};
+  if (patch.title !== undefined) update.title = patch.title.trim() || null;
+  if (patch.bio !== undefined) update.bio = patch.bio.trim() || null;
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase
+    .from('organized_trip_staff')
+    .update(update)
+    .eq('id', staffId);
+  if (error) throw error;
 }
 
 /**
@@ -246,6 +298,8 @@ export interface StaffInvitePreview {
   role_label: string | null;
   title: string | null;
   operator_name: string | null;
+  /** The operator's line introducing them, if they wrote one. */
+  bio: string | null;
 }
 
 /**
@@ -260,11 +314,22 @@ export async function createStaffInviteLink(params: {
   tripId: string;
   roleKey: Exclude<StaffRoleKey, 'operator'>;
   title?: string;
+  /**
+   * Staff-audience requirement ids to ask this person for. Applied when they
+   * accept — there is no staff row to assign them to before that. See
+   * 20260813160000_staff_invite_requirements.sql.
+   */
+  requirementIds?: string[];
+  /** The line travelers read under their name. Copied onto the staff row when
+   *  the link is used — see 20260813170000_staff_profile_for_travelers.sql. */
+  bio?: string;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('create_staff_invite', {
     p_trip_id: params.tripId,
     p_role_key: params.roleKey,
     p_title: params.title?.trim() || null,
+    p_requirement_ids: params.requirementIds ?? [],
+    p_bio: params.bio?.trim() || null,
   });
   if (error) throw error;
   return `${INVITE_BASE}?staff=${data as string}`;
@@ -304,6 +369,17 @@ export interface StaffSearchResult {
   user_id: string;
   name: string | null;
   profile_image_url: string | null;
+  /**
+   * Why this person cannot be picked, or 'available'.
+   *
+   * The three blocked states are things the operator can already read off their
+   * own trip — the roster, the crew list, the pending invites — so naming them
+   * tells them nothing new and saves them staring at "Nobody found" while the
+   * person sits on the trip in front of them. A BLOCK never appears here: those
+   * rows are still dropped server-side, because whether someone blocked you is
+   * exactly what a search endpoint must not confirm.
+   */
+  state: 'available' | 'traveler' | 'crew' | 'invited';
 }
 
 /**
@@ -324,7 +400,13 @@ export async function searchUsersForStaff(
     p_query: query.trim(),
   });
   if (error) throw error;
-  return (data as StaffSearchResult[] | null) ?? [];
+  // `state` defaults to 'available' for a build talking to a database that
+  // predates 20260813210000 — the row is pickable, and the server refuses it if
+  // it is not.
+  return ((data as StaffSearchResult[] | null) ?? []).map(r => ({
+    ...r,
+    state: r.state ?? 'available',
+  }));
 }
 
 /**
@@ -337,12 +419,19 @@ export async function inviteStaffMember(params: {
   userId: string;
   roleKey: Exclude<StaffRoleKey, 'operator'>;
   title?: string;
+  /** See createStaffInviteLink — the ask rides on the invite and lands on
+   *  acceptance, because there is no staff row to assign before then. */
+  requirementIds?: string[];
+  /** See createStaffInviteLink. */
+  bio?: string;
 }): Promise<void> {
   const { error } = await supabase.rpc('invite_staff_member', {
     p_trip_id: params.tripId,
     p_user_id: params.userId,
     p_role_key: params.roleKey,
     p_title: params.title?.trim() || null,
+    p_requirement_ids: params.requirementIds ?? [],
+    p_bio: params.bio?.trim() || null,
   });
   if (error) throw error;
 }

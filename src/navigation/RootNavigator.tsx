@@ -33,6 +33,7 @@ import CommitmentScreen from '../screens/trips/CommitmentScreen';
 import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import OperatorTripEditScreen from '../screens/operator/OperatorTripEditScreen';
 import TravelerOnboardingScreen from '../screens/trips/TravelerOnboardingScreen';
+import StaffPaperworkScreen from '../screens/trips/StaffPaperworkScreen';
 import OperatorEditDestinationScreen from '../screens/operator/OperatorEditDestinationScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -133,6 +134,14 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
           StackActions.push('TravelerOnboarding', {
             tripId: onboardTripId,
             tripTitle: onboardTitle,
+          }),
+        )
+      }
+      onOpenStaffPaperwork={(paperworkTripId, paperworkTitle) =>
+        navigation.dispatch(
+          StackActions.push('StaffPaperwork', {
+            tripId: paperworkTripId,
+            tripTitle: paperworkTitle,
           }),
         )
       }
@@ -256,6 +265,40 @@ function TravelerOnboardingCardScreen({
         queryClient.invalidateQueries({ queryKey: ['trips', 'explore'] });
         navigation.goBack();
       }}
+    />
+  );
+}
+
+/**
+ * The crew member's own paperwork. A card for the same reason
+ * TravelerOnboarding is one — two of its rows open OS pickers.
+ *
+ * Nothing is invalidated on the way out: staff paperwork gates nothing, so
+ * finishing it changes no membership, no count and no permission. The trip
+ * screen behind it is as correct after as it was before.
+ */
+function StaffPaperworkCardScreen({
+  route,
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'StaffPaperwork'>) {
+  const { user } = useOnboarding();
+  const currentUserId = user?.id?.toString() ?? null;
+  const { tripId, tripTitle, devMode } = route.params;
+
+  // No user id means no way to read or write their own documents. Every row
+  // would fail, so going back is the only honest option.
+  if (!currentUserId) {
+    navigation.goBack();
+    return null;
+  }
+
+  return (
+    <StaffPaperworkScreen
+      tripId={tripId}
+      userId={currentUserId}
+      tripTitle={tripTitle ?? null}
+      devMode={!!devMode}
+      onClose={() => navigation.goBack()}
     />
   );
 }
@@ -871,6 +914,14 @@ export default function RootNavigator() {
         name="TravelerOnboarding"
         component={TravelerOnboardingCardScreen}
         options={{ presentation: 'card', gestureEnabled: false }}
+      />
+      {/* A card for the same reason TravelerOnboarding is one. Swipe-back stays
+          on, unlike that route — nothing here is a payment step, and leaving
+          costs the crew member nothing. */}
+      <RootStack.Screen
+        name="StaffPaperwork"
+        component={StaffPaperworkCardScreen}
+        options={{ presentation: 'card' }}
       />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripMembers" component={TripMembersCardScreen} options={{ presentation: 'card' }} />

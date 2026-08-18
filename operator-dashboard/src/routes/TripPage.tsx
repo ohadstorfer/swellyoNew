@@ -5,18 +5,21 @@ import { fetchMembers, fetchTrip } from '../services/trips';
 import { fetchTripReview } from '../services/review';
 import { fetchCounts, fetchMedicalFlags } from '../services/counts';
 import { fetchProfiles, type SurferProfile } from '../services/travelers';
+import { fetchCrew } from '../services/staff';
 import type { TripReview } from '../services/review';
 import { isKnownUploadKind, kindLabel } from '../domain/catalog';
 import { isUploadRequirement } from '../domain/requirements';
 import { useTripMoney } from '../services/useTripMoney';
 import type { TravelerMoney } from '../domain/money';
 import { formatRange, formatUsd, plural } from '../lib/format';
-import { ErrorBox, Loading, CountPair } from '../components/StateBits';
+import { Avatar, ErrorBox, Loading, CountPair } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { ModeNotices } from './MoneyPage';
+import { DASHBOARD_CAPABILITY, useTripAccess } from '../services/access';
 
 export function TripPage() {
   const { tripId = '' } = useParams();
+  const access = useTripAccess(tripId);
 
   const trip = useQuery({ queryKey: ['trip', tripId], queryFn: () => fetchTrip(tripId) });
   const members = useQuery({ queryKey: ['members', tripId], queryFn: () => fetchMembers(tripId) });
@@ -39,7 +42,30 @@ export function TripPage() {
   if (trip.isError) return <ErrorBox error={trip.error} onRetry={() => void trip.refetch()} />;
   if (members.isError)
     return <ErrorBox error={members.error} onRetry={() => void members.refetch()} />;
-  if (trip.isPending || members.isPending) return <Loading what="Loading the trip" />;
+  if (trip.isPending || members.isPending || access.isPending)
+    return <Loading what="Loading the trip" />;
+
+  // Crew below Manager have no documents to review, which is the whole reason
+  // this site exists — so they get a sentence rather than a page of empty
+  // cards. Nothing here is a security boundary: every read on this page is
+  // already refused by the database for anyone without the capability. This
+  // just says so in words.
+  if (access.ready && !access.can(DASHBOARD_CAPABILITY)) {
+    return (
+      <>
+        <PageHead back="/trips" backLabel="All trips" title={trip.data.title} />
+        <div className="card">
+          <div className="card-body">
+            <p>You're on this trip's crew, but not for the paperwork.</p>
+            <p className="muted small" style={{ marginTop: 8 }}>
+              Reviewing documents needs the Manager tier. Everything you can do on this trip is
+              in the Swellyo app — ask the operator if you think this is wrong.
+            </p>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const memberCount = userIds.length;
   const countBy = new Map((counts.data ?? []).map(c => [c.requirementId, c]));
@@ -89,7 +115,10 @@ export function TripPage() {
         )}
 
         {/* ── Money ─────────────────────────────────────────────────────── */}
-        <MoneyCard tripId={tripId} />
+        {/* A Manager sees who has paid (payments.view_status); moving an amount
+            is money.manage, which is the operator alone. A tier without even the
+            read gets no card, rather than a card of dashes. */}
+        {access.can('payments.view_status') && <MoneyCard tripId={tripId} />}
 
         {/* ── Documents ─────────────────────────────────────────────────── */}
         <div className="card enter">
@@ -230,6 +259,13 @@ export function TripPage() {
           </div>
         </div>
 
+        {/* ── Crew ──────────────────────────────────────────────────────── */}
+        {/* Operator only. `staff.manage` is held by the operator of record and
+            by no assignable tier, so this is "am I the operator" asked the way
+            everything else on this site asks it. A Manager reviewing documents
+            never sees the link. */}
+        {access.can('staff.manage') && <CrewCard tripId={tripId} />}
+
         {/* ── Travelers ─────────────────────────────────────────────────── */}
         <TravelersCard
           tripId={tripId}
@@ -240,6 +276,52 @@ export function TripPage() {
         />
       </div>
     </>
+  );
+}
+
+/**
+ * The crew, in one line, linking to the page that manages them.
+ *
+ * Always shown to the operator, even with nobody on it — an empty crew is not
+ * an empty state, it is the thing this card exists to fix. A failed read is
+ * silent rather than red: the crew is not why anyone opened this page.
+ */
+function CrewCard({ tripId }: { tripId: string }) {
+  const crew = useQuery({ queryKey: ['crew', tripId], queryFn: () => fetchCrew(tripId) });
+
+  if (crew.isError) return null;
+
+  const pending = (crew.data ?? []).filter(m => m.pending).length;
+
+  return (
+    <Link to={`/trips/${tripId}/crew`} className="card card-link enter">
+      <div className="card-head">
+        <h2>Crew</h2>
+        <span className="muted small">
+          {crew.isPending ? 'Loading…' : plural(crew.data?.length ?? 0, 'person', 'people')}
+        </span>
+      </div>
+      <div className="card-body row-between">
+        <span className="muted small">
+          {crew.isPending
+            ? ' '
+            : (crew.data?.length ?? 0) === 0
+              ? 'Nobody yet. Add the people who help you run this trip.'
+              : [
+                  crew.data
+                    ?.filter(m => !m.pending)
+                    .map(m => m.name)
+                    .join(', '),
+                  pending > 0 ? `${pending} not accepted yet` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+        </span>
+        <span className="muted" aria-hidden>
+          ›
+        </span>
+      </div>
+    </Link>
   );
 }
 
@@ -342,31 +424,6 @@ function moneyLine(m: TravelerMoney, isOffline: boolean): string {
   if (m.totalUsd === null) return 'no price set';
   if (isOffline) return `${formatUsd(m.totalUsd)} · paid outside Swellyo`;
   return `${formatUsd(m.paidUsd)} of ${formatUsd(m.totalUsd)} paid`;
-}
-
-/** Profile photo, or the first letter when there is none. */
-function Avatar({ url, name }: { url: string | null; name: string }) {
-  const box = { width: 34, height: 34, borderRadius: 99, flexShrink: 0 } as const;
-
-  if (url) return <img src={url} alt="" style={{ ...box, objectFit: 'cover' }} />;
-
-  return (
-    <span
-      aria-hidden
-      style={{
-        ...box,
-        display: 'grid',
-        placeItems: 'center',
-        background: 'var(--panel)',
-        border: '1px solid var(--line)',
-        color: 'var(--muted)',
-        fontSize: 13,
-        fontWeight: 640,
-      }}
-    >
-      {name.trim().charAt(0).toUpperCase() || '?'}
-    </span>
-  );
 }
 
 /**

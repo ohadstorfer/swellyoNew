@@ -24,6 +24,7 @@ import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorks
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { StayTypeSheetContent } from '../../components/trips/sheets/StayTypeSheetContent';
 import { SpotsSheetContent } from '../../components/trips/sheets/SpotsSheetContent';
+import { PayDeadlineSheetContent } from '../../components/trips/sheets/PayDeadlineSheetContent';
 import {
   PriceSheetContent,
   formatTripAmount,
@@ -119,7 +120,7 @@ type SheetKey =
   | 'when' | 'spots'
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
-  | 'price' | 'includes' | 'gettingPaid'
+  | 'price' | 'includes' | 'gettingPaid' | 'payDeadline'
   | 'visibility'
   | 'requirements'
   | null;
@@ -407,11 +408,14 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     [tripId, queryClient],
   );
 
-  // This screen is only reachable from TripDetailScreen's "Edit trip" menu
-  // entry, itself gated on `isTripOwner` (TripDetailScreen.tsx:554,1735) — so
-  // the current user is always the host here. Recomputed the same way rather
-  // than assumed `true`, since `trip` can still be null pre-load.
-  const isHost = !!currentUserId && trip?.host_id === currentUserId;
+  // The operator OF RECORD — not just anyone the menu let in. The menu entry
+  // now also admits staff holding `trip.edit` (a Manager), and this is the
+  // line that keeps money away from them: the Price section below renders on
+  // `isOwner` alone, because `operator_set_traveler_price` and the payment
+  // columns authorise on `host_id`, so a Manager tapping them would only be
+  // handed a raw server error. Everything else on this screen is `trip.edit`,
+  // which RLS already allows a Manager.
+  const isOwner = !!currentUserId && trip?.host_id === currentUserId;
 
   // Same test TripDetailScreen uses to decide whether the operator may CREATE
   // a passport requirement (TripDetailScreen.tsx:546) — `ManageRequirementsSheet`
@@ -440,10 +444,11 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   // Everyone who is not the host: the people a material change needs telling.
   const joinedCount = Math.max(0, participantCount - 1);
 
-  // Host-only: the stored requirement rows, so a date change can report what
-  // it does to their deadlines. Same query TripDetailScreen's own requirements
-  // editor uses (useTripDetail.ts:211) — no new fetch shape invented here.
-  const requirementsQuery = useTripRequirements(tripId, isHost);
+  // The stored requirement rows, so a date change can report what it does to
+  // their deadlines. Same query TripDetailScreen's own requirements editor
+  // uses (useTripDetail.ts:211) — no new fetch shape invented here. `true`:
+  // everyone this screen admits (owner or `trip.edit` staff) may read them.
+  const requirementsQuery = useTripRequirements(tripId, !!trip);
 
   /**
    * One sentence about what a new start date does to the requirement
@@ -573,6 +578,14 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     [trip?.price_inclusions],
   );
 
+  // Offline trips only (the row is gated below). Null — a trip published
+  // before the deadline existed — seeds the sheet at the wizard's default, so
+  // opening it always shows a real value to step from.
+  const payDeadlineInitial = useMemo(
+    () => ({ daysBefore: trip?.offline_payment_due_days_before ?? 30 }),
+    [trip?.offline_payment_due_days_before],
+  );
+
   /**
    * Spec §3.5. Ask before writing a field people joined on the basis of.
    *
@@ -689,7 +702,10 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             their values so the pair does not read as two identical rows, and
             each one tells the sheet which field it meant. "None" rather than a
             blank on Deposit: an empty deposit is a real, chosen state ("they
-            pay in one go"), not a missing one. */}
+            pay in one go"), not a missing one.
+            Owner only — see `isOwner` above. A Manager edits everything else
+            on this screen, never money. */}
+        {isOwner && (
         <EditSection title="Price">
           <EditRow
             label="Price per person"
@@ -707,7 +723,25 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             value={trip.payment_mode === 'managed' ? 'In Swellyo' : 'Myself'}
             onPress={() => setSheet('gettingPaid')}
           />
+          {/* Offline only: a managed trip's deadline is the balance ROW's,
+              edited in Requirements next to the other deadlines. "None" is
+              a trip published before the deadline existed — travelers see no
+              payment note until the operator sets one. */}
+          {trip.payment_mode === 'offline' && trip.hosting_style === 'C' && (
+            <EditRow
+              label="Payment deadline"
+              value={
+                trip.offline_payment_due_days_before == null
+                  ? 'None'
+                  : trip.offline_payment_due_days_before === 1
+                    ? '1 day before the trip'
+                    : `${trip.offline_payment_due_days_before} days before the trip`
+              }
+              onPress={() => setSheet('payDeadline')}
+            />
+          )}
         </EditSection>
+        )}
 
         <EditSection title="Visibility">
           <EditRow label="Listed in explore" onPress={() => setSheet('visibility')} />
@@ -1117,6 +1151,25 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             value={draft.paymentMode}
             onChange={(paymentMode) => setDraft({ paymentMode })}
             depositLabel={formatTripAmount(trip.deposit_amount, trip.budget_currency)}
+          />
+        )}
+      </EditFieldSheet>
+
+      {/* The offline full-payment deadline — a plain trip column, so plain
+          saveField. No `validate`: the stepper can only produce values on
+          DEADLINE_STEPS, all of which the CHECK constraint accepts. */}
+      <EditFieldSheet<{ daysBefore: number }>
+        visible={sheet === 'payDeadline'}
+        title="Payment deadline"
+        initial={payDeadlineInitial}
+        onClose={close}
+        onSave={(next) => saveField({ offline_payment_due_days_before: next.daysBefore })}
+      >
+        {(draft, setDraft) => (
+          <PayDeadlineSheetContent
+            daysBefore={draft.daysBefore}
+            startDateISO={trip.start_date ?? null}
+            onChange={(daysBefore) => setDraft({ daysBefore })}
           />
         )}
       </EditFieldSheet>

@@ -4,7 +4,7 @@ import { useAuth } from '../lib/auth';
 
 /** Page frame: brand on the left, who you are on the right. */
 export function Shell({ children }: { children: ReactNode }) {
-  const { user, signOut } = useAuth();
+  const { user, isOperator, signOut } = useAuth();
 
   return (
     <>
@@ -37,9 +37,13 @@ export function Shell({ children }: { children: ReactNode }) {
 
           {user && (
             <div className="row" style={{ gap: 12 }}>
-              <Link to="/settings" className="small">
-                Settings
-              </Link>
+              {/* Settings is the operator's own defaults — waiver, cancellation
+                  policy, Stripe. Crew have none of that. */}
+              {isOperator && (
+                <Link to="/settings" className="small">
+                  Settings
+                </Link>
+              )}
               <span className="muted small">{user.email}</span>
               <button className="btn btn-sm" onClick={() => void signOut()}>
                 Sign out

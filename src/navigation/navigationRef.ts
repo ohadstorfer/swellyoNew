@@ -38,6 +38,22 @@ export type RootStackParamList = {
      *  real path; a traveler's onboarding cannot undo itself. */
     devMode?: boolean;
   };
+  /**
+   * A crew member's own paperwork on an operator trip — what the operator
+   * asked them for, and where they answer it.
+   *
+   * A CARD, never `presentation: 'modal'`, for the same reason
+   * TravelerOnboarding is one: its upload and medical rows open OS pickers.
+   */
+  StaffPaperwork: {
+    tripId: string;
+    tripTitle?: string | null;
+    /** Launched from the dev menu — lists every crew requirement on the trip
+     *  instead of the ones assigned to you, and adds a Reset. Never set on the
+     *  real path: an operator cannot be crew on their own trip, so there is no
+     *  other way to walk this screen without a second account. */
+    devMode?: boolean;
+  };
   /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
   TripUpdates: { tripId: string };
   /** Full "Members" list — "View all" target of the Overview Participants row and

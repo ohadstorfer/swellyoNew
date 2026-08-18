@@ -8,6 +8,7 @@ import {
   stepState,
   sumPaidUsd,
   toNumber,
+  validateTripPrice,
   type PaymentEvent,
   type TripPrice,
 } from './money';
@@ -240,6 +241,41 @@ describe('checkPriceChange', () => {
     expect(r.ok).toBe(true);
     if (!r.ok || !r.confirm) throw new Error('expected a confirmation');
     expect(r.confirm).toContain('will owe $500');
+  });
+});
+
+describe('validateTripPrice', () => {
+  it('accepts a price alone, and a price with a smaller deposit', () => {
+    expect(validateTripPrice(3000, null)).toBeNull();
+    expect(validateTripPrice(3000, 1000)).toBeNull();
+  });
+
+  it('accepts a deposit equal to the price — everything up front', () => {
+    expect(validateTripPrice(3000, 3000)).toBeNull();
+  });
+
+  it('accepts a zero deposit', () => {
+    // 0 is "no deposit collected", which the DB CHECK allows.
+    expect(validateTripPrice(3000, 0)).toBeNull();
+  });
+
+  it('requires a price', () => {
+    expect(validateTripPrice(null, null)).toContain('Set the price');
+  });
+
+  it('refuses zero and negative prices', () => {
+    // Unlike a traveler total, where 0 means "this one goes free", a trip
+    // default of 0 is what every future joiner would be frozen at.
+    expect(validateTripPrice(0, null)).toContain('more than 0');
+    expect(validateTripPrice(-100, null)).toContain('more than 0');
+  });
+
+  it('refuses a negative deposit', () => {
+    expect(validateTripPrice(3000, -1)).toContain('zero or more');
+  });
+
+  it('refuses a deposit above the price — mirrors the DB CHECK', () => {
+    expect(validateTripPrice(3000, 3001)).toContain('cannot be more than the price');
   });
 });
 

@@ -536,11 +536,18 @@ export type EditableRequirement = {
 };
 
 /**
- * Every requirement row on the trip, active or not.
+ * Every TRAVELER requirement row on the trip, active or not.
  *
  * Deliberately NOT `operator_trip_my_requirements`: that RPC resolves the
  * CALLER's state and hides inactive rows, and neither is what an editor needs.
  * This reads the table straight, which the host's RLS already allows.
+ *
+ * ⚠️ `audience` is load-bearing, not tidiness. `saveRequirements` builds its
+ * by-kind map from this list and treats anything it does not find in the
+ * editor's wanted set as switched off — so an unfiltered read would let the
+ * traveler editor call removeRequirement() on the crew's Passport row the first
+ * time an operator saved with passports off for travelers. Staff requirements
+ * are managed from the crew sheet and are invisible here on purpose.
  */
 export async function fetchTripRequirements(
   tripId: string,
@@ -549,6 +556,7 @@ export async function fetchTripRequirements(
     .from('organized_trip_requirements')
     .select('id, kind, req_type, title, skip_at_onboarding, deadline_days_before, is_active')
     .eq('trip_id', tripId)
+    .eq('audience', 'traveler')
     .order('sort_order', { ascending: true });
   if (error) throw error;
   return (data ?? []).map(r => ({
@@ -1052,7 +1060,11 @@ async function recordWaiverDocument(
     .from('organized_trip_requirements')
     .update({ skip_at_onboarding: 'must_have', deadline_days_before: null, is_active: true })
     .eq('trip_id', tripId)
-    .eq('kind', 'waiver');
+    .eq('kind', 'waiver')
+    // Travelers only. A crew waiver is already must_have and is never skipped,
+    // and `is_active: true` here would silently resurrect one the operator had
+    // switched off.
+    .eq('audience', 'traveler');
   if (promoteErr) {
     console.warn('[tripDocumentsService] waiver promote to must_have failed:', promoteErr);
   }

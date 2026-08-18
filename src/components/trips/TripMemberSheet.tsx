@@ -30,6 +30,15 @@ interface Props {
    *  only they may price anyone. Showing this row to an admin would be a
    *  button that always errors. */
   viewerIsOperator: boolean;
+  /**
+   * May this viewer remove a traveler? `travelers.remove` in the capability
+   * set, which the seeded Manager tier carries. Deliberately separate from
+   * `viewerIsHost`: promoting an admin writes `participants.role = 'host'` and
+   * stays host-only, while removing someone is its own capability — the
+   * database splits them the same way (20260807000100 §2). Defaults to
+   * `viewerIsHost` so existing callers keep today's behaviour.
+   */
+  viewerCanRemove?: boolean;
   /** `group_trips.host_id` — the trip's owner. Their row gets no "Remove as
    *  admin" and no "Remove from trip", for anyone, including themselves:
    *  `protect_trip_owner_membership` (20260803000000 §11) refuses both at the
@@ -70,7 +79,7 @@ const joinedAgo = (iso: string | null): string => {
 };
 
 export function TripMemberSheet({
-  visible, member, viewerIsHost, isSelf, tripId, viewerIsOperator, ownerUserId, paymentMode,
+  visible, member, viewerIsHost, viewerCanRemove, isSelf, tripId, viewerIsOperator, ownerUserId, paymentMode,
   budgetFxRate, budgetCurrency, requirements, onClose,
   onViewProfile, onMessage, onSetAdmin, onRemoveAdmin, onRemove,
 }: Props) {
@@ -80,6 +89,8 @@ export function TripMemberSheet({
   // Close first, then run the action, so the confirm Alert sits above nothing.
   const wrap = (fn: () => void) => () => { onClose(); fn(); };
   const canManage = viewerIsHost && !isSelf && !!m;
+  // Same shape as canManage, on the removal capability instead of hostship.
+  const canRemove = (viewerCanRemove ?? viewerIsHost) && !isSelf && !!m;
   // The owner's row. `!isSelf` already hides everything below from the owner
   // viewing themselves, but this does not lean on that: the row must be
   // unmanageable when a PROMOTED ADMIN is looking at it, which is exactly the
@@ -124,7 +135,7 @@ export function TripMemberSheet({
               {canSetPrice ? (
                 <SheetOptionRow icon="cash-outline" label="Price" onPress={() => setPriceOpen(true)} pressScale />
               ) : null}
-              {canManage && !isOwnerRow ? (
+              {canRemove && !isOwnerRow ? (
                 <SheetOptionRow icon="person-remove-outline" label="Remove from trip" danger onPress={wrap(() => onRemove(m))} />
               ) : null}
             </View>

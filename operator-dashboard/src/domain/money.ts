@@ -306,8 +306,9 @@ export type PriceChangeCheck =
  *   new total < paid        -> BLOCKED
  *
  * The block is the important one. Lowering a total below what someone already
- * paid leaves them overpaid, and this site has no refund — nothing in the
- * system can resolve that state. Stripe refuses the same move for the same
+ * paid leaves them overpaid, and only a refund (issued from their traveler
+ * page) can resolve that state — so the block points there instead of letting
+ * the numbers go wrong first. Stripe refuses the same move for the same
  * reason: a credit note reduces what is owed "but not below zero".
  *
  * The server does NOT check this. operator_set_traveler_price accepts any
@@ -334,7 +335,7 @@ export function checkPriceChange(args: {
       ok: false,
       reason:
         `${travelerName} has already paid ${formatUsd(paidUsd)}. ` +
-        `To charge less than that you need to refund them in Stripe first.`,
+        `To charge less than that, refund them first from their traveler page.`,
     };
   }
 
@@ -351,4 +352,34 @@ export function checkPriceChange(args: {
       `${travelerName} has paid ${formatUsd(paidUsd)}.${before} ` +
       `After this change they will owe ${formatUsd(willOwe)}.`,
   };
+}
+
+// ── Changing the trip's own price ─────────────────────────────────────────
+
+/**
+ * The trip default, as the app's edit screen validates it — a port of
+ * validatePrice/validateDeposit in the app's tripValidation.ts, kept in one
+ * function because the dialog shows one error at a time.
+ *
+ * Stricter than a traveler's price on purpose: a traveler total of 0 is a
+ * legitimate "this one goes free", but the trip default is what every future
+ * joiner is frozen at, and a 0 there is almost always a typo. The deposit rule
+ * mirrors the DB CHECK `group_trips_deposit_not_over_price` — same sentence,
+ * before the server says it in Postgres.
+ *
+ * No paid-amount check here, deliberately. Changing the trip price never
+ * touches anyone already on the trip (they are frozen first — see
+ * updateTripPrice), so there is no overpayment to block.
+ */
+export function validateTripPrice(
+  costPerPerson: number | null,
+  depositAmount: number | null,
+): string | null {
+  if (costPerPerson === null) return 'Set the price per person.';
+  if (costPerPerson <= 0) return 'The price has to be more than 0.';
+  if (depositAmount !== null) {
+    if (depositAmount < 0) return 'The deposit has to be zero or more.';
+    if (depositAmount > costPerPerson) return 'The deposit cannot be more than the price.';
+  }
+  return null;
 }

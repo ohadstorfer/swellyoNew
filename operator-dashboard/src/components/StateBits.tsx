@@ -44,6 +44,37 @@ export function Empty({ title, note }: { title: string; note?: ReactNode }) {
   );
 }
 
+/**
+ * Profile photo, or the first letter when there is none.
+ *
+ * A letter rather than a silhouette: on a list of eight people the silhouettes
+ * are identical and the letters are not, so the fallback still helps you find
+ * the row you came for.
+ */
+export function Avatar({ url, name, size = 34 }: { url: string | null; name: string; size?: number }) {
+  const box = { width: size, height: size, borderRadius: 99, flexShrink: 0 } as const;
+
+  if (url) return <img src={url} alt="" style={{ ...box, objectFit: 'cover' }} />;
+
+  return (
+    <span
+      aria-hidden
+      style={{
+        ...box,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'var(--panel)',
+        border: '1px solid var(--line)',
+        color: 'var(--muted)',
+        fontSize: Math.round(size * 0.38),
+        fontWeight: 640,
+      }}
+    >
+      {name.trim().charAt(0).toUpperCase() || '?'}
+    </span>
+  );
+}
+
 const STATE_TAG: Record<RequirementState, string> = {
   approved: 'tag-ok',
   submitted: 'tag-wait',

@@ -630,10 +630,13 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
                 visible
                 token={activeStaffToken}
                 onClose={() => setActiveStaffToken(null)}
-                onAccepted={(tripId) => {
+                onAccepted={(tripId, hasPaperwork) => {
                   setActiveStaffToken(null);
                   invalidateTrip(tripId);
                   onOpenTrip?.(tripId);
+                  // On top of the trip, so backing out of the paperwork leaves
+                  // them on the trip they just joined.
+                  if (hasPaperwork) pushRootCard('StaffPaperwork', { tripId });
                 }}
               />
             )}

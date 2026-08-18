@@ -281,6 +281,14 @@ export const DocumentReviewScreen: React.FC<{
    * fix either.
    */
   renderOverlay?: () => React.ReactNode;
+  /**
+   * May this viewer decide? `docs.approve` in the capability set. Everything
+   * stays readable without it (that is `docs.view`, which gates the mount in
+   * the caller) — but Approve, Ask again and Remind disappear, because a
+   * button the server will refuse is worse than no button. Defaults to true
+   * so existing host callers do not change.
+   */
+  canApprove?: boolean;
 }> = ({
   visible,
   onClose,
@@ -294,6 +302,7 @@ export const DocumentReviewScreen: React.FC<{
   initialWaiting,
   renderTravelerExtras,
   renderOverlay,
+  canApprove = true,
 }) => {
   const insets = useSafeAreaInsets();
   // ONE piece of state for level 2, not three booleans. Level 2 is a person, a
@@ -402,7 +411,8 @@ export const DocumentReviewScreen: React.FC<{
   // `not_started`, so `owed` would read as everybody — including the people who
   // have already paid. The RPC refuses them too, so the two sides agree rather
   // than one being quietly wrong. (D3.)
-  const canRemind = !!openRequirement && owed > 0 && openRequirement.reqType !== 'pay';
+  const canRemind =
+    canApprove && !!openRequirement && owed > 0 && openRequirement.reqType !== 'pay';
 
   /**
    * Level 2, waiting shape: everything the operator has to act on, whoever
@@ -885,11 +895,16 @@ export const DocumentReviewScreen: React.FC<{
           onClose={() => setViewing(null)}
           storagePath={viewing?.item.storagePath ?? null}
           title={viewing?.item.title ?? 'Document'}
-          // A decision is only offered while there is one to make. An already
-          // approved file stays viewable, read-only.
-          onApprove={viewing?.item.state === 'submitted' ? handleApprove : undefined}
+          // A decision is only offered while there is one to make — and only
+          // to a viewer who may make it. An already approved file stays
+          // viewable, read-only.
+          onApprove={
+            canApprove && viewing?.item.state === 'submitted' ? handleApprove : undefined
+          }
           onReject={
-            viewing?.item.state === 'submitted' ? () => setRejecting(viewing.item) : undefined
+            canApprove && viewing?.item.state === 'submitted'
+              ? () => setRejecting(viewing.item)
+              : undefined
           }
           busy={busy}
           // This screen is the host's, so export belongs here and nowhere a

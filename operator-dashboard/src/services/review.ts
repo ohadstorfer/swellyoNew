@@ -59,12 +59,28 @@ export async function fetchTripReview(
   tripId: string,
   userIds: string[],
 ): Promise<TripReview> {
-  const [reqRes, docRes, ackRes, medRes, waiver] = await Promise.all([
+  const [reqRes, audienceRes, docRes, ackRes, medRes, waiver] = await Promise.all([
     supabase
       .from('organized_trip_requirements_resolved')
       .select('id, kind, req_type, title, due_date, sort_order, skip_at_onboarding')
       .eq('trip_id', tripId)
       .eq('is_active', true),
+    // Which of those rows are written for TRAVELERS.
+    //
+    // A separate read because the resolved view does not carry `audience`: it
+    // was created with `select r.*`, which Postgres expanded to the columns
+    // that existed then, and `audience` came later. Migration 20260813190000
+    // solved the same problem in SQL by joining the base table; PostgREST
+    // cannot join, so this is the same join done in two round trips.
+    //
+    // Without it a crew requirement — created the moment an operator ticks
+    // "Passport" for a guide — appears in this list, and every traveler on the
+    // trip shows as missing a document that was never asked of them.
+    supabase
+      .from('organized_trip_requirements')
+      .select('id')
+      .eq('trip_id', tripId)
+      .eq('audience', 'traveler'),
     supabase
       .from('organized_trip_travelers_documents')
       .select(
@@ -83,11 +99,17 @@ export async function fetchTripReview(
   ]);
 
   if (reqRes.error) throw reqRes.error;
+  if (audienceRes.error) throw audienceRes.error;
   if (docRes.error) throw docRes.error;
   if (ackRes.error) throw ackRes.error;
   if (medRes.error) throw medRes.error;
 
+  const travelerFacing = new Set((audienceRes.data ?? []).map((r: any) => r.id as string));
+
   const requirements: Requirement[] = (reqRes.data ?? [])
+    // Crew paperwork is managed from the crew page and is invisible here — see
+    // the read above.
+    .filter((r: any) => travelerFacing.has(r.id))
     // `pay` has no UI here — there is no ledger yet.
     .filter((r: any) => r.req_type !== 'pay')
     .map((r: any) => ({

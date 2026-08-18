@@ -220,6 +220,26 @@ decided yet and the nesting will break the first time a Guide needs medical.
   `trip_staff_can()` never matches it (it joins on `user_id = auth.uid()`).
 - **I6 — Staff are invisible to money and capacity.** Different table, so this
   is free — as long as no one adds staff to `group_trip_participants`.
+- **I7 — A row-level policy cannot express a column-level rule.**
+  `group_trips` UPDATE is `trip_staff_can(id, 'trip.edit')`, which a Manager
+  holds — and `cost_per_person`, `deposit_amount`, `payment_mode`, the
+  cancellation terms and `status` all live on that row. RLS has no way to say
+  "this row, except those columns", so from Phase 2 until 13 August every one of
+  them was reachable by anyone who could edit anything. No screen ever did it;
+  a direct PostgREST call would have.
+
+  `trg_guard_operator_trip_money` (migration `20260813200000`) closes it. It
+  asks the same question every other gate asks — `money.manage` for price,
+  payment and refund terms, `trip.cancel` for cancelling — rather than
+  hardcoding `host_id`, so the sets stay editable and I1 still means the
+  operator always passes. It fires only on a real change (`is distinct from`),
+  so an editor that PATCHes the whole row on a title edit is unaffected, and it
+  skips writes with no JWT, which are the Stripe webhook and the payments
+  functions.
+
+  **The lesson generalises:** when a capability names a *field* rather than a
+  table, RLS is not enough on its own. Check for this before granting a tier
+  `trip.edit` on anything that also carries money.
 
 ## Rollout
 

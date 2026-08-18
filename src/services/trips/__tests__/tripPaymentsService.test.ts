@@ -7,6 +7,7 @@ jest.mock('../../../config/supabase', () => ({ supabase: { from: jest.fn() } }))
 import {
   amountDue,
   amountOutstanding,
+  isPayingInFull,
   usdToStripeCents,
   commissionCents,
 } from '../tripPaymentsService';
@@ -44,6 +45,34 @@ describe('amountDue', () => {
   // balance, so it reads as "unknown" (null) — 0 would look like fully paid.
   it('returns null for a contradictory balance (deposit larger than total)', () => {
     expect(amountDue('balance', { totalUsd: 2000, depositUsd: 5000 })).toBeNull();
+  });
+});
+
+// What `freeze_traveler_price()` produces for someone who joined on or after
+// the full-payment deadline: deposit == total, balance == 0. Copy only — see
+// 20260817000000_full_payment_after_deadline.sql.
+describe('isPayingInFull', () => {
+  it('is true when the deposit is the whole price', () => {
+    expect(isPayingInFull({ totalUsd: 3000, depositUsd: 3000 })).toBe(true);
+    // The other half of that deal: nothing left after onboarding.
+    expect(amountDue('balance', { totalUsd: 3000, depositUsd: 3000 })).toBe(0);
+  });
+
+  it('is false for an ordinary split', () => {
+    expect(isPayingInFull({ totalUsd: 3000, depositUsd: 1000 })).toBe(false);
+  });
+
+  // A trip that takes one single payment has no deposit ROW, so the deposit
+  // step never renders and there is no label to fix. Answering "false" keeps
+  // this about the deposit step and nothing else.
+  it('is false when there is no deposit at all', () => {
+    expect(isPayingInFull({ totalUsd: 3000, depositUsd: null })).toBe(false);
+  });
+
+  it('is false when nothing is priced, and for a missing struct', () => {
+    expect(isPayingInFull({ totalUsd: null, depositUsd: null })).toBe(false);
+    expect(isPayingInFull(null)).toBe(false);
+    expect(isPayingInFull(undefined)).toBe(false);
   });
 });
 

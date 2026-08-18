@@ -2456,9 +2456,12 @@ export const AppContent: React.FC = () => {
             visible={staffInviteVisible}
             token={pendingStaffToken}
             onClose={clearStaffInvite}
-            onAccepted={(tripId) => {
+            onAccepted={(tripId, hasPaperwork) => {
               clearStaffInvite();
               openTripCard(tripId);
+              // Pushed ON TOP of the trip, so backing out of the paperwork
+              // leaves them on the trip they just joined rather than nowhere.
+              if (hasPaperwork) pushRootCard('StaffPaperwork', { tripId });
             }}
           />
         )}

@@ -1489,6 +1489,60 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
+                {/* Crew Paperwork — local mode only. The staff side of the same
+                    trip: what a guide or photographer is asked for, and where
+                    they answer it.
+
+                    ⚠️ It opens in devMode, which lists EVERY crew requirement on
+                    the trip instead of the ones assigned to you. That is not a
+                    shortcut for convenience — an operator cannot be crew on
+                    their own trip (they are already a participant, and
+                    trg_staff_not_traveler refuses the overlap), so the real
+                    query correctly returns nothing for the person testing.
+                    Assignment itself still needs a second account.
+
+                    Everything else is REAL: tapping through actually signs the
+                    waiver, saves the medical form and uploads files under your
+                    own user. The header's Reset clears them again. */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={async (e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      const { data, error } = await supabase
+                        .from('group_trips')
+                        .select('id, title')
+                        .ilike('title', DEV_ONBOARDING_TRIP_TITLE)
+                        .limit(1)
+                        .maybeSingle();
+                      if (error || !data) {
+                        Alert.alert(
+                          'Trip not found',
+                          `No trip titled "${DEV_ONBOARDING_TRIP_TITLE}". Create it, or edit DEV_ONBOARDING_TRIP_TITLE.`,
+                        );
+                        return;
+                      }
+                      // Same 350ms as the item above: this menu is a Modal, and
+                      // pushing a card while it is still dismissing makes iOS
+                      // drop the new screen straight back out.
+                      setTimeout(
+                        () =>
+                          pushRootCard('StaffPaperwork', {
+                            tripId: data.id as string,
+                            tripTitle: (data.title as string | null) ?? null,
+                            devMode: true,
+                          }),
+                        350,
+                      );
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="people-circle-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>Crew Paperwork</Text>
+                  </TouchableOpacity>
+                )}
+
                 {/* Replay welcome guide — local mode only. Clears the
                     completed flag so the guide fires again the next time the
                     user enters Swelly chat. */}

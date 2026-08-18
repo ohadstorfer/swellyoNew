@@ -75,6 +75,7 @@ import {
   fetchTravelerPrices,
   fetchPaidByRequirement,
   amountOutstanding,
+  isPayingInFull,
   startCheckout,
   type PayStep,
   type TravelerPrices,
@@ -367,6 +368,20 @@ export default function TravelerOnboardingScreen({
   const progress = total === 0 ? 1 : Math.min(index / total, 1);
 
   const catalog = step ? REQUIREMENT_CATALOG[step.kind] : null;
+
+  /**
+   * This traveler pays the whole price here, in one go — either the operator
+   * asks for no deposit, or they joined on or after the full-payment deadline
+   * and `freeze_traveler_price()` froze their deposit at the full cost (see
+   * `20260817000000_full_payment_after_deadline.sql`).
+   *
+   * COPY ONLY. The amount comes from `outstandingUsd` below either way, and
+   * the charge itself is the server's. But the catalog calls this step
+   * "Deposit", and a screen that says "Deposit" over the full trip price —
+   * on a trip whose page advertises a smaller one — reads as a bug and stops
+   * people from paying.
+   */
+  const payingInFull = isPayingInFull(prices);
 
   // Delegated to the payments service rather than re-derived here. `balance` is
   // total minus deposit, not total — computing it inline is how the deposit
@@ -909,8 +924,14 @@ export default function TravelerOnboardingScreen({
           <Text style={styles.eyebrow}>
             Step {index + 1} of {total} · {step.skippable ? 'Optional' : 'Required'}
           </Text>
-          <Text style={styles.title}>{catalog.title}</Text>
-          <Text style={styles.sub}>{catalog.helpText}</Text>
+          <Text style={styles.title}>
+            {step.kind === 'deposit' && payingInFull ? 'Full payment' : catalog.title}
+          </Text>
+          <Text style={styles.sub}>
+            {step.kind === 'deposit' && payingInFull
+              ? 'This trip is one payment. Pay the full cost to confirm your place.'
+              : catalog.helpText}
+          </Text>
 
           {rejected && step.requirement.note ? (
             <View style={styles.calloutWarn}>
@@ -924,7 +945,10 @@ export default function TravelerOnboardingScreen({
               <Text style={styles.amountBig}>
                 {outstandingUsd > 0 ? `$${outstandingUsd.toLocaleString('en-US')}` : '—'}
               </Text>
-              {prices?.totalUsd != null && step.kind === 'deposit' ? (
+              {/* Suppressed when the deposit IS the total: "$3,000 / of $3,000
+                  total" is a caption that answers nothing and invites a
+                  second look for the difference. */}
+              {prices?.totalUsd != null && step.kind === 'deposit' && !payingInFull ? (
                 <Text style={styles.amountCap}>
                   of ${prices.totalUsd.toLocaleString('en-US')} total
                 </Text>

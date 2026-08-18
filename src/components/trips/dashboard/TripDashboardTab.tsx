@@ -56,6 +56,17 @@ export type TripDashboardTabProps = {
    *  line then drops the countdown rather than inventing one. */
   startDateISO?: string | null;
   endDateISO?: string | null;
+  /**
+   * Per-card gates, from the viewer's capability set (useTripCapabilities).
+   * The host passes all-true; staff get what their tier's row says. These are
+   * UX only — every read below is enforced again by RLS, so a wrong `true`
+   * shows an empty card, never data. The queries are also disabled per flag,
+   * because a fetch RLS will empty out is a round trip for nothing.
+   */
+  canViewMoney: boolean;
+  canViewDocs: boolean;
+  canViewMedical: boolean;
+  canViewStats: boolean;
   /** Everyone on the trip except hosts, with names and avatars. */
   travelers: ReviewTraveler[];
   /** Per-traveler requirement state, from the screen's existing review query. */
@@ -75,6 +86,10 @@ export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
   tripId,
   startDateISO,
   endDateISO,
+  canViewMoney,
+  canViewDocs,
+  canViewMedical,
+  canViewStats,
   travelers,
   review,
   reviewLoading,
@@ -86,17 +101,19 @@ export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
   const money = useQuery({
     queryKey: ['operatorDashboard', 'money', tripId],
     queryFn: () => fetchTripMoney(tripId),
+    enabled: canViewMoney,
   });
   const medical = useQuery({
     queryKey: ['operatorDashboard', 'medical', tripId],
     queryFn: () => fetchMedicalFlags(tripId),
+    enabled: canViewMedical,
   });
 
   const userIds = useMemo(() => travelers.map(t => t.userId).sort(), [travelers]);
   const profiles = useQuery({
     queryKey: ['operatorDashboard', 'profiles', userIds],
     queryFn: () => fetchTravelerProfiles(userIds),
-    enabled: userIds.length > 0,
+    enabled: userIds.length > 0 && canViewStats,
   });
 
   const byUser = useMemo(() => {
@@ -119,50 +136,69 @@ export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
   return (
     <View style={styles.root}>
       {/* ── Are you on track ───────────────────────────────────────────── */}
-      <TripStatusLine
-        startDateISO={startDateISO}
-        endDateISO={endDateISO}
-        late={totalLate}
-        loading={reviewLoading}
-      />
+      {/* Its whole content is the review's late count, so a viewer without
+          docs would get a status line built from a query that never ran —
+          "nothing late" as a permanent lie. */}
+      {canViewDocs && (
+        <TripStatusLine
+          startDateISO={startDateISO}
+          endDateISO={endDateISO}
+          late={totalLate}
+          loading={reviewLoading}
+        />
+      )}
 
-      {/* ── Mode notices ───────────────────────────────────────────────── */}
-      <ModeNotices hiddenCount={money.data?.hiddenCount ?? 0} />
+      {canViewMoney && (
+        <>
+          {/* ── Mode notices ───────────────────────────────────────────── */}
+          <ModeNotices hiddenCount={money.data?.hiddenCount ?? 0} />
 
-      {/* ── Payments not live yet ──────────────────────────────────────── */}
-      <StripeBanner isOffline={money.data?.isOffline ?? true} loading={money.isPending} />
+          {/* ── Payments not live yet ──────────────────────────────────── */}
+          <StripeBanner isOffline={money.data?.isOffline ?? true} loading={money.isPending} />
+        </>
+      )}
 
       {/* ── Needs review ───────────────────────────────────────────────── */}
-      <ReviewBanner
-        loading={reviewLoading}
-        count={totalToReview}
-        // Straight to the documents it is counting — every one that needs a
-        // decision, whoever sent it. Same destination as the web banner.
-        onPress={onOpenWaiting}
-      />
+      {canViewDocs && (
+        <ReviewBanner
+          loading={reviewLoading}
+          count={totalToReview}
+          // Straight to the documents it is counting — every one that needs a
+          // decision, whoever sent it. Same destination as the web banner.
+          onPress={onOpenWaiting}
+        />
+      )}
 
       {/* ── Money ──────────────────────────────────────────────────────── */}
-      <MoneyCard
-        money={money.data ?? null}
-        loading={money.isPending}
-        failed={money.isError}
-        onRetry={() => void money.refetch()}
-      />
+      {canViewMoney && (
+        <MoneyCard
+          money={money.data ?? null}
+          loading={money.isPending}
+          failed={money.isError}
+          onRetry={() => void money.refetch()}
+        />
+      )}
 
       {/* ── Documents ──────────────────────────────────────────────────── */}
-      <DocumentsCard
-        review={review}
-        travelerCount={travelers.length}
-        loading={reviewLoading}
-        onOpenRequirement={onOpenRequirement}
-        onManage={onManageRequirements}
-      />
+      {canViewDocs && (
+        <DocumentsCard
+          review={review}
+          travelerCount={travelers.length}
+          loading={reviewLoading}
+          onOpenRequirement={onOpenRequirement}
+          onManage={onManageRequirements}
+        />
+      )}
 
       {/* ── Travelers ──────────────────────────────────────────────────── */}
       {/* Above "About this group" now. Medical counts and surf stats used to
           sit here, and neither can be tapped or acted on — so on a phone the
           operator scrolled past two dead ends to reach the one list they came
-          for. Reference material goes after the work. */}
+          for. Reference material goes after the work.
+          Gated on docs: this list IS the review work-queue (every row opens
+          the review flow), so for a stats-only Guide it would be a list of
+          buttons that all error. */}
+      {canViewDocs && (
       <Section
         title="Travelers"
         sub={
@@ -205,38 +241,53 @@ export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
           </View>
         )}
       </Section>
+      )}
 
       {/* ── About this group ───────────────────────────────────────────── */}
       {/* Two blocks that were two full sections. Both are read-only reference —
           neither leads anywhere — so they are one section with sub-headings
           rather than two headings competing with Money and Documents.
-          Medical first: it changes how the trip is run. */}
+          Medical first: it changes how the trip is run. Each block gates on
+          its own capability — medical is Manager-and-up, stats reach down to
+          Guide — so for a Guide this section IS their dashboard. */}
+      {(canViewMedical || canViewStats) && (
       <Section title="About this group">
-        <Text style={styles.aboutLabel}>Medical flags</Text>
-        <Text style={styles.aboutSub}>Counts only. No names on this screen.</Text>
-        {medical.isPending ? (
-          <Text style={styles.muted}>Loading…</Text>
-        ) : medical.isError ? (
-          <SectionError onRetry={() => void medical.refetch()} />
-        ) : medical.data && medical.data.formsCompleted > 0 ? (
-          <MedicalBody flags={medical.data} travelerCount={travelers.length} />
-        ) : (
-          <Text style={styles.muted}>Nobody has filled in the medical form yet.</Text>
+        {canViewMedical && (
+          <>
+            <Text style={styles.aboutLabel}>Medical flags</Text>
+            <Text style={styles.aboutSub}>Counts only. No names on this screen.</Text>
+            {medical.isPending ? (
+              <Text style={styles.muted}>Loading…</Text>
+            ) : medical.isError ? (
+              <SectionError onRetry={() => void medical.refetch()} />
+            ) : medical.data && medical.data.formsCompleted > 0 ? (
+              <MedicalBody flags={medical.data} travelerCount={travelers.length} />
+            ) : (
+              <Text style={styles.muted}>Nobody has filled in the medical form yet.</Text>
+            )}
+          </>
         )}
 
-        <Text style={[styles.aboutLabel, styles.aboutLabelNext]}>Surf</Text>
-        {/* isError FIRST. Without it a failed fetch falls through to
-            SurfStatsBody with an empty list, which renders "No travelers yet."
-            on a trip with fifteen travelers — the screen stating something
-            false and offering no way to find out otherwise. */}
-        {profiles.isError ? (
-          <SectionError onRetry={() => void profiles.refetch()} />
-        ) : profiles.isPending && userIds.length > 0 ? (
-          <Text style={styles.muted}>Loading…</Text>
-        ) : (
-          <SurfStatsBody profiles={[...(profiles.data?.values() ?? [])]} />
+        {canViewStats && (
+          <>
+            <Text style={[styles.aboutLabel, canViewMedical && styles.aboutLabelNext]}>
+              Surf
+            </Text>
+            {/* isError FIRST. Without it a failed fetch falls through to
+                SurfStatsBody with an empty list, which renders "No travelers yet."
+                on a trip with fifteen travelers — the screen stating something
+                false and offering no way to find out otherwise. */}
+            {profiles.isError ? (
+              <SectionError onRetry={() => void profiles.refetch()} />
+            ) : profiles.isPending && userIds.length > 0 ? (
+              <Text style={styles.muted}>Loading…</Text>
+            ) : (
+              <SurfStatsBody profiles={[...(profiles.data?.values() ?? [])]} />
+            )}
+          </>
         )}
       </Section>
+      )}
     </View>
   );
 };

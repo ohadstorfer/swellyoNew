@@ -99,7 +99,9 @@ import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGea
 import { ReportTripSheet } from '../../components/ReportTripSheet';
 import { ShareTripStorySheet } from '../../components/trips/ShareTripStorySheet';
 import { TripStaffSheet } from '../../components/trips/TripStaffSheet';
-import { useTripCrew } from '../../hooks/trips/useTripCapabilities';
+import { CrewSection } from '../../components/trips/CrewSection';
+import { useTripCrew, useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
+import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
 import { hapticMedium, hapticLight, hapticSuccess, hapticError } from '../../utils/haptics';
 import { toWidthThumbUrl } from '../../services/media/thumbnails';
@@ -118,6 +120,7 @@ import {
   YourGearCard,
   TripDocumentsCard,
   PaymentSection,
+  OfflinePaymentNote,
   type PaymentSectionState,
   type DocumentRow,
 } from '../../components/trips/plan/PlanSections';
@@ -156,6 +159,7 @@ import { friendlyErrorMessage, showErrorAlert } from '../../utils/friendlyError'
 import {
   fetchMyDocument,
   actionForRequirement,
+  resolveDeadlineDate,
   type EditableRequirement,
   type RequirementKind,
   type TripRequirement,
@@ -167,6 +171,7 @@ import {
 import {
   amountDue,
   amountOutstanding,
+  isPayingInFull,
   startCheckout,
   fetchTravelerPrices,
   fetchPaidByRequirement,
@@ -232,6 +237,9 @@ interface TripDetailScreenProps {
   /** Push the traveler-onboarding flow. Operator trips only — the only route
    *  from "approved" to actually being on the trip. */
   onStartOnboarding?: (tripId: string, tripTitle: string | null) => void;
+  /** Push a crew member's own paperwork list. Operator trips only, and only
+   *  offered to someone the trip has actually asked for something. */
+  onOpenStaffPaperwork?: (tripId: string, tripTitle: string | null) => void;
 }
 
 /** Stable empty list for the requirements editor. An inline `?? []` would be a
@@ -424,7 +432,7 @@ type PaymentsCache = {
 };
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
@@ -463,13 +471,29 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // call order stays stable across renders (no conditional hooks).
   const isHostDerived = isTripHost(trip, participants, currentUserId);
 
+  /**
+   * Staff permissions — the first screen to actually ask the database.
+   *
+   * `can()` is the ONLY way any gate below widens beyond `isHost`. It is UX
+   * only (the hook's header explains why); every capability checked here is
+   * enforced again by RLS, so a wrong `true` shows a button that errors, never
+   * data. Operator trips only — on anything else the query is disabled and
+   * `can()` is always false, so peer-trip gates cannot move.
+   *
+   * Declared this early because query `enabled` flags below read it, and
+   * hoisting them above their data would be a temporal-dead-zone crash.
+   */
+  const { can } = useTripCapabilities(tripId, trip?.hosting_style === 'C');
+
   const updatesQuery = useTripAdminUpdates(tripId);
   const adminUpdates = updatesQuery.data ?? [];
 
   const gearQuery = useTripGear(tripId, currentUserId);
   const gearItems = gearQuery.data ?? [];
 
-  const requestsQuery = useTripRequests(tripId, isHostDerived);
+  // Managers too: reviewing a join request is `trip.edit` in RLS, and the full
+  // Members view they reach it through is roster-level.
+  const requestsQuery = useTripRequests(tripId, isHostDerived || can('trip.edit'));
   const pendingRequests = requestsQuery.data?.pending ?? [];
   const declinedRequests = requestsQuery.data?.declined ?? [];
 
@@ -590,7 +614,16 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           requirementId: r.requirementId,
           kind: r.kind,
           reqType: r.reqType,
-          title: r.title,
+          // The requirement row's own title, except when this traveler's
+          // deposit IS the whole price — a trip they joined on or after the
+          // full-payment deadline (see `isPayingInFull`). Calling the full
+          // cost a "Deposit" next to a number bigger than the one the trip
+          // page advertises reads as a billing error, and the traveler's next
+          // move is to ask rather than to pay.
+          title:
+            r.kind === 'deposit' && isPayingInFull(paymentsQuery.data?.prices)
+              ? 'Full payment'
+              : r.title,
           state: r.state as DocumentRow['state'],
           dueDate: r.dueDate,
           note: r.note,
@@ -633,12 +666,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       null,
     [payRows],
   );
-  // Plain sum, refunds included (they are negative rows). Clamped at render,
-  // not here — an overpaid traveler should still read as "all paid".
-  const totalPaidUsd = useMemo(
-    () => Object.values(paymentsQuery.data?.paid ?? {}).reduce((s, n) => s + n, 0),
-    [paymentsQuery.data],
-  );
   // How the total splits, for the card's breakdown. Deposit before balance —
   // `payRows` already arrives in REQUIREMENT_ORDER, but the order is what
   // makes the two rows readable, so it is pinned here rather than assumed.
@@ -656,11 +683,49 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           title: r.title,
           totalUsd: total,
           paidUsd: Math.min(paymentsQuery.data?.paid[r.requirementId] ?? 0, total),
+          // The row's own resolved deadline and overdue state, passed through
+          // rather than recomputed — the Payment card must never name a date
+          // or a lateness the task rows above disagree with.
+          dueDate: r.dueDate ?? null,
+          overdue: r.state === 'overdue',
         };
       })
       .filter(s => s.totalUsd > 0)
       .sort((a, b) => (a.kind === 'deposit' ? -1 : b.kind === 'deposit' ? 1 : 0));
   }, [payRows, paymentsQuery.data]);
+
+  /**
+   * Paid so far — the sum of the STEPS, each capped at what that step costs,
+   * never the raw ledger total.
+   *
+   * ⚠️ SURPLUS ON ONE STEP DOES NOT PAY ANOTHER. `amountOutstanding` is
+   * `max(0, due - paid)` per step, and `payTarget` charges one step at a
+   * time, so the server collects each step on its own and overpayment on the
+   * deposit stays on the deposit. A plain sum of the ledger silently spends
+   * that surplus against the trip total, and the card then contradicts both
+   * the breakdown under it and the sheet the button opens.
+   *
+   * Seen on device (13 Aug): a deposit of $1,000 carrying $3,500 of test
+   * payments less $1,000 of refunds — $2,500 net — read as "$2,600 of $3,000,
+   * $400 left to pay" while the step row said the final payment still wanted
+   * $1,900 and the sheet offered to charge exactly that. Refunds were never
+   * the missing part; they were already in the sum as negative rows. The
+   * $1,500 of surplus was.
+   *
+   * Reachable without any test spam: pay a deposit, take a partial refund,
+   * pay it again, and the deposit is overpaid by the refunded amount.
+   *
+   * Falls back to the raw ledger only when there are no priced steps to cap
+   * against — the card needs `travelerTotalUsd` to render at all, so this is
+   * the degenerate case where every step costs zero.
+   */
+  const totalPaidUsd = useMemo(() => {
+    if (paySteps.length === 0) {
+      return Object.values(paymentsQuery.data?.paid ?? {}).reduce((s, n) => s + n, 0);
+    }
+    return paySteps.reduce((s, step) => s + step.paidUsd, 0);
+  }, [paySteps, paymentsQuery.data]);
+
   const [payAmountSheetOpen, setPayAmountSheetOpen] = useState(false);
 
   // ── Host review ───────────────────────────────────────────────────────────
@@ -686,9 +751,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Only worth fetching once this trip actually asks for something. On a peer
   // trip `documentRows` is empty and this never runs.
   const hasRequirements = documentRows.length > 0;
+  // `can('docs.view')` alone for staff: a Manager is not a participant, so
+  // their own `documentRows` is always empty and `hasRequirements` can never
+  // be true for them. The worst case is one empty read on a trip that asks
+  // for nothing.
   const reviewQuery = useTripReview(
     tripId,
-    isHostDerived && hasRequirements,
+    (isHostDerived && hasRequirements) || can('docs.view'),
     reviewUserIds,
   );
   const reviewData = reviewQuery.data?.travelers ?? [];
@@ -743,7 +812,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     // `hosting_style === 'C'` inline rather than the `isOperatorTrip` alias:
     // that is declared below this point, and hoisting this query above it
     // would be a temporal-dead-zone crash on first render.
-    enabled: isHostDerived && trip?.hosting_style === 'C',
+    // `payments.view_status` is read-only by definition — a Manager sees the
+    // ledger, and RLS refuses them anything that moves money.
+    enabled: (isHostDerived || can('payments.view_status')) && trip?.hosting_style === 'C',
   });
 
   /**
@@ -756,13 +827,29 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const tripRefunds = useQuery({
     queryKey: ['operatorDashboard', 'refunds', tripId],
     queryFn: () => fetchTripRefunds(tripId),
-    enabled: isHostDerived && trip?.hosting_style === 'C',
+    enabled: (isHostDerived || can('payments.view_status')) && trip?.hosting_style === 'C',
   });
 
   // Crew shown on the Overview. Operator trips only — an ordinary group trip
   // has no staff table rows, so this would be a guaranteed-empty round trip.
   // Same `hosting_style === 'C'` inline as above, for the same TDZ reason.
   const crewQuery = useTripCrew(tripId, trip?.hosting_style === 'C');
+
+  /**
+   * What THIS viewer was asked for as crew. Empty for everyone else — the RPC
+   * joins on their own staff row, so a traveler or a stranger gets nothing and
+   * the menu entry below never appears for them.
+   *
+   * It is the only durable way back into the paperwork: the invite notification
+   * is read once and gone, and a crew member whose visa arrives three weeks
+   * later has to be able to find the screen again.
+   */
+  const myStaffPaperwork = useQuery({
+    queryKey: ['staffPaperwork', 'mine', tripId],
+    queryFn: () => fetchMyStaffRequirements(tripId),
+    enabled: !!currentUserId && trip?.hosting_style === 'C',
+    staleTime: 60_000,
+  });
 
   // ── Editing what the trip asks for (host) ─────────────────────────────────
   //
@@ -800,11 +887,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // read as empty or not apply — that is expected here, not a bug.
   const isEditTestTrip = trip?.id === '5c042bf4-18af-496c-a3e1-262bfa0a3efc';
   const canManageRequirements =
-    isHostDerived && ((documentsQuery.data?.length ?? 0) > 0 || isOperatorTrip);
+    (isHostDerived || can('trip.edit')) &&
+    ((documentsQuery.data?.length ?? 0) > 0 || isOperatorTrip);
   // Enabled on `isHost`, matching where the sheet is mounted. Tying it to
   // `canManageRequirements` would let the rows disappear underneath an open
   // editor the moment its own Save invalidated the documents query.
-  const requirementsQuery = useTripRequirements(tripId, isHostDerived);
+  const requirementsQuery = useTripRequirements(tripId, isHostDerived || can('trip.edit'));
   const [manageOpen, setManageOpen] = useState(false);
   // Refetch on the way in. Save diffs the draft against these rows, so opening
   // the editor on a cached list is how a change made on another device gets
@@ -1021,10 +1109,20 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const isLockedForTabs =
     !!trip &&
     (trip.status === 'cancelled' || trip.status === 'completed' || isTripPast(trip));
-  // Tabs: only members (host + approved) get the Plan tab, and only while the
-  // trip is live. Once locked (completed / ended / cancelled) the toggle is gone
+  // Tabs: members (host + approved) get the Plan tab, and only while the trip
+  // is live. Once locked (completed / ended / cancelled) the toggle is gone
   // and everyone sees just the Overview.
-  const canSeePlan = (isHost || isApprovedMember) && !isLockedForTabs;
+  //
+  // `roster.view` adds STAFF: a Crew member or Guide is not a participant, so
+  // without it they would be locked out of the very trip they work on. It is
+  // the right key because it is exactly what Plan shows — members, updates,
+  // gear. A Listed credit has no account and no `roster.view`, so nothing
+  // changes for them, and on peer trips `can()` is always false.
+  const canSeePlan = (isHost || isApprovedMember || can('roster.view')) && !isLockedForTabs;
+
+  /** A staff viewer: on the trip through the staff table, not as a traveler.
+   *  Drives the Plan sections that must not assume a participant row. */
+  const isStaffViewer = !isHost && !isApprovedMember && can('roster.view');
 
   /**
    * The Dashboard tab — running the trip, not going on it.
@@ -1037,8 +1135,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
    * yesterday is exactly when an operator still needs the ledger and the
    * documents — the tab that disappears the moment the trip is over is the one
    * they will look for first.
+   *
+   * Staff open it per capability: any one dashboard capability earns the tab,
+   * and each card inside gates on its own. So a Manager gets the working
+   * dashboard and a Guide gets a one-card tab (the group's stats) — which is
+   * the design, not a degenerate case. Never branch on the role name here.
    */
-  const canSeeDashboard = isHost && !!isOperatorTrip;
+  const hasDashboardCap =
+    can('payments.view_status') ||
+    can('docs.view') ||
+    can('medical.view') ||
+    can('travelers.view_stats') ||
+    can('trip.edit');
+  const canSeeDashboard = (isHost || hasDashboardCap) && !!isOperatorTrip;
 
   const visibleTabs = useMemo<TripTab[]>(() => {
     const tabs: TripTab[] = ['overview'];
@@ -2467,9 +2576,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Both CTAs wait for membershipKnown: with placeholder data every viewer
   // looks like a non-member, and members would see "Request to Join" flash.
   // A short blank beats a wrong button.
+  // `!isStaffViewer`: crew are neither host nor participant, so without it a
+  // guide would get a floating "Request to Join" on the trip they work on —
+  // and the database refuses it anyway (the join_requests INSERT policy
+  // carries `not trip_staff_can(trip_id, 'roster.view')`, invariant I3: staff
+  // and travelers are exclusive). A button that always errors.
   const showJoinCta =
     membershipKnown &&
-    !isHost && !isCancelled && !isApprovedMember && myRequest?.status !== 'approved';
+    !isHost && !isCancelled && !isApprovedMember && !isStaffViewer &&
+    myRequest?.status !== 'approved';
   // Trip full = a cap is set and it's reached. participant_count is the
   // trigger-maintained denormalized count (incl. host) shown as "X/Y going" —
   // reliable even for non-members whose `participants` array is RLS-trimmed.
@@ -2575,14 +2690,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         group: 2,
         onPress: handleCompleteTrip,
       },
-      // Edit trip — the operator OF RECORD only, on a hosting_style 'C' trip.
-      // Deliberately trip.host_id and not isHost: isHost is flat multi-host
-      // (every promoted admin), and this screen edits cost_per_person, which
-      // group_trips' own UPDATE policy would otherwise let any co-host change.
-      // Same reasoning as operator_set_traveler_price's C3 fix. Peer A/B hosts
-      // keep the inline Overview pills; the wizard's edit mode stays
+      // Edit trip — the operator of record, or staff holding `trip.edit`
+      // (Manager tier). Deliberately trip.host_id and not isHost: isHost is
+      // flat multi-host (every promoted admin) with no capability row behind
+      // it. The Price section inside the screen stays owner-only — a Manager
+      // edits dates and description, never cost_per_person (the server would
+      // refuse them anyway: operator_set_traveler_price's C3 fix). Peer A/B
+      // hosts keep the inline Overview pills; the wizard's edit mode stays
       // unreachable for them, exactly as it is today.
-      (isTripOwner && (isOperatorTrip || isEditTestTrip) && !isLocked) && {
+      ((isTripOwner || can('trip.edit')) && (isOperatorTrip || isEditTestTrip) && !isLocked) && {
         key: 'edit',
         tripIcon: 'edit-02' as const,
         label: 'Edit trip',
@@ -2601,8 +2717,26 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         group: 2,
         onPress: () => setStaffSheetVisible(true),
       },
-      // Cancel — host only, while the trip is still live.
-      (isHost && !isLocked) && {
+      // Your paperwork — crew only, and only once they have been asked for
+      // something. The list is the gate: a guide asked for nothing sees no
+      // entry, rather than a screen that opens onto an apology.
+      ((myStaffPaperwork.data?.length ?? 0) > 0) && {
+        key: 'staffPaperwork',
+        icon: 'document-text-outline' as const,
+        label: myStaffPaperwork.data?.some(r => !r.fulfilled)
+          ? 'Your paperwork'
+          : 'Your paperwork · done',
+        group: 2,
+        onPress: () => onOpenStaffPaperwork?.(trip.id, trip.title ?? null),
+      },
+      // Cancel — while the trip is still live. On an OPERATOR trip that means
+      // the operator of record and nobody else: `trip.cancel` is Operator-only
+      // in the matrix, and since 20260813200000 a trigger enforces it on the
+      // column. Using isHost there — which is flat multi-host, every promoted
+      // co-admin — would show the button to someone the database then refuses
+      // with a raw error. Peer trips are untouched: they have no operator of
+      // record, the trigger skips them, and every host may still cancel.
+      ((isOperatorTrip ? isTripOwner : isHost) && !isLocked) && {
         key: 'cancel',
         icon: 'ban-outline',
         label: 'Cancel trip',
@@ -2817,6 +2951,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               // days, and both read as the same number.
               startDateISO={trip.start_date}
               endDateISO={trip.end_date}
+              // Per-card gates. The host gets everything, staff get what their
+              // tier's capability row says — a Guide's dashboard is just the
+              // group stats, and that is the design. RLS enforces each one
+              // again server-side.
+              canViewMoney={isHost || can('payments.view_status')}
+              canViewDocs={isHost || can('docs.view')}
+              canViewMedical={isHost || can('medical.view')}
+              canViewStats={isHost || can('travelers.view_stats')}
               travelers={reviewTravelers}
               review={reviewData}
               reviewLoading={reviewQuery.isLoading}
@@ -2864,7 +3006,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             committedCount={committedCount}
             showCommitment={!isOperatorTrip}
             onViewAll={onViewAllMembers}
-            pendingCount={isHost ? pendingRequests.length : 0}
+            pendingCount={isHost || can('trip.edit') ? pendingRequests.length : 0}
             onMemberPress={
               onViewUserProfile
                 ? userId => {
@@ -2872,6 +3014,18 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   }
                 : undefined
             }
+          />
+        </View>
+
+        {/* 1.2) Crew — moved here from the Overview for everyone who joined
+            (the Overview keeps it only for people still deciding). Same data,
+            now answering "who is running your trip" instead of selling it.
+            Renders nothing on peer trips: the query is disabled there and
+            CrewSection returns null on an empty list. */}
+        <View onLayout={registerSection('crew')}>
+          <CrewSection
+            crew={crewQuery.data ?? []}
+            style={{ marginTop: 24, paddingHorizontal: 4 }}
           />
         </View>
 
@@ -2886,13 +3040,16 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         )}
 
         {/* 2) Recent admin updates — always shown (members see a read-only
-            "No updates yet" placeholder; only the host gets "+ Add update").
-            The Members section above provides the spacing under the toggle. */}
+            "No updates yet" placeholder; posting needs the capability).
+            `updates.send` is what lets a Guide post without handing them the
+            whole edit screen — see the migration that adds it. RLS enforces
+            the same rule, so a stale `true` here shows a button that errors,
+            never a write. */}
         {(
           <View onLayout={registerSection('updates')} style={{ marginTop: 16 }}>
             <AdminUpdatesCard
               updates={adminUpdates}
-              isHost={isHost}
+              isHost={isHost || can('trip.edit') || can('updates.send')}
               formatTime={formatRelativeTime}
               onAddUpdate={handleStartAddUpdate}
               onViewAll={onViewAllUpdates}
@@ -2946,6 +3103,32 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             </View>
           )}
         </View>
+
+        {/* 3.5) Staff: their own paperwork, surfaced in Plan where a traveler's
+            wallet would be. Staff have no participant row, so the traveler
+            documents card below can never render for them — this is their
+            equivalent. Only once something was asked (same rule as the menu
+            entry): a guide asked for nothing gets nothing. */}
+        {isStaffViewer && (myStaffPaperwork.data?.length ?? 0) > 0 && (
+          <View style={styles.planSection} onLayout={registerSection('staff-paperwork')}>
+            <TouchableOpacity
+              style={styles.gearReqsBadge}
+              onPress={() => onOpenStaffPaperwork?.(trip.id, trip.title ?? null)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="document-text-outline" size={16} color="#222B30" />
+              <Text style={styles.gearReqsBadgeText}>
+                {(() => {
+                  const left = (myStaffPaperwork.data ?? []).filter(r => !r.fulfilled).length;
+                  return left > 0
+                    ? `Your paperwork — ${left} ${left === 1 ? 'item' : 'items'} left`
+                    : 'Your paperwork — all done';
+                })()}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color="#222B30" />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* 4) Documents (v1: passport image). Placed after Packing & Gear so the
             Figma order above stays intact. Renders only when this trip actually
@@ -3005,6 +3188,32 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 lastRefundAt={paymentsQuery.data?.refunds.lastAt ?? null}
                 refundCount={paymentsQuery.data?.refunds.count ?? 0}
                 onPayNow={handlePayNow}
+              />
+            </View>
+          )}
+
+        {/* The offline sibling: the operator collects outside the app, so
+            there is no progress and no button — but "pay the full amount by
+            then" is still the Plan's job to say. Only when the operator set a
+            deadline: older offline trips said nothing about money here, and
+            they should keep saying nothing rather than all grow a card. */}
+        {!canSeeDashboard &&
+          !isHost &&
+          trip?.hosting_style === 'C' &&
+          trip?.payment_mode === 'offline' &&
+          trip?.offline_payment_due_days_before != null &&
+          trip?.cost_per_person != null && (
+            <View style={styles.planSection} onLayout={registerSection('payment')}>
+              <OfflinePaymentNote
+                totalUsd={trip.cost_per_person}
+                dueDateISO={
+                  resolveDeadlineDate(
+                    trip.start_date ?? null,
+                    trip.offline_payment_due_days_before,
+                  )?.toISOString() ?? null
+                }
+                dueDaysBefore={trip.offline_payment_due_days_before}
+                operatorName={participants.find(p => p.role === 'host')?.name ?? null}
               />
             </View>
           )}
@@ -3205,13 +3414,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onDecline={handleDeclineGearRequest}
       />
       {/* Host review — every traveler's documents, with Approve / Ask again.
-          Mounted on `isHost` alone. It used to also require
+          Mounted on `isHost` / `docs.view` alone. It used to also require
           `documentRows.length > 0`, but that reads a query this screen
           invalidates on every approve/reject — so the mount could drop while
           the review Modal (or the viewer/reject sheet nested inside it) was
           mid-dismiss. Same stability rule as the requirements editor below:
           a Modal's MOUNT must not depend on data that moves under it. */}
-      {isHost && (
+      {(isHost || can('docs.view')) && (
         <DocumentReviewScreen
           visible={reviewOpen}
           onClose={() => setReviewOpen(false)}
@@ -3219,6 +3428,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           loading={reviewQuery.isLoading}
           travelers={reviewTravelers}
           review={reviewData}
+          canApprove={isHost || can('docs.approve')}
           initialUserId={reviewFocusUserId}
           initialRequirementId={reviewFocusRequirementId}
           initialWaiting={reviewWaiting}

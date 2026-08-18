@@ -1,0 +1,637 @@
+<title>Before the First Operator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    --ground:   #F3F6F8;
+    --card:     #FFFFFF;
+    --ink:      #0E1A22;
+    --muted:    #566874;
+    --faint:    #8496A1;
+    --rule:     #DCE4EA;
+    --rule-soft:#E9EFF3;
+
+    --stop:     #A82C24;
+    --stop-bg:  #FBEAE8;
+    --soon:     #8F5710;
+    --soon-bg:  #FAF0E0;
+    --ok:       #0C6355;
+    --ok-bg:    #E3F1EE;
+    --accent:   #1A5B85;
+
+    --display: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --body:    'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:   #0D1418;
+      --card:     #141E24;
+      --ink:      #E6EDF1;
+      --muted:    #9BAEB9;
+      --faint:    #6E828E;
+      --rule:     #25343D;
+      --rule-soft:#1C282F;
+
+      --stop:     #F08C82;
+      --stop-bg:  #2E1613;
+      --soon:     #E0AC5E;
+      --soon-bg:  #2B2011;
+      --ok:       #5FC6B0;
+      --ok-bg:    #102A26;
+      --accent:   #74B4DC;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #0D1418;
+    --card:     #141E24;
+    --ink:      #E6EDF1;
+    --muted:    #9BAEB9;
+    --faint:    #6E828E;
+    --rule:     #25343D;
+    --rule-soft:#1C282F;
+
+    --stop:     #F08C82;
+    --stop-bg:  #2E1613;
+    --soon:     #E0AC5E;
+    --soon-bg:  #2B2011;
+    --ok:       #5FC6B0;
+    --ok-bg:    #102A26;
+    --accent:   #74B4DC;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16.5px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+  }
+
+  /* ── masthead ───────────────────────────────────────────── */
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(32px, 6vw, 46px);
+    line-height: 1.06;
+    letter-spacing: -0.022em;
+    margin: 14px 0 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    margin: 18px 0 0;
+    font-size: 18.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+
+  .standfirst strong { color: var(--ink); font-weight: 600; }
+
+  /* ── totals strip ───────────────────────────────────────── */
+
+  .totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    margin: 34px 0 0;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .tot {
+    flex: 1 1 120px;
+    padding: 14px 18px 13px;
+    border-right: 1px solid var(--rule-soft);
+  }
+  .tot:last-child { border-right: 0; }
+
+  .tot-n {
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .tot-l {
+    font-family: var(--display);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.055em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 7px;
+  }
+  .n-stop { color: var(--stop); }
+  .n-soon { color: var(--soon); }
+  .n-ok   { color: var(--ok); }
+  .n-plain{ color: var(--accent); }
+
+  /* ── sections ───────────────────────────────────────────── */
+
+  section { margin-top: 54px; }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 20px;
+    letter-spacing: -0.012em;
+    margin: 0;
+  }
+
+  .sec-note {
+    font-family: var(--display);
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-left: auto;
+    text-align: right;
+  }
+
+  /* ── ranked blockers ────────────────────────────────────── */
+
+  .item {
+    display: grid;
+    grid-template-columns: 46px 1fr;
+    gap: 0 18px;
+    padding: 20px 0 19px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  .rank {
+    font-family: var(--mono);
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.35;
+    color: var(--stop);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mark {
+    width: 9px;
+    height: 9px;
+    margin-top: 9px;
+    background: var(--soon);
+  }
+  .mark.ok { background: var(--ok); }
+
+  .item h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 17.5px;
+    line-height: 1.3;
+    letter-spacing: -0.008em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .item p {
+    margin: 7px 0 0;
+    font-size: 16px;
+    line-height: 1.52;
+    color: var(--muted);
+    max-width: 64ch;
+  }
+
+  .item p + p { margin-top: 6px; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.845em;
+    background: var(--rule-soft);
+    color: var(--ink);
+    padding: 1.5px 4.5px;
+    border-radius: 3px;
+    word-break: break-word;
+  }
+
+  /* ── what works: grouped ────────────────────────────────── */
+
+  .groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 30px 40px;
+    margin-top: 26px;
+  }
+
+  .group h3 {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.085em;
+    text-transform: uppercase;
+    color: var(--ok);
+    margin: 0 0 11px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .group ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .group li {
+    font-size: 15.5px;
+    line-height: 1.45;
+    color: var(--muted);
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .group li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    background: var(--ok);
+    opacity: 0.75;
+  }
+
+  /* ── decisions ──────────────────────────────────────────── */
+
+  .decide {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 0 16px;
+    padding: 17px 0 16px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  .q {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1.35;
+  }
+
+  .decide h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 16.5px;
+    line-height: 1.32;
+    margin: 0;
+  }
+
+  .decide p {
+    margin: 6px 0 0;
+    font-size: 15.5px;
+    color: var(--muted);
+    max-width: 62ch;
+  }
+
+  /* ── verdict box ────────────────────────────────────────── */
+
+  .verdict {
+    margin-top: 46px;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--stop);
+    padding: 24px 26px 22px;
+  }
+
+  .verdict h2 {
+    font-size: 17px;
+    margin-bottom: 10px;
+  }
+
+  .verdict p {
+    margin: 0 0 9px;
+    font-size: 16px;
+    color: var(--muted);
+    max-width: 66ch;
+  }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict strong { color: var(--ink); font-weight: 600; }
+
+  /* ── footer ─────────────────────────────────────────────── */
+
+  footer {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.85;
+    letter-spacing: 0.02em;
+    color: var(--faint);
+  }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 40px 18px 72px; }
+    .item { grid-template-columns: 34px 1fr; gap: 0 12px; }
+    .tot { flex-basis: 50%; border-bottom: 1px solid var(--rule-soft); }
+  }
+</style>
+
+<div class="wrap">
+
+  <p class="eyebrow">Operator trips · type C · go-live check</p>
+  <h1>Before the First Operator</h1>
+  <p class="standfirst">
+    I walked the whole type-C path — operator setup, selling a trip, taking money,
+    travelers, crew, both dashboards — and checked every claim against the
+    <strong>live production database</strong>, not against notes.
+    The ground is solid. <strong>Five things stand between it and a real operator</strong>,
+    and only three of them are code.
+  </p>
+
+  <div class="totals">
+    <div class="tot"><div class="tot-n n-stop">5</div><div class="tot-l">Blockers</div></div>
+    <div class="tot"><div class="tot-n n-soon">6</div><div class="tot-l">Fix soon</div></div>
+    <div class="tot"><div class="tot-n n-ok">32</div><div class="tot-l">Already works</div></div>
+    <div class="tot"><div class="tot-n n-plain">5</div><div class="tot-l">Your call</div></div>
+  </div>
+
+  <!-- ══ BLOCKERS ══════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <h2>Blockers</h2>
+      <span class="sec-note">A real operator's first trip breaks on these</span>
+    </div>
+
+    <div class="item">
+      <div class="rank">1</div>
+      <div>
+        <h3>Stripe is still in test mode</h3>
+        <p>No real money has ever moved through this. The database holds 10 test payments and 0 live ones.</p>
+        <p>Four switches flip together: the <code>sk_live_</code> key in the edge functions, <code>app.stripe_livemode</code> in the database, <code>EXPO_PUBLIC_STRIPE_LIVEMODE</code> in the app, <code>VITE_STRIPE_LIVEMODE</code> on the dashboard. Miss one and nothing errors — the totals just quietly disagree with each other.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="rank">2</div>
+      <div>
+        <h3>Cancelling a trip refunds nobody</h3>
+        <p><code>cancelTrip()</code> sets <code>status = 'cancelled'</code> and stops. Travelers who paid keep their money with the operator and get a banner.</p>
+        <p>This is the worst day an operator can have, and right now it is handled one refund at a time, by hand, by you.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="rank">3</div>
+      <div>
+        <h3>A late joiner can hold a seat while owing most of the price</h3>
+        <p>Past the full-payment deadline, a new traveler pays only the deposit and walks out of onboarding a full member. The balance is skippable and the deadline is already gone.</p>
+        <p>The fix is written but not applied — <code>20260817000000_full_payment_after_deadline.sql</code>. Confirmed: <code>operator_trip_full_payment_due</code> does not exist in production.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="rank">4</div>
+      <div>
+        <h3>The operator agreement is a summary, not a contract</h3>
+        <p>Operators accept <code>summary-2026-08-12</code>. It says nothing about an insurance minimum, indemnity, licence, or a duty to refund.</p>
+        <p>The machinery is right — versioned text, timestamp, re-ask on bump. Only the words are missing. The code comment already says so: "when the real agreement lands, bump this once more."</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="rank">5</div>
+      <div>
+        <h3>Nothing is committed</h3>
+        <p>82 changed files sit on branch <code>ohad</code>. Every staff permission, the crew page, the paperwork flow, the traveler onboarding work — all of it lives on one laptop.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FIX SOON ══════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <h2>Fix soon</h2>
+      <span class="sec-note">Works today, will hurt with real customers</span>
+    </div>
+
+    <div class="item">
+      <div class="mark"></div>
+      <div>
+        <h3>The traveler gets nothing in writing after paying</h3>
+        <p>A person pays $1,000 and we send no receipt. <code>payments-checkout</code> never sets <code>receipt_email</code>, so not even Stripe's own receipt goes out.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="mark"></div>
+      <div>
+        <h3>The operator is not told when someone pays</h3>
+        <p><code>stripe-webhook</code> records the money and sends zero notifications. The operator finds out by opening the dashboard and looking.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="mark"></div>
+      <div>
+        <h3>A traveler who paid can just leave</h3>
+        <p><code>leaveTrip()</code> removes them from the trip. No refund, no warning about the policy they agreed to, no note to the operator that a paid seat opened up.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="mark"></div>
+      <div>
+        <h3>Becoming an operator is a manual database call</h3>
+        <p><code>set_operator_status()</code> is admin-only, by design. Fine for one operator. It is the whole bottleneck at ten.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="mark"></div>
+      <div>
+        <h3>No money view across trips</h3>
+        <p>The dashboard shows money one trip at a time. An operator running five trips has no total, no upcoming payouts, no "who owes me what" in one place.</p>
+      </div>
+    </div>
+
+    <div class="item">
+      <div class="mark"></div>
+      <div>
+        <h3>Everything is proven on a sample of one</h3>
+        <p>One operator account, four type-C trips, one of them a real sale. The flows below are correct in code and lightly walked in practice.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHAT WORKS ════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <h2>Already works</h2>
+      <span class="sec-note">Checked against the live schema</span>
+    </div>
+
+    <div class="groups">
+
+      <div class="group">
+        <h3>Operator setup</h3>
+        <ul>
+          <li>Six steps, and all six are editable later in Settings</li>
+          <li>Stripe Connect onboarding, with all six waiting states handled</li>
+          <li>Payout status kept live — charges, payouts, what Stripe still needs</li>
+          <li>Default currency, cancellation policy, waiver, insurance certificate</li>
+          <li>Terms acceptance is versioned and stamped server-side</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Selling a trip</h3>
+        <ul>
+          <li>Price, deposit, and a full-payment deadline counted back from the start date</li>
+          <li>Card payments or offline — the operator picks per trip</li>
+          <li>Prices shown in the traveler's own currency, charged in USD</li>
+          <li>The operator is the merchant of record; their name is on the statement</li>
+          <li>12% commission, taken automatically</li>
+          <li>Price and cancel switch are locked to the operator — a manager cannot touch them</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Travelers</h3>
+        <ul>
+          <li>Request → approve → onboarding, and approval takes no seat</li>
+          <li>Documents, waiver, medical form, passport with the APIS fields</li>
+          <li>A deadline per requirement, with a daily reminder job running</li>
+          <li>The cancellation policy is frozen on the trip and shown before paying</li>
+          <li>Consent stored with the exact text, a hash, IP and timestamp</li>
+          <li>Rejected files are deleted from storage, not just marked</li>
+          <li>Passports are purged on a schedule</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Money</h3>
+        <ul>
+          <li>Checkout, partial payments, deposit and balance as separate debts</li>
+          <li>Refunds from the app and from the dashboard</li>
+          <li>Refunds give our commission back too, so the operator is not out of pocket</li>
+          <li>Test and live payments never mix into the same total</li>
+          <li>Refunds are gated on one capability, checked in the database</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>Crew</h3>
+        <ul>
+          <li>Five tiers, and the permissions are database rows — not a release</li>
+          <li>Invite by link or in-app, with paperwork attached to the invite</li>
+          <li>Crew can be asked for their own documents and medical form</li>
+          <li>Crew and travelers can never be the same person</li>
+          <li>Crew show on the trip page with photo, title and bio</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <h3>The web dashboard</h3>
+        <ul>
+          <li>Eleven pages — trips, one trip, money, crew, waiting list, documents, travelers, settings</li>
+          <li>Adds nothing to the database; every read is already permitted</li>
+          <li>Never indexed, never framed, no referrer leaked</li>
+          <li>Warns when it finds payments in the Stripe mode it is not counting</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══ DECISIONS ═════════════════════════════════════════ -->
+  <section>
+    <div class="sec-head">
+      <h2>Your call, not code</h2>
+      <span class="sec-note">Nothing below is a bug</span>
+    </div>
+
+    <div class="decide">
+      <div class="q">?</div>
+      <div>
+        <h3>Who holds the money until the trip runs?</h3>
+        <p>Today: nobody. A $1,000 deposit reaches the operator's Stripe balance months before anyone gets on a plane. If they disappear, the money is already gone. Stripe can hold it — that is a setting and a decision, not a build.</p>
+      </div>
+    </div>
+
+    <div class="decide">
+      <div class="q">?</div>
+      <div>
+        <h3>Is 12% the number?</h3>
+        <p>It is the database default and no operator has agreed to it in writing. It becomes much harder to change after the first one signs.</p>
+      </div>
+    </div>
+
+    <div class="decide">
+      <div class="q">?</div>
+      <div>
+        <h3>What happens when an operator cancels?</h3>
+        <p>Who refunds, out of whose balance, and by when. Answer this before building blocker 2 — the code follows the policy, not the other way round.</p>
+      </div>
+    </div>
+
+    <div class="decide">
+      <div class="q">?</div>
+      <div>
+        <h3>Do we check the insurance, or just keep it?</h3>
+        <p>We store the certificate. Nobody reads it, and nothing checks the cover amount or the expiry date.</p>
+      </div>
+    </div>
+
+    <div class="decide">
+      <div class="q">?</div>
+      <div>
+        <h3>The seven lawyer questions are still open</h3>
+        <p>Jurisdiction, package-travel rules, whether our waiver can release Swellyo as well as the operator. They are written out in <code>agreements-and-terms.md</code> §7 and none has an answer.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ VERDICT ═══════════════════════════════════════════ -->
+  <div class="verdict">
+    <h2>What I would do in this order</h2>
+    <p><strong>Commit today's work</strong>, then apply the late-joiner migration. Both are done, both are one action, and one of them is a money hole.</p>
+    <p><strong>Get the agreement written</strong> and bump the terms version. It has the longest lead time and nothing else depends on you.</p>
+    <p><strong>Answer the cancellation question</strong>, then build refund-on-cancel and the payment receipt together — they are the same afternoon.</p>
+    <p><strong>Flip Stripe last</strong>, all four switches in one sitting, and run one real trip of your own through it before an outside operator sees it.</p>
+  </div>
+
+  <footer>
+    Branch ohad · 82 files uncommitted<br>
+    Repo read and production database queried 17 August 2026<br>
+    Every gap above verified against the live schema, not against notes<br>
+    1 operator account · 4 type-C trips · 10 test payments · 0 live
+  </footer>
+
+</div>

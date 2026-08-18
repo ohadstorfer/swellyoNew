@@ -204,6 +204,42 @@ A type-C trip with no managed payment has required set = waiver + medical
 only. Same rule, same RPC — activation happens when those are done. Nothing
 special-cased.
 
+### Joining after the full-payment deadline (17 Aug)
+
+Migration: `20260817000000_full_payment_after_deadline.sql`
+
+The money on a managed trip is split in two: `deposit` (must_have, no
+deadline, paid in onboarding) and `balance` (skippable, carrying the
+operator's full-payment deadline, paid later in the Plan tab).
+
+That split assumes the deadline is still ahead. Once it has passed, a new
+traveler was being asked for a deposit and handed a final payment that was
+already overdue — and because the balance is *skippable*, activation does not
+wait for it. They could pay $1,000 of a $3,000 trip, finish onboarding as a
+full member, take a seat, and owe the rest with no deadline left to chase
+them with.
+
+The rule now: **a traveler whose participant row is created on or after the
+full-payment deadline has `deposit_usd` frozen at the whole price.** One
+payment, in onboarding, for the full cost. The balance then works out to
+exactly `0`, which `operator_traveler_amount_due` already returns and
+`operator_requirement_pay_state` already reads as approved.
+
+- Frozen **per traveler at join time**, like the price itself. Nobody already
+  on the trip is touched, and moving the dates afterwards does not rewrite a
+  deal that was already struck.
+- It does **not** apply when the operator sets a traveler's price by hand —
+  that is a deliberate number and the deadline must not silently overwrite it.
+- Not applied on months-only trips (no `start_date`, so a relative deadline
+  has no date to land on) — mirrors `resolveDeadlineDate` on the client.
+- No new column, no new requirement row, no change to what activation checks.
+  The whole feature is *which number gets frozen*.
+
+Client side is copy only: `isPayingInFull()` in `tripPaymentsService.ts`
+renames the step from "Deposit" to "Full payment" in the onboarding runner and
+in the Plan tab's task rows. Calling the whole price a deposit — on a trip
+whose page advertises a smaller one — reads as a billing error.
+
 ---
 
 ## 3. New UI

@@ -1448,6 +1448,13 @@ export type PaymentStep = {
   totalUsd: number;
   /** Already paid against it, clamped to totalUsd. */
   paidUsd: number;
+  /** When it must be paid, ISO — the requirement row's own resolved deadline,
+   *  so this card can never name a date the task row above disagrees with.
+   *  Null/absent = no deadline set (months-only trips have no resolved date). */
+  dueDate?: string | null;
+  /** The task row's own overdue state, NOT recomputed here from dueDate —
+   *  two clocks would eventually disagree on the same screen. */
+  overdue?: boolean;
 };
 
 export const PaymentSection: React.FC<{
@@ -1525,6 +1532,19 @@ export const PaymentSection: React.FC<{
         })()
       : null;
 
+  // WHEN the remaining money is due — the next unpaid step's own deadline.
+  // Rendered as its own line only when the step breakdown is hidden: with the
+  // breakdown showing, each step names its date and a third date here would
+  // just restate the balance's. "Was due", not a countdown — the task row
+  // above already carries the red pill; this card only has to agree with it.
+  const nextUnpaid = allPaid ? undefined : steps.find(s => s.paidUsd < s.totalUsd);
+  const dueWhen = nextUnpaid?.dueDate ? formatDue(nextUnpaid.dueDate) : null;
+  const dueLine = dueWhen
+    ? nextUnpaid?.overdue
+      ? `Was due ${dueWhen}`
+      : `Due by ${dueWhen}`
+    : null;
+
   return (
     <View style={styles.ygBlock}>
       <View style={styles.ygHeader}>
@@ -1564,6 +1584,12 @@ export const PaymentSection: React.FC<{
           )}
         </Text>
 
+        {!showSteps && dueLine ? (
+          <Text style={[styles.payDue, nextUnpaid?.overdue && styles.payDueLate]}>
+            {dueLine}
+          </Text>
+        ) : null}
+
         {/* Directly under the two figures it explains, and above the step
             breakdown: the breakdown's numbers are ALSO net of the refund, so
             the reason has to be read before them, not after. */}
@@ -1577,10 +1603,20 @@ export const PaymentSection: React.FC<{
           <View style={styles.paySteps}>
             {steps.map(s => {
               const done = s.paidUsd >= s.totalUsd;
+              // Each unpaid step names its own date, on the name's line —
+              // "Final payment · by 12 Sep" — because "the rest before the
+              // trip" was exactly the sentence travelers were left with.
+              // Nothing on a finished step: its date stopped mattering.
+              const stepWhen = !done && s.dueDate ? formatDue(s.dueDate) : null;
               return (
                 <View key={s.key} style={styles.payStepRow}>
                   <Text style={styles.payStepName} numberOfLines={1}>
                     {s.title}
+                    {stepWhen ? (
+                      <Text style={s.overdue ? styles.payDueLate : undefined}>
+                        {s.overdue ? ` · was due ${stepWhen}` : ` · by ${stepWhen}`}
+                      </Text>
+                    ) : null}
                   </Text>
                   <Text style={[styles.payStepAmount, done && styles.payStepAmountDone]}>
                     {done
@@ -1618,6 +1654,67 @@ export const PaymentSection: React.FC<{
         {/* Said once, under the button that starts the charge — the last thing
             read before Checkout opens, which is where Booking.com puts it too. */}
         {currencyNote ? <Text style={styles.payCurrencyNote}>{currencyNote}</Text> : null}
+      </View>
+    </View>
+  );
+};
+
+// Payment, when Swellyo is NOT collecting — PaymentSection's offline sibling.
+// Purely informational: no progress bar (the app cannot know what has changed
+// hands), no button, and never red — claiming someone is late requires knowing
+// they haven't paid, which only the operator does. Just the three facts a
+// traveler needs: how much, to whom, by when.
+//
+// Only rendered when the operator actually set a deadline (the caller's gate):
+// offline trips said nothing about money before this existed, and growing a
+// payment card retroactively on all of them would be new noise, not new
+// information.
+export const OfflinePaymentNote: React.FC<{
+  /** The trip's price per person, canonical USD. */
+  totalUsd: number;
+  /** The deadline resolved to a real date, ISO — null while the trip only has
+   *  months, when there is no honest date to name. */
+  dueDateISO: string | null;
+  /** The stored deadline, days before departure — the wording that stays true
+   *  when no exact date exists to resolve against. */
+  dueDaysBefore: number;
+  /** The operator's own name. "The operator" when unknown — travelers pay a
+   *  person, and the sentence should say which one whenever it can. */
+  operatorName?: string | null;
+}> = ({ totalUsd, dueDateISO, dueDaysBefore, operatorName }) => {
+  const viewer = useViewer();
+  // Same gate as PaymentSection: a genuine other-currency hint, never a bogus
+  // rounding echo of the USD figure.
+  const approx = formatApproxLocal(totalUsd, viewer);
+  const when = dueDateISO ? formatDue(dueDateISO) : null;
+  const dueLine = when
+    ? `Due by ${when}`
+    : dueDaysBefore === 1
+      ? 'Due 1 day before the trip'
+      : `Due ${dueDaysBefore} days before the trip`;
+  return (
+    <View style={styles.ygBlock}>
+      <View style={styles.ygHeader}>
+        <View style={styles.ygHeaderText}>
+          <Text style={styles.ygTitle}>Payment</Text>
+          <Text style={styles.ygSub}>What this trip costs, and when</Text>
+        </View>
+      </View>
+
+      <View style={styles.payCard}>
+        <View style={styles.payAmountRow}>
+          <Text style={styles.payLabel}>Full amount</Text>
+          <Text style={styles.payCount}>
+            <Text style={styles.payCountStrong}>{formatExactUsd(totalUsd)}</Text>
+            {approx ? (
+              <Text style={styles.payRemainingApprox}>{` (about ${approx})`}</Text>
+            ) : null}
+          </Text>
+        </View>
+        <Text style={styles.payDue}>{dueLine}</Text>
+        <Text style={styles.payRefund}>
+          {`You pay ${operatorName || 'the operator'} directly, outside the app.`}
+        </Text>
       </View>
     </View>
   );
@@ -2162,6 +2259,18 @@ const styles = StyleSheet.create({
     color: T.muted,
     marginTop: 4,
   },
+  // "Due by 12 Sep" — the payRefund clothes: a footnote to the "left to pay"
+  // line above it, never a fourth figure. Red only once it is actually late,
+  // matching the task rows' own overdue color.
+  payDue: {
+    fontFamily: ff('Inter', '400'),
+    fontWeight: '400',
+    fontSize: 12,
+    lineHeight: 18,
+    color: T.muted,
+    marginTop: 4,
+  },
+  payDueLate: { color: '#C4361E' },
   // Quiet by design: it must be readable before paying, never compete with the
   // figure or the button.
   payCurrencyNote: {

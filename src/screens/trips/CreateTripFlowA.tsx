@@ -712,7 +712,21 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardS
     // updateGroupTrip never writes requirement rows. Present because
     // WizardState requires it.
     requirementKinds: [],
-    requirementTiming: { ...DEFAULT_TIMING },
+    // …except the balance deadline on an OFFLINE trip, which is a trip COLUMN,
+    // not a requirement row — the Pricing step edits it and the save path
+    // writes it back. Hydrate it, or the stepper would show the default and a
+    // no-op save would quietly overwrite the operator's real deadline.
+    requirementTiming: {
+      ...DEFAULT_TIMING,
+      ...(trip.payment_mode === 'offline' && trip.offline_payment_due_days_before != null
+        ? {
+            balance: {
+              skippable: true,
+              daysBefore: trip.offline_payment_due_days_before,
+            },
+          }
+        : null),
+    },
     waiverFile: null,
     ageMin: trip.age_min != null ? String(trip.age_min) : '',
     ageMax: trip.age_max != null ? String(trip.age_max) : '',
@@ -2161,6 +2175,15 @@ export default function CreateTripFlowA({
       const priceInclusions = isFixedFlow
         ? normalizePriceInclusions(state.priceInclusions)
         : null;
+      // The Pricing step's "Final payment" deadline. ONE value, two stores:
+      // a managed trip writes it onto the balance requirement row (through
+      // `state.requirementTiming` at createRequirements below), an offline
+      // trip writes it onto the trip itself — the DB refuses pay rows on
+      // offline trips, so a column is the only place theirs can live.
+      const balanceDueDaysBefore = Math.max(
+        0,
+        Math.round((state.requirementTiming.balance ?? DEFAULT_TIMING.balance).daysBefore),
+      );
       const descriptionText = state.description.trim();
       const maxParticipants = state.maxParticipants
         ? parseInt(state.maxParticipants, 10)
@@ -2217,6 +2240,14 @@ export default function CreateTripFlowA({
           price_inclusions: priceInclusions,
           payment_mode: editPaymentMode,
           deposit_amount: editDepositAmount,
+          // Offline only — a managed trip's deadline lives on its balance row
+          // and is edited in Manage requirements, never here. A managed trip
+          // flipped offline in this save gets the stepper's current value
+          // (the default, unless the operator touched it): its old row
+          // deadline was never hydrated into this wizard, and the row is
+          // about to be deactivated anyway.
+          offline_payment_due_days_before:
+            isFixedFlow && editPaymentMode === 'offline' ? balanceDueDaysBefore : null,
           trip_structure: state.tripStructure.length ? state.tripStructure : null,
           trip_vibes: state.tripVibes.length ? state.tripVibes : null,
           wave_shapes: waveShapesArray,
@@ -2277,6 +2308,11 @@ export default function CreateTripFlowA({
           payment_mode: isFixedFlow ? state.paymentMode : 'offline',
           deposit_amount:
             isFixedFlow && state.paymentMode === 'managed' ? depositAmountUsd : null,
+          // Offline C trips only. Managed trips carry the same value on their
+          // balance requirement row instead (createRequirements below); A/B
+          // trips have no payment deadline at all.
+          offline_payment_due_days_before:
+            isFixedFlow && state.paymentMode === 'offline' ? balanceDueDaysBefore : null,
 
           // The policy is FROZEN here and never read live again, so changing a
           // default later cannot rewrite terms someone already agreed to.
@@ -2504,22 +2540,6 @@ export default function CreateTripFlowA({
       });
     };
 
-    // The real date the deadline lands on. Months-only trips have no exact
-    // start date, so there is nothing honest to show — say so instead of
-    // inventing one.
-    const deadlineLabel = (daysBefore: number) => {
-      const due = resolveDeadlineDate(
-        state.datesMode === 'exact' ? state.startDateISO : null,
-        daysBefore,
-      );
-      if (!due) return 'Set exact dates to see the date';
-      return due.toLocaleDateString(undefined, {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      });
-    };
-
     // The timing controls, shared by the document cards and the pay cards.
     // Extracted rather than duplicated: "when is it due" must look and behave
     // identically for a passport and for a deposit, and two copies drift.
@@ -2560,7 +2580,7 @@ export default function CreateTripFlowA({
                     ? '1 day before the trip'
                     : `${timing.daysBefore} days before the trip`}
                 </Text>
-                <Text style={localStyles.daysDate}>{deadlineLabel(timing.daysBefore)}</Text>
+                <Text style={localStyles.daysDate}>{deadlineDateLabel(timing.daysBefore)}</Text>
               </View>
               <Pressable
                 onPress={() =>
@@ -3441,9 +3461,38 @@ export default function CreateTripFlowA({
     );
   };
 
+  // The real date a deadline lands on. Months-only trips have no exact start
+  // date, so there is nothing honest to show — say so instead of inventing
+  // one. Shared by the Pricing step's "Final payment" stepper and the
+  // Requirements step's timing controls: two copies of "which date is that"
+  // would drift.
+  const deadlineDateLabel = (daysBefore: number) => {
+    const due = resolveDeadlineDate(
+      state.datesMode === 'exact' ? state.startDateISO : null,
+      daysBefore,
+    );
+    if (!due) return 'Set exact dates to see the date';
+    return due.toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  };
+
   const renderPricingStep = () => {
     const inc = state.priceInclusions;
     const customItems = customList;
+    // The full-payment deadline. Bound to requirementTiming.balance — the same
+    // value the Requirements step's "Final payment" card edits — so the two
+    // controls can never disagree. Offline trips have no requirement row to
+    // carry it; for them the publish handler copies this onto the trip itself
+    // (offline_payment_due_days_before).
+    const balanceTiming = state.requirementTiming.balance ?? DEFAULT_TIMING.balance;
+    const setBalanceDays = (daysBefore: number) =>
+      update('requirementTiming', {
+        ...state.requirementTiming,
+        balance: { ...balanceTiming, daysBefore },
+      });
     const rows: {
       key: keyof PriceInclusions;
       sheet: SheetKey;
@@ -3566,6 +3615,58 @@ export default function CreateTripFlowA({
                 ) : null}
               </>
             )}
+
+            {/* When the money is due — on the same step as the price and the
+                mode, for BOTH modes. Managed trips write it onto the balance
+                requirement row; offline trips onto the trip itself. It used
+                to be reachable only through the Requirements step's pay card
+                (managed) or not exist at all (offline), and operators
+                published trips without ever seeing that a deadline was set
+                for them. */}
+            <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
+              Payment deadline
+            </Text>
+            <Text style={localStyles.helper}>
+              {state.paymentMode === 'managed'
+                ? 'Travelers must finish paying by this date.'
+                : "Shown in each traveler's plan: pay you the full amount by this date."}
+            </Text>
+            <View style={localStyles.daysRow}>
+              <Pressable
+                onPress={() => setBalanceDays(Math.max(0, balanceTiming.daysBefore - 7))}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Move the payment deadline closer to the trip"
+                style={({ pressed }) => [
+                  localStyles.stepBtn,
+                  pressed && localStyles.stepBtnPressed,
+                ]}
+              >
+                <Ionicons name="remove" size={16} color="#212121" />
+              </Pressable>
+              <View style={localStyles.daysLabel}>
+                <Text style={localStyles.daysValue}>
+                  {balanceTiming.daysBefore === 1
+                    ? '1 day before the trip'
+                    : `${balanceTiming.daysBefore} days before the trip`}
+                </Text>
+                <Text style={localStyles.daysDate}>
+                  {deadlineDateLabel(balanceTiming.daysBefore)}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setBalanceDays(Math.min(365, balanceTiming.daysBefore + 7))}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Move the payment deadline earlier"
+                style={({ pressed }) => [
+                  localStyles.stepBtn,
+                  pressed && localStyles.stepBtnPressed,
+                ]}
+              >
+                <Ionicons name="add" size={16} color="#212121" />
+              </Pressable>
+            </View>
           </>
         )}
 

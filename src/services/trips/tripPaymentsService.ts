@@ -52,6 +52,31 @@ export function amountDue(step: PayStep, p: TravelerPrices): number | null {
   return balance < 0 ? null : balance;
 }
 
+/**
+ * This traveler's trip is ONE payment: their frozen deposit is the whole
+ * price, so the balance works out to zero and there is nothing left after
+ * onboarding.
+ *
+ * Two configurations land here, and both want the same words:
+ *
+ *  • the operator asks for no deposit at all and prices the traveler in full;
+ *  • the traveler joined on or after the full-payment deadline, and
+ *    `freeze_traveler_price()` froze their deposit at the whole price —
+ *    see `20260817000000_full_payment_after_deadline.sql`.
+ *
+ * It exists only to pick COPY. Nothing is gated on it: what a traveler owes is
+ * `amountDue`, and what they are charged is the server's. Calling the whole
+ * price a "Deposit" is the kind of small lie that reads as a bug, which is the
+ * entire reason this is here.
+ *
+ * `>=`, not `===`: a deposit above the total is a contradictory configuration
+ * the CHECK blocks in stored rows, but if one ever reached here it is still a
+ * single payment, not a split.
+ */
+export function isPayingInFull(p: TravelerPrices | null | undefined): boolean {
+  return !!p && p.totalUsd != null && p.depositUsd != null && p.depositUsd >= p.totalUsd;
+}
+
 /** What is still owed after everything already paid against this step. */
 export function amountOutstanding(
   step: PayStep,

@@ -13,7 +13,7 @@ A small, separate website. It is **not** part of the mobile app and does not sha
 - Operators log in with Google, the same account they use in the Swellyo app.
 - They pick a trip and see how it is going.
 - They can review documents and download files.
-- They can see the money, and set one traveler's price.
+- They can see the money, set the trip's price and deposit, and set one traveler's price.
 - They cannot otherwise edit the trip, message anyone, or remove travelers. That stays on mobile.
 
 **Why it exists:** reviewing 60 documents and sending passports to a hotel is painful on a phone. Those two jobs earn a desktop screen. Everything else does not.
@@ -32,9 +32,11 @@ A small, separate website. It is **not** part of the mobile app and does not sha
 
 This site **includes approve and reject**, because that is the review the workbench says earns desktop.
 
-**2. Setting a traveler's price.** Decided by Ohad on 4 August, when the money section was built. Prices are per traveler and frozen at join, so an operator quoting one person a different rate has nowhere else to do it on a desktop — and a price is the one number they most often need to fix while on a call.
+**2. Setting prices.** Decided by Ohad on 4 August, when the money section was built. Prices are per traveler and frozen at join, so an operator quoting one person a different rate has nowhere else to do it on a desktop — and a price is the one number they most often need to fix while on a call.
 
-Everything else Eyal called "real management" (editing the trip, messaging, removing people) stays off desktop.
+On 13 August Ohad extended this to the trip's own price and deposit — the quote for whoever joins next. Same reasoning, and the freeze-first rule (§4.6) means it cannot change what anyone already aboard owes.
+
+Everything else Eyal called "real management" (editing the rest of the trip, messaging, removing people) stays off desktop.
 
 If Eyal wants desktop strictly read-only, remove three buttons. It is a subtraction, not a redesign.
 
@@ -58,6 +60,12 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
    - **Still own-data only.** It cannot touch `<trip_id>/` — the traveler documents and the per-trip waivers — which is where every sensitive file lives.
    - **Why it is here at all:** setup is four steps, and three of them are already on this site. Sending an operator to their phone for one PDF, on the screen where they do everything else, is the kind of gap that makes people give up halfway.
 
+   **Amended again 2026-08-13, for the trip price.** Decided by Ohad. This is the first write that touches a trip rather than the operator's own defaults, so the boundary line above ("if a feature needs to change a trip, it belongs in the app") is narrowed, not dropped: everything about a trip *except its price* still belongs in the app.
+
+   - **What it writes:** `cost_per_person` and `deposit_amount` on `group_trips`, plus keeping the trip's two `pay` requirement rows in line with the deposit. Nothing else on the trip, ever.
+   - **Nothing new was permitted for it.** The UPDATE policy on `group_trips`, the FOR ALL requirements policy and the `operator_freeze_trip_prices` function all pre-date this site's use of them — the app's Edit-trip screen goes through the identical path (`updateOperatorTripPrice`), and this site copies its order exactly (§4.6).
+   - **The freeze is what makes it safe.** Everyone already aboard is pinned to their current price before the new one lands, so this write can only change what future joiners are quoted. The freeze RPC is also host_id-gated, which makes it the effective permission check.
+
    **Stripe is the exception and stays one.** Connect onboarding needs the secret key and lives behind an edge function the app calls. Step 1 of setup reports the state and points at the app. Do not build a second onboarding path here.
 2. **The database is the security boundary.** Row Level Security decides what an operator can see. The website cannot see a trip it does not host, even if the code asks for it.
 3. **No backend.** The browser talks to Supabase directly. Netlify serves static files only.
@@ -68,9 +76,50 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
 ## 3. Who can get in
 
 - Login is **Google OAuth** through Supabase. It is the only provider enabled on the project, and operators already have accounts from the mobile app.
-- After login, the site looks for trips where the person is a **host** and the trip is `hosting_style = 'C'` (an operator trip).
-- No operator trips → a plain message, not an error. They are logged in, they just have nothing to manage.
-- There are no roles or staff accounts. Only the operator sees this.
+- After login, the site looks for two things: trips where the person is a **host** on a `hosting_style = 'C'` trip, and trips where they are live **crew** (`organized_trip_staff`, accepted and not revoked).
+- Neither → a plain message, not an error. They are logged in, they just have nothing to manage.
+
+### Crew, added 2026-08-13
+
+The line above used to read *"There are no roles or staff accounts. Only the operator sees this."* Asked for by Ohad: **a Manager should be able to run their trip's dashboard.**
+
+The reasoning is the same one that justifies the site at all. Reviewing sixty passports is painful on a phone, and it is often the Manager doing it — telling them to use their phone while the person who hired them has a desktop screen is an oversight, not a rule.
+
+What that means concretely:
+
+- **Ask "can I?", never "what tier am I?"** The five tiers are labels; what each can do is an editable row in `organized_trip_staff_roles`. Nothing on this site branches on `'manager'` — it reads `my_trip_capabilities(trip_id)`, the same RPC the app uses. Today `docs.view` happens to mean *Manager and up*; that is the answer, not the question.
+- **`docs.view` is the door to a trip.** Document review is the product. A Crew or Guide tier — roster and profiles, no documents — gets one sentence instead of a page of empty cards, because a shell of a site reads as a broken one.
+- **`payments.view_status` shows the money; `money.manage` moves it.** A Manager sees who has paid. Prices and refunds stay with the operator of record, guarded on `group_trips.host_id` in the database as before (§7).
+- **`/settings` and `/setup` are operator-only.** They are that account's own defaults — Stripe, waiver, cancellation policy. Crew have no such row, so the routes redirect to `/trips` and the header link is hidden.
+- **Nothing new in the database.** Every capability was already enforced by RLS or inside an RPC before this change; the site just stopped assuming the only person holding them was the host. Rule 1 is intact — no tables, no functions, no migrations from this project.
+- **Still UX, not security.** Forcing a capability check to true in the browser changes nothing: Postgres refuses the read.
+
+#### What a Manager gets, exactly
+
+Decided by Ohad, 13 August: **a Manager sees everything on this site except `money.manage`, `staff.manage` and `trip.cancel`.** Audited page by page against the seeded Manager set:
+
+| Page / action | Needs | Manager |
+|---|---|:-:|
+| Trip list, trip snapshot, counts | `docs.view` | ✓ |
+| Documents: view, open, download, export | `docs.view`, `data.export` | ✓ |
+| Approve / reject a document | `docs.approve` | ✓ |
+| "Remind N people" | `docs.view` | ✓ |
+| Medical flags | `medical.view` | ✓ |
+| Traveler pages, profiles, emergency contact | `travelers.view_profiles` | ✓ |
+| Money: totals, who paid, the ledger, refund history | `payments.view_status` | ✓ |
+| Set a trip or traveler price · issue a refund | `money.manage` **+ `host_id`** | ✗ |
+| Invite or edit crew | `staff.manage` | ✗ (not on this site at all) |
+| Cancel the trip | `trip.cancel` | ✗ (not on this site at all) |
+
+Two of those three do not exist here anyway — crew and cancellation are app-only — so in practice the single difference a Manager sees is the price and refund buttons. The Money page says so in a line, rather than showing every number with no buttons and letting it read as half-loaded.
+
+#### The two pages that are not about a trip
+
+`/setup` and `/settings` stay operator-only, and this is **not** a fourth exclusion — they are not trip data at all. Both read rows keyed to the signed-in *person*: `operator_payout_accounts` (their Stripe Connect account), `operator_settings` (their currency, cancellation default, terms confirmations), and their default waiver at `defaults/<user_id>/`. All three are `user_id = auth.uid()` in RLS, so a capability cannot reach them — there is no trip in the check.
+
+Shown to a Manager they would be worse than empty: the Connect button would open Stripe onboarding **for the Manager**, creating a merchant account for someone who is not the merchant, while the trip's payouts stayed exactly where they were. Same family as `money.manage`, so it follows the same rule.
+
+The setup banner is hidden for the same reason: it names a step only the operator can take.
 
 ---
 
@@ -81,6 +130,7 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
 /trips                        the operator's trips
 /trips/:id                    trip snapshot
 /trips/:id/money              every traveler's price, what they paid, the ledger
+/trips/:id/crew               who runs the trip — tiers, titles, paperwork (operator only)
 /trips/:id/d/:requirementId   one requirement, everyone, with export
 /trips/:id/t/:userId          one traveler
 /settings                     defaults: currency, cancellation policy, payments
@@ -123,6 +173,22 @@ Top to bottom:
    This is the only per-person way into the site — every other card is per-requirement, so before this a traveler who had submitted nothing could not be opened at all.
    The roster comes from the member list, never from the review read: a slow or failed review must not make the trip look empty.
 
+### 4.2b Crew page — added 2026-08-14
+
+The people who **run** the trip, as opposed to the travelers who go on it. Full design: `docs/superpowers/specs/2026-08-14-crew-page.md`.
+
+- **The operator of record only.** Gated on `staff.manage`, which `my_trip_capabilities()` hands out with the rest of the operator set to `group_trips.host_id` and which no assignable tier carries. So the question the page asks is the same one every other page asks — "can I?" — and the answer happens to mean "am I the operator". A Manager never sees the card on the trip snapshot, and typing the URL gets a sentence. This is invariant I2 of the staff spec: if a Manager could edit the crew, a Manager could grant themselves the operator's permissions.
+- **A card on the trip snapshot** sits above Travelers, naming who is on the crew and how many invites are still unaccepted.
+- **Editing one person** opens a dialog. Their tier (the five cards, capabilities drawn from `organized_trip_staff_roles`, never hardcoded), their title, their bio, and the paperwork tick list. Removing is a soft revoke behind a confirm that names them.
+- **Name and photo are not editable for anyone with an account** — those come from `surfers`, so a person renames themselves once and every trip they crew follows. What the operator owns is how this trip *introduces* them. A Listed credit (no account) has no profile to read from, so its name is editable here; its photo stays in the app, which is the only place with an upload path.
+- **Adding** is search-by-name and an in-app invite. Invite links and Listed credits stay in the app — a link is shared over WhatsApp anyway, and a Listed credit wants that photo upload.
+- **Paperwork is a catalog, not a list of what exists.** Ticking Passport creates the staff-audience requirement row if the trip has none. Status is binary, **Sent / Not sent**: there is no approve or reject for crew paperwork, so a third state would be a queue nobody can clear. No deadline and no overdue — crew paperwork is flagged, never gated.
+
+Rule 1 holds: no table, no function, no migration from this project. Two bugs were fixed on the way, both older than this page:
+
+- `fetchProfiles` read `surfers.profile_photo_url`. Both columns exist; only `profile_image_url` is ever written, so 684 of 685 people showed a letter instead of a face.
+- `fetchTripReview` read every active requirement on the trip. `organized_trip_requirements_resolved` does not carry `audience` (it was created `select r.*` before the column existed), so a crew passport would have appeared in the traveler review and every traveler would have shown as missing it. Fixed the same way migration 20260813190000 fixed it in SQL — by reading the base table for the audience.
+
 ### 4.3 Requirement detail page
 
 Every tile opens a full page: all travelers, their state, and **export**.
@@ -151,6 +217,14 @@ One row per traveler: total, each payment step with what is still owed, and paid
 
 The raw rows are the point. Operators reconcile against their Stripe dashboard, and a single total cannot be checked against anything.
 
+**The trip's own price is edited here too** (added 13 August). A "Trip price" card shows `cost_per_person` and `deposit_amount` with an owner-only edit, saved through the app's order exactly — the only safe one:
+
+1. `operator_freeze_trip_prices` — everyone already aboard is pinned to the price they have today. If this throws, nothing is written; a half-done reprice is worse than none.
+2. The two columns are written on `group_trips`.
+3. On a managed trip, the `pay` requirement rows follow the deposit: adding a deposit creates or reactivates its row, dropping it retires the row. `is_active` only, never delete — the ledger's `requirement_id` points at these rows.
+
+So changing the trip price never changes what anyone already aboard owes — it is the quote for whoever joins next. Changing one existing traveler happens through their own price button, where the paid-amount rules below apply.
+
 **Setting a price is owner-only.** The database guards it on `group_trips.host_id` — the operator of record — while this site finds trips through `role = 'host'`, which includes every admin promoted with "Set as admin". Those admins see the money; they do not see the button.
 
 Changing a price after money has arrived follows three rules, and only one interrupts:
@@ -161,7 +235,7 @@ Changing a price after money has arrived follows three rules, and only one inter
 | Paid, new total at or above it | Confirm, with the numbers spelled out |
 | New total below what they paid | **Blocked** |
 
-The block exists because an overpaid traveler cannot be put right from here — there is no refund on this site. Stripe refuses the same move for the same reason. **The server does not check this**, so a direct API call still gets through; that gap is logged for the next payments migration.
+The block exists because lowering a total below what someone paid leaves them overpaid, and only a refund resolves that state — since 11 August one can be issued from their traveler page, and the block's message points there. Stripe refuses the same move for the same reason. **The server does not check this**, so a direct API call still gets through; that gap is logged for the next payments migration.
 
 ### 4.5 Review actions
 
@@ -184,7 +258,7 @@ The purge deletes the file and leaves the row.
 
 ## 6. Data
 
-Everything below is already live. **This project reads only — with exactly one exception, `operator_settings`, which it also writes. See Rule 1.**
+Everything below is already live. **This project mostly reads. Every write it does is listed in Rule 1: `operator_settings`, and the trip-price path.**
 
 | What | Where it comes from |
 |---|---|
@@ -204,7 +278,8 @@ Everything below is already live. **This project reads only — with exactly one
 | Traveler prices | `group_trip_participants.price_total_usd`, `.deposit_usd` |
 | Trip default price | `group_trips.cost_per_person`, `.deposit_amount`, `.payment_mode` |
 | Payment steps | `organized_trip_requirements_resolved` where `req_type = 'pay'` |
-| Set a price | `operator_set_traveler_price(...)` |
+| Set a traveler's price | `operator_set_traveler_price(...)` |
+| Set the trip's price | `operator_freeze_trip_prices(...)`, then `group_trips` **update** (two columns), then a `pay`-row sync on `organized_trip_requirements` — see §4.6 |
 
 Verified against production on 2 August: every function above grants `EXECUTE` to `authenticated`, every table has RLS on, and both views are `security_invoker` so table policies still apply.
 
@@ -228,11 +303,12 @@ Two traps live in that file on purpose. Money is added in whole **cents**, becau
 
 > **Known debt.** Four copies of one rule is a smell. The proper fix is the `operator_trip_requirement_matrix` function, which was specced but never applied. Do it next time someone is working in the database. Not now — it would mean a migration, and this project is meant to add nothing.
 
+Every amount here is US dollars, and the currency is baked into column names rather than stored. Before adding a payment method that settles in anything else, read `docs/superpowers/specs/2026-08-13-other-currencies-note.md` — one thing in it cannot be fixed after the fact.
+
 ---
 
 ## 7. Not building
 
-- **Refunds.** They are read and shown. Issuing one happens in the Stripe dashboard.
 - **Payout status** — whether Stripe has paid the operator out. A different question from "did the traveler pay", on a different Stripe object, and mixing the two on one screen is how people misread their own balance.
 - Bulk price setting. One traveler at a time.
 - Invoices and receipts. Stripe already emails them.
@@ -240,7 +316,8 @@ Two traps live in that file on purpose. Money is added in whole **cents**, becau
 - Staff accounts or roles.
 - A view across several trips at once.
 - Charts. Counts and lists only.
-- Editing trips, messaging, removing travelers.
+- Editing trips beyond their price and deposit; messaging; removing travelers.
+- Changing `payment_mode`. Turning payment collection on or off reorders more than two columns (pay rows, freeze, revert on failure) and stays in the app's "Getting paid" sheet.
 
 ---
 

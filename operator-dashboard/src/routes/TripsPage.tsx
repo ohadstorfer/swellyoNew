@@ -17,7 +17,7 @@ export function TripsPage() {
 
   return (
     <>
-      <PageHead title="Your trips" sub="Trips you run as an operator" />
+      <PageHead title="Your trips" sub="Trips you run, and trips you're crew on" />
 
       {q.isPending && <Loading what="Loading your trips" />}
       {q.isError && <ErrorBox error={q.error} onRetry={() => void q.refetch()} />}
@@ -25,7 +25,7 @@ export function TripsPage() {
       {q.data && q.data.length === 0 && (
         <Empty
           title="No operator trips on this account"
-          note="You are signed in. Operator trips you host will show up here."
+          note="You are signed in. Trips you host, or are crew on, will show up here."
         />
       )}
 
@@ -55,6 +55,10 @@ export function TripsPage() {
                     {trip.hostingStyle !== 'C' && (
                       <span className="tag tag-warn">Not an operator trip</span>
                     )}
+                    {/* Whose trip this is. Someone who both runs trips and
+                        crews on other people's needs to tell them apart before
+                        they open one — the pages inside look the same. */}
+                    {trip.viaCrew && <span className="tag tag-idle">Crew</span>}
                     {days !== null && days >= 0 && (
                       <span className="tag tag-idle">{plural(days, 'day')} to go</span>
                     )}

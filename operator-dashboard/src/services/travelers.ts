@@ -27,10 +27,14 @@ export type MedicalForm = {
 export async function fetchProfiles(userIds: string[]): Promise<Map<string, SurferProfile>> {
   if (userIds.length === 0) return new Map();
 
+  // `profile_image_url`, NOT `profile_photo_url`. Both columns exist on
+  // `surfers` and only the first one is ever written — the app writes it
+  // everywhere and never mentions the other. Reading the wrong one showed a
+  // letter instead of a face for 684 of 685 people on production.
   const { data, error } = await supabase
     .from('surfers')
     .select(
-      'user_id, name, profile_photo_url, age, country_from, surf_level_category, surfboard_type, travel_experience',
+      'user_id, name, profile_image_url, age, country_from, surf_level_category, surfboard_type, travel_experience',
     )
     .in('user_id', userIds);
 
@@ -41,7 +45,7 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Surf
     map.set(r.user_id, {
       userId: r.user_id,
       name: r.name ?? 'Unnamed traveler',
-      photoUrl: r.profile_photo_url ?? null,
+      photoUrl: r.profile_image_url ?? null,
       age: r.age ?? null,
       countryFrom: r.country_from ?? null,
       surfLevel: r.surf_level_category ?? null,

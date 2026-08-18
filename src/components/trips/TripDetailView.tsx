@@ -477,7 +477,15 @@ export interface TripDetailViewProps {
    *  Only people the operator chose to show reach this list; the filtering is
    *  server-side (capability `profile.shown_to_travelers`).
    *  Empty on ordinary group trips, which have no crew. */
-  crew?: { id: string; name: string; title: string | null; avatarUrl: string | null }[];
+  crew?: {
+    id: string;
+    name: string;
+    /** What they do — "Photographer", "Surf instructor". */
+    title: string | null;
+    /** The operator's line introducing them. */
+    bio: string | null;
+    avatarUrl: string | null;
+  }[];
   /** Open a participant's profile (tap on their avatar). */
   onParticipantPress?: (userId: string) => void;
   /** Optional handler for the Participants "See all" link. */

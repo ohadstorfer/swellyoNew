@@ -35,6 +35,7 @@ import {
   type OperatorSettings,
 } from '../services/trips/operatorSettingsService';
 import { PRESET_LABEL, summarise } from '../services/trips/cancellationPolicy';
+import { pushRootCard } from '../navigation/navigationRef';
 
 // Settings menu icons
 const iconPrivacyPreferences = require('../assets/icons/privacy-preferences.png');
@@ -365,6 +366,21 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               </TouchableOpacity>
 
               <Text style={styles.operatorNote}>{summarise(opSettings.policy)}</Text>
+
+              {/* The door back into everything setup asked for — waiver,
+                  insurance, the agreement, plus the two rows above. Before
+                  this, finishing setup closed the screen forever: the banner
+                  entry disappears with `needsSetup`, and an operator whose
+                  insurance expired had nowhere to replace it. */}
+              <TouchableOpacity
+                style={styles.menuRow}
+                activeOpacity={0.7}
+                onPress={() => pushRootCard('OperatorSetup', undefined)}
+              >
+                <Ionicons name="briefcase-outline" size={22} color="#333" style={styles.menuIcon} />
+                <Text style={styles.menuRowText}>Waiver, insurance & agreement</Text>
+                <Ionicons name="chevron-forward" size={16} color="#9A9A9A" />
+              </TouchableOpacity>
             </>
           )}
 

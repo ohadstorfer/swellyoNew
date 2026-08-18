@@ -41,6 +41,7 @@ import {
   CATEGORY_TITLE,
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
+import { CrewSection } from './CrewSection';
 import { Images } from '../../assets/images';
 import { TripIcon, type TripIconName } from './tripIcons';
 import { getStorageThumbUrl } from '../../services/media/imageService';
@@ -704,40 +705,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* ---- Crew ---- */}
           {/* Operator trips only, and only the people the operator chose to show
               (capability `profile.shown_to_travelers`, filtered server-side).
-              A name and a face, not a link: crew are not trip members, so there
-              is no profile to open for a Listed credit and no reason to treat
-              the two kinds differently here. */}
-          {crew.length > 0 ? (
-            <View style={styles.section}>
-              <SectionTitle title="Crew" />
-              <View style={styles.crewList}>
-                {crew.map(c => (
-                  <View key={c.id} style={styles.crewRow}>
-                    {c.avatarUrl ? (
-                      <CachedImage
-                        source={{ uri: getStorageThumbUrl(c.avatarUrl, 144) ?? c.avatarUrl }}
-                        style={styles.crewAvatar}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                      />
-                    ) : (
-                      <CachedImage
-                        source={Images.defaultAvatar}
-                        style={styles.crewAvatar}
-                        contentFit="cover"
-                      />
-                    )}
-                    <View style={styles.crewText}>
-                      <Text style={styles.crewName} numberOfLines={1}>{c.name}</Text>
-                      {!!c.title && (
-                        <Text style={styles.crewTitle} numberOfLines={1}>{c.title}</Text>
-                      )}
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
+              Hidden for anyone with the Plan tab — same rule as Participants
+              below — because the crew moved to Plan for them; here it is part
+              of the sales page for people deciding whether to join. */}
+          {!hideParticipants && <CrewSection crew={crew} style={styles.section} />}
 
           {/* ---- About this trip ---- */}
           {vm.description || isHost ? (
@@ -767,6 +738,133 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                 <Text style={styles.bodyPlaceholder}>
                   Add a description so surfers know what this trip is about.
                 </Text>
+              )}
+            </View>
+          ) : null}
+
+          {/* ---- Accommodation ---- */}
+          {/* Right under "About this trip", above Surf style: where someone
+              stays is a bigger deal on an operator trip than board choice, so
+              it reads early instead of dangling at the very bottom. */}
+          {showAccommodation || canEditStay ? (
+            <View style={styles.section}>
+              {/* The empty-state card below is itself the "add" affordance for
+                  the host, so the header keeps just the title (Figma 13518-9184). */}
+              <SectionTitle title="Accommodation" />
+              {vm.specificStaySelected && vm.accommodationName ? (
+                <TouchableOpacity
+                  style={styles.stayCard}
+                  activeOpacity={stayUrl ? 0.85 : 1}
+                  disabled={!stayUrl}
+                  onPress={stayUrl ? () => openStayUrl(stayUrl) : undefined}
+                  accessibilityRole={stayUrl ? 'link' : undefined}
+                  accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
+                >
+                  {vm.accommodationImageUri ? (
+                    <CachedImage
+                      source={{ uri: vm.accommodationImageUri }}
+                      style={styles.stayImage}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.stayImage, styles.stayImagePlaceholder]}>
+                      <Ionicons name="image-outline" size={32} color="#B0B0B0" />
+                    </View>
+                  )}
+                  <View style={styles.stayPill}>
+                    <View style={styles.stayPillIcon}>
+                      <TripIcon name="home-03" size={24} color={ICON_INK} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.stayName} numberOfLines={1}>
+                        {vm.accommodationName}
+                      </Text>
+                      <Text style={styles.stayMeta} numberOfLines={1}>
+                        {vm.accommodationKindLabel
+                          ? `${vm.accommodationKindLabel} · Leading option`
+                          : 'Leading option'}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                // Empty state (no specific stay yet). Host (loose flow) → a big
+                // tap-to-add card; members/viewers → the same card reading
+                // "Not set yet" (Figma 13518-9184).
+                <View style={styles.stayCard}>
+                  <TouchableOpacity
+                    style={[styles.stayImage, styles.stayEmpty]}
+                    activeOpacity={canEditStay ? 0.85 : 1}
+                    disabled={!canEditStay}
+                    onPress={canEditStay ? onEditAccommodation : undefined}
+                    accessibilityRole={canEditStay ? 'button' : undefined}
+                    accessibilityLabel={canEditStay ? 'Add accommodation' : undefined}
+                  >
+                    <TripIcon name="home-03" size={30} color="#7B7B7B" />
+                    <Text style={styles.stayEmptyText}>
+                      {canEditStay ? 'Tap to add Accommodation' : 'Not set yet'}
+                    </Text>
+                  </TouchableOpacity>
+                  {vm.accommodationKindLabel ? (
+                    <View style={styles.stayPill}>
+                      <View style={styles.stayPillIcon}>
+                        <TripIcon name="home-03" size={24} color={ICON_INK} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.stayName} numberOfLines={1}>
+                          {vm.accommodationKindLabel}
+                        </Text>
+                        <Text style={styles.stayMeta} numberOfLines={1}>
+                          Leading option
+                        </Text>
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+              )}
+            </View>
+          ) : null}
+
+          {/* ---- What's included ---- */}
+          {/* Flow C only, and only when the operator actually itemised the
+              price. The same rows the Price chip's sheet shows — but nobody
+              who does not tap the chip ever finds that sheet, and "what am I
+              paying for" is the page's whole sales question. Five rows here,
+              the sheet for the rest. */}
+          {isOperator && hasPriceDetail ? (
+            <View style={styles.section}>
+              <SectionTitle title="What's included" />
+              <View style={styles.sheetList}>
+                {includeSections.slice(0, 5).map((sec, i) => (
+                  <View
+                    key={sec.title}
+                    style={[styles.sheetRow, i > 0 && styles.sheetRowDivider]}
+                  >
+                    <View style={styles.sheetRowIcon}>
+                      <Ionicons
+                        name={INCLUDE_ICON[sec.title] ?? 'checkmark'}
+                        size={18}
+                        color={C.inkBody}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.sheetRowTitle}>{sec.title}</Text>
+                      <Text style={styles.sheetRowItem} numberOfLines={2}>
+                        {sec.items.join(', ')}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+              {(includeSections.length > 5 || addOns.length > 0) && (
+                <TouchableOpacity
+                  onPress={() => setShowIncludes(true)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.seeMore}>See everything included</Text>
+                </TouchableOpacity>
               )}
             </View>
           ) : null}
@@ -914,86 +1012,6 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Accommodation ---- */}
-          {showAccommodation || canEditStay ? (
-            <View style={styles.section}>
-              {/* The empty-state card below is itself the "add" affordance for
-                  the host, so the header keeps just the title (Figma 13518-9184). */}
-              <SectionTitle title="Accommodation" />
-              {vm.specificStaySelected && vm.accommodationName ? (
-                <TouchableOpacity
-                  style={styles.stayCard}
-                  activeOpacity={stayUrl ? 0.85 : 1}
-                  disabled={!stayUrl}
-                  onPress={stayUrl ? () => openStayUrl(stayUrl) : undefined}
-                  accessibilityRole={stayUrl ? 'link' : undefined}
-                  accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
-                >
-                  {vm.accommodationImageUri ? (
-                    <CachedImage
-                      source={{ uri: vm.accommodationImageUri }}
-                      style={styles.stayImage}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
-                    />
-                  ) : (
-                    <View style={[styles.stayImage, styles.stayImagePlaceholder]}>
-                      <Ionicons name="image-outline" size={32} color="#B0B0B0" />
-                    </View>
-                  )}
-                  <View style={styles.stayPill}>
-                    <View style={styles.stayPillIcon}>
-                      <TripIcon name="home-03" size={24} color={ICON_INK} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.stayName} numberOfLines={1}>
-                        {vm.accommodationName}
-                      </Text>
-                      <Text style={styles.stayMeta} numberOfLines={1}>
-                        {vm.accommodationKindLabel
-                          ? `${vm.accommodationKindLabel} · Leading option`
-                          : 'Leading option'}
-                      </Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ) : (
-                // Empty state (no specific stay yet). Host (loose flow) → a big
-                // tap-to-add card; members/viewers → the same card reading
-                // "Not set yet" (Figma 13518-9184).
-                <View style={styles.stayCard}>
-                  <TouchableOpacity
-                    style={[styles.stayImage, styles.stayEmpty]}
-                    activeOpacity={canEditStay ? 0.85 : 1}
-                    disabled={!canEditStay}
-                    onPress={canEditStay ? onEditAccommodation : undefined}
-                    accessibilityRole={canEditStay ? 'button' : undefined}
-                    accessibilityLabel={canEditStay ? 'Add accommodation' : undefined}
-                  >
-                    <TripIcon name="home-03" size={30} color="#7B7B7B" />
-                    <Text style={styles.stayEmptyText}>
-                      {canEditStay ? 'Tap to add Accommodation' : 'Not set yet'}
-                    </Text>
-                  </TouchableOpacity>
-                  {vm.accommodationKindLabel ? (
-                    <View style={styles.stayPill}>
-                      <View style={styles.stayPillIcon}>
-                        <TripIcon name="home-03" size={24} color={ICON_INK} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.stayName} numberOfLines={1}>
-                          {vm.accommodationKindLabel}
-                        </Text>
-                        <Text style={styles.stayMeta} numberOfLines={1}>
-                          Leading option
-                        </Text>
-                      </View>
-                    </View>
-                  ) : null}
-                </View>
-              )}
-            </View>
-          ) : null}
         </>
       )}
 
@@ -1651,29 +1669,7 @@ const styles = StyleSheet.create({
   // Crew: a vertical list, not the horizontal avatar strip participants use.
   // There are a handful of them and the title ("Head Guide") is the point —
   // a scrolling row of faces would hide exactly the thing worth reading.
-  crewList: { gap: 12 },
-  crewRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  crewAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.avatarBg },
-  crewText: { flex: 1 },
-  // Bare fontFamily + fontWeight, matching every other style in this file
-  // rather than the ff() helper used elsewhere in the app. Mixing them here
-  // would render this one section at a different weight from the sections
-  // directly above and below it.
-  crewName: {
-    fontFamily: FONT_MONTSERRAT,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
-    color: C.ink,
-  },
-  crewTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '400',
-    color: C.textMuted,
-    marginTop: 2,
-  },
+  // Crew styles moved into CrewSection.tsx with the section itself.
   // Tappable avatar row — bleeds edge-to-edge so it scrolls to the screen edge.
   avatarScroll: {
     marginHorizontal: -16,

@@ -1,0 +1,1091 @@
+<title>Operator Trips Checklist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ground: #F5F7F6;
+    --surface: #FFFFFF;
+    --ink: #0F1E1C;
+    --muted: #5C6E6C;
+    --faint: #8A9B99;
+    --line: #DFE6E4;
+    --line-soft: #EDF1F0;
+
+    --done: #0D6A5E;
+    --done-bg: #E4F0EE;
+    --partly: #9A5E12;
+    --partly-bg: #F7EDDE;
+    --gap: #A5332B;
+    --gap-bg: #F8E6E4;
+
+    --sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    padding: 64px 0 28px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 44px);
+    letter-spacing: -0.02em;
+    line-height: 1.08;
+    text-wrap: balance;
+    margin: 0 0 14px;
+  }
+
+  .standfirst {
+    margin: 0;
+    max-width: 62ch;
+    font-size: 17px;
+    color: var(--muted);
+  }
+
+  /* ---------- totals ---------- */
+
+  .totals {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 0;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 32px;
+  }
+
+  .total {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 6px 12px 6px 10px;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border: 1px solid transparent;
+  }
+  .total b { font-size: 14px; font-variant-numeric: tabular-nums; }
+  .total.is-done   { color: var(--done);   background: var(--done-bg);   border-color: #CDE3DF; }
+  .total.is-partly { color: var(--partly); background: var(--partly-bg); border-color: #EBDBC2; }
+  .total.is-new    { color: var(--muted);  background: #EAEEED;          border-color: var(--line); }
+
+  /* ---------- callout boxes ---------- */
+
+  .box {
+    margin: 0 0 40px;
+    padding: 26px 24px 24px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+  }
+  .box.is-good { border-color: #CDE3DF; }
+  .box.is-open { border-color: #EBDBC2; }
+  .box h2 { margin-bottom: 4px; }
+  .box .lede {
+    margin: 0 0 18px;
+    color: var(--muted);
+    max-width: 64ch;
+  }
+  .box ol, .box ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+  }
+  .box ol { counter-reset: item; }
+  .box li {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 0 14px;
+  }
+  .box ol li { counter-increment: item; }
+  .box ol li::before {
+    content: counter(item);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--partly);
+    background: var(--partly-bg);
+    border-radius: 5px;
+    text-align: center;
+    padding: 3px 0;
+    height: fit-content;
+    margin-top: 2px;
+  }
+  .box ul li::before {
+    content: "—";
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--faint);
+    text-align: center;
+    margin-top: 3px;
+  }
+  .box strong {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 15px;
+    display: block;
+    margin-bottom: 3px;
+  }
+  .box p { margin: 0; color: var(--muted); font-size: 14.5px; max-width: 64ch; }
+
+  /* ---------- sections ---------- */
+
+  section { margin-bottom: 34px; }
+
+  .sec-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0 0 12px 2px;
+  }
+
+  .sec-title {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--faint);
+    letter-spacing: 0.04em;
+    flex: none;
+    padding-top: 2px;
+  }
+
+  h2 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 20px;
+    letter-spacing: -0.012em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .sec-who {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--faint);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    flex: none;
+    padding-bottom: 3px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  /* the meter: one bar, real segments */
+  .meter {
+    display: flex;
+    height: 3px;
+    background: var(--line-soft);
+  }
+  .meter i { display: block; height: 100%; }
+  .meter .m-done   { background: var(--done); }
+  .meter .m-partly { background: var(--partly); }
+
+  /* ---------- rows ---------- */
+
+  .row {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    gap: 0 16px;
+    align-items: start;
+    padding: 13px 18px;
+    border-top: 1px solid var(--line-soft);
+  }
+  .row:first-of-type { border-top: none; }
+
+  .chip {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 4px 0 3px;
+    border-radius: 5px;
+    margin-top: 2px;
+  }
+  .chip.is-done   { color: var(--done);   background: var(--done-bg); }
+  .chip.is-partly { color: var(--partly); background: var(--partly-bg); }
+
+  .what {
+    font-family: var(--sans);
+    font-weight: 500;
+    font-size: 15px;
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  /* Marks the rows that changed today, so the diff from this morning's audit
+     is readable without a second document. */
+  .built {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--done);
+    background: var(--done-bg);
+    border-radius: 4px;
+    padding: 2px 5px 1px;
+    margin-left: 8px;
+    vertical-align: 2px;
+    white-space: nowrap;
+  }
+
+  .note {
+    margin: 5px 0 0;
+    font-size: 14.5px;
+    color: var(--muted);
+    max-width: 66ch;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: #F0F3F2;
+    color: #3A4E4B;
+    padding: 1px 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  footer {
+    margin-top: 44px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.03em;
+    color: var(--faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+
+  @media (max-width: 600px) {
+    .row { grid-template-columns: 1fr; gap: 7px; padding: 14px 15px; }
+    .chip { width: 84px; margin-top: 0; }
+    .sec-who { display: none; }
+    .built { display: inline-block; margin: 4px 0 0; vertical-align: baseline; }
+  }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <p class="eyebrow">Swellyo · Group trips type C</p>
+    <h1>Operator Trips Checklist</h1>
+    <p class="standfirst">
+      Your list, checked line by line against the code on branch <code>ohad</code>.
+      Audited on the morning of 17 August, then built the same day — the
+      <span class="built">17 aug</span> tag marks every row that moved.
+    </p>
+  </div>
+
+  <div class="totals">
+    <span class="total is-done"><b>62</b> done</span>
+    <span class="total is-partly"><b>1</b> partly</span>
+    <span class="total is-new"><b>15</b> built today</span>
+  </div>
+
+  <!-- ============ STATUS ============ -->
+  <div class="box is-good">
+    <h2>Where it stands</h2>
+    <p class="lede">
+      Every gap the audit found is closed. The one migration it needed is live on prod.
+      Two things are left, and neither is code.
+    </p>
+    <ol>
+      <li>
+        <div>
+          <strong>Nothing is committed</strong>
+          <p>All of it sits uncommitted on <code>ohad</code>, as usual, for your review.
+          The spec and plan behind the work is
+          <code>docs/specs/operator-trips/staff-gaps-spec-and-plan.md</code>.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Device test pending</strong>
+          <p>Verified by type-check, test run and code reading only. The staff flows need a
+          second account on an all-dev-member trip — an operator cannot be crew on their own
+          trip, so there is no way to walk them single-handed.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+
+  <!-- ============ WHAT THE AUDIT MISSED ============ -->
+  <div class="box is-open">
+    <h2>Three things the audit did not catch</h2>
+    <p class="lede">
+      Found while building. Worth knowing, because two of them were worse than the list said.
+    </p>
+    <ul>
+      <li>
+        <div>
+          <strong>Crew had no Plan tab at all</strong>
+          <p>The audit said crew were missing a staff section. In fact
+          <code>canSeePlan</code> was <code>isHost || isApprovedMember</code>, and staff are
+          neither — so a guide opening the trip they work on saw only the public Overview.
+          Now gated on <code>roster.view</code> too.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>The Members screen was entirely host-gated</strong>
+          <p>Giving managers the pending-requests count in Plan was not enough: the screen that
+          count leads to still refused them. Join requests now go by <code>trip.edit</code> and
+          removing a traveler by <code>travelers.remove</code> — separate capabilities, the way
+          the database separates them.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>A bug introduced and fixed the same hour</strong>
+          <p>Handing staff the Plan tab also handed them a floating "Request to Join" on their
+          own trip — which the database refuses outright (staff and travelers are exclusive).
+          A button that always errors. Gated off.</p>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <!-- ============ OPERATOR SETUP ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">A</span>
+        <h2>Operator setup</h2>
+      </div>
+      <span class="sec-who">before the first trip</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Button to start the setup</p>
+          <p class="note">A banner on the Trips screen, and it also opens by itself when you try to make a type C trip.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Create a Stripe account</p>
+          <p class="note">Step 1. Full Connect onboarding, and it reads the six Stripe states back.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Currency</p>
+          <p class="note">Step 2.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Pick the refund / cancellation policy</p>
+          <p class="note">Step 3. It becomes the default for new trips, and each trip freezes its own copy at publish.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Upload the waiver</p>
+          <p class="note">Step 4.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Liability insurance</p>
+          <p class="note">Step 5. Upload, then it sits in review until someone checks it.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Sign the Swellyo agreement</p>
+          <p class="note">Step 6. Saved as a consent record.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Change any of it later<span class="built">17 aug</span></p>
+          <p class="note">A "Waiver, insurance &amp; agreement" row in Settings opens the same screen, which already
+          supported second passes — finished steps recede but stay tappable. It only ever lacked a door: the
+          banner entry disappeared the moment setup completed, so an operator whose insurance expired had
+          nowhere to replace it. Once complete the screen titles itself "Operator settings".</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CREATE A TRIP ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">B</span>
+        <h2>Create a trip</h2>
+      </div>
+      <span class="sec-who">flow C wizard</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Everything the old flow had</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Set required docs, with a deadline for each</p>
+          <p class="note">A whole step of the wizard. Each doc is either "when they join" or skippable with a deadline counted back from the start date.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Upload the waiver</p>
+          <p class="note">In the same step. Without the file the waiver requirement can never be met, so the wizard ties the two together.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Set the deposit amount</p>
+          <p class="note">On the budget step. Blank or 0 means one single payment, no deposit row.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Set the full price and the payment deadline</p>
+          <p class="note">Paid in Swellyo: the deadline is the balance row's. Paid outside: a trip column of its own.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 1.1 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">1.1</span>
+        <h2>Overview — people who did not join</h2>
+      </div>
+      <span class="sec-who">public</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Everything that was there before</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">A better designed "What's included" section<span class="built">17 aug</span></p>
+          <p class="note">It was a bottom sheet you reached by tapping the Price chip, so nobody who did not
+          tap the chip ever learned what the price covered. Now a real section on the page — five rows,
+          then "See everything included" opens the full sheet.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Show the crew — photo, name, role, short bio</p>
+          <p class="note">Only the people whose tier is marked as shown to travelers, and only after they accept.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Tap a crew card to open a sheet with more info<span class="built">17 aug</span></p>
+          <p class="note">The cards were plain views. Now pressable, opening a sheet with the photo, the role
+          and the whole bio — the card still cuts it at three lines so one chatty guide cannot bury the next person.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Move accommodation higher, give it more weight<span class="built">17 aug</span></p>
+          <p class="note">It was the last section on the page, under Wave information. Now directly below
+          "About this trip", above Surf style.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">See the members and open their profiles</p>
+          <p class="note">The avatar row is tappable, and hidden for people who joined — they get the richer Members section in Plan.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 1.2 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">1.2</span>
+        <h2>Overview — travelers and crew who joined</h2>
+      </div>
+      <span class="sec-who">members</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Same as 1.1, without the members</p>
+          <p class="note">Already hidden for anyone who has the Plan tab.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Without the staff — crew moves to Plan<span class="built">17 aug</span></p>
+          <p class="note">The crew list is now one component used in both places: Overview keeps it for people
+          still deciding, Plan gets it for everyone who joined. Same rule as the Participants row, which
+          already hid itself the same way.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 1.3 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">1.3</span>
+        <h2>Overview — operators and trip managers</h2>
+      </div>
+      <span class="sec-who">staff</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">A dedicated space for editing the trip</p>
+          <p class="note">A full edit screen: cover, name, description, dates, spots, surf level, boards, the wave,
+          age, how it works, vibe, stay, about you, price, deposit, what's included, how you get paid, visibility,
+          requirements, gear, updates.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Trip managers get the edit button too<span class="built">17 aug</span></p>
+          <p class="note">The button was gated on the operator of record, so a manager saw the traveler's
+          Overview with nothing to edit. Now on the capability. The Price section inside the screen stays
+          owner-only — the server authorises money on the owner alone, so a manager tapping it would only
+          get an error.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2.1 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">2.1</span>
+        <h2>Plan — travelers</h2>
+      </div>
+      <span class="sec-who">traveler</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Members</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Staff<span class="built">17 aug</span></p>
+          <p class="note">The crew section, between Members and Admin updates.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Admin updates — view</p>
+          <p class="note">Members see the list, with a read-only "No updates yet" when it is empty.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Personal gear</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Pay section, with a sheet to pay all or part</p>
+          <p class="note">Paid so far against the total, one Pay now button, and a sheet that takes any amount up
+          to what is left. Refunds show here too. Trips paid outside the app get a note instead of a button.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Travel wallet — passport, flights, insurance, visa, medical</p>
+          <p class="note">Every row shows its status, and you can add what is missing or replace what is there.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Open tasks</p>
+          <p class="note">Above the wallet, holding only what is still owed. When it is empty it says everything is in the wallet.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Group gear</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2.2 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">2.2</span>
+        <h2>Plan — crew members</h2>
+      </div>
+      <span class="sec-who">crew · guide</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Members, personal gear, group gear, travel wallet, open tasks<span class="built">17 aug</span></p>
+          <p class="note">These existed, but crew could not reach them: the Plan tab itself was members-only.
+          Now any staff tier with roster access gets it. Their wallet is fed from their own paperwork rows,
+          since staff have no traveler documents.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Their own paperwork — see what was asked, upload it</p>
+          <p class="note">A screen of its own, plus a card in Plan. Both appear only once the operator has
+          actually asked them for something.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Staff section<span class="built">17 aug</span></p>
+          <p class="note">Same crew section travelers get.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Admin updates — send<span class="built">17 aug</span></p>
+          <p class="note">Needed the one migration: posting was gated on "edit the trip", which the Guide tier
+          does not have — even though its own description promises updates. Giving guides the edit right
+          would have handed them the whole edit screen, so a narrow <code>updates.send</code> capability was
+          added instead. Applied to prod. Guides edit their own updates, never the operator's.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">See the group's surf and travel numbers<span class="built">17 aug</span></p>
+          <p class="note">Those numbers lived only inside the Dashboard, which crew never got. The Dashboard
+          now opens per capability, so a guide gets a one-card version: the group's stats and nothing else.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2.3 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">2.3</span>
+        <h2>Dashboard — trip managers</h2>
+      </div>
+      <span class="sec-who">manager</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">The whole space<span class="built">17 aug</span></p>
+          <p class="note">Everything on this list already existed and worked — for the operator. The tab simply
+          appeared only for a host, and a manager is a staff row, not a participant. Each card now gates on its
+          own capability: money and payment rows on payment status, the review queue on documents, medical on
+          medical, stats on stats. A manager gets the working dashboard minus anything that moves money.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">The permission tiers are connected to the screens<span class="built">17 aug</span></p>
+          <p class="note">This was the root of five of the ten gaps. The five tiers were real in the database,
+          the operator could already assign them, and the hook that asks "can I?" was written, tested and
+          called by nothing — every gate in the app was still "am I the host?". It is wired now, in the trip
+          screen, the dashboard, the review screen, the members screen and the edit screen.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2.4 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">2.4</span>
+        <h2>Dashboard — trip operators</h2>
+      </div>
+      <span class="sec-who">operator of record</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:95%"></i><i class="m-partly" style="width:5%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">See members and see staff</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Add a crew member who is not in the app</p>
+          <p class="note">Name, photo, role from a profession list, description. No account needed.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Add a crew member who is in the app</p>
+          <p class="note">Search a user, set the tier, write the description, pick the docs to ask them for,
+          send the invite. There is also a share link for people you cannot find by search.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Edit or remove an existing crew member</p>
+          <p class="note">Name, photo and description on every row. Tier changes only for people with an account.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Open a crew member's card — approve or reject their docs<span class="built">17 aug</span></p>
+          <p class="note">You could ask crew for documents and they could upload them, but only the desktop
+          dashboard could look at what arrived. A "Received" list now sits under the paperwork checklist in
+          each crew member's screen; tapping a file opens the same viewer travelers get, with Approve and
+          Ask again.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Admin updates — send and view</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Personal gear, group gear, packing suggestions</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Travel wallet — same as the traveler's</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">No open tasks</p>
+          <p class="note">Right already. The tasks card is hidden for anyone who has the Dashboard.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">See the group's surf and travel numbers</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Trip summary — payments and travelers</p>
+          <p class="note">A money card with the total, what has been paid and what is left, plus a row per traveler.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Documents page — view, approve, reject</p>
+          <p class="note">A review queue, openable from a single doc, a single traveler, or the whole waiting list.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Join requests — approve and reject</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Open a traveler — their docs, their profile, their payment status</p>
+          <p class="note">The review screen carries all three, plus their medical answers and their flights.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Refund a traveler</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Change the price for one traveler only</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Remove someone from the trip</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Edit the required docs — visa and the rest</p>
+          <p class="note">A manage sheet that adds, removes and re-dates requirements after the trip is published.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Edit payments — price for everyone, deposit, both deadlines</p>
+          <p class="note">Price and deposit in the Price section of the edit screen; the two deadlines next to the
+          other requirement deadlines. Per-traveler price is a separate sheet, listed above.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-partly">partly</span>
+        <div>
+          <p class="what">Open a crew member's surf-traveler profile</p>
+          <p class="note">The sheet shows their crew card — photo, role, full bio. Opening their real Swellyo
+          profile still needs one field: the staff row carries their account id, but the query that feeds the
+          crew list does not return it, so there is nothing to push a profile with. One field and one tap handler.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">
+        <span class="sec-num">3</span>
+        <h2>Traveler onboarding</h2>
+      </div>
+      <span class="sec-who">joining a trip</span>
+    </div>
+    <div class="card">
+      <div class="meter"><i class="m-done" style="width:100%"></i></div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Pay the deposit or the full amount, and sign the cancellation policy</p>
+          <p class="note">The policy is frozen on the trip when it is published, so it cannot change under
+          someone who already agreed.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Sign the waiver</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div><p class="what">Fill in the medical statement</p></div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Insurance, passport, flights, visa — each with a Skip</p>
+          <p class="note">Required steps come first, skippable ones after. The end screen counts what is left
+          and drops it into Open tasks in Plan.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Only what applies</p>
+          <p class="note">The steps are built from the trip's own requirement rows, so a trip that asks for
+          nothing shows nothing.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OUT OF SCOPE ============ -->
+  <div class="box is-open">
+    <h2>Deliberately not done</h2>
+    <p class="lede">
+      None of these was on your list. They are either known gaps from the staff spec or a
+      second pass — worth a decision, not a surprise.
+    </p>
+    <ul>
+      <li>
+        <div>
+          <strong>Staff get no notifications</strong>
+          <p>The fan-out builds its admin list from participants with the host role and does not know the
+          staff table exists. An invited guide is never told, and a manager misses every document and payment
+          notification. Its own piece of work.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Staff are not in the group chat</strong>
+          <p>The chat capability is granted by the Guide and Manager tiers and wired to nothing — a guide needs
+          a conversation membership, which is a separate permission system. So the chat button stays host and
+          member only, on purpose: a button that errors is worse than no button.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Inviting travelers is still host-only</strong>
+          <p>A manager reviews join requests and removes people, but does not invite. Not asked for — say the
+          word and it is one gate.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>The web operator dashboard is untouched</strong>
+          <p>Its Crew page already did the document review the app just gained. Nothing there regressed, and
+          nothing there gained the new capabilities either.</p>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+  <footer>
+    <span>Branch ohad · uncommitted</span>
+    <span>Audited and built 17 August 2026</span>
+    <span>63 items</span>
+    <span>Migration applied to prod</span>
+  </footer>
+
+</div>
