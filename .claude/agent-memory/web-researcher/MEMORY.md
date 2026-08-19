@@ -1,106 +1,108 @@
 # Web Researcher Agent Memory
 
-- [User Blocking System Research](research_user_blocking.md) — DB schema, WhatsApp/Instagram/Mastodon UX, Apple 1.2, Supabase RLS
-- [Apple Sign In — Expo + Supabase](research_apple_sign_in.md) — Dev Console setup, Supabase config, native vs OAuth, iOS/Android/web diffs
-- [Expo Push Notifications + Supabase](research_push_notifications.md) — SDK 54 setup, token storage, FCM v1, APNs via EAS, DM trigger, foreground suppression
-- [RNGH Custom Slider Thumb Jump Bug](research_rngh_custom_slider.md) — use event.x + onLayout, not startX + translationX
-- [expo-image-picker Android allowsEditing](research_expo_image_picker_android.md) — crop overlay invisible on Android; config plugin/Platform gate/expo-image-manipulator workarounds
-- [Android Keyboard Handling — Chat Apps + Expo SDK 54](research_android_keyboard_chat.md) — adjustResize+edgeToEdge broken Android 15+; use react-native-keyboard-controller
-- [Photo/Media Permissions — iOS & Android Store Requirements](research_photo_permissions.md) — NSPhotoLibraryUsageDescription, Play May-2025 enforcement, permission primer UX
-- [Age Gate + DOB Onboarding — Industry Patterns](research_age_gate_dob_onboarding.md) — ask once, lock field, underage=terminate; Tinder/Bumble/Hinge pattern
-- [Force LTR Layout — React Native / Expo](research_force_ltr.md) — JS + native MainApplication.kt + AndroidManifest supportsRtl=false + iOS AppDelegate
-- [Bottom Safe Area Insets — Android](research_bottom_safe_area_android.md) — SafeAreaView vs hook, double-padding, Android 15 bottom=0 bug
-- [Android Edge-to-Edge — Expo SDK 54](research_android_edge_to_edge.md) — default on, mandatory Android 16+; useSafeAreaInsets; Modal nav bar bug
-- [Android Nav Bar Insets — Full Guide](research_android_nav_bar_insets.md) — 3-button/2-button/gesture heights, double-padding bug, bottom=0 fix (RNSC 5.2+)
-- [Google Sign-In Account Picker — react-native-google-signin](research_google_signin_account_picker.md) — force picker via signOut+signIn, Supabase session gotcha, v13+ API
-- [expo-video v2 Performance & Preloading](research_expo_video_performance.md) — createVideoPlayer pool+replace() for Android decoder reuse, bufferOptions, black-screen bug
-- [EAS App Variants — app.json vs app.config.js + APP_VARIANT](research_eas_app_variants.md) — plain object silently ignores app.json; function form required
-- [AGP "No Variants Exist" — Expo SDK 54 / RN 0.81](research_agp_no_variants_expo54.md) — patch-package removes stale buildscript blocks; root resolutionStrategy unreliable
-- [EAS Dev Build — Google OAuth + Maps SHA-1](research_eas_dev_build_google_sha1.md) — dev build uses different keystore/SHA-1; register in GCC; google-services.json must match
-- [EAS Build — .env Files, Gitignore, and EAS Secrets](research_eas_env_variables.md) — gitignored .env not uploaded; EXPO_PUBLIC_ needs plain/sensitive visibility
-- [EXPO_PUBLIC Env Vars — Dev Client vs EAS Build](research_expo_public_env_dev_client.md) — dev client bundle served over network; local .env picked up by Metro at start
-- [RNKC Chat Keyboard Sync — iMessage Recipe](research_rnkc_chat_keyboard_sync.md) — KeyboardChatScrollView v1.21+ (project has v1.18.5); official KGestureArea+KStickyView pattern
-- [Profile Image Upload — Expo + Supabase](research_profile_image_upload.md) — Supabase transforms paid-only; client-side expo-image-manipulator 1024px/q0.75 correct
-- [Client-Side Video Trimming — Expo SDK 54](research_video_trimming.md) — react-native-video-trim v7.1 active; ffmpeg-kit retired; no web support
-- [Google Play Icon Requirements — Full Spec](research_google_play_icon_requirements.md) — hi-res 512×512, adaptive safe zone, monochrome, roundIcon deprecation
-- [RNGH Pan vs ScrollView Vertical Scroll Conflict](research_rngh_pan_scrollview_conflict.md) — failOffsetY [-40,40] + simultaneousWithExternalGesture; blocksExternalGesture unreliable
-- [Swipe-Back vs ScrollView Coexistence — iOS + RNGH](research_swipe_back_scrollview_coexistence.md) — WhatsApp=edge-only, Telegram=ratio check; fix=simultaneousWithExternalGesture+failOffsetY[-40,40]
-- [Push Notification Failure Modes — Expo + Supabase](research_push_notification_failure_modes.md) — token staleness, APNs env, Android channel bug #30762, SDK54 bridgeless silent-push bug
-- [react-native-image-crop-picker — openCropper Modal Stacking](research_rnimage_crop_picker_modal.md) — stacked iOS modal=VC crash; keep Modal mounted not unmounted; 500ms delay
-- [WhatsApp Send Animation — RN Reanimated v3](research_whatsapp_send_animation.md) — FadeInUp.duration(200) new bubble only; SlideInDown+inverted=broken
-- [Interactive Keyboard Dismiss Android — KeyboardGestureArea](research_interactive_keyboard_dismiss_android.md) — Android-only(>=11); interpolator "linear"=whole-list drag (WhatsApp-style, correct choice)
-- [Layered Overlay Pattern — Profile over Chat](research_layered_overlay_pattern.md) — absoluteFill sibling order, display:none vs unmount, transparentModal Android bug
-- [Chat Bubble Inline Timestamp Layout](research_chat_bubble_timestamp_layout.md) — float-right-in-block via invisible spacer nested Text + absoluteFill overlay
-- [Google Places Display Fields — Short Names](research_google_places_display_fields.md) — structured_formatting.main_text+secondary_text cleanest for autocomplete
-- [Google Places API — Response Fields, Storage, Session Tokens](research_google_places_api.md) — full field list, place_id 12mo refresh, session token billing rules
-- [Google Places Autocomplete — Library, API Keys, Pricing](research_google_places_autocomplete.md) — raw fetch>library for Expo; CORS needs proxy; session tokens=free autocomplete
-- [expo-updates EAS Update — Add to Existing Production App](research_expo_updates_eas.md) — new binary required; eas update:configure auto-adds url+channel; appVersion policy
-- [expo-updates Production Pitfalls — Full Brief](research_expo_updates_production.md) — fingerprint AAB bug SDK54 (#41694); env vars baked from local .env; rollback via eas update:rollback
-- [Drag-to-Reorder — Reanimated v3 + Gesture Handler v2](research_drag_reorder_reanimated.md) — absolute position+positions map; snap-back fix set top.value directly in onFinish
-- [Swipe-to-Reply Gesture — WhatsApp style](research_swipe_to_reply_gesture.md) — ReanimatedSwipeable, gestureActivationArea:"edge", threshold 70-75pt, progress SharedValue
-- [Camera/Photo Capture Library — Expo SDK 54](research_camera_photo_capture.md) — expo-image-picker correct for chat (Expo Go+web); VisionCamera v5=no Expo Go/web
-- [expo-image-picker Camera Risk Audit — v17 SDK 54](research_expo_image_picker_camera_risk_audit.md) — Android mixed mediaTypes=IMAGE_CAPTURE only; HEIC mimeType lie; #39480 open bug
-- [Create-Trip Wizard — 14 Component UX Research](research_create_trip_component_ux.md) — full UX patterns for CreateTripFlowA/C inputs
-- [Wizard UX — Create Group Surf Trip (5-step)](research_wizard_ux.md) — bar+fraction indicator, sticky footer nav, on-blur validation, keyboard-controller footer
-- [Mobile Agent Simulator Testing — May 2026](research_mobile_agent_sim_testing.md) — expo-mcp+ios-simulator-mcp+Maestro MCP; WDA Xcode26 bug; hybrid selector+screenshot consensus
-- [Stripe Marketplace Fee Structure — Swellyo](research_stripe_marketplace_fee_structure.md) — 12% host commission, Swellyo absorbs card fee, ACH saves ~$38/trip
-- [Stripe Connect Hidden Costs — Marketplace](research_stripe_connect_hidden_costs.md) — FX surcharges, Israeli payout via Wise not Stripe, chargeback 2-tier fees, ~$1.2-1.4k/mo bleed
-- [Stripe Connect Setup — Express/Custom/v2, Israel, Chargebacks](research_stripe_connect_setup.md) — Express v1 now; IL supported; destination charges for MoR; manual payout schedule
-- [Swellyo Compliance Brief — Pre-launch](research_swellyo_compliance.md) — MTL safe, 1099-K $20k/200tx, Israeli W-8BEN+1042-S, EU SCA auto, privacy/ToS=BLOCKERS
-- [WeTravel Hidden Margins + PayFac Economics](research_wetravel_pricing.md) — card spread+float=$36-50M/yr (can't replicate); Pro $79/mo; what's copyable on Connect
-- [Error Monitoring + Alerting — Sentry vs PostHog vs custom](research_error_monitoring.md) — Sentry Team $26/mo Slack; PostHog 100k free but no native crashes; Log Drain $60/mo
-- [Supabase Error Alerting — Layer-by-Layer Feasibility](research_supabase_error_alerting.md) — no single switch; Log Drains closest to catch-all; PostgREST/Auth/Storage no native hooks
-- [Observability + Monitoring Full Stack — 2026](research_observability_monitoring.md) — Sentry free 5k/Team $26; Crashlytics free+EAS; recommended $0 stack; PostHog RN crash bug
-- [Supabase Realtime Scaling — in filter, channel limits, CHANNEL_ERROR, broadcast_changes](research_supabase_realtime_scaling.md) — in() max 100 UUIDs, 100 channels/connection limit, broadcast_changes=scale path
-- [TanStack Query v5 — React Native / Expo 54 / React 19](research_tanstack_query_v5_rn.md) — compat confirmed, focusManager+AppState required, staleTime=0 causes refetch storm
-- [KeyboardAwareScrollView — Form + Floating Footer Guide](research_keyboard_aware_scroll_view_form.md) — mode="insets" vs "layout", bottomOffset math, v1.18.5 upgrade note
-- [Timezone-Aware Push Notifications — Industry Patterns](research_timezone_push_notifications.md) — IANA storage, hourly-bucket vs precomputed-UTC, quiet hours 8am-9pm, DST pitfalls
-- [Netlify Agent Auto-Deploy — Prompt to Live URL](research_netlify_agent_autodeploy.md) — headless CLI, PAT auth, direct --dir deploy, env var bake-in risk
-- [Claude Skills — Planning + UX/UI Design (fast-urls)](research_claude_skills_planning_uxui.md) — obra/superpowers brainstorming skill + Anthropic frontend-design; how to adapt both
-- [Carousel Jank — JS-thread scrollX vs useNativeDriver + BlurView in animated cards](research_carousel_jank_native_driver_blur.md) — fix=Animated.event+useNativeDriver:true+throttle=1; BlurView=GPU cost
-- [Unsplash API — Trip Cover Picker Legal + Technical Guide](research_unsplash_api.md) — legal+free; hotlink only, trigger download_location, attribution everywhere
-- [Supabase Storage Image Caching — Full Guide](research_supabase_image_caching.md) — /object/public/ default no-cache; ?t=updated_at param=correct staleness fix
-- [Deep Stack Navigation Architecture — react-navigation native-stack](research_navigation_stack_architecture.md) — native mechanism, 10+ deep fine, transparentModal for panels, 5-phase migration
-- [Canonical Nav Architecture — Tabs + Stacks + Sheets (v7 full)](research_nav_canonical_architecture.md) — tabs-inside-root-stack pattern, per-tab stacks, SharedValue scroll-hide tab bar
-- [Platform Navigation Conventions — iOS + Android](research_nav_platform_conventions.md) — per-tab stack preservation, re-tap=pop+scroll-top, Android back=pop not switch tab
-- [Keep-Alive Screens + Realtime State in Native-Stack](research_nav_keepalive_realtime.md) — state/scroll survive stack push; freezeOnBlur only freezes renders not websockets
-- [Open-Source RN App Nav — Bluesky + Expensify](research_nav_opensource_apps.md) — per-tab stacks+commonScreens(); Composer=state overlay not stack screen
-- [Nav Migration War Stories — boolean-flag to react-navigation](research_nav_migration_warstories.md) — incremental-root-first wins; atomic flag switch=state corruption; red flags list
-- [Realtime Subscription + Card-Stack Nav Pattern](research_realtime_subscription_focus_pattern.md) — useFocusEffect=official pattern; freezeOnBlur halts rendering not websockets
-- [Perceived-Instant Feed Prefetch — TanStack Query v5 + Supabase](research_perceived_instant_feed_prefetch.md) — prefetchQuery vs ensureQueryData, depth=5 items on 4G, staleTime pitfall
-- [Chat Long List Memory — FlatList tuning, FlashList v2, sliding-window cap](research_chat_long_list_memory.md) — windowSize 7/maxToRenderPerBatch 15; removeClippedSubviews=no memory savings; cap 200-300 msgs
-- [Crash Isolation + Error Boundaries — React Native / Chat Screens](research_error_boundary_crash_isolation.md) — 3-layer: Zod parse + screen boundary resetKeys + per-item fallback
-- [Read Receipts — Industry Patterns (WhatsApp/Telegram/Slack/Signal)](research_read_receipts_patterns.md) — watermark not per-message; instant Broadcast+deferred DB write
-- [Typing Indicators — Group Chat Engineering](research_typing_indicators.md) — XEP-0085 edge-triggered; WhatsApp 3s keepalive+5s stop; Broadcast not Presence
-- [WhatsApp Photo Send Failure UX](research_whatsapp_photo_send_failure_ux.md) — sender states, thumbnail preserved on fail, upload-first architecture
-- [PayPro Global — Marketplace Fit Evaluation](research_paypro_global.md) — hard no: SaaS-only MoR, no marketplace split-payout, no travel/physical
-- [Smaller Israeli Payment Gateways — Marketplace Research](research_il_payment_gateways_smaller.md) — 12 providers: Grow/Meshulam, Z-Credit, PayMe, HYP, YaadPay, etc — split-payout/tashlumim/Bit
-- [Supabase Image Transform Billing + Replacement Patterns](research_supabase_image_transform_billing.md) — meter=unique origin images; client-side thumb at upload recommended; wsrv.nl fallback
-- [ImageScript EXIF + magick-wasm autoOrient — Supabase Edge](research_imagescript_exif_orientation.md) — ImageScript no EXIF support; magick-wasm autoOrient() handles all 8 orientations
-- [EAS Build ASC API Key — iOS Credentials + Extension Targets](research_eas_build_asc_api_key_credentials.md) — env var names, non-interactive limits, Admin role required
-- [Smooth Tab Bar — Reanimated 3 + React Navigation v7](research_smooth_tab_bar_reanimated.md) — translateX pill not width, lazy=false, New Arch jank regression SDK 54
-- [Tab Bar Interruptible Animation — Rapid Tap Pattern](research_tab_bar_interruptible_animation.md) — useAnimatedStyle withSpring reactive pattern vs event-handler bug #2733
-- [Native Tab Animation Smoothness — iOS/Android Engineering Principles](research_native_tab_animation_smoothness.md) — render server out-of-process CAAnimation, Android Baseline Profiles
-- [Instagram Tab Bar Architecture — Native vs React Native](research_instagram_tab_bar_architecture.md) — native shell (IGTabBarController), RN=embedded screens only, UITabBarController keep-alive
-- [react-native-bottom-tabs — Full Prop-by-Prop API Reference](research_rnbt_native_bottom_tabs.md) — icon/color/label props, bar shape limits, iOS 26 bugs #439/#505, Expo dev-build setup
-- [Instagram Liquid Glass Rollback + iOS 26 Tab Bar Ecosystem](research_instagram_liquid_glass_rollback.md) — IG adopted then reverted LG; native tab bg not overridable; brand-heavy apps use custom JS bar
-- [Expo SDK 55 Upgrade — Effort, Risk, minimizeBehavior](research_sdk55_upgrade.md) — RN 0.83; main risk=Reanimated v3→v4+Gradle overhaul; minimizeBehavior blocked by #4145
-- [Jumbo Emoji Chat — Trigger, Sizing, Bubble, Hermes Detection](research_jumbo_emoji_chat.md) — max 3 emoji triggers jumbo; use unicode-segmenter (Hermes-safe); avoid \p{Emoji}
-- [RNKC Android Edge-to-Edge + Interactive Dismiss Known Issues](research_rnkc_android_edge_to_edge_interactive_dismiss.md) — Discussion #984 nav-bar-gap fixed in 1.21.5 (v1.18.5 predates fix); navigationBarTranslucent workaround
-- [Instagram Stories Share — Mechanism, Link Sticker Verdict, RN Library](research_instagram_stories_share.md) — pasteboard/intent mechanism unchanged, link sticker NOT scriptable (manual paste only), react-native-share still best lib
-- [World Surfaris — Competitor Profile](research_world_surfaris_competitor.md) — AU surf travel agency (1997), consultant-led not self-serve, $2.5k–$20k+/person, boats+resorts (owns nothing), no instant booking, commission-from-operators model
-- [Chat Scroll-to-Bottom on Notification Open](research_chat_scroll_to_bottom_notification.md) — inverted FlatList=flipped-tableview pattern; Swellyo's isNearBottomRef default-true + dedupe already correct, no fix needed
-- [Notification Cold-Start Navigation — RNav v7 + expo-notifications](research_notification_coldstart_navigation.md) — linking-prop pattern vs queue; found exact bug: pushRootCard silently drops if !isReady(), DM path never migrated to pushRootCard unlike trip notifications
-- [Wide/tall image bubble aspect ratio](research_wide_image_bubble_aspect_ratio.md) — no official WhatsApp numbers exist; WA/Messenger/iMessage all center-crop("cover") extremes; Messenger CSS=480x200px max box is best hard number found
-- [WhatsApp Failed/Pending Text Message UX — Full Spec](research_whatsapp_failed_pending_message_ux.md) — clock/tick states, auto-retry-on-reconnect vs manual-retry-on-failure, ordering/timestamp rules, RN temp-id+NetInfo+persisted-queue pattern; Signal/iMessage/Telegram compared
-- [iOS Current Keyboard Language/Direction — native module](research_ios_current_keyboard_language_direction.md) — UITextInputMode.current Swift-unavailable; read first responder's textInputMode, async for timing, skip emoji/dictation
-- [In-App Office Doc Rendering — docx/xlsx/pptx from local file](research_office_doc_inapp_rendering.md) — iOS QuickLook renders all offline (fullscreen Apple chrome); Android has NO native Office renderer; mammoth/SheetJS WebView=glance-only
-- [Rich Push Notifications — WhatsApp Parity (text/image/audio)](research_rich_push_notifications_whatsapp_parity.md) — long text=free both platforms; image=richContent.image free Android, needs iOS NSE+EAS native build; inline audio=MediaStyle+fg-service (Android) or 2nd extension UNNotificationContentExtension w/ single mediaPlay button (iOS), biggest lift
-- [Free Fake Chat/Text-Message Video Generators — 2026](research_fake_chat_video_generators.md) — TypeMagic/Chat-Animator.net/TextingStory top 3; Kapwing free tier unusable; chat-animator.com domain squatted
-- [WeTravel Integration Mechanics — API/Widget/Deep-Link](research_wetravel_integration.md) — no multi-tenant partner API (unlike Stripe Connect); API=per-operator Pro-plan+manual key; deep-link=simplest v1
-- [Remotion Kinetic Typography — Hook Video Best Practices](research_remotion_kinetic_typography.md) — Archivo Black/Montserrat Black, spring damping 12-15/stiffness 150-200, 105-135 frames@30fps, teal on-trend 2026, grain+Ken Burns yes/typewriter+screen-shake-per-word no
-- [Alarm Capabilities — iOS AlarmKit + Android AlarmManager 2026](research_alarm_capabilities_ios_android.md) — AlarmKit iOS26+ entitlement+approval, breaks silent/DND; Android USAGE_ALARM+SCHEDULE_EXACT_ALARM+BOOT_COMPLETED; ACTION_SET_ALARM can't be cancelled; Notifee not expo-notifications for Android
-- [Splitwise Third-Party Integration — API Status, Alternatives](research_splitwise_integration.md) — self-serve API open but ToS bans commercial use, no deep-link/embed exists, recommend build-your-own debt-simplification (Spliit as reference)
-- [WhatsApp Video Compression + Upload — Full Technical Brief](research_whatsapp_video_compression_upload.md) — HD toggle 480p/720p, single-pass client H.264 (double-compression claim unverified/likely myth), Signal-Android as RN implementation proxy
-- [iOS 26 Tab Bar SF Symbol Fill Morph — Mechanism](research_ios26_tabbar_sfsymbol_fill_morph.md) — auto fill since iOS15 (not 26-new), Magic Replace needs 1 symbol w/ baked fill (not 2 icons), no native drag-scrub, react-native-bottom-tabs DISABLES morph via noneSymbolVariant()
-- [Custom SF Symbol .symbolset Raw File Format](research_sfsymbol_symbolset_raw_format.md) — exact Contents.json (verified from real repo), SVG Notes/Guides/Symbols structure, Regular-M-only minimum, strokes NOT allowed, name+name.fill auto-resolves (Apple docs confirmed)
+- [User Blocking](research_user_blocking.md) — DB schema, WhatsApp/IG/Mastodon UX, Apple 1.2, RLS
+- [Apple Sign In](research_apple_sign_in.md) — Expo+Supabase setup, native vs OAuth, iOS/Android/web diffs
+- [Expo Push Notifications](research_push_notifications.md) — SDK54 setup, token storage, FCM v1, APNs/EAS
+- [RNGH Custom Slider Thumb Jump](research_rngh_custom_slider.md) — use event.x+onLayout, not startX+translationX
+- [expo-image-picker Android allowsEditing](research_expo_image_picker_android.md) — crop overlay invisible Android; workarounds
+- [Android Keyboard — Chat + SDK54](research_android_keyboard_chat.md) — adjustResize+edge-to-edge broken 15+; use rn-keyboard-controller
+- [Photo/Media Permissions — Store Reqs](research_photo_permissions.md) — NSPhotoLibraryUsageDescription, Play May-2025, primer UX
+- [Age Gate + DOB Onboarding](research_age_gate_dob_onboarding.md) — ask once, lock field, underage=terminate; Tinder pattern
+- [Force LTR Layout](research_force_ltr.md) — JS+MainApplication.kt+supportsRtl=false+iOS AppDelegate
+- [Bottom Safe Area Insets — Android](research_bottom_safe_area_android.md) — SafeAreaView vs hook, double-padding, A15 bug
+- [Android Edge-to-Edge — SDK54](research_android_edge_to_edge.md) — default on, mandatory A16+; useSafeAreaInsets; Modal bug
+- [Android Nav Bar Insets — Full Guide](research_android_nav_bar_insets.md) — 3/2-button/gesture heights, bottom=0 fix (RNSC 5.2+)
+- [Google Sign-In Account Picker](research_google_signin_account_picker.md) — force via signOut+signIn, Supabase session gotcha
+- [expo-video v2 Perf & Preload](research_expo_video_performance.md) — createVideoPlayer pool+replace(), bufferOptions, black-screen bug
+- [EAS App Variants](research_eas_app_variants.md) — plain object silently ignores app.json; need function form
+- [AGP "No Variants Exist" — SDK54/RN0.81](research_agp_no_variants_expo54.md) — patch-package removes stale buildscript blocks
+- [EAS Dev Build — Google OAuth+Maps SHA-1](research_eas_dev_build_google_sha1.md) — different keystore/SHA-1; register in GCC
+- [EAS Build — .env/Gitignore/Secrets](research_eas_env_variables.md) — gitignored .env not uploaded; EXPO_PUBLIC_ visibility
+- [EXPO_PUBLIC Env — Dev Client vs EAS](research_expo_public_env_dev_client.md) — dev client bundle over network; Metro picks up local .env
+- [RNKC Chat Keyboard Sync](research_rnkc_chat_keyboard_sync.md) — KeyboardChatScrollView v1.21+ (we have 1.18.5); KGestureArea+KStickyView
+- [Profile Image Upload](research_profile_image_upload.md) — Supabase transforms paid-only; client expo-image-manipulator 1024px/q.75
+- [Client Video Trimming — SDK54](research_video_trimming.md) — react-native-video-trim v7.1 active; ffmpeg-kit retired; no web
+- [Google Play Icon Requirements](research_google_play_icon_requirements.md) — hi-res 512, adaptive safe zone, monochrome, roundIcon deprecated
+- [RNGH Pan vs ScrollView Conflict](research_rngh_pan_scrollview_conflict.md) — failOffsetY[-40,40]+simultaneousWithExternalGesture
+- [Swipe-Back vs ScrollView — iOS+RNGH](research_swipe_back_scrollview_coexistence.md) — WA=edge-only, TG=ratio check; same fix as above
+- [Push Failure Modes](research_push_notification_failure_modes.md) — token staleness, APNs env, Android #30762, SDK54 bridgeless bug
+- [react-native-image-crop-picker Modal Stacking](research_rnimage_crop_picker_modal.md) — stacked iOS modal=VC crash; keep mounted, 500ms delay
+- [WhatsApp Send Animation — Reanimated v3](research_whatsapp_send_animation.md) — FadeInUp.duration(200) new bubble only; SlideInDown+inverted broken
+- [Interactive Keyboard Dismiss Android](research_interactive_keyboard_dismiss_android.md) — A11+; interpolator "linear"=whole-list drag (correct)
+- [Layered Overlay — Profile over Chat](research_layered_overlay_pattern.md) — absoluteFill sibling order, display:none vs unmount, Android bug
+- [Chat Bubble Inline Timestamp](research_chat_bubble_timestamp_layout.md) — float-right via invisible spacer nested Text+absoluteFill
+- [Google Places Display Fields](research_google_places_display_fields.md) — structured_formatting.main/secondary_text cleanest
+- [Google Places API — Fields/Storage/Tokens](research_google_places_api.md) — full fields, place_id 12mo refresh, session token billing
+- [Google Places Autocomplete — Lib/Keys/Pricing](research_google_places_autocomplete.md) — raw fetch>lib for Expo; CORS needs proxy
+- [expo-updates EAS Update — Add to Existing App](research_expo_updates_eas.md) — new binary required; update:configure auto-adds url+channel
+- [expo-updates Production Pitfalls](research_expo_updates_production.md) — fingerprint AAB bug (#41694); env baked from local .env
+- [Drag-to-Reorder — Reanimated v3+GH v2](research_drag_reorder_reanimated.md) — absolute position+positions map; snap-back in onFinish
+- [Swipe-to-Reply — WhatsApp style](research_swipe_to_reply_gesture.md) — ReanimatedSwipeable, activationArea:"edge", threshold 70-75pt
+- [Camera/Photo Capture Lib — SDK54](research_camera_photo_capture.md) — expo-image-picker correct (Expo Go+web); VisionCamera v5 no Go/web
+- [expo-image-picker Camera Risk Audit v17](research_expo_image_picker_camera_risk_audit.md) — Android mixed mediaTypes=IMAGE_CAPTURE only; #39480
+- [Create-Trip Wizard — 14 Component UX](research_create_trip_component_ux.md) — UX patterns for CreateTripFlowA/C inputs
+- [Wizard UX — Group Surf Trip (5-step)](research_wizard_ux.md) — bar+fraction indicator, sticky footer, on-blur validation
+- [Mobile Agent Sim Testing — May 2026](research_mobile_agent_sim_testing.md) — expo-mcp+ios-sim-mcp+Maestro MCP; WDA Xcode26 bug
+- [Stripe Marketplace Fee Structure](research_stripe_marketplace_fee_structure.md) — 12% host commission, Swellyo absorbs card fee
+- [Stripe Connect Hidden Costs](research_stripe_connect_hidden_costs.md) — FX surcharges, Israeli payout via Wise, ~$1.2-1.4k/mo bleed
+- [Stripe Connect Setup — Express/Custom/v2/IL](research_stripe_connect_setup.md) — Express v1 now; IL supported; dest charges for MoR
+- [Swellyo Compliance Brief](research_swellyo_compliance.md) — MTL safe, 1099-K $20k/200tx, W-8BEN+1042-S, privacy/ToS=BLOCKERS
+- [WeTravel Hidden Margins + PayFac Econ](research_wetravel_pricing.md) — card spread+float=$36-50M/yr; Pro $79/mo
+- [Error Monitoring — Sentry vs PostHog vs custom](research_error_monitoring.md) — Sentry Team $26/mo Slack; PostHog no native crashes
+- [Supabase Error Alerting — Feasibility](research_supabase_error_alerting.md) — no single switch; Log Drains closest to catch-all
+- [Observability Full Stack — 2026](research_observability_monitoring.md) — Sentry free 5k/Team $26; Crashlytics free+EAS
+- [Supabase Realtime Scaling](research_supabase_realtime_scaling.md) — in() max 100 UUIDs, 100 channels/conn, broadcast_changes=scale path
+- [TanStack Query v5 — RN/Expo54/React19](research_tanstack_query_v5_rn.md) — compat confirmed, focusManager+AppState required
+- [KeyboardAwareScrollView — Form+Footer](research_keyboard_aware_scroll_view_form.md) — mode insets vs layout, bottomOffset math
+- [Timezone-Aware Push](research_timezone_push_notifications.md) — IANA storage, hourly-bucket vs precomputed-UTC, DST pitfalls
+- [Netlify Agent Auto-Deploy](research_netlify_agent_autodeploy.md) — headless CLI, PAT auth, direct --dir deploy, env bake-in risk
+- [Claude Skills — Planning+UX/UI](research_claude_skills_planning_uxui.md) — obra/superpowers brainstorming + Anthropic frontend-design
+- [Carousel Jank — JS scrollX vs native driver+Blur](research_carousel_jank_native_driver_blur.md) — Animated.event+useNativeDriver+throttle=1
+- [Unsplash API — Trip Cover Picker](research_unsplash_api.md) — legal+free; hotlink only, trigger download_location, attribution
+- [Supabase Storage Image Caching](research_supabase_image_caching.md) — /object/public/ default no-cache; ?t=updated_at fix
+- [Deep Stack Nav Architecture](research_navigation_stack_architecture.md) — native mechanism, 10+ deep fine, transparentModal for panels
+- [Canonical Nav — Tabs+Stacks+Sheets (v7)](research_nav_canonical_architecture.md) — tabs-inside-root-stack, per-tab stacks
+- [Platform Nav Conventions — iOS+Android](research_nav_platform_conventions.md) — per-tab preservation, re-tap=pop+scroll-top
+- [Keep-Alive Screens + Realtime — Native-Stack](research_nav_keepalive_realtime.md) — state/scroll survive push; freezeOnBlur=renders only
+- [Open-Source RN Nav — Bluesky+Expensify](research_nav_opensource_apps.md) — per-tab stacks+commonScreens(); Composer=state overlay
+- [Nav Migration War Stories](research_nav_migration_warstories.md) — incremental-root-first wins; atomic flag switch=corruption
+- [Realtime Sub + Card-Stack Nav](research_realtime_subscription_focus_pattern.md) — useFocusEffect official; freezeOnBlur≠websockets
+- [Perceived-Instant Feed Prefetch](research_perceived_instant_feed_prefetch.md) — prefetchQuery vs ensureQueryData, staleTime pitfall
+- [Chat Long List Memory](research_chat_long_list_memory.md) — windowSize 7/batch 15; removeClippedSubviews no savings; cap 200-300
+- [Crash Isolation + Error Boundaries](research_error_boundary_crash_isolation.md) — 3-layer: Zod parse+screen boundary+per-item fallback
+- [Read Receipts — Industry Patterns](research_read_receipts_patterns.md) — watermark not per-message; instant Broadcast+deferred DB
+- [Typing Indicators — Group Chat](research_typing_indicators.md) — XEP-0085 edge-triggered; WA 3s keepalive+5s stop; Broadcast
+- [WhatsApp Photo Send Failure UX](research_whatsapp_photo_send_failure_ux.md) — sender states, thumbnail preserved, upload-first
+- [PayPro Global — Marketplace Fit](research_paypro_global.md) — hard no: SaaS-only MoR, no split-payout, no travel/physical
+- [Smaller Israeli Payment Gateways](research_il_payment_gateways_smaller.md) — 12 providers: Grow/Meshulam, Z-Credit, PayMe, HYP, YaadPay
+- [Supabase Image Transform Billing](research_supabase_image_transform_billing.md) — meter=unique origin images; client thumb at upload
+- [ImageScript EXIF + magick-wasm autoOrient](research_imagescript_exif_orientation.md) — ImageScript no EXIF; magick-wasm autoOrient() handles all 8
+- [EAS ASC API Key — Credentials+Ext Targets](research_eas_build_asc_api_key_credentials.md) — env var names, non-interactive limits, Admin role
+- [Smooth Tab Bar — Reanimated3+RNav v7](research_smooth_tab_bar_reanimated.md) — translateX pill not width, lazy=false, New Arch jank SDK54
+- [Tab Bar Interruptible Animation](research_tab_bar_interruptible_animation.md) — useAnimatedStyle withSpring vs event-handler bug #2733
+- [Native Tab Animation Smoothness](research_native_tab_animation_smoothness.md) — render-server out-of-process CAAnimation, Baseline Profiles
+- [Instagram Tab Bar Architecture](research_instagram_tab_bar_architecture.md) — native shell (IGTabBarController), RN=embedded screens only
+- [react-native-bottom-tabs — API Reference](research_rnbt_native_bottom_tabs.md) — icon/color/label props, iOS26 bugs #439/#505
+- [Instagram Liquid Glass Rollback](research_instagram_liquid_glass_rollback.md) — IG adopted then reverted; native tab bg not overridable
+- [Expo SDK 55 Upgrade — Effort/Risk](research_sdk55_upgrade.md) — RN0.83; risk=Reanimated v3→v4+Gradle; minimizeBehavior blocked
+- [Jumbo Emoji Chat](research_jumbo_emoji_chat.md) — max 3 emoji triggers jumbo; unicode-segmenter (Hermes-safe), avoid \p{Emoji}
+- [RNKC Android Edge-to-Edge + Dismiss Issues](research_rnkc_android_edge_to_edge_interactive_dismiss.md) — nav-bar-gap fixed 1.21.5 (we're 1.18.5)
+- [Instagram Stories Share](research_instagram_stories_share.md) — pasteboard/intent mechanism unchanged, link sticker NOT scriptable
+- [World Surfaris — Competitor Profile](research_world_surfaris_competitor.md) — AU agency, consultant-led, $2.5k-20k+/person, no instant booking
+- [Chat Scroll-to-Bottom on Notif Open](research_chat_scroll_to_bottom_notification.md) — Swellyo's isNearBottomRef default-true already correct
+- [Notification Cold-Start Nav](research_notification_coldstart_navigation.md) — pushRootCard silently drops if !isReady(); DM path never migrated
+- [Wide/Tall Image Bubble Aspect Ratio](research_wide_image_bubble_aspect_ratio.md) — no official WA numbers; all center-crop extremes
+- [WhatsApp Failed/Pending Message UX](research_whatsapp_failed_pending_message_ux.md) — clock/tick states, temp-id+NetInfo+persisted-queue
+- [iOS Current Keyboard Language/Direction](research_ios_current_keyboard_language_direction.md) — read first responder's textInputMode, async
+- [In-App Office Doc Rendering](research_office_doc_inapp_rendering.md) — iOS QuickLook renders offline; Android no native Office renderer
+- [Rich Push — WhatsApp Parity](research_rich_push_notifications_whatsapp_parity.md) — image=iOS NSE+EAS build; inline audio=biggest lift
+- [Free Fake Chat Video Generators — 2026](research_fake_chat_video_generators.md) — TypeMagic/Chat-Animator.net/TextingStory top 3
+- [WeTravel Integration Mechanics](research_wetravel_integration.md) — no multi-tenant partner API; deep-link=simplest v1
+- [Remotion Kinetic Typography](research_remotion_kinetic_typography.md) — Archivo/Montserrat Black, spring 12-15/150-200, 105-135f@30fps
+- [Alarm Capabilities — iOS AlarmKit+Android 2026](research_alarm_capabilities_ios_android.md) — AlarmKit iOS26+ entitlement; Notifee not expo-notifications
+- [Splitwise Third-Party Integration](research_splitwise_integration.md) — API open but ToS bans commercial use; build own (Spliit ref)
+- [WhatsApp Video Compression+Upload](research_whatsapp_video_compression_upload.md) — HD toggle 480/720p; double-compression claim unverified
+- [iOS26 Tab Bar SF Symbol Fill Morph](research_ios26_tabbar_sfsymbol_fill_morph.md) — auto since iOS15; rn-bottom-tabs disables via noneSymbolVariant()
+- [Custom SF Symbol .symbolset Format](research_sfsymbol_symbolset_raw_format.md) — exact Contents.json, Regular-M-only min, no strokes
+- [Cancel Trip/Event + Refunds](research_cancel_trip_refund_flow.md) — Airbnb/Eventbrite/GYG force full refund; reverse_transfer+refund_app_fee
+- [Stripe Test-Mode Connected Balance Funding](research_stripe_test_mode_connected_balance.md) — 4000000000000077/tok_bypassPending, on_behalf_of ambiguity, fund-then-Transfer fallback, delay_days unavailable on Express

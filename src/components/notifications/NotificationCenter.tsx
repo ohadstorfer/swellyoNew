@@ -163,7 +163,13 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
  * same treatment `operator_stripe_ready` correctly gets, but wrong here,
  * because this row's entire job is to be tapped.
  */
-const TRIPLESS_PRESSABLE: ReadonlySet<string> = new Set(['operator_setup_required']);
+const TRIPLESS_PRESSABLE: ReadonlySet<string> = new Set([
+  'operator_setup_required',
+  // Same shape, same reason: it is about the payout account, not a trip, and
+  // its whole job is to be tapped — the screen it opens is where the operator
+  // reopens Stripe.
+  'operator_stripe_action_needed',
+]);
 
 function isPressableRow(n: NotificationRow, canOpenTrip: boolean): boolean {
   if (TRIPLESS_PRESSABLE.has(n.type)) return true;
@@ -349,6 +355,16 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
       // is about the account and carries no trip_id at all, so it would fall
       // through the guard below and be silently unpressable.
       if (n.type === 'operator_setup_required') {
+        pushRootCard('OperatorSetup', undefined);
+        return;
+      }
+      // Stripe broke → the same checklist, because that is where
+      // ConnectStripeCard lives and it already draws the right state and the
+      // "Open Stripe" button for every one of these reasons. Once setup is
+      // complete the screen titles itself "Operator settings", so an operator
+      // who finished months ago does not land on something that looks like
+      // onboarding.
+      if (n.type === 'operator_stripe_action_needed') {
         pushRootCard('OperatorSetup', undefined);
         return;
       }

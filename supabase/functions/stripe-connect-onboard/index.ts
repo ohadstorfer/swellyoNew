@@ -137,10 +137,29 @@ function statusColumns(s: AccountStatus) {
  * account exists, so a divergence here would be unfixable without recreating
  * every operator's account.
  *
- * Express, i.e. Stripe collects requirements and carries negative-balance
- * liability. Ohad's decision on 2026-08-04, taken while zero accounts existed.
- * Changing it is not an edit to this line — it is a migration of every
- * connected account.
+ * Express, i.e. Stripe collects requirements. Ohad's decision on 2026-08-04,
+ * taken while zero accounts existed. Changing it is not an edit to this line —
+ * it is a migration of every connected account.
+ *
+ * ⚠️ An earlier version of this comment claimed Express means Stripe carries
+ * negative-balance liability. That is WRONG for our accounts, read off a live
+ * one on 2026-08-12: `controller.losses.payments = "application"` — Swellyo
+ * covers a connected account that goes negative (a lost dispute's transfer
+ * reversal is how one goes negative — Phase 3 of
+ * refunds-and-merchant-of-record.md).
+ *
+ * What limits that exposure is `settings.payouts.debit_negative_balances`,
+ * which Phase 3 step 4 asked this function to set — and which turns out to
+ * DEFAULT TO TRUE for our configuration (per Stripe's API reference, checked
+ * 2026-08-20: default is false only when `controller.requirement_collection`
+ * is 'application'; ours is 'stripe'). So Stripe already auto-debits the
+ * operator's bank to refill a negative balance, and this call deliberately
+ * does NOT send the parameter: sending it on an Express creation is
+ * undocumented behaviour on the one request that must never 400, for a value
+ * it would not change. Auto-debit only works for banks in AU / CA /
+ * Europe+SEPA+UK / NZ / US — an operator banking anywhere else cannot be
+ * debited, and the Operator Agreement's reimbursement clause is the only
+ * claim we have.
  *
  * Returns null (already logged) when Stripe made the account but we could not
  * persist the id. See the caller comments: continuing past that would orphan
@@ -168,6 +187,8 @@ async function createExpressAccount(
       email: userRow?.email ?? '',
       'capabilities[card_payments][requested]': 'true',
       'capabilities[transfers][requested]': 'true',
+      // debit_negative_balances is deliberately NOT sent — it already
+      // defaults to true for this configuration. See the header comment.
     },
     `connect-account:${userId}`,
   );

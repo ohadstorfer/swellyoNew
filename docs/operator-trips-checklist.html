@@ -339,15 +339,20 @@
       <span class="built">17 aug</span> tag marks every row that moved.
       That night, a second pass walked the <em>scenarios</em> — the paths one trip
       actually takes, not the parts — and found 8 holes. They are section 4.
-      One is closed, one is built and waiting on a deploy, 6 are open.
+      Four are closed, two more were found and closed on 19 August while
+      wiring the Stripe alerts, the cancel-refund one closed the same night,
+      and the deadline reminders went live 20 August. Removing a paid traveler closed on the 19th too.
+      The last one — chargebacks — was built on the 20th: code and database are
+      done, and it goes live with two function deploys and two Stripe checkboxes
+      that were blocked on a wrong login. The row has the exact steps.
     </p>
   </div>
 
   <div class="totals">
-    <span class="total is-done"><b>69</b> done</span>
+    <span class="total is-done"><b>77</b> done</span>
     <span class="total is-partly"><b>2</b> partly</span>
-    <span class="total is-gap"><b>6</b> scenario holes</span>
-    <span class="total is-new"><b>17</b> built</span>
+    <span class="total is-gap"><b>0</b> scenario holes</span>
+    <span class="total is-new"><b>25</b> built</span>
   </div>
 
   <!-- ============ STATUS ============ -->
@@ -1050,61 +1055,201 @@
       <span class="sec-who">night pass · 17 aug</span>
     </div>
     <div class="card">
-      <div class="meter"><i class="m-done" style="width:50%"></i><i class="m-partly" style="width:7%"></i><i class="m-gap" style="width:43%"></i></div>
+      <div class="meter"><i class="m-done" style="width:88%"></i><i class="m-partly" style="width:12%"></i></div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-done">closed</span>
         <div>
-          <p class="what">A cancelled trip still takes money</p>
-          <p class="note">Cancelling hides the buttons and notifies everyone — but <code>payments-checkout</code>
-          never reads the trip's status. A traveler on a stale screen or an old push link can still pay a
-          cancelled trip, and the server says yes. One <code>status = 'active'</code> check.</p>
+          <p class="what">A cancelled trip still takes money — and refunded nobody<span class="built">19 aug</span></p>
+          <p class="note">The note here used to say "one <code>status = 'active'</code> check". That check is
+          in, and it was the smaller half. <code>payments-checkout</code> (v19, deployed) now refuses a trip
+          that is not active with a 409 and a line written for the traveler holding the payment screen — they
+          did nothing wrong and are about to lose a trip, so it says what happened rather than just refusing.
+          Cancelled and completed get different sentences; the check sits after <code>payment_mode</code> so an
+          offline trip keeps its own message, and before capacity so a cancelled trip is never called "full".</p>
+          <p class="note">The bigger half is that cancelling now pays everyone back, which nothing did before —
+          it was one of the three go-live blockers. A new <code>trip-cancel</code> function refunds every
+          traveler in full, and the policy does not apply: those terms govern a traveler who backs out, never an
+          operator who calls the trip off. Airbnb, Eventbrite and GetYourGuide all draw the line in the same
+          place. So the function takes no amounts from the client and has no partial mode — the refund is not
+          the caller's decision.</p>
+          <p class="note">Order is the load-bearing part: cancel first, then expire the open Checkout Sessions,
+          then refund. Refunding first would leave a window where someone pays into a trip already being wound
+          up and misses the batch. The session sweep is best-effort — Stripe pages that list at 100
+          platform-wide — which is exactly why the server-side status check has to exist too, and stay.
+          Re-running is safe: an already-cancelled trip falls through to the refund sweep, so the client's
+          Retry only re-attempts what did not finish, and a double tap cannot double-refund.</p>
+          <p class="note">It also refuses rather than guesses. A refund it cannot price in the operator's own
+          settlement currency is blocked, not attempted, and an operator with too little balance gets
+          <code>blocked_insufficient_balance</code> per traveler instead of a half-done batch. Refund rows go to
+          <code>organized_trip_refunds</code> only — the ledger's <code>refunded</code> events stay the
+          webhook's job, because a second writer would double-count its cumulative maths.</p>
+          <p class="note"><b>Live.</b> Function deployed, checkout redeployed, and the audit migration
+          (<code>cancelled_at</code> / <code>_by</code> / <code>_reason</code>) applied to prod — who pulled the
+          trip, when and why, which was never recorded before and is not backfillable. One thing to know: the
+          refund core in <code>trip-cancel</code> is a hand-kept copy of <code>payments-refund</code>'s, since
+          this repo has no shared-module convention for edge functions. Change one, change both — that drift
+          has already cost 12% of the balance headroom once, when one copy read <code>amount</code> where it
+          had to read <code>net</code>.</p>
         </div>
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-done">closed</span>
         <div>
-          <p class="what">Deadline reminders never fire on their own</p>
-          <p class="note">The due-soon and overdue notifications exist and render — but their only producer is
-          the operator pressing "Remind" on the dashboard. The daily job covers trip start and end, not
-          requirements. A traveler can sail past every document and payment deadline in silence, and the
-          operator is not told either.</p>
+          <p class="what">Deadline reminders never fire on their own<span class="built">20 aug</span></p>
+          <p class="note">The due-soon and overdue notifications existed and rendered — but their only producer
+          was the operator pressing "Remind" on the dashboard. The daily job covered trip start and end, not
+          requirements. A traveler could sail past every document deadline in silence, and the operator was not
+          told either — <code>operator_requirement_overdue_operator</code> had existed in the enum since July
+          with no producer at all.</p>
+          <p class="note">Scoped to <em>document</em> deadlines (DOC-2/DOC-3/OPS-2 in the notifications plan) —
+          not payment deadlines (PAY-1..4), which the plan leaves as an open product decision ("decide the real
+          consequence" for a late deposit). A new RPC, <code>operator_requirement_deadline_owed</code>, is a
+          hand-kept copy of <code>operator_remind_requirement</code>'s own "who still owes this" logic — same
+          reason <code>trip-cancel</code> keeps its own copy of the refund core: a definer function is the
+          security boundary, so duplicating it here is safer than threading a shared helper through the RPC
+          that already has a client contract.</p>
+          <p class="note">A new daily cron, <code>scan-requirement-deadlines</code>, reads it per trip and
+          writes two things: the traveler side at -14/-7/-3/-2/-1 days before due and +1/+3 after (matching the
+          existing copy's cadence exactly), and one operator digest per requirement — never one push per stuck
+          traveler — once the deadline is a day out or past, repeating at most every 20 hours while anyone is
+          still owed. Deliberately excludes anything already <code>rejected</code>: that has its own live
+          notification naming exactly what to fix, and re-nagging it on a timer would just be a second, vaguer
+          message about the same thing.</p>
+          <p class="note">Idempotency needed no claim column: the traveler side dedupes on
+          (recipient, requirement, exact day offset) read straight from notification history, the same pattern
+          <code>scan-trip-reminders</code> already uses for its own stages. The operator digest has no natural
+          per-requirement column to claim, so it reads its own last-sent time from the same table instead.</p>
+          <p class="note"><code>operator_requirement_overdue</code> and
+          <code>operator_requirement_overdue_operator</code> had no copy anywhere — not a template row, not a
+          fallback, not a client type — so producing them today would have rendered as the generic "Notification"
+          fallback the checklist's own footer warns about. Both now have real copy in
+          <code>dispatch-notification-queue/render.ts</code> and in the client, with no template row on
+          purpose: the text needs a formatted due date and a headcount, and neither <code>{date}</code> nor
+          <code>{count}</code> is a var either renderer's <code>fill()</code> resolves — the same reason
+          <code>operator_stripe_action_needed</code> has no template row either.</p>
+          <p class="note"><b>Live 20 Aug.</b> Applied and deployed in order: <code>operator_requirement_deadline_owed</code>
+          on prod, <code>scan-requirement-deadlines</code> deployed, smoke-tested by hand (200,
+          <code>travelerNudges: 0, operatorDigests: 0</code> — nothing due today, nothing sent), then
+          <code>dispatch-notification-queue</code> redeployed with the real copy for both overdue types, then
+          the cron (jobid 12, <code>35 7 * * *</code>). Caught one thing on the way: this same deploy pass had
+          to fix a live-blocking typo in <code>render.ts</code>'s brand-new <code>member_removed</code> refund
+          copy (<code>d.refund_usd</code> where the param is named <code>data</code>) — the function would not
+          have compiled otherwise, blocking this deploy and the remove-refund work in the row below it, which
+          landed in the same window.</p>
         </div>
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-partly">built</span>
         <div>
-          <p class="what">A chargeback is invisible</p>
-          <p class="note">The webhook handles "paid" and "refunded", nothing else. A traveler disputes a card
-          charge → no row is written, nobody is told, and every money total is silently wrong from that day on.
-          Disputes can arrive up to ~18 months after the charge.</p>
+          <p class="what">A chargeback is invisible<span class="built">20 aug</span></p>
+          <p class="note">Was: a traveler disputes a card charge → no row is written, nobody is told, and every
+          money total is silently wrong from that day on. Disputes can arrive up to ~18 months after the charge.</p>
+          <p class="note"><b>Built 20 aug — Phase 3 of the refunds spec, on "do it".</b> The webhook now handles
+          <code>charge.dispute.created</code> (a 0-amount <code>disputed</code> marker in the ledger, plus a
+          quiet-hours-bypassing push to the operator naming the amount and the evidence deadline — the one
+          dispute moment with a clock on it) and <code>charge.dispute.closed</code>. A dispute lost first pulls
+          the operator's share back with a <em>transfer reversal</em> — reverse-on-loss only, per Stripe's
+          cross-border warning; idempotent by dispute-id metadata; recovery ordered before the ledger write so a
+          failed reversal retries — then writes a negative <code>dispute_lost</code> row. Every money total in
+          the app, the web dashboard and <code>operator_requirement_pay_state</code> sums non-failed rows, so
+          they all self-correct on that row with zero changes: the traveler who charged back simply owes again.
+          A dispute won writes nothing (no money moved) and just tells the operator. All three migrations are
+          APPLIED to prod; the three ledgers label the new rows (Chargeback chip / "Dispute opened") instead of
+          calling them "Payment". Step 4 of the plan turned out to need no code: <code>debit_negative_balances</code>
+          already defaults to true for our Express configuration, so Stripe auto-debits the operator's bank when
+          the reversal sends them negative (AU/CA/SEPA+UK/NZ/US banks only).</p>
+          <p class="note"><b>⚠️ Not live until four clicks that were blocked on a wrong login.</b> The Supabase
+          CLI and the browser are both signed into an account that cannot see the Swellyo project, so two
+          deploys are pending: <code>stripe-webhook</code> (the handler) and
+          <code>dispatch-notification-queue</code> (the push copy — deliberately no template rows, the copy
+          needs amounts and dates). And the sandbox webhook destination must subscribe
+          <code>charge.dispute.created</code> + <code>charge.dispute.closed</code> — dashboard-created, so no
+          API can add them. Until then Stripe never sends the events and the code sits idle rather than
+          failing. The live-mode flip now needs SIX events; PRE_BUILD_CHECKLIST is updated.</p>
         </div>
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-done">closed</span>
         <div>
-          <p class="what">Stripe breaking is silent</p>
-          <p class="note">When an operator's account becomes ready, they get a notification. When it becomes
-          disabled — papers past due, payouts frozen — nothing fires. The operator finds out when a traveler's
-          payment fails, which is the worst possible messenger.</p>
+          <p class="what">Stripe breaking is silent<span class="built">18 aug</span></p>
+          <p class="note">Built. Four things now speak: Stripe closed the account, payments stopped, payouts
+          frozen, and a deadline already missed while the account still works — that last one being the only
+          one that arrives while there is still time to act. The first two bypass quiet hours; an operator
+          whose payments have stopped is better woken than left selling.</p>
+          <p class="note">It is a trigger on the payout row, not a branch in the webhook, and that is the
+          whole point. Three different things write that row — Stripe's webhook, the onboarding poll, and a
+          new daily sweep — and any of them can be the one that notices. Putting the rule in the row means all
+          three fire it identically, the same way cancel and remove are triggers so the web dashboard notifies
+          exactly like the phone. "Stripe approved you" moved there too: it used to depend on a webhook
+          endpoint registered in a dashboard nobody re-checks, which is the same single point of failure that
+          left the payment ledger empty for six days in August.</p>
+          <p class="note">The daily sweep re-reads every connected account from Stripe whether or not the
+          webhook is alive, so this can no longer break by something being quietly unregistered. It is
+          scheduled and running as of 19 August, 05:40 UTC. Live and proved: the sweep was run once by hand against the real account and returned
+          <code>refreshed: 1</code> while sending nothing, and the trigger was walked through all four
+          failures inside a transaction that was then thrown away — the escalation from "deadline missed"
+          to "payments stopped" to "account closed" produced three separate alerts, and a rejected account
+          produced one, not three.</p>
         </div>
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-done">closed</span>
         <div>
-          <p class="what">Removing a paid traveler leaves the money behind</p>
-          <p class="note">Remove works: it notifies them, cleans up the chat, deletes the join request. But
-          nothing points at the refund — that is a separate manual step the operator has to remember. Same for
-          someone kicked mid-onboarding after paying the deposit.</p>
+          <p class="what">A failed payment told nobody<span class="built">19 aug</span></p>
+          <p class="note">A card declined, or a checkout opened and abandoned, and the traveler heard
+          nothing — they found out when the operator chased them. The old note in the plan said the
+          server could not know, because the attempt only existed on the phone. That was wrong: Stripe
+          says both, <code>payment_intent.payment_failed</code> and
+          <code>checkout.session.expired</code>. We simply were not subscribed.</p>
+          <p class="note">Now handled, and the interesting part is everything it refuses to send.
+          Checkout deliberately expires its own stale-priced sessions when a price is edited, so an
+          expiry with a live replacement is someone mid-payment, not someone stuck. It also stays quiet
+          when the money arrived another way, when the trip is cancelled or already departed, and more
+          than once per requirement per day. Best-effort by design — it never fails the webhook, so it
+          could not start a retry storm even before the migrations landed.</p>
         </div>
       </div>
 
       <div class="row">
-        <span class="chip is-partly">partly</span>
+        <span class="chip is-done">closed</span>
+        <div>
+          <p class="what">A payment can reach Stripe and never reach us<span class="built">19 aug</span></p>
+          <p class="note">The one that already happened, and the reason the row above exists at all.
+          The platform webhook destination went missing twice in August; payments succeeded, the ledger
+          stayed empty, and <em>nobody noticed for six days</em> — four payments, $3,500, and a traveler
+          who had overpaid by $600 while the app kept asking for more.</p>
+          <p class="note">It was recoverable by arithmetic the whole time, and nothing was doing the
+          arithmetic. The hourly health check now counts Stripe's succeeded charges against our ledger
+          rows and fails when they diverge, naming the PaymentIntent ids a human would backfill from.
+          Critical, with the existing two-strikes email debounce. This is the alarm the incident asked
+          for in writing.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">done</span>
+        <div>
+          <p class="what">Removing a paid traveler leaves the money behind<span class="built">19 aug</span></p>
+          <p class="note">Closed 19 August. Removing someone who has paid now opens a sheet FIRST — everything, what the policy gives at today’s date, or any amount down to zero — and only then takes them off the trip. Unlike cancelling, the operator picks the amount, because only they know whether the traveler backed out or was dropped. Refunds spread across that person’s payments newest-first: a traveler is not one payment, and one on prod has six. A Manager holding <code>travelers.remove</code> without <code>money.manage</code> cannot remove a paid traveler at all, and a refund Stripe refuses never traps the operator — they can still remove and retry later. Also reachable from the Dashboard’s traveler page. Device-tested; the testing found four bugs, all fixed.</p>
+          <p class="note"><b>Re-checked 19 aug — unchanged, but cheaper than it was.</b>
+          <code>removeParticipant</code> still does four things and none of them is money: banner, delete,
+          join-request cleanup, push. The confirm dialog says "they'll be notified and removed from the group
+          chat" and never mentions what they paid. What changed around it is that the refund machinery is now
+          proven twice over — <code>payments-refund</code> for one traveler, <code>trip-cancel</code> for a
+          whole trip — so this is a question in the remove sheet ("refund $X now?") wired to a function that
+          already exists, not a build. Unlike the trip-level rule, the answer here is genuinely the operator's:
+          a traveler removed for cause and one removed by mistake do not get the same money back, which is why
+          it should be asked rather than assumed.</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="chip is-done">closed</span>
         <div>
           <p class="what">Deposit paid, onboarding abandoned — and nobody notices<span class="built">18 aug</span></p>
           <p class="note">Built. The traveler is nudged four hours after they stop, again at 24 hours, and then
@@ -1146,12 +1291,28 @@
       </div>
 
       <div class="row">
-        <span class="chip is-gap">hole</span>
+        <span class="chip is-done">closed</span>
         <div>
-          <p class="what">Moving the dates moves every deadline in silence</p>
+          <p class="what">Moving the dates moves every deadline in silence<span class="built">19 aug</span></p>
           <p class="note">Due dates are counted back from the start date, so changing it reschedules every
-          document and the final payment — and there is no "trip changed" notification at all. Travelers find
-          out if the operator presses Remind.</p>
+          document and the final payment. That part stays — it is why moving a trip needs no backfill. What
+          changed is that it is no longer silent, on either side.</p>
+          <p class="note">The operator is told before they confirm, and the final payment gets its own
+          sentence with its new date on it, because that is the one nobody has in mind while dragging a
+          calendar. Documents are a count next to it, and anything landing in the past is still called out.
+          The old line asking the operator to go tell people themselves is gone — the popup now says we do.</p>
+          <p class="note">We do, from a trigger on the row rather than from the edit screen, so changing the
+          dates from the dashboard or by hand in SQL notifies exactly the same. Everyone on the trip hears,
+          including travelers part-way through onboarding — the dates are half the deal they are in the
+          middle of accepting. Hosts are excluded by <em>role</em>, not by the trip's <code>host_id</code>:
+          that column only names the primary host, so the older test would have told a co-host about their
+          own change.</p>
+          <p class="note"><b>Applied 19 aug</b>, both migrations, and proven on prod in a rolled-back test:
+          moving El Salvador 26 by three days wrote one notification to each of its 3 travelers, queued 3
+          pushes, and read back <code>13 Jan – 23 Jan 2027</code> with <code>has_deadlines</code> true — then
+          rolled the whole thing back, so nothing was sent and the trip's dates never moved. Push copy ships
+          as a template row, so the dispatcher needed no deploy; the trade is that the push says "the dates
+          changed" while the bell names them, until that function is next deployed.</p>
         </div>
       </div>
 
@@ -1256,10 +1417,10 @@
   </div>
 
   <footer>
-    <span>Branch ohad · committed</span>
-    <span>Audited, built and scenario-reviewed 17 August 2026</span>
-    <span>77 items</span>
-    <span>Both migrations applied to prod</span>
+    <span>Branch ohad · client changes uncommitted</span>
+    <span>Audited and scenario-reviewed 17 August · Stripe alerts, cancel-refunds 18–19 Aug · deadline reminders 20 Aug 2026</span>
+    <span>79 items</span>
+    <span>10 migrations applied, none outstanding · scan-requirement-deadlines live, jobid 12</span>
   </footer>
 
 </div>

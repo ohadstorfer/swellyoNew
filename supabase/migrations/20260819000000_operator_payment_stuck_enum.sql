@@ -1,0 +1,23 @@
+-- PAY-6 (docs/trip-notifications-plan.html): the notification type for "your
+-- payment did not finish".
+--
+-- Written by `stripe-webhook` on `payment_intent.payment_failed` (the card was
+-- declined) and `checkout.session.expired` (checkout was opened and abandoned;
+-- Stripe expires it after ~24h). Until now both events told nobody — the
+-- webhook acknowledged and ignored them, and the traveler found out when the
+-- operator chased them.
+--
+-- ── Why this is its own file ────────────────────────────────────────────────
+-- Postgres will not let a new enum value be USED in the same transaction that
+-- adds it, and 20260819000100 references this value inside
+-- `notification_push_priority`. So this one must be committed first — run this
+-- file, then that one, never both in one editor tab. Same split as
+-- 20260818000500, 20260805000000, 20260713000000 and 20260724000000.
+--
+-- ── Ordering against the other pending migrations ───────────────────────────
+-- Apply AFTER 20260818000500 + 20260818000600 (the Connect-status pair):
+-- 20260819000100 rebuilds `notification_push_priority` from 000600's version,
+-- so applying it before 000600 would erase `operator_stripe_action_needed`'s
+-- priority line — and 000600 applied later would erase this one's.
+
+alter type public.notification_type add value if not exists 'operator_payment_stuck';

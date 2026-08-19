@@ -8,7 +8,10 @@ export type CheckName =
   | "google_geocode"
   | "expo_push"
   | "edge_functions"
-  | "matching";
+  | "matching"
+  | "stripe_ledger"
+  | "push_queue"
+  | "cron_http";
 
 /** A single check. `run` resolves on success and THROWS on failure.
  *  It may resolve to a string — a diagnostic note the runner copies onto the

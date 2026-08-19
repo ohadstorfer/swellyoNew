@@ -1,0 +1,24 @@
+-- The notification type for "the trip dates moved".
+--
+-- Closes the hole in docs/operator-trips-checklist.html: "Moving the dates
+-- moves every deadline in silence". Requirement deadlines are stored relative
+-- to departure (`deadline_days_before`, resolved against `start_date` by
+-- group_trip_requirements_resolved), and so is the offline full-payment
+-- deadline (`group_trips.offline_payment_due_days_before`). Changing the start
+-- date therefore reschedules every document AND the final payment — and until
+-- now there was no "trip changed" notification of any kind. Travelers found
+-- out only if the operator happened to press Remind.
+--
+-- ── Why this is its own file ────────────────────────────────────────────────
+-- Postgres will not let a new enum value be USED in the same transaction that
+-- adds it, and 20260819000300 references this value inside
+-- `notification_push_priority`. So this one must be committed first — run this
+-- file, then that one, never both in one editor tab. Same split as
+-- 20260819000000, 20260818000500, 20260805000000 and 20260724000000.
+--
+-- ── Ordering against the other pending migrations ───────────────────────────
+-- Apply AFTER 20260819000100. 20260819000300 rebuilds
+-- `notification_push_priority` from that migration's version, so applying it
+-- first would erase `operator_payment_stuck`'s priority line.
+
+alter type public.notification_type add value if not exists 'trip_dates_changed';

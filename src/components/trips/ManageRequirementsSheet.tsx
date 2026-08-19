@@ -57,6 +57,7 @@ import {
   resolveDeadlineDate,
   saveRequirementChanges,
   stepDeadline,
+  deadlineStepBlocked,
   type EditableRequirement,
   type RequirementKind,
   type RequirementTiming,
@@ -590,20 +591,40 @@ export const ManageRequirementsSheet: React.FC<{
                             </Text>
                             <Text style={styles.daysDate}>{deadlineLabel(t.daysBefore)}</Text>
                           </View>
-                          <Pressable
-                            onPress={() =>
-                              setKindTiming(kind, { daysBefore: stepDeadline(t.daysBefore, 1) })
-                            }
-                            disabled={isDeadlineAtEnd(t.daysBefore, 1)}
-                            hitSlop={8}
-                            style={({ pressed }) => [
-                              styles.stepBtn,
-                              isDeadlineAtEnd(t.daysBefore, 1) && styles.stepBtnOff,
-                              pressed && styles.stepBtnPressed,
-                            ]}
-                          >
-                            <Ionicons name="add" size={16} color="#212121" />
-                          </Pressable>
+                          {/* ⚠️ PLUS MEANS EARLIER. The scale is days BEFORE
+                              departure, so it runs backwards against the
+                              calendar and this is the only button that can
+                              walk a deadline off the back of today. Blocked
+                              when it would — an operator may not SET a
+                              deadline that has already gone. The minus button
+                              opposite carries no such guard, deliberately:
+                              reducing days-before moves the date later, which
+                              is exactly how a deadline that is already in the
+                              past gets dragged back into the future — even
+                              when one notch is not enough to escape it. */}
+                          {(() => {
+                            const plusBlocked =
+                              isDeadlineAtEnd(t.daysBefore, 1) ||
+                              deadlineStepBlocked(t.daysBefore, 1, startDateISO);
+                            return (
+                              <Pressable
+                                onPress={() =>
+                                  setKindTiming(kind, {
+                                    daysBefore: stepDeadline(t.daysBefore, 1),
+                                  })
+                                }
+                                disabled={plusBlocked}
+                                hitSlop={8}
+                                style={({ pressed }) => [
+                                  styles.stepBtn,
+                                  plusBlocked && styles.stepBtnOff,
+                                  pressed && styles.stepBtnPressed,
+                                ]}
+                              >
+                                <Ionicons name="add" size={16} color="#212121" />
+                              </Pressable>
+                            );
+                          })()}
                         </View>
                       ) : (
                         <Text style={styles.timingHint}>No Skip button.</Text>

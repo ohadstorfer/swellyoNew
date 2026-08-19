@@ -98,6 +98,20 @@ async function stripeGet(path: string, label = path) {
   return res.json();
 }
 
+/** POST to Stripe. Same redacted-label contract as stripeGet. */
+async function stripePost(path: string, params: Record<string, string>, label = path) {
+  const res = await fetch(`https://api.stripe.com/v1/${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${STRIPE_SECRET_KEY}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+  if (!res.ok) throw new Error(`Stripe ${label} failed`);
+  return res.json();
+}
+
 /**
  * supabase-js v2's `PostgrestError` is a plain object, not an `Error`
  * subclass. `e instanceof Error ? e.message : e` therefore logs the WHOLE
@@ -150,6 +164,255 @@ const PERMANENT_PG_ERROR_CODES = new Set([
   '23502', // not null violation
 ]);
 
+/**
+ * PAY-6: write an `operator_payment_stuck` notification for a payment that
+ * did not finish. Called for `payment_intent.payment_failed` (metadata lives
+ * on the PaymentIntent — payments-checkout sets it via
+ * `payment_intent_data[metadata]`) and `checkout.session.expired` (metadata
+ * lives on the session itself).
+ *
+ * Every guard here exists to NOT send:
+ *
+ *  - An expired session with an open replacement is payments-checkout's own
+ *    doing — it deliberately expires stale-priced sessions and mints a fresh
+ *    one in the same request (price edits, dedup). The traveler is mid-
+ *    checkout, not stuck; "your payment did not go through" would be a lie.
+ *  - A payment that arrived AFTER the failure (retried the declined card and
+ *    it worked, or paid through a newer session) means nothing is stuck.
+ *  - A cancelled or already-departed trip is past chasing — the plan's global
+ *    stop rule ("trip started · cancelled · person removed").
+ *  - A deleted requirement has nothing left to pay.
+ *  - One nudge per requirement per 24h, matching the Remind button's cooldown.
+ *
+ * Throws are the caller's problem — it logs and acknowledges (best-effort).
+ */
+async function notifyPaymentStuck(
+  supabase: ReturnType<typeof createClient>,
+  event: { type: string; id: string; data: { object: Record<string, unknown> } },
+): Promise<void> {
+  const expired = event.type === 'checkout.session.expired';
+  const obj = event.data.object as {
+    created?: number;
+    metadata?: Record<string, string>;
+  };
+  const m = obj.metadata ?? {};
+  const tripId = m.trip_id;
+  const userId = m.user_id;
+  const requirementId = m.requirement_id;
+  if (!tripId || !userId || !requirementId) {
+    // Not one of ours (or pre-metadata) — permanent, nothing to notify.
+    return;
+  }
+
+  if (expired) {
+    // Replacement-session check. Same list-then-filter technique (and the
+    // same platform-wide ~100-open-sessions limit) as payments-checkout's
+    // dedup — past that page this guard can miss and the worst case is one
+    // spurious reminder, not money.
+    const open = await stripeGet('checkout/sessions?status=open&limit=100');
+    const stillOpen = (open.data ?? []).some(
+      (sess: { metadata?: Record<string, string> }) =>
+        sess.metadata?.trip_id === tripId &&
+        sess.metadata?.user_id === userId &&
+        sess.metadata?.requirement_id === requirementId,
+    );
+    if (stillOpen) return;
+  }
+
+  // Paid-meanwhile: any 'paid' ledger row for this traveler+requirement newer
+  // than the failed attempt means the money got through another way.
+  const objCreatedIso = obj.created
+    ? new Date(Number(obj.created) * 1000).toISOString()
+    : new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: paidSince, error: paidErr } = await supabase
+    .from('organized_trip_payment_events')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('requirement_id', requirementId)
+    .eq('event_type', 'paid')
+    .gte('created_at', objCreatedIso)
+    .limit(1);
+  if (paidErr) throw paidErr;
+  if (paidSince && paidSince.length > 0) return;
+
+  // The requirement must still exist and the trip must still be worth paying
+  // for. `maybeSingle` on the requirement: a deleted row is a skip, not an
+  // error.
+  const { data: req, error: reqErr } = await supabase
+    .from('organized_trip_requirements')
+    .select('id')
+    .eq('id', requirementId)
+    .maybeSingle();
+  if (reqErr) throw reqErr;
+  if (!req) return;
+
+  const { data: trip, error: tripErr } = await supabase
+    .from('group_trips')
+    .select('status, start_date')
+    .eq('id', tripId)
+    .maybeSingle();
+  if (tripErr) throw tripErr;
+  if (!trip) return;
+  if (trip.status === 'cancelled') return;
+  if (trip.start_date && String(trip.start_date) <= new Date().toISOString().slice(0, 10)) return;
+
+  // Cooldown: one per requirement per 24h, whichever event got there first.
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: recent, error: recentErr } = await supabase
+    .from('notifications')
+    .select('id')
+    .eq('recipient_id', userId)
+    .eq('type', 'operator_payment_stuck')
+    .eq('entity_id', requirementId)
+    .gte('created_at', dayAgo)
+    .limit(1);
+  if (recentErr) throw recentErr;
+  if (recent && recent.length > 0) return;
+
+  const { error: insErr } = await supabase.from('notifications').insert({
+    recipient_id: userId,
+    trip_id: tripId,
+    type: 'operator_payment_stuck',
+    audience: 'user',
+    entity_type: 'requirement',
+    // entity_id = the requirement, so the queue's dedup_key collapses a
+    // decline and a later expiry of the same attempt into one push.
+    entity_id: requirementId,
+    data: { reason: expired ? 'checkout_abandoned' : 'card_declined' },
+  });
+  if (insErr) throw insErr;
+}
+
+/** "Aug 31" — same shape scan-requirement-deadlines uses for due_date_label. */
+function disputeDueLabel(dueBy: unknown): string | null {
+  const n = Number(dueBy);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  try {
+    return new Date(n * 1000).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Phase 3 (refunds-and-merchant-of-record.md): tell the operator about a
+ * dispute. Recipient is the operator of record — group_trips.host_id, the
+ * same two-hop identity payments-checkout routes the money by. audience
+ * 'admin' + entity = the requirement, matching the
+ * operator_requirement_overdue_operator digest, the closest trip-scoped
+ * operator-facing precedent.
+ *
+ * Throws are the caller's problem — every call site wraps this best-effort:
+ * a lost notification costs a heads-up, never money or a retry storm.
+ */
+async function notifyDisputeToOperator(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  requirementId: string,
+  type: 'operator_charge_disputed' | 'operator_dispute_closed',
+  data: Record<string, unknown>,
+): Promise<void> {
+  const { data: trip, error: tripErr } = await supabase
+    .from('group_trips')
+    .select('host_id, title')
+    .eq('id', tripId)
+    .maybeSingle();
+  if (tripErr) throw tripErr;
+  if (!trip?.host_id) return;
+
+  // Redelivery guard for the one path with no ledger insert to dedup on
+  // (a dispute closed 'won' writes no row). dispute_id is unique per case,
+  // so one notification per (case, outcome) no matter how often Stripe
+  // resends the event.
+  const { data: dup, error: dupErr } = await supabase
+    .from('notifications')
+    .select('id')
+    .eq('recipient_id', trip.host_id)
+    .eq('type', type)
+    .eq('data->>dispute_id', String(data.dispute_id ?? ''))
+    .eq('data->>outcome', String(data.outcome ?? ''))
+    .limit(1);
+  if (dupErr) throw dupErr;
+  if (dup && dup.length > 0) return;
+
+  const { error: insErr } = await supabase.from('notifications').insert({
+    recipient_id: trip.host_id,
+    trip_id: tripId,
+    type,
+    audience: 'admin',
+    entity_type: 'requirement',
+    entity_id: requirementId,
+    data: { trip_title: trip.title, ...data },
+  });
+  if (insErr) throw insErr;
+}
+
+/**
+ * A dispute was LOST: pull the money back from the operator with a transfer
+ * reversal. Phase 3 step 3, and the spec's one hard rule lives here: reverse
+ * ONLY on the loss, never on `created` — for a cross-border charge, Stripe
+ * warns you may be unable to transfer the money back if the dispute is won.
+ *
+ * Idempotent by inspection, not by Stripe idempotency keys (whose 24h window
+ * is shorter than Stripe's ~3-day retry schedule): a reversal this function
+ * created carries the dispute id in its metadata, so a redelivered event
+ * finds it and does nothing.
+ *
+ * Throws → the caller 500s → Stripe retries. A failed recovery must never be
+ * acknowledged away; this is money, not a notification.
+ */
+async function reverseTransferForLostDispute(dispute: {
+  id: string;
+  charge?: string;
+  amount: number;
+}): Promise<void> {
+  if (!dispute.charge) {
+    console.error('[stripe-webhook] lost dispute carries no charge id — nothing to reverse');
+    return;
+  }
+  const c = await stripeGet(`charges/${dispute.charge}`, 'charges/<redacted>');
+  if (!c.transfer) {
+    // Platform-lane payment: nothing was transferred to an operator, so there
+    // is nothing to pull back. Swellyo eats this one — expected, per the spec.
+    console.error('[stripe-webhook] lost dispute on a platform-lane charge — no transfer to reverse');
+    return;
+  }
+
+  const transferId = String(c.transfer);
+  const t = await stripeGet(`transfers/${transferId}`, 'transfers/<redacted>');
+
+  const existing = await stripeGet(
+    `transfers/${transferId}/reversals?limit=100`,
+    'transfers/<redacted>/reversals',
+  );
+  const alreadyDone = (existing.data ?? []).some(
+    (r: { metadata?: Record<string, string> }) => r.metadata?.dispute_id === dispute.id,
+  );
+  if (alreadyDone) return;
+
+  // A reversal can never exceed what is left on the transfer — a partial
+  // refund (refunds reverse proportionally) may have shrunk it already. The
+  // dispute is the full charge; the transfer was the charge minus our
+  // commission, so the cap is the normal case, not the edge case: we recover
+  // the operator's share and eat our own.
+  const reversible = Number(t.amount) - Number(t.amount_reversed ?? 0);
+  const amount = Math.min(Number(dispute.amount), reversible);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    console.error('[stripe-webhook] lost dispute: transfer already fully reversed, nothing to recover');
+    return;
+  }
+
+  await stripePost(
+    `transfers/${transferId}/reversals`,
+    { amount: String(amount), 'metadata[dispute_id]': dispute.id },
+    'transfers/<redacted>/reversals',
+  );
+}
+
 serve(async req => {
   // The signature check fails OPEN if the secret is missing: `Deno.env.get(
   // ...)!` only asserts a type at compile time. At runtime a missing secret
@@ -191,6 +454,11 @@ serve(async req => {
     }
 
     let row: Record<string, unknown> | null = null;
+    // Runs once, after the ledger row is INSERTED for the first time — a
+    // redelivery takes the 23505 → "genuine redelivery" exit above it and
+    // never gets here, which is what makes a notification-per-event safe.
+    // Best-effort: a throw is logged, never retried (same contract as PAY-6).
+    let afterInsert: (() => Promise<void>) | null = null;
 
     if (event.type === 'checkout.session.completed') {
       const s = event.data.object;
@@ -367,6 +635,148 @@ serve(async req => {
         // partial refund the reversal is proportional, so the error is
         // bounded by the reversed portion, not the whole fee.
       };
+    } else if (
+      event.type === 'payment_intent.payment_failed' ||
+      event.type === 'checkout.session.expired'
+    ) {
+      // PAY-6 (docs/trip-notifications-plan.html): a payment that did not
+      // finish tells the traveler, instead of telling nobody. Two shapes of
+      // "did not finish": the card was declined (they watched it happen), and
+      // the checkout was opened and abandoned (Stripe expires it after ~24h).
+      //
+      // Best-effort BY DESIGN — always acknowledged, never 500. A notification
+      // is not a ledger row: losing one costs a reminder, while a retry storm
+      // over one costs three days of noise (and until the
+      // `operator_payment_stuck` migrations are applied, the insert fails on
+      // the unknown enum value — that must not loop). This also means these
+      // events can be subscribed in the Stripe dashboard before or after the
+      // migrations land, in either order, safely.
+      try {
+        await notifyPaymentStuck(supabase, event);
+      } catch (e) {
+        console.error('[stripe-webhook] payment-stuck notify failed (best-effort, not retrying)', safeMessage(e));
+      }
+      return new Response('ok');
+    } else if (
+      event.type === 'charge.dispute.created' ||
+      event.type === 'charge.dispute.closed'
+    ) {
+      // Phase 3 (refunds-and-merchant-of-record.md): a chargeback stops being
+      // invisible. `created` writes a 0-amount 'disputed' marker and tells the
+      // operator while there is still time to fight it — the evidence clock is
+      // days. `closed` splits on the outcome: 'lost' recovers the operator's
+      // share with a transfer reversal, then writes the negative
+      // 'dispute_lost' row that lets every money total self-correct; 'won'
+      // moved no money net, so it writes nothing and just tells the operator.
+      const d = event.data.object as {
+        id: string;
+        charge?: string;
+        payment_intent?: string;
+        amount: number;
+        currency?: string;
+        reason?: string;
+        status?: string;
+        evidence_details?: { due_by?: number };
+      };
+
+      if (!d.payment_intent) {
+        console.error('[stripe-webhook] dispute has no payment_intent', event.id);
+        return new Response('ok'); // permanent — nothing to look up
+      }
+
+      const currency = String(d.currency ?? '').toLowerCase();
+      if (currency !== 'usd') {
+        console.error(
+          '[stripe-webhook] unsupported currency, refusing to write',
+          currency,
+          event.id,
+        );
+        return new Response('ok');
+      }
+
+      // The PaymentIntent carries our metadata. NOT optional, same as the
+      // refund path: without it there is no row to build, and a lost dispute
+      // row is exactly as unrecoverable as a lost refund row — throw and 500
+      // so Stripe retries.
+      const pi = await stripeGet(`payment_intents/${d.payment_intent}`);
+      const m = pi.metadata ?? {};
+      const amountUsd = Number(d.amount) / 100;
+
+      const status = String(d.status ?? '');
+      const closed = event.type === 'charge.dispute.closed';
+
+      if (!closed) {
+        row = {
+          trip_id: m.trip_id,
+          user_id: m.user_id,
+          requirement_id: m.requirement_id,
+          provider: 'stripe',
+          provider_event_id: event.id,
+          provider_object_id: d.payment_intent,
+          event_type: 'disputed',
+          // 0 by design (and by CHECK): the outcome is not known yet, and a
+          // won dispute returns the money — no total may move on this row.
+          amount_usd: 0,
+          amount_charged: 0,
+          currency_charged: currency.toUpperCase(),
+          is_livemode: !!event.livemode,
+        };
+        afterInsert = () =>
+          notifyDisputeToOperator(supabase, String(m.trip_id), String(m.requirement_id), 'operator_charge_disputed', {
+            dispute_id: d.id,
+            amount_usd: amountUsd,
+            reason: d.reason ?? null,
+            evidence_due_label: disputeDueLabel(d.evidence_details?.due_by),
+          });
+      } else if (status === 'lost') {
+        // Recovery FIRST, ledger second. If the reversal throws, the 500
+        // makes Stripe retry the whole event; nothing has been written yet,
+        // so the retry re-runs both halves, and the reversal's own
+        // metadata-based idempotency keeps it single.
+        await reverseTransferForLostDispute(d);
+
+        row = {
+          trip_id: m.trip_id,
+          user_id: m.user_id,
+          requirement_id: m.requirement_id,
+          provider: 'stripe',
+          provider_event_id: event.id,
+          provider_object_id: d.payment_intent,
+          event_type: 'dispute_lost',
+          // Negative, like 'refunded': the traveler's bank took the money
+          // back, so their balance is once again a plain sum().
+          amount_usd: -amountUsd,
+          amount_charged: -amountUsd,
+          currency_charged: currency.toUpperCase(),
+          is_livemode: !!event.livemode,
+        };
+        afterInsert = () =>
+          notifyDisputeToOperator(supabase, String(m.trip_id), String(m.requirement_id), 'operator_dispute_closed', {
+            dispute_id: d.id,
+            amount_usd: amountUsd,
+            outcome: 'lost',
+          });
+      } else if (status === 'won') {
+        // No ledger row — nothing moved net. The notify helper carries its
+        // own dispute_id dedup, since there is no insert to dedup on here.
+        if (m.trip_id && m.requirement_id) {
+          try {
+            await notifyDisputeToOperator(supabase, String(m.trip_id), String(m.requirement_id), 'operator_dispute_closed', {
+              dispute_id: d.id,
+              amount_usd: amountUsd,
+              outcome: 'won',
+            });
+          } catch (e) {
+            console.error('[stripe-webhook] dispute-won notify failed (best-effort, not retrying)', safeMessage(e));
+          }
+        }
+        return new Response('ok');
+      } else {
+        // 'warning_closed' — an inquiry that closed without ever becoming a
+        // real chargeback. No money moved, nothing to say.
+        console.error('[stripe-webhook] dispute closed without an outcome, ignoring', status, event.id);
+        return new Response('ok');
+      }
     } else {
       // Everything else is acknowledged and ignored, so Stripe stops retrying.
       return new Response('ok');
@@ -407,6 +817,14 @@ serve(async req => {
         // in normal operation and needs a human to look at it.
       }
       throw error;
+    }
+
+    if (afterInsert) {
+      try {
+        await afterInsert();
+      } catch (e) {
+        console.error('[stripe-webhook] post-insert notify failed (best-effort, not retrying)', safeMessage(e));
+      }
     }
 
     return new Response('ok');

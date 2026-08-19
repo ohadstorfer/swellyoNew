@@ -27,10 +27,12 @@ const EXPO_CHUNK = 100;
 /** Bulk-mark many queue rows to one (status, skip_reason) in a single update. */
 async function markBulk(supabase: any, ids: string[], status: string, skip_reason: string | null) {
   if (ids.length === 0) return;
-  await supabase.from("notification_queue").update({
+  const { error } = await supabase.from("notification_queue").update({
     status, skip_reason,
     sent_at: status === "sent" ? new Date().toISOString() : null,
   }).in("id", ids);
+  // Log-only: rows left behind return via the unstick-sending-pushes sweep.
+  if (error) console.error(`[dispatch] markBulk(${status}/${skip_reason}) failed for ${ids.length} rows:`, error.message);
 }
 
 serve(async (req) => {
@@ -59,6 +61,9 @@ serve(async (req) => {
     .order("created_at", { ascending: true })
     .limit(BATCH);
   if (error) {
+    // This branch logging nothing is how the 18 Aug outage stayed invisible for
+    // nine hours: the 500 lived only in function_edge_logs, which nothing reads.
+    console.error(`[dispatch ${reqId}] drain query failed:`, error.message);
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { "Content-Type": "application/json" } });
   }
 
@@ -78,6 +83,9 @@ serve(async (req) => {
     const { error: claimErr } = await supabase
       .from("notification_queue").update({ status: "sending" }).in("id", allIds);
     if (claimErr) {
+      // The exact line that failed silently on 18 Aug (23514: CHECK had no
+      // 'sending'). If it ever fails again, this time the logs say so.
+      console.error(`[dispatch ${reqId}] claim to 'sending' failed for ${allIds.length} rows:`, claimErr.message);
       return new Response(JSON.stringify({ error: claimErr.message, request_id: reqId }), {
         status: 500, headers: { "Content-Type": "application/json" },
       });

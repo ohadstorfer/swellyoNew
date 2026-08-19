@@ -351,14 +351,14 @@ const ITEMS = [
   bell:['{amount} left to pay','You paid part of it. The rest is still open.'],
   note:'Only makes sense now that part payments exist. Stop as soon as it hits zero.' },
 
-{ group:'Money', id:'PAY-6', on:true, status:'new', aud:'Traveler',
+{ group:'Money', id:'PAY-6', on:true, status:'live', aud:'Traveler',
   key:'operator_payment_stuck',
   title:'A payment did not finish',
   who:'Checkout was opened, nothing arrived.',
-  timing:'2 hours after the attempt, once',
+  timing:'On the failed card, once. On an abandoned checkout, when Stripe expires it (~24h).',
   push:['Your payment for {trip} did not go through','Nothing was charged — try again'],
   bell:['Payment did not finish','Nothing was charged. You can try again.'],
-  note:'We know the attempt started (<code>pendingPaymentStore</code>) but that lives on the phone, not the server. Would need the server to see it. Off until we decide.' },
+  note:'<b>LIVE 2026-08-19</b> — end to end: handlers deployed, migrations applied, and both events subscribed on the Stripe destination (4 events now, Snapshot). At live-mode flip the live destination must be created with the same 4 events — added to PRE_BUILD_CHECKLIST.<br><br><code>stripe-webhook</code> (v10) handles <code>payment_intent.payment_failed</code> and <code>checkout.session.expired</code>: best-effort, one per requirement per 24h, and it stays silent when a replacement checkout is open (payments-checkout expires stale-priced sessions on purpose), when the money arrived another way, or when the trip is cancelled/departed. Push copy is a <code>notification_templates</code> row, so the dispatcher needed no deploy.<br><br><i>History: the original note claimed the attempt only existed on the phone (<code>pendingPaymentStore</code>); corrected 2026-08-18 — Stripe tells the server. See OPS-9 for the other half: a payment that succeeded and never reached us.</i>' },
 
 { group:'Money', id:'PAY-7', on:true, status:'new', aud:'Traveler',
   key:'operator_payment_received',
@@ -420,7 +420,7 @@ const ITEMS = [
 { group:'Personal gear', id:'PRS-2', on:true, status:'new', aud:'Traveler',
   key:'personal_gear_unchecked',
   title:'Personal gear not ticked off',
-  who:'How many items on the host’s list this person has not ticked yet. Any number above zero, not only “ticked nothing”.',
+  who:'The number of items on the host’s list this person has not ticked yet. One left is enough to send it.',
   timing:'-3, -1 days before departure',
   push:['Packing for {trip}','{count} things on your list are not ticked'],
   bell:['{count} things not ticked','Open your packing list for {trip}.'],
@@ -453,6 +453,15 @@ const ITEMS = [
   push:['{trip} is a wrap','Hope it was good'],
   bell:['{trip} ended','Hope it was good.'],
   note:'Live. Bell only in practice — the push is low priority.' },
+
+{ group:'The trip itself', id:'TRP-5', on:true, status:'live', aud:'Everyone',
+  key:'trip_dates_changed',
+  title:'The dates moved',
+  who:'Everyone on the trip, including travelers still in onboarding, plus anyone with a pending join request.',
+  timing:'right away, when start_date or end_date actually changes',
+  push:['New dates for {trip}','The dates changed. Your deadlines moved with them — tap to see.'],
+  bell:['New trip dates','{trip} now runs {date_range}. Your deadlines moved with them.'],
+  note:'<b>LIVE 2026-08-19.</b> Both migrations applied, and proven on prod in a rolled-back test: moving El Salvador 26 three days forward wrote one notification to each of its 3 travelers, queued 3 pushes, and read back <code>13 Jan – 23 Jan 2027</code> with <code>has_deadlines</code> true — then rolled back, so nothing was sent and the dates never moved.<br><br>Closes the last silent material change: every requirement deadline and the final payment are stored as days-before-departure, so moving the start date reschedules all of them — and nothing told anyone. Travelers found out only if the operator pressed Remind.<br><br>A trigger on <code>group_trips</code> (<code>trg_notify_trip_dates_changed</code>), not app code, so the phone, the operator dashboard and a hand-written UPDATE all notify identically. Hosts are excluded by <code>role</code> rather than <code>host_id</code> — that column names only the primary host, and the older test tells a co-host about their own change (<b>trg_trip_cancelled still has that bug</b>). Silent on a cancelled trip, and silent when the exact dates are cleared back to loose months.<br><br><code>data.date_range</code> is formatted in the trigger so push and bell say the same thing, and it is duplicated into <code>data.stage</code> on purpose: the queue’s dedup key would otherwise let a first, still-pending push swallow a second date change and deliver dates that are no longer true. <code>data.has_deadlines</code> decides whether the copy claims deadlines moved and whether the tap lands on Documents or the trip — false on every peer trip, which has no deadlines at all.<br><br>The operator half is the confirm popup in <code>OperatorTripEditScreen</code>: it now names the final payment’s new date on its own line, counts the documents beside it, still flags anything landing in the past, and no longer asks the operator to go tell people themselves.<br><br><b>Nothing left to apply.</b> The live <code>notification_push_priority</code> was diffed against the repo before the rebuild and matched branch for branch, so nothing was erased; it now carries 31 branches and grants execute to <code>service_role</code> only. Push copy is a <code>notification_templates</code> row, so the dispatcher needed no deploy; the trade is that the push cannot name the dates (<code>fill()</code> has no <code>{date_range}</code>) while the bell can. Deploy the dispatcher some day, delete the row, and the push names them too.' },
 
 /* ── OPERATOR SIDE ───────────────────────────────────── */
 { group:'Operator and staff', id:'OPS-8', on:true, status:'new', aud:'Operator',
@@ -526,6 +535,15 @@ const ITEMS = [
   push:['Passport problem on {trip}','{actor}’s passport expires {date}'],
   bell:['Passport expires {date}','{actor} may not be allowed to travel.'],
   note:'This is the one that stops a person being turned away at the airport. Worth building even if nothing else here is.' },
+
+{ group:'Operator and staff', id:'OPS-9', on:true, status:'live', aud:'Us',
+  key:'ledger_divergence_alarm',
+  title:'A payment reached Stripe but never reached us',
+  who:'Us, not the operator and not the traveler. Nobody outside can act on this.',
+  timing:'hourly, inside the health-check job',
+  push:['Ledger does not match Stripe','{count} charges with no row'],
+  bell:['Ledger gap','Stripe shows {count} charges we have no row for.'],
+  note:'<b>The other half of PAY-6</b> (Ohad, 2026-08-18): “a payment did not go through the webhook, for any reason”. This is the case where the card <i>worked</i> — Stripe charged it — and our webhook never wrote the row.<br><br>This really happened: the destination was missing from 05–07 Aug and again on 10 Aug, <b>nobody noticed for six days</b>, 4 payments / $3,500 were lost, and the app kept demanding money from a traveler who had <b>overpaid by $600</b>.<br><br>The check needs no logs — count Stripe’s succeeded charges against <code>organized_trip_payment_events</code> and shout when they diverge. The same arithmetic works on the connected account’s balance.<br><br><b>LIVE 2026-08-19:</b> <code>stripe_ledger</code> check in <code>health-check</code> (v28, deployed) — succeeded charges from the last 3 days (15-min grace) vs <code>organized_trip_payment_events</code>, matched on PaymentIntent id, critical, on the hourly cron with the existing 2-consecutive-failures email debounce. The same deploy shipped the 17 Aug openai-timeout fix that ends the false daily failures.' },
 ];
 
 /* ─────────────────────────────────────────────────────────
@@ -596,7 +614,7 @@ function passes(it){
   if (f === 'all') return true;
   if (f === 'live' || f === 'half' || f === 'new') return it.status === f;
   if (f === 'Traveler') return it.aud === 'Traveler' || it.aud === 'Everyone';
-  if (f === 'Operator') return it.aud === 'Operator' || it.aud === 'Staff';
+  if (f === 'Operator') return it.aud === 'Operator' || it.aud === 'Staff' || it.aud === 'Us';
   return true;
 }
 

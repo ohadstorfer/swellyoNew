@@ -830,6 +830,68 @@ export function isDeadlineAtEnd(current: number, direction: 1 | -1): boolean {
 }
 
 /**
+ * Local midnight today, as a Date. The clock every deadline comparison uses.
+ *
+ * Deliberately not UTC: `toISOString()` marks a deadline overdue up to a day
+ * early for anyone west of Greenwich, and an operator in California being told
+ * their deadline passed while it is still today is a bug they cannot explain.
+ * Same reasoning as `todayISO()` in the dashboard's domain/requirements.ts.
+ */
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Must this step be refused?
+ *
+ * The rule: **an operator may not SET a deadline that has already gone.** Not
+ * a warning — the button is dead, in this app and on the operator dashboard.
+ * Spec: docs/specs/operator-trips/deadline-editing.md §4.
+ *
+ * ⚠️ MIND THE DIRECTION. The scale is DAYS BEFORE DEPARTURE, so it runs
+ * backwards against the calendar: `+1` means MORE days before, which is an
+ * EARLIER date. Only `+1` is ever refused.
+ *
+ * `-1` is ALWAYS allowed, and that is policy rather than arithmetic. Fewer
+ * days before is a later date, so it always moves a deadline toward the
+ * future — but it does not always reach it. On a trip ten days out, a
+ * deadline standing at 365 days before is deep in the past, and stepping down
+ * to 180 is still in the past. Refusing that step because the result is also
+ * historic would leave BOTH buttons dead and the operator unable to fix the
+ * very row they came to fix. So a step that improves things is never blocked,
+ * even when it does not finish the job.
+ *
+ * False when the trip has no exact start date: a months-only trip has no real
+ * date for any step to land on, so there is nothing to compare against.
+ * Mirrors `resolveDeadlineDate` returning null there.
+ *
+ * False at the ends of the scale too — a step that cannot move is
+ * `isDeadlineAtEnd`'s business, and answering "true" here would disable the
+ * button for the wrong reason.
+ *
+ * ⚠️ TWIN: `deadlineStepBlocked` in
+ * `operator-dashboard/src/domain/requirements.ts`. The two projects share no
+ * code (separate package.json, blocked in metro.config.js), so this rule is
+ * written twice on purpose. If one changes, change the other — the whole point
+ * of the rule is that both apps agree on what an operator may save.
+ */
+export function deadlineStepBlocked(
+  current: number,
+  direction: 1 | -1,
+  startDateISO: string | null,
+): boolean {
+  if (direction === -1) return false;
+  if (!startDateISO) return false;
+  const next = stepDeadline(current, direction);
+  if (next === current) return false;
+  const due = resolveDeadlineDate(startDateISO, next);
+  if (!due) return false;
+  return due.getTime() < startOfToday().getTime();
+}
+
+/**
  * THE onboarding set. Fixed, on every operator trip. Not a default.
  *
  * Operators used to pick which requirements existed and which were mandatory.
@@ -919,11 +981,30 @@ export function resolveDeadlineDate(
   daysBefore: number,
 ): Date | null {
   if (!startDateISO) return null;
-  const start = new Date(startDateISO);
-  if (Number.isNaN(start.getTime())) return null;
+  const start = parseLocalDate(startDateISO);
+  if (!start) return null;
   const due = new Date(start);
   due.setDate(due.getDate() - Math.max(0, Math.round(daysBefore)));
   return due;
+}
+
+/**
+ * `YYYY-MM-DD` as LOCAL midnight.
+ *
+ * ⚠️ `new Date('2026-09-18')` is not that. A bare date string is parsed as UTC
+ * midnight, which west of Greenwich is the EVENING BEFORE in local time — so
+ * `getDate()` returns 17, and every deadline computed from it came out a day
+ * early for every operator in the Americas. Found 19 Aug on a UTC-6 machine,
+ * where a step that lands exactly on today read as already past.
+ *
+ * `group_trips.start_date` is a `date` column, so the bare form is all that
+ * ever arrives here; the fallback exists so a timestamp does not silently
+ * become null if that ever changes.
+ */
+function parseLocalDate(iso: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 /**

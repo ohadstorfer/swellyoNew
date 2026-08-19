@@ -35,3 +35,37 @@ verify_jwt = true
 # on Stripe's signature, which is stronger. Deploy with --no-verify-jwt.
 [functions.stripe-webhook]
 verify_jwt = false
+
+# The every-minute push dispatcher. Its cron authenticates with a service-role
+# Bearer, which IS a valid JWT — so the gateway check stays ON (probed live
+# 2026-08-20: an unauthenticated POST gets the gateway's 401, and the cron
+# keeps draining the queue). This entry exists so a deploy can never silently
+# flip that state.
+[functions.dispatch-notification-queue]
+verify_jwt = true
+
+# The Connect endpoint — Stripe again, so the same rule, its own signing secret.
+#
+# ⚠️ This entry was MISSING until 2026-08-18, which made a plain
+# `supabase functions deploy stripe-connect-webhook` a way to silently kill it:
+# with no entry the CLI defaults verify_jwt to ON, the gateway 401s Stripe
+# before the function runs, and the symptom is zero invocations rather than
+# failing ones. That is the leading explanation for `stripe-webhook` going dead
+# on 10 August and taking four payments with it.
+[functions.stripe-connect-webhook]
+verify_jwt = false
+
+# Cron only — the daily Stripe Connect sweep. Same shape as
+# purge-group-documents: the gateway lets it through, the function gates itself
+# on x-internal-secret / the service-role bearer.
+[functions.refresh-connect-accounts]
+verify_jwt = false
+
+# Cron only — the hourly cron calls it with ?token=<HEALTHCHECK_TOKEN>, not a
+# JWT, and the function gates itself on that token. Live has the gateway open
+# (verified 2026-08-18: an unauthenticated curl reaches the function's own
+# `{"error":"unauthorized"}`); this entry was missing, so a plain deploy would
+# have defaulted verify_jwt ON and silently 401'd the cron — the exact
+# stripe-connect-webhook failure mode described above.
+[functions.health-check]
+verify_jwt = false

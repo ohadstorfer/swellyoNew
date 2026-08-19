@@ -44,6 +44,14 @@ export type NotificationType =
   // note "reminder cadence is not decided yet", and then nothing sent it. The
   // cadence is now whatever the operator taps, with a 24h cooldown in the RPC.
   | 'operator_requirement_due_soon'
+  // Same requirement, past its due date. Written by the daily
+  // scan-requirement-deadlines cron (20260820000000), which is the first
+  // producer either of these two overdue types has ever had — the enum
+  // values existed since July with nothing sending them.
+  | 'operator_requirement_overdue'
+  // The operator's own heads-up that someone is late. One digest per
+  // requirement, not one per traveler — `data.count` says how many.
+  | 'operator_requirement_overdue_operator'
   // Stripe finished verifying an operator's payout account and they can now be
   // paid. Written by `stripe-connect-webhook`, and the ONLY notification here
   // that is not about a trip — `trip_id` is null, because this can (and by
@@ -51,6 +59,15 @@ export type NotificationType =
   // NotificationCenter already refuses to navigate a row with no trip_id, so
   // it renders as an unpressable status line, which is exactly right.
   | 'operator_stripe_ready'
+  // The same account went the other way: Stripe stopped it, froze its payouts,
+  // or set a deadline it has already missed. Written by
+  // `trg_notify_connect_status`, which reads the edge off the row — so the
+  // Connect webhook, the onboarding poll and the daily sweep all produce it.
+  // `data.reason` is one of 'blocked' | 'charges_disabled' | 'payouts_disabled'
+  // | 'past_due' and decides both the copy and whether the push waits for quiet
+  // hours. Like its counterpart above it carries no `trip_id`; unlike it, this
+  // one has somewhere to go, so NotificationCenter routes it by type.
+  | 'operator_stripe_action_needed'
   // A Swellyo admin turned on someone's `surfers.operator` flag. Written by
   // `trg_notify_operator_setup_required` — the ONLY producer, and it fires on
   // the false→true edge only, so there is no cron and nothing that can repeat.
@@ -62,7 +79,37 @@ export type NotificationType =
   // Written by `invite_staff_member`. Like `trip_invite_received`, this row is
   // a QUESTION, not news: tapping it opens the accept sheet rather than the
   // trip, because the recipient is not on the crew until they say yes.
-  | 'operator_staff_invited';
+  | 'operator_staff_invited'
+  // A traveler's payment did not finish — the card was declined
+  // (`data.reason === 'card_declined'`) or a checkout was opened and abandoned
+  // until Stripe expired it (`'checkout_abandoned'`). Written by
+  // `stripe-webhook`, best-effort, one per requirement per 24h. The copy is
+  // the same for both reasons on purpose: "nothing was charged, try again" is
+  // the whole message either way, and naming the decline would just make the
+  // traveler relive it.
+  | 'operator_payment_stuck'
+  // A traveler's bank opened a chargeback on one of the operator's payments.
+  // Written by `stripe-webhook` from `charge.dispute.created` (Phase 3 of
+  // refunds-and-merchant-of-record.md). The operator cannot answer the bank —
+  // the dispute sits on Swellyo's platform account — but the evidence that
+  // wins it (booking records, the waiver, messages) is theirs, and the clock
+  // is short: `data.evidence_due_label` is the bank's deadline, and it is why
+  // this one bypasses quiet hours.
+  | 'operator_charge_disputed'
+  // The same case closed. `data.outcome` is 'won' (the money stays) or 'lost'
+  // (a negative 'dispute_lost' ledger row was written and the traveler's pay
+  // state fell back to unpaid). Same producer, from `charge.dispute.closed`.
+  | 'operator_dispute_closed'
+  // The trip moved. Written by `trg_notify_trip_dates_changed`, which fires off
+  // the row, so the app, the operator dashboard and a hand-written UPDATE all
+  // produce it identically. It matters more than "the dates changed" sounds:
+  // every requirement deadline and the final payment are stored relative to
+  // `start_date`, so they all move with it and the traveler agreed to none of
+  // it. `data.date_range` is the new range, pre-formatted by the trigger so the
+  // push and the bell say the same thing; `data.has_deadlines` says whether
+  // this trip has any deadline to have moved, and is what decides where the row
+  // taps through to.
+  | 'trip_dates_changed';
 
 /**
  * Every bell type, as a runtime set for the foreground push gate.
@@ -92,9 +139,16 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   trip_invite_declined: true,
   operator_document_rejected: true,
   operator_requirement_due_soon: true,
+  operator_requirement_overdue: true,
+  operator_requirement_overdue_operator: true,
   operator_stripe_ready: true,
+  operator_stripe_action_needed: true,
   operator_setup_required: true,
   operator_staff_invited: true,
+  operator_payment_stuck: true,
+  operator_charge_disputed: true,
+  operator_dispute_closed: true,
+  trip_dates_changed: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
   Object.keys(BELL_TYPE_FLAGS)
@@ -189,7 +243,31 @@ export function tripFocusForNotification(
     // waiting to be tapped. A reminder that lands on the trip's Overview would
     // make the traveler hunt for the thing they were just asked for.
     case 'operator_requirement_due_soon':
+    // Same reasoning, one day later.
+    case 'operator_requirement_overdue':
       return 'documents';
+    // operator_requirement_overdue_operator has no Plan tab of its own to
+    // land on — it's an operator digest, not a traveler card — so it falls
+    // to 'overview' below, which opens the trip; the Dashboard tab with the
+    // review queue is one tap from there. operator_charge_disputed and
+    // operator_dispute_closed fall the same way for the same reason: the
+    // money card lives on the Dashboard tab, one tap from the trip.
+    // The place with a Pay button. A stuck DEPOSIT — the realistic case, it is
+    // the biggest amount and the first one asked for — belongs to a traveler
+    // still mid-onboarding, and 'onboarding' opens that flow at their current
+    // step. For someone already in (a balance payment), it resolves to the
+    // plain overview, which the focus type documents as its fallback.
+    case 'operator_payment_stuck':
+      return 'onboarding';
+    // The dates themselves are already in the notification body, so the reason
+    // to tap is the part that is NOT there: which deadlines moved, and to when.
+    // That is the Documents card. On a trip with no deadline-carrying
+    // requirement — every peer trip, and an operator trip whose rows are all
+    // must_have — there is nothing to look at there, so it opens the trip.
+    // `has_deadlines` is written by the trigger; a row created before it
+    // existed has no such key and lands on 'overview', which is the safe half.
+    case 'trip_dates_changed':
+      return data?.has_deadlines ? 'documents' : 'overview';
     case 'trip_invite_accepted':
     case 'trip_invite_declined':
       return 'overview';
@@ -568,8 +646,31 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
       };
     case 'trip_cancelled':
       return { title: 'Trip cancelled', body: `${trip} was cancelled.`, icon: 'close-circle-outline' };
-    case 'member_removed':
-      return { title: 'Removed from trip', body: `You're no longer part of ${trip}.`, icon: 'remove-circle-outline' };
+    case 'member_removed': {
+      // Absent `refund_usd` means no money moved — say nothing rather than "$0".
+      const refund = typeof d.refund_usd === 'number' && d.refund_usd > 0 ? d.refund_usd : null;
+      return {
+        title: 'Removed from trip',
+        body: refund
+          ? `You're no longer part of ${trip}. $${refund.toFixed(2)} is on its way back.`
+          : `You're no longer part of ${trip}.`,
+        icon: 'remove-circle-outline',
+      };
+    }
+    case 'trip_dates_changed': {
+      // `date_range` is formatted by the trigger, not here, so the bell and the
+      // push name the dates identically. A row written before that key existed
+      // falls back to the vaguer sentence rather than printing "undefined".
+      const range = typeof d.date_range === 'string' ? d.date_range : '';
+      const moved = d.has_deadlines ? ' Your deadlines moved with them.' : '';
+      return {
+        title: 'New trip dates',
+        body: range
+          ? `${trip} now runs ${range}.${moved}`
+          : `The dates for ${trip} changed.${moved}`,
+        icon: 'calendar-outline',
+      };
+    }
     case 'trip_reminder': {
       const s = d.stage || '';
       if (s === 'tomorrow') return { title: 'Trip tomorrow', body: `${trip} starts tomorrow.`, icon: 'time-outline' };
@@ -626,6 +727,70 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: 'time-outline',
       };
     }
+    case 'operator_requirement_overdue': {
+      // Same document, past its due date — DOC-3 in the notifications plan.
+      // Names the deadline, not just "late", since a traveler juggling
+      // several items needs the date to know how late.
+      const needed = d.requirement_title || 'A document';
+      const label = d.due_date_label ? ` It was due ${d.due_date_label}.` : '';
+      return {
+        title: `${needed} is late`,
+        body: `Your organiser is waiting for this for ${trip}.${label}`,
+        icon: 'alert-circle-outline',
+      };
+    }
+    case 'operator_requirement_overdue_operator': {
+      // OPS-2 in the plan. One row per requirement, never one per stuck
+      // traveler — `data.count` is the whole point of batching it that way.
+      const needed = d.requirement_title || 'A document';
+      const count = typeof d.count === 'number' ? d.count : null;
+      const who = count === 1 ? '1 person' : `${count ?? 'Some'} people`;
+      return {
+        title: `${who} late on ${needed}`,
+        body: `Open the dashboard to chase them for ${trip}.`,
+        icon: 'alert-circle-outline',
+      };
+    }
+    case 'operator_payment_stuck':
+      // "Nothing was charged" leads because it answers the traveler's actual
+      // fear — a declined card leaves someone unsure whether money moved. The
+      // same copy for both reasons (declined / abandoned): the instruction is
+      // identical, and the reason only decides which one the traveler already
+      // knows.
+      return {
+        title: 'Your payment did not finish',
+        body: `Nothing was charged for ${trip}. You can try again.`,
+        icon: 'card-outline',
+      };
+    case 'operator_charge_disputed': {
+      // The deadline leads the body: it is the only part of a chargeback with
+      // a clock on it, and the operator's evidence (booking records, the
+      // waiver, messages) is the only thing that wins one. Deliberately does
+      // NOT say "respond in your Stripe dashboard" — the dispute sits on
+      // Swellyo's platform account, and an operator hunting their Express
+      // dashboard for a case that is not there would lose days.
+      const amount = typeof d.amount_usd === 'number' ? `$${d.amount_usd.toFixed(2)} ` : '';
+      const due = d.evidence_due_label ? ` Evidence is due by ${d.evidence_due_label} — gather your booking records.` : '';
+      return {
+        title: `A ${amount}payment was disputed`,
+        body: `A traveler's bank is taking back a payment on ${trip}.${due}`,
+        icon: 'alert-circle-outline',
+      };
+    }
+    case 'operator_dispute_closed': {
+      const amount = typeof d.amount_usd === 'number' ? `$${d.amount_usd.toFixed(2)}` : 'The payment';
+      return d.outcome === 'lost'
+        ? {
+            title: 'The dispute was lost',
+            body: `${amount} went back to the traveler's bank for ${trip}.`,
+            icon: 'close-circle-outline',
+          }
+        : {
+            title: 'You won the dispute',
+            body: `The bank ruled in your favor — the payment on ${trip} stands.`,
+            icon: 'checkmark-circle-outline',
+          };
+    }
     case 'operator_setup_required':
       // Says what they GET, not what we need. "Finish your setup" is a chore;
       // being told you can now sell trips is the reason to open it.
@@ -644,6 +809,44 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         body: 'You can now collect payment for your trips in Swellyo.',
         icon: 'card-outline',
       };
+    case 'operator_stripe_action_needed':
+      // One type, four sentences. "Contact Stripe support" and "send them a
+      // document" are not the same instruction, and an operator who reads the
+      // wrong one wastes the time they have left.
+      //
+      // Never Stripe's own field names, here or in the push. With Express
+      // accounts it is Stripe's form that collects the requirements, and
+      // 'individual.verification.document' tells an operator nothing they can
+      // act on — the same reason `describeConnectState` shows a count instead.
+      switch (d.reason) {
+        case 'blocked':
+          return {
+            title: 'Stripe closed your payout account',
+            body: 'You can no longer collect payments. Stripe decides this, not Swellyo — contact Stripe support to find out why.',
+            icon: 'alert-circle-outline',
+          };
+        case 'charges_disabled':
+          return {
+            title: 'Your payments have stopped',
+            body: 'Stripe switched off payments on your account. Travelers cannot pay you until it is fixed.',
+            icon: 'alert-circle-outline',
+          };
+        case 'payouts_disabled':
+          return {
+            title: 'Stripe paused your payouts',
+            body: 'You can still take payments, but the money is not reaching your bank yet.',
+            icon: 'card-outline',
+          };
+        default:
+          // 'past_due' — and the fallback, because a reason we do not know is
+          // still a reason to look. Word for word what the setup card says in
+          // `action_needed`, so the notification and the screen it opens agree.
+          return {
+            title: 'Stripe needs something from you',
+            body: 'Some details are past their deadline. Send them now, or Stripe will stop your payments.',
+            icon: 'time-outline',
+          };
+      }
     case 'operator_staff_invited': {
       // The tier leads. "Marta added you to El Salvador 26" says nothing about
       // what you are being handed — Crew and Manager are very different jobs,

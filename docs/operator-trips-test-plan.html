@@ -1,0 +1,866 @@
+<title>Operator Trips — Test Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ground: #F5F7F6;
+    --surface: #FFFFFF;
+    --ink: #0F1E1C;
+    --muted: #5C6E6C;
+    --faint: #8A9B99;
+    --line: #DFE6E4;
+    --line-soft: #EDF1F0;
+
+    --done: #0D6A5E;
+    --done-bg: #E4F0EE;
+    --partly: #9A5E12;
+    --partly-bg: #F7EDDE;
+    --gap: #A5332B;
+    --gap-bg: #F8E6E4;
+
+    --sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+    --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 900px; margin: 0 auto; padding: 0 20px 96px; }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { padding: 64px 0 28px; border-bottom: 1px solid var(--line); }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--faint); margin: 0 0 14px;
+  }
+
+  h1 {
+    font-family: var(--sans); font-weight: 700;
+    font-size: clamp(30px, 5vw, 44px);
+    letter-spacing: -0.02em; line-height: 1.08;
+    text-wrap: balance; margin: 0 0 14px;
+  }
+
+  .standfirst { margin: 0; max-width: 62ch; font-size: 17px; color: var(--muted); }
+
+  /* ---------- progress ---------- */
+
+  .progress {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+    padding: 14px 0 12px;
+    background: var(--ground);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar { flex: 1 1 200px; height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--done); transition: width .18s ease; }
+  .count {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--muted); white-space: nowrap;
+  }
+  .reset {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: var(--faint); background: none; border: 1px solid var(--line);
+    border-radius: 99px; padding: 5px 12px; cursor: pointer;
+  }
+  .reset:hover { color: var(--gap); border-color: var(--gap); }
+
+  /* ---------- warning ---------- */
+
+  .warn {
+    margin: 26px 0 0; padding: 18px 20px;
+    background: var(--gap-bg); border: 1px solid #EFCFCB; border-radius: 10px;
+  }
+  .warn h3 {
+    font-family: var(--sans); font-size: 13px; font-weight: 700;
+    letter-spacing: .04em; text-transform: uppercase;
+    color: var(--gap); margin: 0 0 8px;
+  }
+  .warn p { margin: 0 0 8px; font-size: 15px; }
+  .warn p:last-child { margin-bottom: 0; }
+
+  .note {
+    margin: 22px 0 0; padding: 16px 18px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    font-size: 15px; color: var(--muted);
+  }
+  .note strong { color: var(--ink); }
+
+  /* ---------- sections ---------- */
+
+  section { margin-top: 52px; }
+
+  h2 {
+    font-family: var(--sans); font-weight: 700;
+    font-size: 22px; letter-spacing: -0.01em;
+    margin: 0 0 6px; display: flex; align-items: baseline; gap: 10px;
+  }
+  h2 .num {
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--faint); letter-spacing: .08em;
+  }
+
+  .lede { margin: 0 0 6px; max-width: 68ch; color: var(--muted); font-size: 15px; }
+
+  .where {
+    font-family: var(--mono); font-size: 11.5px;
+    color: var(--faint); margin: 0 0 18px; word-break: break-word;
+  }
+
+  /* ---------- items ---------- */
+
+  .item {
+    display: block; position: relative;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px 14px 46px;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .item:hover { border-color: #CBD8D5; }
+  .item input {
+    position: absolute; left: 16px; top: 16px;
+    width: 17px; height: 17px; accent-color: var(--done); cursor: pointer; margin: 0;
+  }
+  .item.checked { background: var(--done-bg); border-color: #C7E0DB; }
+  .item.checked .t { color: var(--muted); text-decoration: line-through; text-decoration-color: #A9C6C0; }
+
+  .t { font-family: var(--sans); font-weight: 600; font-size: 15px; line-height: 1.4; display: block; }
+
+  .how, .pass { margin: 6px 0 0; font-size: 14.5px; color: var(--muted); }
+  .pass { color: var(--done); }
+  .pass b, .how b {
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint); margin-right: 6px;
+  }
+  .pass b { color: #4F978C; }
+
+  code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--line-soft); border-radius: 4px; padding: 1px 5px;
+  }
+  .item.checked code { background: #D6E8E4; }
+
+  .tag {
+    display: inline-block; vertical-align: 2px;
+    font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 99px; margin-left: 8px;
+  }
+  .money  { background: var(--gap-bg);   color: var(--gap); }
+  .silent { background: var(--partly-bg); color: var(--partly); }
+  .perm   { background: #E7E9F3;          color: #4A4F86; }
+  .device { background: var(--line-soft); color: var(--muted); }
+
+  pre {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 12px 0 0;
+  }
+
+  footer {
+    margin-top: 64px; padding-top: 22px;
+    border-top: 1px solid var(--line);
+    font-size: 14px; color: var(--faint);
+  }
+</style>
+
+<div class="page">
+
+  <div class="masthead">
+    <p class="eyebrow">Operator trips · QA</p>
+    <h1>Test plan for everything shipped 17–20 August</h1>
+    <p class="standfirst">
+      Nine feature commits and fourteen migrations, all applied to production. This is the
+      walk-through: what to poke, how to set the state up, and what counts as passing.
+      Grouped by risk — money first, then the things that fail silently.
+    </p>
+  </div>
+
+  <div class="progress">
+    <span class="count" id="count">0 / 0</span>
+    <span class="bar"><i id="fill"></i></span>
+    <button class="reset" id="reset">reset</button>
+  </div>
+
+  <div class="warn">
+    <h3>Before you touch anything</h3>
+    <p>
+      <strong>Group trips are live on prod with real users.</strong> Every test below must run on a
+      trip whose participants are <em>all</em> dev accounts. Cancelling a trip now refunds
+      everyone automatically — on the wrong trip that is real money and real pushes.
+    </p>
+    <p>
+      Stripe is in <strong>test mode</strong>. Refunds need a funded test balance:
+      <code>scripts/fund-test-balance.sh</code>.
+    </p>
+    <p>
+      Several checks want a push to arrive. Push is dead in Expo Go — use a dev build,
+      or verify by reading <code>notification_queue</code> instead of waiting for the phone.
+    </p>
+  </div>
+
+  <div class="note">
+    <strong>Handy while testing.</strong> Force any scheduled job to run now rather than waiting
+    for its slot, and read what the gateway answered:
+    <pre>-- 8 stalled-onboarding (hourly :20) · 12 requirement deadlines (07:35)
+-- 9 refresh-connect (05:40) · 10 unstick-sending (*/10) · 5 dispatcher (*/1)
+select jobid, jobname, schedule, command from cron.job order by jobid;
+-- copy the command out and execute it directly, then:
+select status_code, content, created from net._http_response order by created desc limit 5;</pre>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">01</span> Cancelling a trip, and removing a paid traveler</h2>
+    <p class="lede">
+      The largest change of the week and the only one that moves money on its own.
+      Cancelling used to be a column write; removing a traveler moved nothing at all.
+    </p>
+    <p class="where">8687e81 · trip-cancel · payments-checkout · CancelTripSheet · RemoveTravelerSheet · cancellationPolicy.ts · migration 20260819010000</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A cancelled trip refuses new money <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Open checkout on a trip, cancel it from another device, then complete the payment on the stale screen.</p>
+      <p class="pass"><b>pass</b> The server refuses. <code>payments-checkout</code> now reads status; before this it said yes.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Operator cancels → everyone gets 100% back <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Set a strict frozen policy on the trip (e.g. 0% this close to departure), pay from two accounts, cancel as the operator.</p>
+      <p class="pass"><b>pass</b> Both are refunded in full. The frozen policy is deliberately ignored — it governs a traveler backing out, not the operator pulling the trip.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Open checkout sessions are expired before the refunds run <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Leave a Checkout tab open and unpaid, cancel the trip, then try to pay in that tab.</p>
+      <p class="pass"><b>pass</b> Stripe says the session expired. Order matters: cancel → expire → refund, so nothing new arrives mid-run.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">One traveler, many payments — refunded newest first <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Pay a deposit, then a partial, then the balance. Remove that traveler with a partial refund amount that covers less than the total.</p>
+      <p class="pass"><b>pass</b> The amount spreads across their payment rows from newest backwards. A traveler is not one payment — on prod one has six paid rows.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The policy pre-fills the removal amount, and null is not zero <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Remove a paid traveler on a trip with a policy, then on a trip that never set one.</p>
+      <p class="pass"><b>pass</b> With a policy the suggested figure matches <code>refundPctFor()</code>. Without one the field offers nothing rather than $0 — a trip that stated no terms must not be handed invented ones.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Removal is gated on <code>money.manage</code>, not <code>travelers.remove</code> <span class="tag perm">permission</span></span>
+      <p class="how"><b>how</b> As a Manager holding <code>travelers.remove</code> but not <code>money.manage</code>, try to remove a traveler who has paid.</p>
+      <p class="pass"><b>pass</b> Refused. Removing an unpaid traveler still works. Otherwise a Manager strands the money.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Retrying a half-finished cancel does not double-refund <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Cancel a trip with several payers; while it runs, fire the cancel again.</p>
+      <p class="pass"><b>pass</b> Total refunded equals total paid. Stripe decides what is left on each charge, not our rows.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Not enough balance → one blocked row, not one per payment</span>
+      <p class="how"><b>how</b> Drain the test balance, then ask for a $70 refund from a traveler holding five payments.</p>
+      <p class="pass"><b>pass</b> The audit trail logs $70 of blocked intent once. The bug logged $350.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The audit trail names the right event</span>
+      <p class="how"><b>how</b> Remove one traveler, then read the cancellation audit rows.</p>
+      <p class="pass"><b>pass</b> It says the traveler was removed. It used to claim the trip was cancelled.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Both sheets open, paint, and do not freeze the app <span class="tag device">device</span></span>
+      <p class="how"><b>how</b> Open RemoveTravelerSheet from inside TripMemberSheet, and RefundSheet the same way. Android and iOS.</p>
+      <p class="pass"><b>pass</b> Opaque surface, gestures alive, no invisible touch lock. Both were real bugs: a sheet mounted as a <em>sibling</em> of another sheet's Modal is dead on iOS, and BottomSheetShell paints no surface of its own.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t"><code>npx jest src/services/trips/__tests__/refundPctFor.test.ts</code></span>
+      <p class="pass"><b>pass</b> 21 tests green.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">02</span> The traveler who paid and stopped</h2>
+    <p class="lede">
+      Re-timed on the 19th: 4 hours, 24 hours, then every 24 hours with no last rung.
+      The operator joins at the 24-hour mark. The clock runs from the traveler's
+      <em>last action</em>, not the deposit.
+    </p>
+    <p class="where">3b08d01 · 1d5a14d · scan-stalled-onboarding + ladder.ts · cron jobid 8 (<code>20 * * * *</code>) · operator_stalled_onboarders</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The cron really is hourly <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> <code>select schedule from cron.job where jobid = 8;</code></p>
+      <p class="pass"><b>pass</b> <code>20 * * * *</code>. The jobname still says <code>-daily</code> and cannot be renamed (42501). <strong>Read the schedule, not the name.</strong> On a daily job "4 hours" silently means "tomorrow morning".</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">At 4 hours only the traveler hears</span>
+      <p class="how"><b>how</b> Get a dev account into <code>onboarding</code> with the deposit paid, backdate its last action past 4h, run job 8.</p>
+      <p class="pass"><b>pass</b> One <code>onboarding_unfinished</code> row for the traveler. No <code>operator_onboarding_stalled</code>, and no to-do banner on the dashboard yet.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">At 24 hours the operator joins, and the banner appears on the same mark</span>
+      <p class="how"><b>how</b> Backdate past 24h, run job 8, then open the trip on the operator dashboard.</p>
+      <p class="pass"><b>pass</b> Traveler push, operator digest, and the to-do banner all together. A banner the notification does not match is worse than either alone.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Then daily, and exactly once a day <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Leave the traveler stalled and let several hourly runs pass — or run job 8 by hand five times in a row.</p>
+      <p class="pass"><b>pass</b> One nudge per 24h window, not one per run. This is the regression the ladder tests exist for.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Acting restarts the ladder rather than buying silence</span>
+      <p class="how"><b>how</b> Let a traveler reach day 3, have them upload one document, then wait 4 hours and run the job.</p>
+      <p class="pass"><b>pass</b> They are nudged again at stage 0. The stored stage only counts while its anchor still matches their last action.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Someone found already a week stale gets one message, not seven</span>
+      <p class="how"><b>how</b> Backdate a fresh traveler by 8 days and run the job twice.</p>
+      <p class="pass"><b>pass</b> One send, at stage 8. It does not walk up through 1–8.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The copy names the steps actually blocking them</span>
+      <p class="how"><b>how</b> Read the push, not the row. Someone who stopped <em>because</em> they were unsure which step it was is not helped by "you have steps left".</p>
+      <p class="pass"><b>pass</b> The body lists the missing titles, and the three voices differ: <code>4h</code>, <code>24h</code>, <code>repeat</code>.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Ten stalled travelers is one operator notification</span>
+      <p class="how"><b>how</b> Stall three dev accounts on the same trip.</p>
+      <p class="pass"><b>pass</b> One digest per trip with a count, mirroring the "Remind N people" button.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The bell row reads properly, not the generic fallback <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Open the notification centre after a nudge. <code>onboarding_unfinished</code> was missing from the <code>NotificationType</code> union in <code>notificationsService.ts</code> — confirm it is there now, or that the row still reads acceptably.</p>
+      <p class="pass"><b>pass</b> The bell says what the push says. Tolerable at 3 sends; this now fires daily.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t"><code>npx deno test supabase/functions/scan-stalled-onboarding/__tests__/ladder.test.ts</code></span>
+      <p class="pass"><b>pass</b> 9 tests green.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">03</span> Deadline reminders that fire on their own</h2>
+    <p class="lede">
+      The copy has existed since July; the only thing that ever sent it was the operator
+      pressing a button. <code>operator_requirement_overdue_operator</code> had no producer at all.
+    </p>
+    <p class="where">scan-requirement-deadlines · operator_requirement_deadline_owed · cron jobid 12 (07:35) · migrations 20260820000000/100</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Due-soon fires on the plan's ladder</span>
+      <p class="how"><b>how</b> Set a document deadline so it resolves to 14, 7, 3, 2 and 1 days out in turn, running job 12 at each.</p>
+      <p class="pass"><b>pass</b> One <code>operator_requirement_due_soon</code> at each of those marks and nothing on the days between.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Overdue fires at +1 and +3, then stops</span>
+      <p class="pass"><b>pass</b> Two <code>operator_requirement_overdue</code> sends, not a daily drip.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The operator hears once a day while anyone is still late <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Leave two travelers owing the same requirement past its date; run job 12 twice inside 20 hours.</p>
+      <p class="pass"><b>pass</b> One <code>operator_requirement_overdue_operator</code> per requirement, cooled down 20h — read off the last notification, not a stamp column.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Someone who has done it is never chased</span>
+      <p class="how"><b>how</b> Approve one traveler's document, leave the other's pending, run the job.</p>
+      <p class="pass"><b>pass</b> Only the one still owing hears. The RPC mirrors <code>operator_remind_requirement</code>'s status logic — acknowledge, then medical, then upload.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The push renders real copy, not "You have a new trip update" <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Read the delivered push for all three types.</p>
+      <p class="pass"><b>pass</b> Real sentences. The generic fallback means the live <code>dispatch-notification-queue</code> is behind the repo — redeploy it.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">04</span> Moving the dates</h2>
+    <p class="lede">
+      Every deadline is stored relative to departure, so moving a trip moves them all — correctly,
+      and until now in total silence.
+    </p>
+    <p class="where">migrations 20260819000200/300 · describeDeadlineShift() in OperatorTripEditScreen</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Travelers are told when the dates move</span>
+      <p class="how"><b>how</b> Change the start date on a trip with two dev travelers.</p>
+      <p class="pass"><b>pass</b> Both get <code>trip_dates_changed</code>. Hosts and crew do not — the exclusion is by <code>role</code>, not by <code>host_id</code>, so a second host is excluded too.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The operator sees which deadlines land in the past before saving</span>
+      <p class="how"><b>how</b> Move the start date much closer on a trip with a 180-day requirement.</p>
+      <p class="pass"><b>pass</b> The warning names how many deadlines move and how many are now behind. It reports; it changes nothing.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Deadlines actually resolve to the new dates</span>
+      <p class="how"><b>how</b> Reopen the Plan tab as a traveler after the move.</p>
+      <p class="pass"><b>pass</b> Every date shifted by the same amount, with no backfill anywhere.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">05</span> Editing deadlines from the web dashboard</h2>
+    <p class="lede">
+      New, and the one part of the week with no migration behind it — the write was already
+      permitted. Built but <strong>not device-tested and not committed</strong>.
+    </p>
+    <p class="where">operator-dashboard RequirementsEditor.tsx + services/requirements.ts + domain/requirements.ts · docs/specs/operator-trips/deadline-editing.md</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t"><code>+</code> means an EARLIER date, and it is the button that gets refused</span>
+      <p class="how"><b>how</b> Step a deadline up on a trip a few days out.</p>
+      <p class="pass"><b>pass</b> The scale is days <em>before</em> departure, so it runs backwards against the calendar. Only <code>+</code> is ever blocked; <code>−</code> always improves things.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A step that lands in the past is unreachable, not warned about</span>
+      <p class="how"><b>how</b> Try every step on a trip ten days out.</p>
+      <p class="pass"><b>pass</b> Steps resolving before today cannot be selected at all. Same rule now on the phone — check both apps agree.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Deadlines no longer render a day early west of Greenwich <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Set the machine to a US timezone and compare the resolved date in the app against the dashboard.</p>
+      <p class="pass"><b>pass</b> They match. <code>resolveDeadlineDate</code> parsed <code>YYYY-MM-DD</code> as UTC midnight — the evening before, for every operator in the Americas.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Card-level save: many rows, one diff</span>
+      <p class="how"><b>how</b> Toggle one requirement off, retime two others, hit Save once.</p>
+      <p class="pass"><b>pass</b> One write. Reload and all three changes stand.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The confirm names who stops being overdue</span>
+      <p class="how"><b>how</b> Push a deadline later on a trip where someone is already late.</p>
+      <p class="pass"><b>pass</b> The confirm says so before saving. Overdue is derived, so it recomputes silently otherwise.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Pay rows behave differently, on purpose</span>
+      <p class="how"><b>how</b> Look at <code>deposit</code> and <code>balance</code> in the editor and on the Money card.</p>
+      <p class="pass"><b>pass</b> No on/off toggle, timing editable, and the Money card shows the final-payment date read-only. Managed trips only.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t"><code>cd operator-dashboard && npm test && npm run build</code></span>
+      <p class="pass"><b>pass</b> Green. Root <code>npx tsc</code> and <code>npx jest</code> do not cover this folder.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">06</span> The waiver</h2>
+    <p class="lede">
+      One waiver per trip for its life — because publishing v2 silently un-signed everyone,
+      and nothing in the system asks them to sign again.
+    </p>
+    <p class="where">75c14ce · 4ad1e42 · unique index on (trip_id, kind) · recordWaiverDocument</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A published trip with members cannot swap its waiver</span>
+      <p class="how"><b>how</b> Open Edit on a selling trip that has a traveler.</p>
+      <p class="pass"><b>pass</b> No Replace button, and the hint says why.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">An empty trip can — and "empty" is not a member count</span>
+      <p class="how"><b>how</b> Publish a trip, upload the wrong PDF, swap it before anyone joins.</p>
+      <p class="pass"><b>pass</b> Allowed. The gate is: no participants besides the host, <em>and</em> no acknowledgements against the waiver from anyone. The host is a participant row on every type-C trip, so a count would never open the carve-out.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A crew signature closes it, even with zero travelers <span class="tag perm">permission</span></span>
+      <p class="how"><b>how</b> Add a photographer, have them sign, then try to replace the waiver on a trip with no travelers.</p>
+      <p class="pass"><b>pass</b> Refused. Crew sign the same document and are not participants — a member count would have un-signed them, which is the exact bug.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The swap keeps one row and one version</span>
+      <p class="how"><b>how</b> After a legal swap, read the requirement rows and the document hash.</p>
+      <p class="pass"><b>pass</b> Same id, same version, new <code>document_hash</code>. Never a window where the requirement exists with no document behind it.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A refused upload reads as a sentence and leaves no orphan</span>
+      <p class="how"><b>how</b> Force the refusal, then look in storage under the operator prefix (the purge skips it).</p>
+      <p class="pass"><b>pass</b> A friendly message, not a raw 23505, and the uploaded PDF is gone.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A trip with no waiver at all can still get its first one</span>
+      <p class="how"><b>how</b> Simulate the half-failed publish, then add the waiver from Edit.</p>
+      <p class="pass"><b>pass</b> Allowed. It un-signs nobody, and a waiver requirement with no document can never be approved — the trip is unjoinable until it exists.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">07</span> The late joiner pays in full</h2>
+    <p class="lede">
+      Past the full-payment deadline the deposit/balance split stops making sense: people were
+      walking out of onboarding holding a seat and owing $2,000, with no deadline left to chase them with.
+    </p>
+    <p class="where">b4e177f · frozen <code>deposit_usd</code> at join · isPayingInFull()</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Joining after the deadline asks for the whole price <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Set the balance requirement's deadline into the past, join with a fresh dev account.</p>
+      <p class="pass"><b>pass</b> One payment for the full cost inside onboarding, and the balance works out to exactly zero.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The screen says "Full payment", not "Deposit"</span>
+      <p class="pass"><b>pass</b> <code>isPayingInFull()</code> reads deposit ≥ total off the frozen row. "Deposit" over the full trip price reads as a bug and stops people paying.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Nobody who already joined moves</span>
+      <p class="how"><b>how</b> Check an existing member's frozen amounts before and after the deadline passes, and after the dates change.</p>
+      <p class="pass"><b>pass</b> Unchanged. A deal already struck is not rewritten.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A hand-set traveler price is not overwritten <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Set a custom price for someone, then have them join past the deadline.</p>
+      <p class="pass"><b>pass</b> Their number stands. That is a deliberate figure and second-guessing it overwrites the operator.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">08</span> Crew can actually work the trip</h2>
+    <p class="lede">
+      The permission system went live on 7 August and nothing on the client called it — every gate
+      still read <code>isHost</code>. The database said yes and the UI never asked.
+    </p>
+    <p class="where">f5ff56d · useTripCapabilities · trip_staff_can() · CrewSection · StaffPaperworkScreen</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Each of the five tiers sees its own trip <span class="tag perm">permission</span></span>
+      <p class="how"><b>how</b> Invite one dev account per tier and open the trip as each.</p>
+      <p class="pass"><b>pass</b> Plan and Dashboard tabs open per capability, not per role. A crew member had no Plan tab at all before — <code>canSeePlan</code> required host-or-participant, and staff are neither.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Dashboard cards gate individually <span class="tag perm">permission</span></span>
+      <p class="pass"><b>pass</b> Money, documents, medical and stats each appear only with their own capability.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Reviewing and approving are two different rights <span class="tag perm">permission</span></span>
+      <p class="how"><b>how</b> As someone holding <code>docs.view</code> but not <code>docs.approve</code>, open a submitted document.</p>
+      <p class="pass"><b>pass</b> It opens; the approve action does not.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Edit trip opens for <code>trip.edit</code>, but the Price block stays the owner's <span class="tag money">money</span></span>
+      <p class="pass"><b>pass</b> The Price block is absent for non-owners. <code>guard_trip_money_and_cancel</code> refuses them anyway, and a button that 403s is worse than no button.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Promoting an admin stays host-only <span class="tag perm">permission</span></span>
+      <p class="pass"><b>pass</b> The client splits it the way the database does.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A Guide can post an update and nothing else <span class="tag perm">permission</span></span>
+      <p class="how"><b>how</b> As a Guide, post a trip update, then try to change the dates.</p>
+      <p class="pass"><b>pass</b> The update posts on <code>updates.send</code>. Dates, description, requirements and join requests stay shut — they used to ride on the same <code>trip.edit</code> gate.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Staff do not see "Request to Join" on a trip they work</span>
+      <p class="pass"><b>pass</b> No floating button. The database refuses it outright, so it could only ever fail.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Crew paperwork, end to end</span>
+      <p class="how"><b>how</b> Ask for paperwork on the invite, answer it in <code>StaffPaperworkScreen</code>, review it in the staff sheet, then do the same round trip from the web dashboard's crew page.</p>
+      <p class="pass"><b>pass</b> Both surfaces show the same state — <code>CrewSection</code> is one component rendered by both.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Documents handed to travelers arrive</span>
+      <p class="how"><b>how</b> Deliver a document from the operator side and open it as the traveler.</p>
+      <p class="pass"><b>pass</b> It appears in their trip. <code>organized_trip_delivered_documents</code>.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Operator setup is reachable from Settings after it is finished</span>
+      <p class="pass"><b>pass</b> Waiver, insurance and policy stay editable rather than being sealed at the end of onboarding.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">09</span> Stripe breaking is no longer silent</h2>
+    <p class="lede">
+      Becoming ready has notified the operator since August. Becoming <em>disabled</em> notified nobody —
+      they found out when a traveler's payment failed, which is the worst possible messenger.
+    </p>
+    <p class="where">migrations 20260818000500/600/700 · trigger on the account row · refresh-connect-accounts · cron jobid 9 (05:40)</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">All three writers fire the same warning <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Break a test account three ways: let the webhook deliver <code>account.updated</code>, open the polling screen, and run job 9.</p>
+      <p class="pass"><b>pass</b> Each path notifies. The rule lives in the row, not in any one function — putting it in one leaves the other two silent.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A stopped account wakes the operator <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Drive an account to <code>charges_disabled</code> or <code>blocked</code>.</p>
+      <p class="pass"><b>pass</b> Priority 0 — straight out, no quiet-hours hold. An operator whose payments have stopped is better woken than left selling.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The gentler states wait for morning</span>
+      <p class="pass"><b>pass</b> <code>past_due</code> and friends get the normal quiet-hours <code>send_after</code>.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The daily sweep exists and is answered <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Run job 9 by hand and read <code>net._http_response</code>.</p>
+      <p class="pass"><b>pass</b> 200, not 404. A cron pointing at an undeployed function 404s once a day, forever, silently.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The bell row reads properly</span>
+      <p class="pass"><b>pass</b> <code>operator_stripe_action_needed</code> renders real copy in the notification centre and in the push.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">10</span> A payment that did not finish</h2>
+    <p class="lede">
+      Stripe tells us both ways a checkout dies. Until now the webhook acknowledged both and told nobody.
+    </p>
+    <p class="where">migrations 20260819000000/100 · stripe-webhook · PAY-6 in trip-notifications-plan.html</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A declined card notifies the traveler <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Pay with Stripe's decline test card.</p>
+      <p class="pass"><b>pass</b> <code>operator_payment_stuck</code>, reason <code>card_declined</code>.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">An abandoned checkout notifies too</span>
+      <p class="how"><b>how</b> Open checkout, close the tab, wait for <code>checkout.session.expired</code>.</p>
+      <p class="pass"><b>pass</b> Same type, reason <code>checkout_abandoned</code>. The attempt is not phone-only, whatever the old plan note said.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The copy differs by reason</span>
+      <p class="pass"><b>pass</b> Declined, past due and abandoned each read differently. A card problem and a forgotten tab are not the same message.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">11</span> A chargeback</h2>
+    <p class="lede">
+      Until the 20th a dispute wrote nothing: no row, nobody told, and every money total
+      silently wrong from that day on. A dispute can arrive up to ~18 months after the charge,
+      so "wrong from that day on" meant a year of drift.
+    </p>
+    <p class="where">stripe-webhook · migrations 20260820000200/300/400 (applied) · TravelerExtras · MoneyPage · TravelerPage</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The bank opens a case → a marker worth zero <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Pay with Stripe's dispute test card (<code>4000 0000 0000 0259</code>), then read <code>organized_trip_payment_events</code>.</p>
+      <p class="pass"><b>pass</b> One <code>disputed</code> row with <code>amount_usd = 0</code>. Zero by design and by CHECK — the outcome is unknown and a won dispute returns the money, so no total may move yet.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The operator is woken, with the evidence date in the message <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Read the push for <code>operator_charge_disputed</code>.</p>
+      <p class="pass"><b>pass</b> Priority 0 — straight out, no quiet-hours hold — and it names the evidence deadline. This is the one dispute moment with a clock on it.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">No money is pulled back while the case is open <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Check the operator's connected balance after <code>created</code>, before any outcome.</p>
+      <p class="pass"><b>pass</b> Untouched. Reversing on open is the one thing the spec forbids: on a cross-border charge Stripe warns you may be unable to transfer it back if you win.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Lost → the operator's share comes back, then the ledger says so <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Close the dispute as lost from the Stripe test dashboard.</p>
+      <p class="pass"><b>pass</b> A transfer reversal first, then a negative <code>dispute_lost</code> row. Order matters: recovery before the write, so a failed reversal 500s and Stripe retries the whole event.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Won → nothing moves and nothing is written</span>
+      <p class="how"><b>how</b> Close a second dispute as won.</p>
+      <p class="pass"><b>pass</b> No ledger row at all, just <code>operator_dispute_closed</code> with outcome <code>won</code>. There is deliberately no <code>dispute_won</code> event type — a won case moves no money net.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A redelivered event does not reverse twice <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Resend the <code>charge.dispute.closed</code> event from the Stripe dashboard.</p>
+      <p class="pass"><b>pass</b> One reversal, one row, one notification. The reversal carries the dispute id in its metadata and is found by inspection — Stripe idempotency keys expire in 24h, shorter than its own ~3-day retry schedule.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A partly-refunded charge does not over-reverse <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Refund half a payment, then lose a dispute on it.</p>
+      <p class="pass"><b>pass</b> The reversal is capped at what is left on the transfer. Refunds reverse proportionally, so the cap is the normal case, not the edge.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Every money total self-corrects <span class="tag money">money</span></span>
+      <p class="how"><b>how</b> Compare the traveler's paid total, the trip's money page and the operator dashboard before and after a lost dispute.</p>
+      <p class="pass"><b>pass</b> All three drop by the disputed amount, with no special-casing anywhere — the negative row keeps every balance a plain <code>sum()</code>. Note the traveler now reads as owing again, which is true.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">All three ledgers label it rather than showing a bare minus</span>
+      <p class="how"><b>how</b> Look at the row in the app (TravelerExtras) and on the dashboard (MoneyPage, TravelerPage).</p>
+      <p class="pass"><b>pass</b> "Chargeback" for the loss, "Dispute opened" for the marker — not "Refund", which is what an unlabelled negative row would read as.</p>
+    </label>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════ -->
+
+  <section>
+    <h2><span class="num">12</span> The plumbing under all of it</h2>
+    <p class="lede">
+      Push was completely dead for eight hours on the 18th and nothing looked broken. These checks
+      are cheap and they are the ones that catch the next one.
+    </p>
+    <p class="where">migrations 20260818230000 · 20260819000400 · 20260819170000 · health-check checks/{cronHttp,pushQueue,stripe}.ts</p>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">Nothing is stuck in the queue <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> <code>select status, count(*) from notification_queue group by 1;</code></p>
+      <p class="pass"><b>pass</b> No growing <code>pending</code> pile, and no <code>sending</code> row older than a few minutes.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">A stranded claim is swept back <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Hand-set a row to <code>sending</code> with an old <code>claimed_at</code>, wait for job 10.</p>
+      <p class="pass"><b>pass</b> It returns to <code>pending</code> and goes out. Aging must use <code>claimed_at</code>, never <code>send_after</code> — that would yank rows out from under a live run and double-push.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The abandoned-onboarding job actually delivers <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Run job 4 and read the response.</p>
+      <p class="pass"><b>pass</b> Not 401. Its anon JWT had a line break in it and every one of 1,753 runs failed at the gateway while pg_cron recorded them all as <code>succeeded</code>.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The health check now watches cron HTTP, the push queue and Stripe <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Run the hourly health check and read its report.</p>
+      <p class="pass"><b>pass</b> Three new checks present and passing. pg_cron only measures that the request was made — these measure the answer.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The live dispatcher is not behind the repo <span class="tag silent">silent</span></span>
+      <p class="how"><b>how</b> Download the live function into a scratch workdir and diff it before believing any copy test in this document.</p>
+      <p class="pass"><b>pass</b> No difference beyond what you meant to ship. It caught up on 19 August; keep checking anyway — that check is what proved it.</p>
+    </label>
+
+    <label class="item"><input type="checkbox">
+      <span class="t">The rest of the suite still passes</span>
+      <p class="how"><b>how</b> <code>npx tsc</code> · <code>npx jest</code> · <code>npx deno test supabase/functions/dispatch-notification-queue/__tests__/</code> · <code>cd operator-dashboard && npm test</code></p>
+      <p class="pass"><b>pass</b> Matches the baseline. The dashboard is excluded from the root toolchain on purpose, so it needs its own run.</p>
+    </label>
+  </section>
+
+  <footer>
+    Written 20 August 2026 · covers 75c14ce → 1d5a14d plus the uncommitted deadline-editing,
+    Connect-status, payment-stuck, deadline-scan and chargeback work · all migrations applied to prod.
+    Companion docs: <code>docs/operator-trips-checklist.html</code>,
+    <code>docs/trip-notifications-plan.html</code>,
+    <code>docs/specs/operator-trips/deadline-editing.md</code>.
+  </footer>
+
+</div>
+
+<script>
+  // Checked state survives a reload — a pass like this takes more than one sitting.
+  // Bump this whenever items are added or reordered — saved state is indexed
+  // by position, so a mid-document insertion would restore the wrong boxes.
+  const KEY = 'swellyo.operator-trips-test-plan.v2';
+  const boxes = [...document.querySelectorAll('.item input')];
+  const saved = JSON.parse(localStorage.getItem(KEY) || '[]');
+
+  const paint = () => {
+    const done = boxes.filter(b => b.checked).length;
+    document.getElementById('count').textContent = done + ' / ' + boxes.length;
+    document.getElementById('fill').style.width = (done / boxes.length * 100) + '%';
+    boxes.forEach(b => b.closest('.item').classList.toggle('checked', b.checked));
+  };
+
+  boxes.forEach((b, i) => {
+    b.checked = !!saved[i];
+    b.addEventListener('change', () => {
+      localStorage.setItem(KEY, JSON.stringify(boxes.map(x => x.checked)));
+      paint();
+    });
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    boxes.forEach(b => (b.checked = false));
+    localStorage.removeItem(KEY);
+    paint();
+  });
+
+  paint();
+</script>

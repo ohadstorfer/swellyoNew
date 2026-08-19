@@ -9,6 +9,9 @@ import { googleGeocodeCheck } from "./google.ts";
 import { expoPushCheck } from "./expo.ts";
 import { edgeFunctionsCheck } from "./edgeFunctions.ts";
 import { matchingCheck } from "./matching.ts";
+import { stripeLedgerCheck } from "./stripe.ts";
+import { pushQueueCheck } from "./pushQueue.ts";
+import { cronHttpCheck } from "./cronHttp.ts";
 
 export function buildAllChecks(): Check[] {
   return [
@@ -22,5 +25,8 @@ export function buildAllChecks(): Check[] {
     expoPushCheck(),
     edgeFunctionsCheck(),
     matchingCheck(),
+    stripeLedgerCheck(),
+    pushQueueCheck(),
+    cronHttpCheck(),
   ];
 }

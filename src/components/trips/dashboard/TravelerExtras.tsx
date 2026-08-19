@@ -172,14 +172,25 @@ export const TravelerExtras: React.FC<{
                         and a completed refund is neither — and the orange lines
                         below are refunds that did NOT happen, so a warning
                         colour here would collide with them. */}
-                    {e.eventType === 'refunded' ? (
+                    {e.eventType === 'refunded' || e.eventType === 'dispute_lost' ? (
+                      /* A chargeback reverses the list the same way a refund
+                         does, so it shares the chip — only the word changes,
+                         because the operator did not choose it. */
                       <View style={styles.refundRow}>
                         <View style={styles.refundChip}>
-                          <Text style={styles.refundChipText}>Refund</Text>
+                          <Text style={styles.refundChipText}>
+                            {e.eventType === 'refunded' ? 'Refund' : 'Chargeback'}
+                          </Text>
                         </View>
                         <Text style={styles.refundAmount}>{formatUsd(e.amountUsd)}</Text>
                         <Text style={styles.muted}>{formatDay(e.createdAt)}</Text>
                       </View>
+                    ) : e.eventType === 'disputed' ? (
+                      /* A marker, pinned to $0 by the DB — no amount shown,
+                         because no money has finally moved yet. */
+                      <Text style={styles.muted}>
+                        {formatDay(e.createdAt)} · Dispute opened
+                      </Text>
                     ) : (
                       <Text style={styles.muted}>
                         {formatDay(e.createdAt)} · Payment {formatUsd(e.amountUsd)}

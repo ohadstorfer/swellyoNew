@@ -108,6 +108,14 @@ function pruneBlankCustomInclusions(inc: PriceInclusions): PriceInclusions {
   return { ...inc, custom: pruned };
 }
 
+/** Same shape ManageRequirementsSheet prints a deadline in
+ *  (ManageRequirementsSheet.tsx:417-421), so the date an operator reads in the
+ *  "Change the dates?" warning matches the one on the requirement row it is
+ *  talking about. */
+function formatDueDate(d: Date): string {
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 type Props = NativeStackScreenProps<RootStackParamList, 'OperatorEditTrip'>;
 
 /**
@@ -444,6 +452,32 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   // Everyone who is not the host: the people a material change needs telling.
   const joinedCount = Math.max(0, participantCount - 1);
 
+  /**
+   * Everyone `trg_notify_trip_dates_changed` will actually write a row for —
+   * the same set, computed the same way: every participant whose role is not
+   * host, with NO status filter.
+   *
+   * Not `joinedCount`. `participant_count` counts seats, and a traveler still
+   * in onboarding holds none (20260810000000) — so on a trip where two people
+   * are part-way through accepting and nobody has finished, `joinedCount` is 0,
+   * `confirmMaterialChange` skips the popup entirely, and the operator moves
+   * the trip with no warning while two notifications go out. Those two are
+   * precisely the people spec §9 names as most exposed to a date change: it is
+   * half the deal they are in the middle of accepting.
+   *
+   * `role !== 'host'` rather than `user_id !== host_id` for the same reason the
+   * trigger uses it — a trip can have several hosts (20260708000000) and
+   * `host_id` names only the primary.
+   *
+   * Undercounts by any pending join requester, whom the trigger also notifies
+   * and this screen does not fetch. An undercount is the safe direction: the
+   * popup never promises fewer people than it tells.
+   */
+  const datesNotifyCount = useMemo(
+    () => (data?.participants ?? []).filter(p => p.role !== 'host').length,
+    [data?.participants],
+  );
+
   // The stored requirement rows, so a date change can report what it does to
   // their deadlines. Same query TripDetailScreen's own requirements editor
   // uses (useTripDetail.ts:211) — no new fetch shape invented here. `true`:
@@ -451,8 +485,21 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   const requirementsQuery = useTripRequirements(tripId, !!trip);
 
   /**
-   * One sentence about what a new start date does to the requirement
-   * deadlines, or '' when there is nothing to say. Spec §9.
+   * What a new start date does to the deadlines, in plain sentences, or ''
+   * when there is nothing to say. Spec §9.
+   *
+   * Two different things move, and the operator needs them named separately:
+   *
+   *  · THE MONEY. On a managed trip the final payment is an ordinary
+   *    requirement row (`kind = 'balance'`) whose deadline is counted back
+   *    from departure like any other. On an offline trip there is no row at
+   *    all — the deadline is a trip column, `offline_payment_due_days_before`
+   *    (migration 20260813000000), because trg_pay_requires_managed_trip
+   *    refuses pay rows on a trip Swellyo does not collect for. Both are
+   *    stored relative to `start_date`, so both move with it, and this is the
+   *    one an operator dragging a calendar is least likely to have in mind.
+   *    So it gets its own sentence, with the resulting date spelled out.
+   *  · THE PAPERWORK. Every other active, skippable row, as a count.
    *
    * Only counts ACTIVE, SKIPPABLE requirements. A must-have row (passport,
    * waiver, deposit) has `deadline_days_before = null` in the DB — no real due
@@ -477,24 +524,66 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       const nextStart = patch.start_date ?? null;
       if (!nextStart || !trip?.start_date || nextStart === trip.start_date) return '';
       if (requirementsQuery.data === undefined) return 'Deadline changes are still loading.';
-      const rows = requirementsQuery.data.filter(r => r.isActive && r.skippable);
-      if (rows.length === 0) return '';
+
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      let moved = 0;
       let inThePast = 0;
-      for (const row of rows) {
-        const next = resolveDeadlineDate(nextStart, row.daysBefore);
-        if (!next) continue;
-        moved += 1;
-        if (next.getTime() < today.getTime()) inThePast += 1;
+      // Every resolved deadline goes through here, money and paperwork alike,
+      // so the "lands in the past" count can never disagree with the sentences
+      // above it.
+      const resolve = (daysBefore: number): Date | null => {
+        const due = resolveDeadlineDate(nextStart, daysBefore);
+        if (due && due.getTime() < today.getTime()) inThePast += 1;
+        return due;
+      };
+
+      const sentences: string[] = [];
+
+      // The money row, whichever of the two shapes this trip uses.
+      const balanceRow =
+        trip.payment_mode === 'managed'
+          ? requirementsQuery.data.find(r => r.kind === 'balance' && r.isActive && r.skippable)
+            ?? null
+          : null;
+      const offlineDays =
+        trip.payment_mode === 'offline'
+          ? trip.offline_payment_due_days_before ?? null
+          : null;
+      const payDue =
+        balanceRow ? resolve(balanceRow.daysBefore)
+        : offlineDays !== null ? resolve(offlineDays)
+        : null;
+      if (payDue) sentences.push(`The final payment moves to ${formatDueDate(payDue)}.`);
+
+      // The paperwork. `balanceRow` is skipped by id, not by kind, so a trip
+      // that somehow carries two balance rows still counts the second one
+      // rather than dropping it silently.
+      let docs = 0;
+      for (const row of requirementsQuery.data) {
+        if (!row.isActive || !row.skippable) continue;
+        if (balanceRow && row.id === balanceRow.id) continue;
+        if (resolve(row.daysBefore)) docs += 1;
       }
-      if (moved === 0) return '';
-      const head = `${moved} ${moved === 1 ? 'deadline moves' : 'deadlines move'}.`;
-      if (inThePast === 0) return head;
-      return `${head} ${inThePast} ${inThePast === 1 ? 'lands' : 'land'} in the past.`;
+      if (docs > 0) {
+        sentences.push(
+          payDue
+            ? `${docs} document ${docs === 1 ? 'deadline moves' : 'deadlines move'} with it.`
+            : `${docs} ${docs === 1 ? 'deadline moves' : 'deadlines move'}.`,
+        );
+      }
+
+      if (sentences.length === 0) return '';
+      if (inThePast > 0) {
+        sentences.push(`${inThePast} ${inThePast === 1 ? 'lands' : 'land'} in the past.`);
+      }
+      return sentences.join(' ');
     },
-    [requirementsQuery.data, trip?.start_date],
+    [
+      requirementsQuery.data,
+      trip?.start_date,
+      trip?.payment_mode,
+      trip?.offline_payment_due_days_before,
+    ],
   );
 
   /**
@@ -606,8 +695,17 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
    * Skips the popup entirely when the operator is the only person on the trip.
    */
   const confirmMaterialChange = useCallback(
-    (title: string, message: string, confirmLabel: string, run: () => Promise<void>) => {
-      if (joinedCount === 0) return run();
+    (
+      title: string,
+      message: string,
+      confirmLabel: string,
+      run: () => Promise<void>,
+      /** How many people this particular change reaches. Defaults to
+       *  `joinedCount`, which is right for every row that only affects seated
+       *  members. The dates row overrides it — see `datesNotifyCount`. */
+      affected: number = joinedCount,
+    ) => {
+      if (affected === 0) return run();
       return new Promise<void>((resolve, reject) => {
         Alert.alert(title, message, [
           { text: 'Cancel', style: 'cancel', onPress: () => reject(CANCELLED) },
@@ -814,14 +912,29 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         visible={sheet === 'when'}
         initial={datesInitial}
         onClose={close}
+        // The deadline sentence comes SECOND on purpose. The first line is the
+        // thing every operator already knows they are doing (moving the trip);
+        // the second is the thing they are not thinking about (moving the
+        // money and the paperwork with it). Putting the surprise last leaves it
+        // as the sentence still on screen when they reach for the button.
+        //
+        // "We tell them" is a promise the database keeps, not this screen:
+        // trg_notify_trip_dates_changed on group_trips (migration 20260819000300)
+        // fires on the write below, so the same notification goes out when the
+        // dates are changed from the web dashboard or from SQL. Do not move it
+        // into `save()`.
         onSave={(patch: DatesPatch) => confirmMaterialChange(
           'Change the dates?',
           [
-            `${joinedCount} ${joinedCount === 1 ? 'traveler' : 'travelers'} joined on the old dates. Make sure you tell them about this change.`,
+            // "signed up", not "joined": this count includes travelers still
+            // part-way through onboarding, who have not joined anything yet
+            // but did agree to these dates and do get the notification.
+            `${datesNotifyCount} ${datesNotifyCount === 1 ? 'traveler' : 'travelers'} signed up on the old dates. We let ${datesNotifyCount === 1 ? 'them' : 'them all'} know about the new ones.`,
             describeDeadlineShift(patch),
           ].filter(Boolean).join('\n\n'),
           'Change it',
           () => save(patch),
+          datesNotifyCount,
         )}
       />
 

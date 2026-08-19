@@ -236,61 +236,30 @@ serve(async req => {
     }
     const status = readAccountStatus(await res.json());
 
-    // ── The false → true transition, claimed atomically.
+    // ── Write it down. That is now the whole job.
     //
-    // `.eq('charges_enabled', false)` is the whole trick: the UPDATE matches at
-    // most once, because it also SETS charges_enabled to true. Two events
-    // racing (Stripe redelivers, and one account.updated often follows
-    // another within seconds) means the second finds no row and sends no
-    // second push. Reading the row and then writing it would not be safe here.
-    if (status.chargesEnabled) {
-      const { data: claimed, error: claimErr } = await supabase
-        .from('operator_payout_accounts')
-        .update(statusColumns(status))
-        .eq('stripe_account_id', accountId)
-        .eq('charges_enabled', false)
-        .select('user_id');
-      if (claimErr) throw claimErr;
-
-      if (claimed && claimed.length > 0) {
-        const userId = claimed[0].user_id as string;
-
-        // Feed row + push, via the same path as every other notification: the
-        // insert fires tg_enqueue_push, which respects quiet hours for this
-        // priority. Nothing here talks to Expo directly.
-        //
-        // entity_id = the operator's own id, so the queue's dedup_key is
-        // stable ("<user>:operator_stripe_ready:<user>") instead of falling
-        // back to the notification's own row id, which is unique per insert
-        // and would therefore dedupe nothing.
-        //
-        // NON-FATAL on purpose: the status is already saved, which is the part
-        // that unblocks the operator in the app. A failed notification must
-        // never 500 this request and make Stripe redeliver an event whose only
-        // remaining effect would be a duplicate push.
-        const { error: notifyErr } = await supabase.from('notifications').insert({
-          recipient_id: userId,
-          trip_id: null,
-          type: 'operator_stripe_ready',
-          audience: 'user',
-          entity_type: 'payout_account',
-          entity_id: userId,
-          data: {},
-        });
-        if (notifyErr) {
-          console.error('[stripe-connect-webhook] status saved but notification failed', safeMessage(notifyErr));
-        }
-        return new Response('ok');
-      }
-      // Fell through: charges were already true. Still refresh the rest below —
-      // requirements can change on an account that is live (a future deadline,
-      // a document that expired).
-    }
-
-    // Every other case: a plain refresh. No row matching this account id is
-    // normal and not an error — an operator can exist in Stripe while their
-    // row was never written (see the persist failure branch in
-    // stripe-connect-onboard), and this endpoint sees every connected account.
+    // Every notification this used to send comes from
+    // `trg_notify_connect_status` on the row itself (migration 20260818000600).
+    // This function used to claim the false→true transition here with a
+    // conditional UPDATE and insert `operator_stripe_ready` when it won the
+    // race. That worked, and it had two problems the trigger does not:
+    //
+    //   • It made the waiting card's promise — "We'll let you know the moment
+    //     you can get paid" — true only for operators whose change happened to
+    //     reach us by webhook. The onboarding poll and the daily sweep write
+    //     these same columns and told nobody anything.
+    //   • It notified on the way UP and never on the way DOWN, so an operator
+    //     whose account was disabled found out when a traveler's payment
+    //     failed.
+    //
+    // The edge is now read from OLD vs NEW under the row lock, which is
+    // stronger than the conditional UPDATE and does not have to be re-derived
+    // by each writer.
+    //
+    // No row matching this account id is normal and not an error — an operator
+    // can exist in Stripe while their row was never written (see the persist
+    // failure branch in stripe-connect-onboard), and this endpoint sees every
+    // connected account.
     const { error: refreshErr } = await supabase
       .from('operator_payout_accounts')
       .update(statusColumns(status))

@@ -156,6 +156,24 @@ dashboard's `src/domain/money.ts` (via its own env var).
   live key, the operator reads "$0 collected" for deposits travelers have
   actually paid. The money page warns when it finds payments in the mode it is
   not counting — that banner is this mistake.
+- [ ] **Create the live-mode webhook destination with all SIX events.**
+  Sandbox destinations do not exist in live mode — going live means creating a
+  new destination in the live dashboard: URL
+  `https://rfdhtvcmagsbxqntnepv.supabase.co/functions/v1/stripe-webhook`,
+  Events from **Your account**, payload style **Snapshot** (never Thin), events
+  `checkout.session.completed`, `charge.refunded`, `checkout.session.expired`,
+  `payment_intent.payment_failed`, `charge.dispute.created`,
+  `charge.dispute.closed` — then
+  `supabase secrets set STRIPE_WEBHOOK_SECRET=<the new whsec_…>`. Missing
+  `checkout.session.expired` / `payment_intent.payment_failed` silently kills
+  the PAY-6 "payment did not finish" notification; missing the two
+  `charge.dispute.*` events makes chargebacks invisible again — no ledger row,
+  no operator notification, and a LOST dispute never pulls the money back from
+  the operator (Phase 3 of refunds-and-merchant-of-record.md). A missing
+  destination altogether is the 05–10 Aug incident: payments succeed, the
+  ledger stays empty, travelers get dunned for money they already paid. The
+  `stripe_ledger` health check will start failing within the hour if this is
+  forgotten — that alarm is this mistake.
 - [ ] **Reverting is symmetric.** Unset the GUC and both env vars together; no
   ledger rows are ever deleted, test rows simply stop/start counting.
 

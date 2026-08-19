@@ -1,9 +1,25 @@
 ---
 name: group-trips-host-model-and-surftrip-precedent
-description: group_trips is single-host-only (host_id boolean check everywhere); surftrip_groups (a separate, older group-chat feature) already has a working host/admin/member RLS+UI model that is the natural template for group_trips multi-admin
+description: SUPERSEDED for the host-count claim (see update below) — group_trips DID ship multi-host later on 2026-07-08; surftrip_groups host/admin/member RLS+UI model remains an accurate template for other roles
 metadata:
   type: project
 ---
+
+**UPDATE (verified 2026-08-18, tracing `trg_notify_trip_cancelled`'s host-exclusion
+logic):** the "single owner only" claim below is now WRONG. Later the same day,
+`supabase/migrations/20260708000000_group_trip_multiple_hosts.sql` shipped
+multi-host — NOT by adding an `'admin'` role as this memory's "How to apply"
+guessed, but by allowing MULTIPLE `group_trip_participants` rows with
+`role = 'host'`. `group_trips.host_id` still exists but is now only the
+"primary host" (display + notification target, kept in sync by a trigger,
+still exactly one per trip); real permission is
+`is_trip_host(trip_id)` = `EXISTS (... role = 'host' ...)`, checked via RLS.
+Practical consequence: any trigger/query written before 2026-07-08 that
+excludes/targets only `host_id` (e.g. `trg_notify_trip_cancelled`,
+`20260609000050_notification_new_event_triggers.sql:25`) silently misses
+co-hosts — a real, unfixed gap, not just a historical note. The 6-file
+duplicated `isHost` boolean claim below was NOT verified in the 2026-08-18
+pass and may also be stale.
 
 Researched 2026-07-08 for planning a multi-admin feature on `group_trips`.
 

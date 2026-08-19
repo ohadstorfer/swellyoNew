@@ -356,6 +356,48 @@ Order of operations matters — the balance check must come **before** the Strip
 
 ### Phase 3 — Chargeback recovery
 
+> ## ✅ BUILT 2026-08-20 on Ohad's "do it". Status of the five steps:
+>
+> 1. **Migration APPLIED to prod** (`20260820000200`): `event_type` now allows
+>    `'disputed'` (amount pinned to **0** — a marker, because a won dispute
+>    returns the money and no total may move until the outcome) and
+>    `'dispute_lost'` (**negative**, like `'refunded'`). Both CHECKs widened —
+>    the sign CHECK had no `else` branch, so it had to move together with the
+>    type list. Every consumer sums `<> 'failed'`, so totals self-correct the
+>    moment a dispute is lost, with zero consumer changes: the traveler's pay
+>    state falls back to unpaid, and checkout would charge them again — which
+>    is correct, because their bank took the money back by force.
+> 2. **`stripe-webhook` handles `charge.dispute.created` + `.closed`** —
+>    ledger row + operator notification (`operator_charge_disputed`, priority
+>    0, evidence deadline in the copy; `operator_dispute_closed`, won/lost).
+>    Notification enum/priority migrations applied (`20260820000300/000400`).
+>    ⚠️ **Deploy pending** — the Supabase CLI and the browser were both logged
+>    into the wrong Supabase account when this was built. Deploy
+>    `stripe-webhook` AND `dispatch-notification-queue` (push copy is in
+>    render.ts — no template rows on purpose, the copy needs amounts/dates).
+> 3. **Transfer reversal on `closed` + `lost`** — built, reverse-on-loss only
+>    (the cross-border rule below). Idempotent by metadata inspection
+>    (`dispute_id` on the reversal), capped at what is left on the transfer,
+>    recovery ordered BEFORE the ledger insert so a failed reversal 500s and
+>    Stripe retries. Platform-lane charges have no transfer: Swellyo eats
+>    those, as this section always said.
+> 4. **`debit_negative_balances` needs NO code** — checked against the live
+>    API reference 2026-08-20: it defaults to **false only when
+>    `controller.requirement_collection` is `application`; otherwise true.**
+>    Ours is `stripe` (Express), so it is already true on every account.
+>    `stripe-connect-onboard` deliberately does not send the parameter (see
+>    the comment there); §2.3's country list still applies.
+> 5. **`controller.losses.payments` answered 2026-08-12:** `"application"` —
+>    Swellyo covers a negative balance the auto-debit cannot clear.
+>
+> **Also pending: subscribe `charge.dispute.created` + `charge.dispute.closed`
+> on the sandbox webhook destination** (dashboard-created — no API can edit
+> it), and the live-mode flip now needs SIX events (PRE_BUILD_CHECKLIST
+> updated). Until the subscription exists Stripe never sends the events, so
+> the deployed code sits idle rather than failing.
+>
+> The original deferral box is kept below for the reasoning it carries.
+
 > ## ⏸️ DEFERRED 2026-08-12 by Ohad. Read this box before going live with Stripe.
 >
 > **Deferring costs nothing today and everything later.** Right now no real money has moved
@@ -533,7 +575,7 @@ trip to appear on today.
 ```
 Phase 1 (on_behalf_of)  ─┐  ✅ shipped 2026-08-11
 Phase 2 (refunds)       ─┼─ ✅ shipped 2026-08-11 (+ traveler refund line, 2026-08-12)
-Phase 3 (chargebacks)   ─┘  ⏸️ deferred — read the box in §Phase 3 before going live
+Phase 3 (chargebacks)   ─┘  ✅ built 2026-08-20 (migrations applied; 2 deploys + 2 Stripe events pending — see §Phase 3)
 Phase 4c (server ToS)   ─┘  ✅ shipped 2026-08-12 (migration applied)
 Phase 4d (per-trip tick)     ✅ shipped 2026-08-12 (migration applied)
 

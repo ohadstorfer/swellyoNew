@@ -83,8 +83,17 @@ export function renderPush(
       return { title: 'Oh no! Someone left your trip 📉', body: `A member left ${trip}` };
     case 'trip_cancelled':
       return { title: 'Your trip was cancelled', body: `${trip} was cancelled by the admin — see why` };
-    case 'member_removed':
-      return { title: 'Trip update', body: `The admin decided to remove you from ${trip}` };
+    case 'member_removed': {
+      // `refund_usd` is only written when money actually went back, so its
+      // absence is the "say nothing about money" case — never render a zero.
+      const refund = typeof data?.refund_usd === 'number' && data.refund_usd > 0 ? data.refund_usd : null;
+      return {
+        title: 'Trip update',
+        body: refund
+          ? `The admin decided to remove you from ${trip}. $${refund.toFixed(2)} is being refunded — it reaches you in 5–10 business days`
+          : `The admin decided to remove you from ${trip}`,
+      };
+    }
     case 'trip_reminder': {
       const s = stage;
       if (s === 'week')     return { title: `${trip} — 1 week to go!`, body: 'Check out your packing gear and get ready' };
@@ -130,6 +139,102 @@ export function renderPush(
         title: `Still needed for ${trip}`,
         body: `Your organiser is waiting for ${item}`,
       };
+    case 'operator_requirement_overdue': {
+      // Written by scan-requirement-deadlines (20260820000000) — the FIRST
+      // producer this type has ever had. No template row on purpose: the copy
+      // needs a formatted due date, and neither `fill()` above knows a {date}
+      // var. Priority 0 (notification_push_priority) — this one bypasses
+      // quiet hours, because a missed deadline is the urgent case its sibling
+      // due_soon is not.
+      const label = data?.due_date_label ? ` It was due ${data.due_date_label}.` : '';
+      return {
+        title: `${item} is late`,
+        body: `${trip} is still waiting.${label}`,
+      };
+    }
+    case 'operator_requirement_overdue_operator': {
+      // Same producer, the operator's half. One push per REQUIREMENT, never
+      // one per stuck traveler — `data.count` is why it can say that plainly
+      // instead of naming everyone.
+      const count = typeof data?.count === 'number' ? data.count : null;
+      const who = count === 1 ? '1 person' : `${count ?? 'Some'} people`;
+      return {
+        title: `${who} late on ${item}`,
+        body: `Open ${trip} to chase them`,
+      };
+    }
+    case 'operator_payment_stuck':
+      // NOT REACHED IN PRODUCTION TODAY — 20260819000100 seeds a
+      // `notification_templates` row for this key and the template wins at
+      // line 44, which is what let the type ship with no deploy of this
+      // function (whose live copy is behind the repo). This is the fallback if
+      // that row is ever deleted. Same arrangement as
+      // `operator_requirement_due_soon` above.
+      //
+      // "Nothing was charged" leads for the same reason it does in the bell
+      // copy: it answers the fear before giving the instruction.
+      return {
+        title: `Your payment for ${trip} did not go through`,
+        body: 'Nothing was charged — you can try again',
+      };
+    case 'operator_charge_disputed': {
+      // Phase 3 (refunds-and-merchant-of-record.md): a traveler's bank opened
+      // a chargeback. No template row on purpose — the copy needs the amount
+      // and the evidence deadline, and fill() knows neither {amount} nor
+      // {date}. Same arrangement as operator_requirement_overdue.
+      //
+      // The deadline is the whole message: it is the only dispute moment with
+      // a clock on it, and the reason this type bypasses quiet hours
+      // (priority 0). No emoji — this is a fight, not news.
+      const amount = typeof data?.amount_usd === 'number' ? `$${data.amount_usd.toFixed(2)} ` : '';
+      const due = data?.evidence_due_label ? ` Evidence is due by ${data.evidence_due_label}.` : '';
+      return {
+        title: `A ${amount}payment was disputed`,
+        body: `A traveler's bank is taking back a payment on ${trip}.${due}`,
+      };
+    }
+    case 'operator_dispute_closed': {
+      // Same case, resolved. `outcome` decides everything: 'lost' means the
+      // money really left (a negative ledger row exists by now), 'won' means
+      // nothing moved and the wait is over.
+      const amount = typeof data?.amount_usd === 'number' ? `$${data.amount_usd.toFixed(2)}` : 'The payment';
+      return data?.outcome === 'lost'
+        ? {
+            title: 'The dispute was lost',
+            body: `${amount} went back to the traveler's bank for ${trip}.`,
+          }
+        : {
+            title: 'You won the dispute 🎉',
+            body: `The bank ruled in your favor — the payment on ${trip} stands.`,
+          };
+    }
+    case 'trip_dates_changed': {
+      // ⚠️ THIS BRANCH ONLY RUNS ONCE THE TEMPLATE ROW IS GONE. 20260819000300
+      // seeds a `trip_dates_changed` row, and a template wins at line 44 — so
+      // deploying this function alone changes nothing for this type. The row
+      // has to be deleted too, and that is the whole point of doing both:
+      //
+      //   • `fill()` has no `{date_range}` var, so the TEMPLATE CANNOT NAME THE
+      //     DATES. It says "The dates changed" and leaves the reader to go and
+      //     find out what they changed to — on the one push whose entire job is
+      //     to tell them.
+      //   • The template also states "Your deadlines moved with them"
+      //     unconditionally, which is simply false on a trip with no deadlines.
+      //
+      // Both of those are fixed here, where the data is actually available.
+      //
+      // `date_range` is formatted by the TRIGGER, not here, so the bell and the
+      // push name the dates identically — see the note in
+      // notificationsService.ts, which carries the same two branches.
+      const range = typeof data?.date_range === 'string' ? data.date_range : '';
+      // A row written before the key existed falls back to the vaguer sentence
+      // rather than printing "undefined" at somebody.
+      const moved = data?.has_deadlines ? ' Your deadlines moved with them.' : '';
+      return {
+        title: `New dates for ${trip}`,
+        body: range ? `It now runs ${range}.${moved}` : `The dates changed.${moved}`,
+      };
+    }
     case 'operator_stripe_ready':
       // The one push here that deliberately never mentions a trip: it fires on
       // the operator's ACCOUNT, usually before their first trip exists, so
@@ -138,6 +243,39 @@ export function renderPush(
         title: 'Stripe approved you 🎉',
         body: 'You can now collect payment for your trips in Swellyo.',
       };
+    case 'operator_stripe_action_needed':
+      // The other direction, and the one that used to be silent: an operator
+      // whose account Stripe switched off learned about it from a traveler
+      // whose payment failed.
+      //
+      // Also never about a trip — it fires on the ACCOUNT, so `trip` would
+      // render as the "your trip" fallback and read like a bug.
+      //
+      // No emoji anywhere in here. Two of the four are an outage.
+      switch (data?.reason) {
+        case 'blocked':
+          return {
+            title: 'Stripe closed your payout account',
+            body: 'You can no longer collect payments in Swellyo. Contact Stripe support to find out why.',
+          };
+        case 'charges_disabled':
+          return {
+            title: 'Your payments have stopped',
+            body: 'Stripe switched off payments on your account. Travelers cannot pay you until it is fixed.',
+          };
+        case 'payouts_disabled':
+          return {
+            title: 'Stripe paused your payouts',
+            body: 'You can still take payments, but the money is not reaching your bank yet.',
+          };
+        default:
+          // 'past_due', and the fallback — a reason we do not recognise is
+          // still a reason to look.
+          return {
+            title: 'Stripe needs something from you',
+            body: 'Some details are past their deadline. Send them now, or Stripe will stop your payments.',
+          };
+      }
     case 'onboarding_unfinished': {
       // Paid the deposit, never finished. Three voices, not three sends: the
       // first at 4 hours, the second at 24, and then one that repeats daily for

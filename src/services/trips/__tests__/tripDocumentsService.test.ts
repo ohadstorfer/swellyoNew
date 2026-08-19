@@ -18,7 +18,7 @@ jest.mock('expo-crypto', () => ({}));
 jest.mock('../../../utils/imageCompression', () => ({ compressImage: jest.fn() }));
 
 import { supabase } from '../../../config/supabase';
-import { removeRequirement } from '../tripDocumentsService';
+import { removeRequirement, deadlineStepBlocked } from '../tripDocumentsService';
 
 /**
  * Stands in for the three parallel reads plus the write.
@@ -165,5 +165,81 @@ describe('removeRequirement', () => {
 
     await expect(removeRequirement('req-passport')).resolves.toBe('deactivated');
     expect(del).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The past-date rule. Spec: docs/specs/operator-trips/deadline-editing.md §4.
+ *
+ * Dates are built relative to today so the suite does not rot: a hardcoded
+ * 2026 date passes this year and fails next.
+ */
+describe('deadlineStepBlocked', () => {
+  const iso = (daysFromNow: number) => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + daysFromNow);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // Trip in 100 days. 30 days before is +70 from now; the next step up (60)
+  // is +40. Both comfortably ahead.
+  it('allows a step that still lands in the future', () => {
+    expect(deadlineStepBlocked(30, 1, iso(100))).toBe(false);
+  });
+
+  // Trip in 10 days. Standing on 7 (three days out), stepping UP to 14 would
+  // land four days ago.
+  it('blocks a step that lands before today', () => {
+    expect(deadlineStepBlocked(7, 1, iso(10))).toBe(true);
+  });
+
+  // Minus means FEWER days before, which is a LATER date — always an
+  // improvement, so never blocked. Both cases below still RESOLVE to a past
+  // date (a trip 10 days out with a 21-day-before deadline is historic either
+  // way); blocking them would leave both buttons dead on the one row the
+  // operator came to fix. Improving is allowed even when it does not finish
+  // the job.
+  it('never blocks the minus direction, even when the result is still past', () => {
+    expect(deadlineStepBlocked(30, -1, iso(10))).toBe(false);
+    expect(deadlineStepBlocked(365, -1, iso(2))).toBe(false);
+  });
+
+  // Trip in 30 days, standing on 21. Stepping up to 30 lands exactly today.
+  // Today is not the past — the money is due today, and that is a legal thing
+  // to ask for.
+  //
+  // This is the case that caught `new Date('YYYY-MM-DD')` parsing as UTC
+  // midnight: west of Greenwich that is the evening before, so "today" read as
+  // yesterday and the step was refused. See parseLocalDate.
+  it('allows a step that lands exactly today', () => {
+    expect(deadlineStepBlocked(21, 1, iso(30))).toBe(false);
+  });
+
+  // One day further out. The step now lands yesterday, and must be refused —
+  // proving the boundary above is the real edge and not an off-by-one.
+  it('blocks the step one day past that boundary', () => {
+    expect(deadlineStepBlocked(21, 1, iso(29))).toBe(true);
+  });
+
+  // A months-only trip. Nothing resolves to a real date, so there is nothing
+  // to compare and nothing to block.
+  it('allows everything when the trip has no start date', () => {
+    expect(deadlineStepBlocked(7, 1, null)).toBe(false);
+    expect(deadlineStepBlocked(365, 1, null)).toBe(false);
+  });
+
+  // The ends of the scale belong to isDeadlineAtEnd. Answering true here would
+  // disable the button for the wrong reason and make the two guards disagree.
+  it('is false at the top of the scale, where no step exists', () => {
+    expect(deadlineStepBlocked(365, 1, iso(1))).toBe(false);
+  });
+
+  // Not on the scale (an older row). stepDeadline snaps it first; the snapped
+  // value is judged, not the original.
+  it('judges the snapped value for an off-scale input', () => {
+    // 45 snaps to 30 (nearer than 60), which on a trip 10 days out is 20 days
+    // ago. Blocked.
+    expect(deadlineStepBlocked(45, 1, iso(10))).toBe(true);
   });
 });
