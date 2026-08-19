@@ -16,6 +16,8 @@ import { ff } from '../../theme/fonts';
 import type { EnrichedParticipant } from '../../services/trips/groupTripsService';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { TravelerPriceSheet } from './TravelerPriceSheet';
+import { RemoveTravelerSheet } from './RemoveTravelerSheet';
+import type { CancellationPolicy } from '../../services/trips/cancellationPolicy';
 
 interface Props {
   visible: boolean;
@@ -64,7 +66,31 @@ interface Props {
   onMessage: (userId: string, name?: string, avatar?: string | null) => void;
   onSetAdmin: (member: EnrichedParticipant) => void;
   onRemoveAdmin: (member: EnrichedParticipant) => void;
+  /**
+   * Remove someone who has paid NOTHING. Runs through `wrap` — an Alert can sit
+   * over a dismissing sheet safely, because it is not a Modal.
+   *
+   * A traveler who HAS paid never reaches this: their removal opens the nested
+   * RemoveTravelerSheet below, which needs a refund decision first.
+   */
   onRemove: (member: EnrichedParticipant) => void;
+  /**
+   * What this member has paid, net of refunds. `> 0` routes "Remove from trip"
+   * to the refund sheet instead of the plain Alert. 0 (the default) keeps every
+   * existing caller on today's behaviour.
+   */
+  paidUsd?: number;
+  /** The trip's frozen cancellation policy — the refund sheet suggests from it. */
+  cancellation?: CancellationPolicy | null;
+  /** `group_trips.start_date`, for measuring the policy window. */
+  tripStartDate?: string | null;
+  /** Does this viewer hold `money.manage`? Separate from `viewerCanRemove`. */
+  canRefund?: boolean;
+  /**
+   * Does the removal once the refund is settled, with what actually went back.
+   * Only called from the paid path.
+   */
+  onRemoveWithRefund?: (member: EnrichedParticipant, refundedUsd: number) => Promise<void>;
 }
 
 const joinedAgo = (iso: string | null): string => {
@@ -82,6 +108,7 @@ export function TripMemberSheet({
   visible, member, viewerIsHost, viewerCanRemove, isSelf, tripId, viewerIsOperator, ownerUserId, paymentMode,
   budgetFxRate, budgetCurrency, requirements, onClose,
   onViewProfile, onMessage, onSetAdmin, onRemoveAdmin, onRemove,
+  paidUsd = 0, cancellation = null, tripStartDate = null, canRefund = false, onRemoveWithRefund,
 }: Props) {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -102,11 +129,18 @@ export function TripMemberSheet({
   const canSetPrice = canManage && viewerIsOperator && paymentMode === 'managed';
 
   const [priceOpen, setPriceOpen] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
   // Don't let a stale "open" carry forward to the next member this sheet is
   // opened for.
   useEffect(() => {
-    if (!visible) setPriceOpen(false);
+    if (!visible) {
+      setPriceOpen(false);
+      setRemoveOpen(false);
+    }
   }, [visible]);
+
+  /** Has this person got money on the trip that a removal has to answer for? */
+  const removalNeedsRefund = paidUsd > 0 && !!onRemoveWithRefund;
 
   return (
     <BottomSheetShell visible={visible} onClose={onClose}>
@@ -136,7 +170,27 @@ export function TripMemberSheet({
                 <SheetOptionRow icon="cash-outline" label="Price" onPress={() => setPriceOpen(true)} pressScale />
               ) : null}
               {canRemove && !isOwnerRow ? (
-                <SheetOptionRow icon="person-remove-outline" label="Remove from trip" danger onPress={wrap(() => onRemove(m))} />
+                <SheetOptionRow
+                  icon="person-remove-outline"
+                  label="Remove from trip"
+                  danger
+                  // ⚠️ NOT `wrap` when there is money. `wrap` closes this sheet
+                  // and fires the handler in the same tick; if that handler
+                  // opens another BottomSheetShell as a SIBLING in the parent
+                  // screen, two independent native Modals overlap mid-dismiss
+                  // and iOS strands an invisible view controller that eats
+                  // every touch — the app looks frozen. That is exactly what
+                  // this row did when the refund sheet was first added, and it
+                  // is why `Price` above never used `wrap` either. The paid
+                  // path stays nested inside THIS Modal, like the price sheet.
+                  //
+                  // The unpaid path keeps `wrap`: it opens an Alert, which is
+                  // not a Modal and cannot race one.
+                  onPress={
+                    removalNeedsRefund ? () => setRemoveOpen(true) : wrap(() => onRemove(m))
+                  }
+                  pressScale={removalNeedsRefund}
+                />
               ) : null}
             </View>
           </>
@@ -174,6 +228,33 @@ export function TripMemberSheet({
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: tripsKeys.payments(tripId, m.user_id) });
             queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+          }}
+        />
+      ) : null}
+
+      {/* Removing someone who has paid. Nested for the SAME reason the price
+          sheet above is — see the note there, and the one on the Remove row. */}
+      {removalNeedsRefund && m ? (
+        <RemoveTravelerSheet
+          visible={removeOpen}
+          onClose={() => setRemoveOpen(false)}
+          tripId={tripId}
+          userId={m.user_id}
+          travelerName={m.name ?? 'this traveler'}
+          paidUsd={paidUsd}
+          cancellation={cancellation}
+          tripStartDate={tripStartDate}
+          canRefund={canRefund}
+          onRemove={async refundedUsd => {
+            await onRemoveWithRefund!(m, refundedUsd);
+            // The member row is gone; close both sheets rather than leaving
+            // this one open over a person who is no longer on the trip.
+            setRemoveOpen(false);
+            onClose();
+          }}
+          onRefunded={() => {
+            queryClient.invalidateQueries({ queryKey: ['operatorDashboard', 'money', tripId] });
+            queryClient.invalidateQueries({ queryKey: ['operatorDashboard', 'refunds', tripId] });
           }}
         />
       ) : null}

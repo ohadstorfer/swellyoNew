@@ -143,6 +143,108 @@ export function effectiveRules(p: CancellationPolicy): CancellationRule[] {
   return p.preset === 'custom' ? p.rules : PRESET_RULES[p.preset];
 }
 
+// ---------------------------------------------------------------------------
+// turning a policy into a number
+// ---------------------------------------------------------------------------
+
+/**
+ * `start_date` is a Postgres `date` — a calendar day with no time and no zone.
+ *
+ * ⚠️ NOT `new Date(s)`. That parses 'YYYY-MM-DD' as UTC midnight, while
+ * `new Date()` is local, so in any timezone west of UTC the two are already
+ * hours apart before the subtraction starts — enough to move a traveler across
+ * a policy boundary and change what they are refunded. Building the date from
+ * its parts gives local midnight, which is the only thing a calendar day can
+ * honestly mean here.
+ */
+function parseDateOnly(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const startOfDay = (d: Date): number =>
+  new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/**
+ * Whole days from `now` until the trip starts. Negative once it has begun.
+ *
+ * ⚠️ `round`, not `floor`. Both operands are local midnight, so the division is
+ * exact — except across a daylight-saving boundary, where the span is 23 or 25
+ * hours and `floor` would silently lose a day. Losing a day here is not a
+ * rounding error, it is a traveler on the wrong side of a refund step.
+ */
+export function daysUntil(tripStartDate: string, now: Date = new Date()): number | null {
+  const start = parseDateOnly(tripStartDate);
+  if (!start) return null;
+  return Math.round((startOfDay(start) - startOfDay(now)) / 86_400_000);
+}
+
+/**
+ * What percentage this policy gives back, for a cancellation happening now.
+ *
+ * ⚠️ NULL IS NOT ZERO, and collapsing the two is the mistake this whole feature
+ * exists to prevent. Null means "this trip never stated terms" — true of every
+ * type A/B trip and every operator trip published before the policy columns.
+ * Zero means "the terms were stated, and they give nothing back". Suggesting
+ * "$0 back" for a trip that never said so invents a term the traveler never
+ * agreed to. Callers must render null as *no suggestion at all*, never as 0%.
+ *
+ * Returns null when: there is no policy, or the trip has no start date (nothing
+ * to measure the window against).
+ */
+export function refundPctFor(
+  policy: CancellationPolicy | null | undefined,
+  tripStartDate: string | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  if (!policy) return null;
+  if (!tripStartDate) return null;
+
+  const days = daysUntil(tripStartDate, now);
+  if (days === null) return null;
+
+  // Furthest-out first — the order the DB trigger already stores them in, and
+  // the order this walk depends on. Sorted again rather than trusted: a policy
+  // built in the editor has not been through the trigger yet.
+  const rules = [...effectiveRules(policy)].sort((a, b) => b.daysBefore - a.daysBefore);
+
+  // The first window the traveler is still inside wins. No rules at all
+  // (`non_refundable`) and "past every window" both land on 0 — which here is a
+  // real answer the policy gave, not a missing one.
+  for (const rule of rules) {
+    if (days >= rule.daysBefore) return rule.refundPct;
+  }
+  return 0;
+}
+
+/**
+ * What the policy suggests refunding, in dollars.
+ *
+ * A SUGGESTION. Nothing in the app applies this on its own — the operator can
+ * always override it, including to zero or to everything. It exists so the
+ * common case (a traveler who backed out) is one tap instead of arithmetic.
+ *
+ * Null propagates from `refundPctFor`: no policy, no suggestion.
+ */
+export function suggestedRefundUsd(args: {
+  policy: CancellationPolicy | null | undefined;
+  tripStartDate: string | null | undefined;
+  /** What this traveler has actually paid, net of refunds already issued. */
+  paidUsd: number;
+  now?: Date;
+}): number | null {
+  const { policy, tripStartDate, paidUsd, now } = args;
+  const pct = refundPctFor(policy, tripStartDate, now);
+  if (pct === null) return null;
+  if (!Number.isFinite(paidUsd) || paidUsd <= 0) return 0;
+
+  // To the cent. A percentage of an odd amount is otherwise a number with
+  // fifteen decimals, which Stripe rejects and a human cannot read.
+  return Math.round(paidUsd * pct) / 100;
+}
+
 /**
  * One line, for a card or a row. Never mentions who pays it back — on an
  * operator trip the money is in the operator's Stripe account, not ours, so

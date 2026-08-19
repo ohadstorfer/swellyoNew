@@ -257,7 +257,19 @@ export const RefundSheet: React.FC<{
 };
 
 const styles = StyleSheet.create({
-  surface: { paddingHorizontal: 20, paddingTop: 6, gap: 10 },
+  // ⚠️ BottomSheetShell paints the BACKDROP ONLY — it is headless, and every
+  // sheet supplies its own surface. Without these three lines the sheet renders
+  // transparent and the screen behind it shows straight through the content.
+  // Was missing here since this sheet was written; caught 2026-08-19 when a
+  // sheet copied from it shipped the same hole.
+  surface: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    gap: 10,
+  },
   grabWrap: { alignItems: 'center', paddingBottom: 6 },
   grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E0E0E0' },
 

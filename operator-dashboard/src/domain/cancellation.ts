@@ -144,6 +144,91 @@ export function effectiveRules(p: CancellationPolicy): CancellationRule[] {
   return p.preset === 'custom' ? p.rules : PRESET_RULES[p.preset];
 }
 
+// ---------------------------------------------------------------------------
+// turning a policy into a number
+//
+// ⚠️ Byte-for-byte the same as `src/services/trips/cancellationPolicy.ts`. The
+// two apps share no code. Change one, change both — a refund percentage that
+// differs between the phone and the dashboard is the worst possible bug here,
+// because both screens look right on their own.
+// ---------------------------------------------------------------------------
+
+/**
+ * `start_date` is a Postgres `date` — a calendar day with no time and no zone.
+ *
+ * ⚠️ NOT `new Date(s)`. That parses 'YYYY-MM-DD' as UTC midnight, while
+ * `new Date()` is local, so in any timezone west of UTC the two are already
+ * hours apart before the subtraction starts — enough to move a traveler across
+ * a policy boundary and change what they are refunded.
+ */
+function parseDateOnly(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const startOfDay = (d: Date): number =>
+  new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/**
+ * Whole days from `now` until the trip starts. Negative once it has begun.
+ *
+ * ⚠️ `round`, not `floor`. Both operands are local midnight, so the division is
+ * exact — except across a daylight-saving boundary, where the span is 23 or 25
+ * hours and `floor` would silently lose a day.
+ */
+export function daysUntil(tripStartDate: string, now: Date = new Date()): number | null {
+  const start = parseDateOnly(tripStartDate);
+  if (!start) return null;
+  return Math.round((startOfDay(start) - startOfDay(now)) / 86_400_000);
+}
+
+/**
+ * What percentage this policy gives back, for a cancellation happening now.
+ *
+ * ⚠️ NULL IS NOT ZERO. Null means "this trip never stated terms"; zero means
+ * "the terms were stated, and they give nothing back". Callers must render null
+ * as *no suggestion at all*, never as 0%.
+ */
+export function refundPctFor(
+  policy: CancellationPolicy | null | undefined,
+  tripStartDate: string | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  if (!policy) return null;
+  if (!tripStartDate) return null;
+
+  const days = daysUntil(tripStartDate, now);
+  if (days === null) return null;
+
+  // Furthest-out first — the order the DB trigger stores them in, and the order
+  // this walk depends on. Sorted again rather than trusted.
+  const rules = [...effectiveRules(policy)].sort((a, b) => b.daysBefore - a.daysBefore);
+
+  for (const rule of rules) {
+    if (days >= rule.daysBefore) return rule.refundPct;
+  }
+  return 0;
+}
+
+/**
+ * What the policy suggests refunding, in dollars. A SUGGESTION — nothing
+ * applies it on its own. Null propagates: no policy, no suggestion.
+ */
+export function suggestedRefundUsd(args: {
+  policy: CancellationPolicy | null | undefined;
+  tripStartDate: string | null | undefined;
+  paidUsd: number;
+  now?: Date;
+}): number | null {
+  const { policy, tripStartDate, paidUsd, now } = args;
+  const pct = refundPctFor(policy, tripStartDate, now);
+  if (pct === null) return null;
+  if (!Number.isFinite(paidUsd) || paidUsd <= 0) return 0;
+  return Math.round(paidUsd * pct) / 100;
+}
+
 /**
  * One line, for a card or a row. Never mentions who pays it back — on an
  * operator trip the money is in the operator's Stripe account, not ours, so

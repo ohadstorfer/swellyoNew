@@ -61,6 +61,15 @@ export const TravelerExtras: React.FC<{
    */
   justRefunded?: { amountUsd: number; seenRefunds: number } | null;
   onMessage: () => void;
+  /**
+   * Absent when this viewer cannot remove travelers (`travelers.remove`).
+   *
+   * Deliberately a SEPARATE gate from `onRefund`: the database splits removing
+   * a traveler from moving their money, and a Manager can hold the first alone.
+   * What happens when such a Manager tries to remove someone who has PAID is
+   * decided inside the sheet this opens, not here — it has the paid figure.
+   */
+  onRemove?: () => void;
 }> = ({
   tripId,
   userId,
@@ -73,6 +82,7 @@ export const TravelerExtras: React.FC<{
   blockedRefunds = [],
   justRefunded,
   onMessage,
+  onRemove,
 }) => {
   const medical = useQuery({
     queryKey: ['operatorDashboard', 'medicalForm', tripId, userId],
@@ -242,6 +252,22 @@ export const TravelerExtras: React.FC<{
         <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
         <Text style={styles.actionText}>Message {firstName(name)}</Text>
       </PressableScale>
+
+      {/* Removing lives at the very bottom, under Message and visually quieter
+          than it: this screen exists to review someone, and the destructive
+          action should be the one you have to travel to, not the one your
+          thumb lands on. Same reasoning as the refund link sitting inside the
+          money block rather than up here. */}
+      {onRemove && (
+        <PressableScale
+          onPress={onRemove}
+          style={styles.actionDanger}
+          accessibilityLabel={`Remove ${name} from the trip`}
+        >
+          <Ionicons name="person-remove-outline" size={18} color={D.danger} />
+          <Text style={styles.actionDangerText}>Remove from trip</Text>
+        </PressableScale>
+      )}
     </View>
   );
 };
@@ -394,6 +420,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // Outlined, not filled: the destructive action must not compete with Message
+  // for the eye. Colour comes from the dashboard theme, which no longer mirrors
+  // the web palette — do not substitute a raw hex here.
+  actionDanger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: D.danger,
+    backgroundColor: 'transparent',
+  },
+  actionDangerText: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 15,
+    fontWeight: '600',
+    color: D.danger,
   },
 });
 

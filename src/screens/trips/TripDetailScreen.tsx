@@ -89,6 +89,8 @@ import { TripDashboardTab } from '../../components/trips/dashboard/TripDashboard
 import { TravelerExtras } from '../../components/trips/dashboard/TravelerExtras';
 import { TravelerPriceSheet } from '../../components/trips/TravelerPriceSheet';
 import { RefundSheet } from '../../components/trips/RefundSheet';
+import { CancelTripSheet } from '../../components/trips/CancelTripSheet';
+import { RemoveTravelerSheet } from '../../components/trips/RemoveTravelerSheet';
 import { fetchTripRefunds } from '../../services/trips/refundsService';
 import { fetchTripMoney } from '../../services/trips/operatorDashboardService';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
@@ -950,6 +952,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const [openingChat, setOpeningChat] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  // Operator trips only. `cancelling` above still drives the peer-trip Alert
+  // path and the header spinner; this is the sheet's own visibility.
+  const [cancelSheetOpen, setCancelSheetOpen] = useState(false);
+  /** The traveler being removed from inside the document-review screen. */
+  const [removeTarget, setRemoveTarget] = useState<
+    { userId: string; name: string; paidUsd: number } | null
+  >(null);
   const [completing, setCompleting] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [editingPacking, setEditingPacking] = useState(false);
@@ -1541,9 +1550,36 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   };
 
+  /** The removal itself, shared by both paths below. */
+  const doRemoveParticipant = useCallback(
+    async (userId: string, refundedUsd?: number) => {
+      setRemovingUserId(userId);
+      try {
+        await removeParticipant(tripId, userId, refundedUsd);
+        queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+          tripsKeys.detail(tripId),
+          prev =>
+            prev ? { ...prev, participants: prev.participants.filter(p => p.user_id !== userId) } : prev
+        );
+      } finally {
+        setRemovingUserId(null);
+      }
+    },
+    [queryClient, tripId]
+  );
+
   const handleRemoveParticipant = (userId: string) => {
     const target = participants.find(p => p.user_id === userId);
     const name = target?.name || 'this participant';
+
+    // ⚠️ CURRENTLY UNREACHABLE — nothing on this screen calls this. The live
+    // removal path is TripMembersScreen, whose TripMemberSheet routes a paid
+    // traveler to a nested RemoveTravelerSheet so the money is decided first.
+    //
+    // If this is ever wired up, it must do the same. Do NOT open a
+    // BottomSheetShell from here as a sibling of a presented sheet: two native
+    // Modals overlapping mid-dismiss strand an invisible view controller on
+    // iOS and the app looks frozen. Nest it, the way the price sheet is.
     Alert.alert(
       'Remove from trip',
       `Are you sure you want to remove ${name}? They'll be notified and removed from the group chat.`,
@@ -1553,18 +1589,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            setRemovingUserId(userId);
             try {
-              await removeParticipant(tripId, userId);
-              queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
-                tripsKeys.detail(tripId),
-                prev =>
-                  prev ? { ...prev, participants: prev.participants.filter(p => p.user_id !== userId) } : prev
-              );
+              await doRemoveParticipant(userId);
             } catch (e: any) {
               Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
-            } finally {
-              setRemovingUserId(null);
             }
           },
         },
@@ -1572,7 +1600,31 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     );
   };
 
+  /**
+   * Everything the caches need once the trip is cancelled, wherever the cancel
+   * came from. Split out because the two paths below both need it and they must
+   * not drift — an operator trip that cancelled but stayed 'active' in the
+   * detail cache would keep showing a Pay button over a refunded trip.
+   */
+  const applyCancelledToCaches = useCallback(() => {
+    queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
+      tripsKeys.detail(tripId),
+      prev => (prev && prev.trip ? { ...prev, trip: { ...prev.trip, status: 'cancelled' } } : prev)
+    );
+    queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
+    queryClient.invalidateQueries({ queryKey: tripsKeys.explore });
+  }, [queryClient, tripId]);
+
   const handleCancelTrip = () => {
+    // Operator trips go through the sheet: they collected money, and cancelling
+    // one has to refund it in the same action. See CancelTripSheet.
+    if (isOperatorTrip) {
+      setCancelSheetOpen(true);
+      return;
+    }
+
+    // Peer trips (hosting_style A/B) never took a payment through Swellyo, so
+    // there is nothing to reverse and an Alert is the honest amount of ceremony.
     Alert.alert(
       'Cancel trip',
       'This will hide the trip from Explore. Existing participants will see it as cancelled. You can\'t undo this.',
@@ -1585,12 +1637,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             setCancelling(true);
             try {
               await cancelTrip(tripId);
-              queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
-                tripsKeys.detail(tripId),
-                prev => (prev && prev.trip ? { ...prev, trip: { ...prev.trip, status: 'cancelled' } } : prev)
-              );
-              queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
-              queryClient.invalidateQueries({ queryKey: tripsKeys.explore });
+              applyCancelledToCaches();
             } catch (e: any) {
               Alert.alert('Could not cancel', friendlyErrorMessage(e, 'Please try again.'));
             } finally {
@@ -3474,6 +3521,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 justRefunded={
                   justRefunded?.userId === userId ? justRefunded : null
                 }
+                // `travelers.remove`, NOT `money.manage` — the database splits
+                // them and so does this. Whether a Manager may remove someone
+                // who has PAID is decided inside the sheet, which knows the
+                // figure; here we only decide whether the row is offered.
+                onRemove={
+                  isHost || can('travelers.remove')
+                    ? () =>
+                        setRemoveTarget({
+                          userId,
+                          name,
+                          paidUsd:
+                            dashboardMoney.data?.travelers.find(m => m.userId === userId)
+                              ?.paidUsd ?? 0,
+                        })
+                    : undefined
+                }
                 onMessage={() => {
                   // Close the review Modal FIRST. Pushing a chat card from
                   // under a presented Modal leaves it stranded on top of the
@@ -3497,6 +3560,37 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 mounted as a SIBLING of a presented Modal is resolved to the
                 root view controller, which UIKit refuses — it only appears once
                 the operator leaves the traveler. */}
+            {/* Removing from inside the review screen. `inline` for exactly the
+                same reason as the refund sheet below it — and this one has a
+                second reason to be careful: opening it as a sibling of a
+                presented Modal is what froze the Members list, because iOS
+                strands an invisible view controller that eats every touch. */}
+            {removeTarget && (
+              <RemoveTravelerSheet
+                inline
+                visible={!!removeTarget}
+                onClose={() => setRemoveTarget(null)}
+                tripId={tripId}
+                userId={removeTarget.userId}
+                travelerName={removeTarget.name}
+                paidUsd={removeTarget.paidUsd}
+                cancellation={policyFromTrip(trip)}
+                tripStartDate={trip.start_date ?? null}
+                canRefund={isTripOwner || can('money.manage')}
+                onRemove={async refundedUsd => {
+                  await doRemoveParticipant(removeTarget.userId, refundedUsd);
+                  setRemoveTarget(null);
+                }}
+                onRefunded={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: ['operatorDashboard', 'money', tripId],
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: ['operatorDashboard', 'refunds', tripId],
+                  });
+                }}
+              />
+            )}
             <RefundSheet
               inline
               visible={!!refundTarget}
@@ -3839,6 +3933,40 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             participants.find(p => p.role === 'host') ?? null,
           )}
           onClose={() => setStorySheetVisible(false)}
+        />
+      )}
+
+      {/* Cancel an operator trip — and refund everyone in the same action.
+          Mounted on demand so its money figures are read at open time: a sheet
+          kept mounted would quote a total that went stale the moment anyone
+          paid. NOT `inline` — it opens from the header menu, not from inside a
+          presented Modal. */}
+      {cancelSheetOpen && (
+        <CancelTripSheet
+          visible={cancelSheetOpen}
+          onClose={() => setCancelSheetOpen(false)}
+          tripId={tripId}
+          tripTitle={trip.title ?? 'this trip'}
+          // Members only. The operator is not a guest on their own trip, and
+          // counting them would inflate the one number the decision turns on.
+          travelerCount={participants.filter(p => p.role !== 'host').length}
+          // Net of refunds already issued — `collectedUsd` sums signed events,
+          // so a partly-refunded trip quotes what is actually still held.
+          paidUsd={dashboardMoney.data?.collectedUsd ?? 0}
+          // Defaults to offline while the money query is still loading, so the
+          // sheet can never promise a refund it has not confirmed exists.
+          isOffline={dashboardMoney.data?.isOffline ?? true}
+          nameFor={userId =>
+            participants.find(p => p.user_id === userId)?.name ?? 'This traveler'
+          }
+          onCancelled={() => {
+            applyCancelledToCaches();
+            // The ledger and the refund list both moved. Refetch rather than
+            // patch: the batch can partly fail, and guessing the new totals
+            // from here would be inventing them.
+            queryClient.invalidateQueries({ queryKey: ['operatorDashboard', 'money', tripId] });
+            queryClient.invalidateQueries({ queryKey: ['operatorDashboard', 'refunds', tripId] });
+          }}
         />
       )}
 

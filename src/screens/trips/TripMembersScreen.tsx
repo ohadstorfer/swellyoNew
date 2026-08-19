@@ -36,6 +36,9 @@ import { friendlyErrorMessage } from '../../utils/friendlyError';
 import { isTripHost } from '../../utils/tripRole';
 import { useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
 import { InviteMembersSheet } from '../../components/trips/InviteMembersSheet';
+import { policyFromTrip } from '../../services/trips/cancellationPolicy';
+import { fetchTripMoney } from '../../services/trips/operatorDashboardService';
+import { useQuery } from '@tanstack/react-query';
 
 // `target_surf_styles` (SurfStyle: 'shortboard'|'midlength'|'longboard'|'softtop'|'all')
 // and `surfers.surfboard_type` (the real profile enum: 'shortboard'|'mid_length'|
@@ -183,6 +186,31 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   // Rows with an in-flight removal — dimmed + spinner until the refetch drops them.
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
+  /**
+   * What each traveler has paid — the number the removal decision turns on.
+   *
+   * Operator trips only, and only for someone allowed to see the ledger. RLS
+   * would return nothing anyway; the gate keeps it from being a guaranteed-empty
+   * round trip on every peer trip.
+   */
+  const canSeeMoney = isHost || can('payments.view_status');
+  const tripMoney = useQuery({
+    queryKey: ['operatorDashboard', 'money', tripId],
+    queryFn: () => fetchTripMoney(tripId),
+    enabled: canSeeMoney && trip?.hosting_style === 'C',
+  });
+
+  /** Net paid by one traveler, 0 when unknown or nothing. */
+  const paidUsdFor = (userId: string): number =>
+    tripMoney.data?.travelers.find(t => t.userId === userId)?.paidUsd ?? 0;
+
+  /**
+   * Refunding is `money.manage`, which is NOT the same as `travelers.remove`.
+   * A Manager can hold the second alone, and removing a paid traveler would
+   * then strand the money — so the sheet refuses and names the operator.
+   */
+  const canRefund = isHost || can('money.manage');
+
   const refetchCore = () =>
     queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
 
@@ -229,6 +257,29 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
     );
   };
 
+  /** The removal itself, once the money question is settled (or absent). */
+  const doRemove = async (m: EnrichedParticipant, refundedUsd?: number) => {
+    setRemovingIds(prev => new Set(prev).add(m.user_id));
+    try {
+      await removeParticipant(tripId, m.user_id, refundedUsd);
+      await refetchCore();
+    } finally {
+      setRemovingIds(prev => {
+        const next = new Set(prev);
+        next.delete(m.user_id);
+        return next;
+      });
+    }
+  };
+
+  /**
+   * The UNPAID removal path only.
+   *
+   * Anyone who has paid never reaches here — TripMemberSheet routes them to its
+   * own nested RemoveTravelerSheet, so the money is decided before they leave
+   * the roster. This is every peer trip, and every operator trip where the
+   * person never paid.
+   */
   const confirmRemove = (m: EnrichedParticipant) => {
     Alert.alert(
       'Remove from trip',
@@ -239,18 +290,10 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            setRemovingIds(prev => new Set(prev).add(m.user_id));
             try {
-              await removeParticipant(tripId, m.user_id);
-              await refetchCore();
+              await doRemove(m);
             } catch (e: any) {
               Alert.alert('Could not remove', friendlyErrorMessage(e, 'Please try again.'));
-            } finally {
-              setRemovingIds(prev => {
-                const next = new Set(prev);
-                next.delete(m.user_id);
-                return next;
-              });
             }
           },
         },
@@ -452,6 +495,15 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
         onSetAdmin={confirmSetAdmin}
         onRemoveAdmin={confirmRemoveAdmin}
         onRemove={confirmRemove}
+        // The refund sheet lives INSIDE TripMemberSheet, not here. Mounting it
+        // as a sibling of that sheet's Modal strands an invisible view
+        // controller on iOS and locks every touch — it looks like the app
+        // froze. Same reason the price sheet is nested there.
+        paidUsd={sheetMember ? paidUsdFor(sheetMember.user_id) : 0}
+        cancellation={policyFromTrip(trip)}
+        tripStartDate={trip?.start_date ?? null}
+        canRefund={canRefund}
+        onRemoveWithRefund={doRemove}
       />
 
       {currentUserId ? (

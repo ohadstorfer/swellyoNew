@@ -16,7 +16,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 async function sendRemovedNotification(
   supabase: any,
   tripId: string,
-  removedUserId: string
+  removedUserId: string,
+  refundUsd: number | null
 ): Promise<void> {
   const { data: trip, error: tripError } = await supabase
     .from('group_trips')
@@ -36,7 +37,17 @@ async function sendRemovedNotification(
     audience: 'user',
     entity_type: 'group_trip',
     entity_id: tripId,
-    data: { trip_title: (trip as any).title ?? null },
+    data: {
+      trip_title: (trip as any).title ?? null,
+      // Only present when money actually went back. Someone who is removed AND
+      // refunded will otherwise write in to ask where their money is, and the
+      // person who removed them is the last one they want to ask.
+      //
+      // Omitted rather than zeroed when nothing was refunded: `refund_usd: 0`
+      // renders as "$0.00 is being refunded", which is worse than silence.
+      // Renderers must treat absent as "say nothing about money".
+      ...(refundUsd && refundUsd > 0 ? { refund_usd: refundUsd } : {}),
+    },
   });
   if (feedError) {
     console.error('[Trip Removed Notif] member_removed feed insert failed:', feedError);
@@ -98,7 +109,16 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
     }
 
-    await sendRemovedNotification(supabase, tripId, removedUserId);
+    // Optional. Sent by the client only when a refund was actually issued as
+    // part of the removal — an older client omits it entirely, which is why
+    // this is read defensively rather than required.
+    const rawRefund = (body as any).refund_usd ?? (body as any).refundUsd;
+    const refundUsd =
+      typeof rawRefund === 'number' && Number.isFinite(rawRefund) && rawRefund > 0
+        ? rawRefund
+        : null;
+
+    await sendRemovedNotification(supabase, tripId, removedUserId, refundUsd);
 
     return new Response(
       JSON.stringify({ message: 'Notification processed', request_id: reqId }),

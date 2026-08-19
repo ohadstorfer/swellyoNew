@@ -922,6 +922,14 @@ export async function deleteGroupTrip(tripId: string): Promise<boolean> {
 /**
  * Soft-cancel a trip. Hides it from Explore but keeps the row + participants for history.
  * Existing participants see a "cancelled" banner on the detail screen.
+ *
+ * ⚠️ PEER TRIPS ONLY (hosting_style A/B). An operator trip must go through
+ * `cancelTripWithRefunds` instead: this writes the status and nothing else, and
+ * on a trip that collected money that is precisely the bug — travelers keep
+ * losing their spot while the operator keeps their deposits. The two paths are
+ * separate because a peer trip has no payments to reverse and no operator
+ * balance to check, so putting it through the edge function would only add a
+ * network round trip and a Stripe dependency to a plain column write.
  */
 export async function cancelTrip(tripId: string): Promise<void> {
   const { error } = await supabase
@@ -932,6 +940,145 @@ export async function cancelTrip(tripId: string): Promise<void> {
     console.error('[groupTripsService] cancelTrip error:', error);
     throw new Error(error.message);
   }
+}
+
+/** One traveler's refund, as the cancel batch left it. */
+export interface CancelRefundOutcome {
+  userId: string;
+  paymentEventId: string;
+  amountUsd: number;
+  /** `already_refunded` carries no money and is not an error — it is the branch
+   *  that makes retrying the batch safe. */
+  status: 'succeeded' | 'failed' | 'blocked_insufficient_balance' | 'already_refunded';
+  message?: string;
+}
+
+export interface CancelTripResult {
+  /** True whenever the trip is cancelled NOW — including when it already was,
+   *  which is the state a retry starts from. */
+  cancelled: boolean;
+  /** The trip never collected through Stripe, so there was nothing to refund. */
+  offline: boolean;
+  refunds: CancelRefundOutcome[];
+  /** Set when the trip was cancelled but the refund sweep could not run at all
+   *  (unreadable balance, payments query failed). The trip is still cancelled. */
+  error?: string;
+}
+
+/**
+ * Cancel an operator trip and refund every traveler in full.
+ *
+ * The refund is not a parameter. When the operator cancels, everybody gets 100%
+ * back and the trip's own cancellation policy does not apply — that policy is
+ * about a traveler who backs out. Anything else is a support conversation held
+ * BEFORE cancelling, using the one-traveler `issueRefund`.
+ *
+ * Safe to call twice. The server re-asks Stripe what is left on each charge, so
+ * an already-refunded payment is skipped rather than refunded again — which is
+ * what makes the "Retry blocked refunds" button on the status screen safe.
+ *
+ * Never throws for a refund that was refused. A blocked refund is an ANSWER the
+ * operator has to read ("needs ₪2,200, you have ₪900"), and it arrives per
+ * traveler; only a failure to cancel at all comes back as a thrown error.
+ */
+export async function cancelTripWithRefunds(args: {
+  tripId: string;
+  reason?: string;
+}): Promise<CancelTripResult> {
+  const { data, error } = await supabase.functions.invoke('trip-cancel', {
+    body: {
+      tripId: args.tripId,
+      ...(args.reason?.trim() ? { reason: args.reason.trim() } : {}),
+    },
+  });
+
+  // supabase-js turns any non-2xx into an error and hides the JSON body on it.
+  // The body is where the server says WHY (not the operator, already completed),
+  // so dig it back out rather than showing "Edge Function returned a non-2xx
+  // status" for a permission problem.
+  if (error) {
+    let payload: any = null;
+    try {
+      payload = await (error as any).context?.json?.();
+    } catch {
+      /* not JSON — fall through to the generic message */
+    }
+    throw new Error(payload?.error ?? 'Could not cancel the trip. Please try again.');
+  }
+
+  if (!data?.ok) {
+    throw new Error(data?.error ?? 'Could not cancel the trip. Please try again.');
+  }
+
+  return {
+    cancelled: data.cancelled === true,
+    offline: data.offline === true,
+    refunds: (data.refunds ?? []) as CancelRefundOutcome[],
+    ...(data.error ? { error: data.error as string } : {}),
+  };
+}
+
+export interface RefundTravelerResult {
+  refunds: CancelRefundOutcome[];
+  /** Asked for more than their payments could give back, or part was blocked.
+   *  0 when the whole amount went out. */
+  unallocatedUsd: number;
+  /** The sweep could not run at all. Nothing was refunded. */
+  error?: string;
+}
+
+/**
+ * Refund one traveler, without touching the trip.
+ *
+ * The amount is spread across that person's payments server-side, newest first.
+ * This matters: a traveler is not one payment. Deposit and balance are separate
+ * requirements and the balance takes partial payments, so one person can easily
+ * hold six paid rows. The operator decides "give her back $450"; which charges
+ * that comes off is arithmetic they should never have to do.
+ *
+ * `amountUsd` omitted = everything still refundable. `0` is a real answer —
+ * "remove them, refund nothing" — and returns immediately having written no
+ * rows, because an audit trail full of zero-dollar events helps nobody.
+ *
+ * Authorised on `money.manage`, NOT `travelers.remove`. A Manager can hold the
+ * second without the first, and this is what stops them removing a paid
+ * traveler and stranding the money.
+ *
+ * Never throws for a refund that was refused — a blocked refund is an answer
+ * the operator has to read, and it arrives per payment.
+ */
+export async function refundTraveler(args: {
+  tripId: string;
+  userId: string;
+  amountUsd?: number;
+}): Promise<RefundTravelerResult> {
+  const { data, error } = await supabase.functions.invoke('trip-cancel', {
+    body: {
+      tripId: args.tripId,
+      userId: args.userId,
+      ...(args.amountUsd !== undefined ? { amountUsd: args.amountUsd } : {}),
+    },
+  });
+
+  if (error) {
+    let payload: any = null;
+    try {
+      payload = await (error as any).context?.json?.();
+    } catch {
+      /* not JSON — fall through to the generic message */
+    }
+    throw new Error(payload?.error ?? 'Could not issue the refund. Please try again.');
+  }
+
+  if (!data?.ok) {
+    throw new Error(data?.error ?? 'Could not issue the refund. Please try again.');
+  }
+
+  return {
+    refunds: (data.refunds ?? []) as CancelRefundOutcome[],
+    unallocatedUsd: Number(data.unallocatedUsd ?? 0),
+    ...(data.error ? { error: data.error as string } : {}),
+  };
 }
 
 /**
@@ -1569,7 +1716,16 @@ export async function demoteTripHost(tripId: string, userId: string): Promise<vo
 
 export async function removeParticipant(
   tripId: string,
-  userId: string
+  userId: string,
+  /**
+   * What was just refunded to this person, if anything.
+   *
+   * Passed straight through to their removal notification, so someone who is
+   * removed AND refunded is told the amount instead of having to ask the person
+   * who removed them. Omitted (or 0) means the push says nothing about money —
+   * never "$0.00 is being refunded".
+   */
+  refundedUsd?: number
 ): Promise<void> {
   // Only the participant delete is awaited — it's what makes the member row
   // disappear. The banner, join-request cleanup, chat removal, and push all
@@ -1652,7 +1808,11 @@ export async function removeParticipant(
 
   supabase.functions
     .invoke('send-trip-removed-notification', {
-      body: { trip_id: tripId, removed_user_id: userId },
+      body: {
+        trip_id: tripId,
+        removed_user_id: userId,
+        ...(refundedUsd && refundedUsd > 0 ? { refund_usd: refundedUsd } : {}),
+      },
     })
     .catch(notifError => {
       console.warn('[groupTripsService] removeParticipant notification failed:', notifError);

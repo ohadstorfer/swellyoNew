@@ -260,12 +260,43 @@ serve(async req => {
       // that for a literal — splitting it across a `+` collapses the whole row
       // to `GenericStringError` and every `trip.<field>` below stops compiling.
       // eslint-disable-next-line max-len
-      .select('id, title, host_id, payment_mode, max_participants, cancellation_preset, cancellation_rules, cancellation_notes')
+      .select('id, title, host_id, status, payment_mode, max_participants, cancellation_preset, cancellation_rules, cancellation_notes')
       .eq('id', req_.trip_id)
       .single();
 
     if (!trip || trip.payment_mode !== 'managed') {
       return json({ error: 'This trip is not collecting payments' }, 400);
+    }
+
+    // ── 3a. The trip must still be running.
+    //
+    //      Until 2026-08-19 this function never read `status` at all, and that
+    //      was the whole of the "a cancelled trip still takes money" hole: the
+    //      cancel flow hides the buttons and pushes a notification, but a
+    //      traveler sitting on a stale screen, or following an old push, could
+    //      still open Checkout and pay — and the server said yes, took the
+    //      money, and routed it to an operator who had already called the trip
+    //      off. Somebody then had to notice and refund it by hand.
+    //
+    //      Checked AFTER `payment_mode` so an offline trip keeps its own,
+    //      more specific message, and BEFORE capacity so a cancelled trip is
+    //      never reported as "full".
+    //
+    //      This is the durable half of the fix. `trip-cancel` also expires the
+    //      open Checkout Sessions it can find, which kills the payment pages
+    //      travelers already have open — but that is a best-effort sweep over a
+    //      list Stripe pages at 100, and a session it missed would still be
+    //      payable. This check is what makes that impossible, so it must stay
+    //      even though the sweep exists.
+    if (trip.status !== 'active') {
+      // Read verbatim by a TRAVELER who is holding a payment screen. They did
+      // nothing wrong and are about to lose a trip, so this says what happened
+      // rather than refusing them.
+      const line =
+        trip.status === 'cancelled'
+          ? 'This trip was cancelled, so it is not taking payments any more. Anything you already paid is being refunded.'
+          : 'This trip is finished, so it is not taking payments any more.';
+      return json({ error: line }, 409);
     }
 
     // ── 3b. Is there still a spot? Only asked of someone who does not have one
