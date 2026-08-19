@@ -7,11 +7,13 @@
  * about Stripe in different ways:
  *
  *   · the app calls `stripe-connect-onboard` and gets Stripe's live
- *     `requirements` arrays, so it can tell all six Connect states apart;
- *   · this site reads `operator_payout_accounts` directly — four booleans, no
- *     `currently_due`, no `disabled_reason`.
+ *     `requirements` arrays;
+ *   · this site reads the same fields off `operator_payout_accounts`, which
+ *     the Connect webhook and the daily sweep keep current.
  *
- * So the STEPS and their meaning are shared; only the Stripe input differs.
+ * Both then run the SAME six-state rule — the app's `connectStatus.ts` and this
+ * project's `domain/connect.ts` twin. So the STEPS and their meaning are
+ * shared; only where the fields come from differs.
  * Anything else that drifts is a bug — an operator must not be told they are
  * finished here and unfinished there.
  *
@@ -21,7 +23,8 @@
  * the refund terms they are selling on. The `*ConfirmedAt` stamps record that a
  * human looked, which is a different fact from what the value is.
  */
-import type { OperatorSettings, PayoutState } from '../services/settings';
+import { connectStatusOf, type OperatorSettings, type PayoutState } from '../services/settings';
+import { deriveConnectState } from './connect';
 
 export type SetupStepKey =
   | 'stripe'
@@ -79,19 +82,17 @@ export interface OperatorSetupInput {
  *
  * The app's `canCollectPayments` says ready | under_review | action_needed, for
  * a reason Ohad settled on 2026-08-05: blocking an operator whom Stripe is
- * merely reading punishes them for having done everything right. Expressed in
- * the four booleans this site has:
+ * merely reading punishes them for having done everything right.
  *
- *   · `chargesEnabled`                     → live (covers ready AND action_needed)
- *   · `hasAccount && detailsSubmitted`     → submitted and waiting (under_review)
- *
- * The one state this cannot see is `blocked` — Stripe rejecting an account
- * outright. That needs `disabled_reason`, which is not on the table. Such an
- * operator reads as unfinished here, which is the safe way to be wrong: the
- * Payments card sends them to the app, and the app can say why.
+ * ⚠️ `blocked` is NOT done. Until 2026-08-19 this read four booleans, and an
+ * account Stripe had REFUSED satisfied `detailsSubmitted` — so the checklist
+ * ticked the step, the banner disappeared, and nothing anywhere said why no
+ * trip could take money. `disabled_reason` was on the table all along; this
+ * site simply never selected it.
  */
 export function stripeDone(p: PayoutState): boolean {
-  return p.chargesEnabled || (p.hasAccount && p.detailsSubmitted);
+  const state = deriveConnectState(connectStatusOf(p));
+  return state === 'ready' || state === 'action_needed' || state === 'under_review';
 }
 
 export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
@@ -103,7 +104,9 @@ export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
       title: 'Get paid',
       todo: 'Connect Stripe so travelers can pay you.',
       done: stripeDone(payout),
-      pending: payout.hasAccount && payout.detailsSubmitted && !payout.chargesEnabled,
+      // "Checking", not "Done" — submitted and waiting on Stripe. Derived the
+      // same way as `done`, so a refused account can never read as pending.
+      pending: deriveConnectState(connectStatusOf(payout)) === 'under_review',
       // Stripe's onboarding forms are embedded in the phone app and need the
       // secret key behind an edge function. Rebuilding that here would mean a
       // second onboarding path to keep in step with Stripe's six states.

@@ -17,6 +17,7 @@ import {
   EMPTY_SETTINGS,
   fetchOperatorSettings,
   fetchPayoutState,
+  NO_PAYOUT,
   type OperatorSettings,
   type PayoutState,
 } from './settings';
@@ -25,13 +26,6 @@ import {
   operatorSetupSteps,
   setupSummary,
 } from '../domain/operatorSetup';
-
-const NO_PAYOUT: PayoutState = {
-  hasAccount: false,
-  chargesEnabled: false,
-  payoutsEnabled: false,
-  detailsSubmitted: false,
-};
 
 export interface UseOperatorSetup {
   /** False until BOTH reads have settled — nothing should render before then. */

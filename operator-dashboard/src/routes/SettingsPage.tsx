@@ -21,11 +21,14 @@ import {
   CURRENCIES,
   EMPTY_SETTINGS,
   fetchOperatorSettings,
+  connectStatusOf,
   fetchPayoutState,
+  NO_PAYOUT,
   saveOperatorSettings,
   type OperatorSettings,
   type PayoutState,
 } from '../services/settings';
+import { deriveConnectState, describeConnectState } from '../domain/connect';
 import {
   PRESET_BLURB,
   PRESET_LABEL,
@@ -103,41 +106,36 @@ export function SettingsPage() {
 // ── Payments ───────────────────────────────────────────────────────────────
 
 function PaymentsCard({ payout }: { payout: PayoutState | null }) {
-  // Deliberately not collapsed into a single "connected" boolean. That is the
-  // exact mistake the app's ConnectStripeCard was rebuilt to fix: an account
-  // that submitted details and is under review is NOT the same as one that
-  // never started, and telling an operator to "Connect Stripe" again is how
-  // they end up doing it twice.
-  let tag = <span className="tag tag-idle">Not connected</span>;
-  let line = 'You cannot take payments in the app until Stripe is connected.';
-
-  if (payout?.hasAccount && payout.chargesEnabled && payout.payoutsEnabled) {
-    tag = <span className="tag tag-ok">Ready</span>;
-    line = 'Stripe can take payments and pay you out.';
-  } else if (payout?.hasAccount && payout.chargesEnabled) {
-    tag = <span className="tag tag-warn">Payouts on hold</span>;
-    line = 'Stripe can take payments, but is not paying out yet. Stripe usually holds the first payout for a few days.';
-  } else if (payout?.hasAccount && payout.detailsSubmitted) {
-    tag = <span className="tag tag-wait">Under review</span>;
-    line = 'Stripe has your details and is checking them. Nothing to do.';
-  } else if (payout?.hasAccount) {
-    tag = <span className="tag tag-warn">Not finished</span>;
-    line = 'Stripe still needs information from you.';
-  }
+  // Deliberately not collapsed into a single "connected" boolean, and no longer
+  // a ladder of if/else here either. Both halves of that were bugs: an account
+  // that submitted details and is under review is NOT one that never started,
+  // and an account Stripe REFUSED is neither — it used to read as "Stripe still
+  // needs information from you", sending the operator to fill in a form that
+  // could not help them. `deriveConnectState` is the one rule, shared with the
+  // app, and the only thing allowed to read `disabled_reason`.
+  const status = connectStatusOf(payout ?? NO_PAYOUT);
+  const state = deriveConnectState(status);
+  const copy = describeConnectState(state, status);
+  // Only when there is something to go and do. Telling a live operator — or one
+  // Stripe has refused — to "finish Stripe in the app" is an instruction that
+  // leads nowhere.
+  const showAppNote = state !== 'ready' && state !== 'blocked';
 
   return (
     <div className="card enter" style={{ marginBottom: 16 }}>
       <div className="card-body">
         <div className="row-between" style={{ marginBottom: 6 }}>
           <h3>Payments</h3>
-          {tag}
+          <span className={`tag tag-${copy.tone}`}>{copy.tag}</span>
         </div>
-        <p className="muted small" style={{ marginBottom: 10 }}>{line}</p>
-        <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-          Connect and finish Stripe in the Swellyo app, under Settings →
-          Payments. It has to be done there because Stripe's forms are built
-          into the app.
-        </p>
+        <p className="muted small" style={{ marginBottom: 10 }}>{copy.line}</p>
+        {showAppNote && (
+          <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+            Connect and finish Stripe in the Swellyo app, under Settings →
+            Payments. It has to be done there because Stripe's forms are built
+            into the app.
+          </p>
+        )}
       </div>
     </div>
   );

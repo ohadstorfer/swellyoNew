@@ -11,6 +11,11 @@
  */
 import { supabase } from '../lib/supabase';
 import {
+  deriveConnectState,
+  type ConnectState,
+  type ConnectStatus,
+} from '../domain/connect';
+import {
   DEFAULT_POLICY,
   rulesFromWire,
   rulesToWire,
@@ -322,12 +327,36 @@ export interface PayoutState {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   detailsSubmitted: boolean;
+  /** requirements.currently_due — Stripe is waiting on the operator. */
+  currentlyDue: string[];
+  /** requirements.past_due — the same, but a deadline has already passed. */
+  pastDue: string[];
+  /** requirements.disabled_reason. ⚠️ NOT a rejection flag on its own — see
+   *  `deriveConnectState`, which is the only thing allowed to interpret it. */
+  disabledReason: string | null;
 }
+
+/** Nothing known. Used when the row is missing or the read failed. */
+export const NO_PAYOUT: PayoutState = {
+  hasAccount: false,
+  chargesEnabled: false,
+  payoutsEnabled: false,
+  detailsSubmitted: false,
+  currentlyDue: [],
+  pastDue: [],
+  disabledReason: null,
+};
 
 export async function fetchPayoutState(userId: string): Promise<PayoutState> {
   const { data, error } = await supabase
     .from('operator_payout_accounts')
-    .select('stripe_account_id, charges_enabled, payouts_enabled, details_submitted')
+    .select(
+      'stripe_account_id, charges_enabled, payouts_enabled, details_submitted, ' +
+        // Added 2026-08-05 by the app side and never read here, which is why a
+        // REFUSED account used to show up as "Stripe still needs information
+        // from you". The Connect webhook and the daily sweep keep them fresh.
+        'requirements_due, requirements_past_due, disabled_reason',
+    )
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -339,5 +368,34 @@ export async function fetchPayoutState(userId: string): Promise<PayoutState> {
     chargesEnabled: Boolean(row?.charges_enabled),
     payoutsEnabled: Boolean(row?.payouts_enabled),
     detailsSubmitted: Boolean(row?.details_submitted),
+    currentlyDue: Array.isArray(row?.requirements_due) ? row.requirements_due : [],
+    pastDue: Array.isArray(row?.requirements_past_due) ? row.requirements_past_due : [],
+    disabledReason: row?.disabled_reason ?? null,
   };
+}
+
+/** The payout row as the shared Connect rule wants it. */
+export function connectStatusOf(p: PayoutState): ConnectStatus {
+  return {
+    // The rule only asks whether an account exists, never which one, and this
+    // site has no use for the id itself.
+    accountId: p.hasAccount ? 'acct' : null,
+    chargesEnabled: p.chargesEnabled,
+    payoutsEnabled: p.payoutsEnabled,
+    detailsSubmitted: p.detailsSubmitted,
+    currentlyDue: p.currentlyDue,
+    pastDue: p.pastDue,
+    disabledReason: p.disabledReason,
+  };
+}
+
+/** This operator's Connect state, in one call. */
+export async function fetchConnectState(userId: string): Promise<{
+  payout: PayoutState;
+  status: ConnectStatus;
+  state: ConnectState;
+}> {
+  const payout = await fetchPayoutState(userId);
+  const status = connectStatusOf(payout);
+  return { payout, status, state: deriveConnectState(status) };
 }

@@ -376,7 +376,13 @@ function PaymentList({
                   <td className="muted small">{formatDate(e.createdAt)}</td>
                   <td>{nameOf(e.userId)}</td>
                   <td className="muted small">
-                    {e.eventType === 'refunded' ? 'Refund' : 'Payment'}
+                    {e.eventType === 'refunded'
+                      ? 'Refund'
+                      : e.eventType === 'dispute_lost'
+                        ? 'Chargeback'
+                        : e.eventType === 'disputed'
+                          ? 'Dispute opened'
+                          : 'Payment'}
                   </td>
                   <td
                     style={{
@@ -384,7 +390,10 @@ function PaymentList({
                       color: e.amountUsd < 0 ? 'var(--danger)' : undefined,
                     }}
                   >
-                    {formatUsd(e.amountUsd)}
+                    {/* A 'disputed' row is a marker, pinned to $0 by the DB —
+                        the money has not finally moved. A dash reads as
+                        "no movement"; $0.00 would read as a broken payment. */}
+                    {e.eventType === 'disputed' ? '—' : formatUsd(e.amountUsd)}
                   </td>
                 </tr>
               ))}

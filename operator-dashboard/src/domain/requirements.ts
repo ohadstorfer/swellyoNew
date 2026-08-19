@@ -46,6 +46,10 @@ export type Requirement = {
   sortOrder: number;
   /** 'must_have' | a deadline flavour. Drives ordering, not state. */
   skipAtOnboarding: string | null;
+  /** Days before departure, as STORED. Null on a must_have row, which carries
+   *  no deadline at all — `dueDate` is null there too. This is the number the
+   *  editor's stepper moves; `dueDate` is what it resolves to. */
+  deadlineDaysBefore: number | null;
 };
 
 export type DocumentRow = {
@@ -171,4 +175,128 @@ export const STATE_LABEL: Record<RequirementState, string> = {
   approved: 'Approved',
   rejected: 'Rejected',
   overdue: 'Overdue',
+};
+
+/* ───────────────────────────────────────────────────────────────────────────
+ * Editing deadlines
+ *
+ * Spec: docs/specs/operator-trips/deadline-editing.md
+ *
+ * ⚠️ EVERYTHING BELOW IS A TWIN of the app's
+ * `src/services/trips/tripDocumentsService.ts`. The two projects share no code
+ * — separate package.json, and this one is blocked in the app's
+ * metro.config.js on purpose — so the rule is written twice. Same pattern as
+ * `src/domain/operatorSetup.ts`. If one changes, change the other: an operator
+ * who edits the same trip on their phone and here must be allowed to save
+ * exactly the same things.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * The deadline scale. Operators think in named intervals, not arbitrary
+ * numbers, so the stepper snaps through these rather than adding a fixed
+ * count of days: the gap that matters near departure (a day, three days) is
+ * not the gap that matters months out.
+ */
+export const DEADLINE_STEPS = [1, 3, 7, 14, 21, 30, 60, 90, 120, 180, 365];
+
+/**
+ * Move one notch along the scale. A value that is not on the scale — an older
+ * row, or one written before the scale existed — snaps to the nearest step
+ * first, so the control can never get stuck between notches.
+ */
+export function stepDeadline(current: number, direction: 1 | -1): number {
+  let idx = DEADLINE_STEPS.indexOf(current);
+  if (idx === -1) {
+    idx = DEADLINE_STEPS.reduce(
+      (best, v, i) =>
+        Math.abs(v - current) < Math.abs(DEADLINE_STEPS[best] - current) ? i : best,
+      0,
+    );
+    // Already snapped — that move counts as the step.
+    if (DEADLINE_STEPS[idx] !== current) return DEADLINE_STEPS[idx];
+  }
+  const next = Math.min(DEADLINE_STEPS.length - 1, Math.max(0, idx + direction));
+  return DEADLINE_STEPS[next];
+}
+
+/** True when the value sits at an end of the scale — used to disable a button
+ *  rather than let it silently do nothing. */
+export function isDeadlineAtEnd(current: number, direction: 1 | -1): boolean {
+  const idx = DEADLINE_STEPS.indexOf(current);
+  if (idx === -1) return false;
+  return direction === -1 ? idx === 0 : idx === DEADLINE_STEPS.length - 1;
+}
+
+/**
+ * The real date a deadline lands on, as `YYYY-MM-DD`, or null when the trip
+ * has no exact start date (a months-only trip).
+ *
+ * Deadlines are stored RELATIVE to departure on purpose: duplicating a trip or
+ * moving its dates keeps every deadline correct, where absolute dates would
+ * silently break.
+ *
+ * Strings throughout, never `new Date(iso)`. A bare `YYYY-MM-DD` parses as UTC
+ * midnight, which west of Greenwich is the evening before — the app carried
+ * that bug and rendered every deadline a day early for operators in the
+ * Americas. Working in local calendar strings makes it unrepresentable here.
+ */
+export function resolveDeadlineISO(
+  startDateISO: string | null,
+  daysBefore: number,
+): string | null {
+  if (!startDateISO) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(startDateISO);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() - Math.max(0, Math.round(daysBefore)));
+  return todayISO(d);
+}
+
+/**
+ * Must this step be refused?
+ *
+ * The rule: **an operator may not SET a deadline that has already gone.** Not
+ * a warning — the button is dead, here and in the app.
+ *
+ * ⚠️ MIND THE DIRECTION. The scale is DAYS BEFORE DEPARTURE, so it runs
+ * backwards against the calendar: `+1` means MORE days before, which is an
+ * EARLIER date. Only `+1` is ever refused.
+ *
+ * `-1` is ALWAYS allowed, and that is policy rather than arithmetic. Fewer
+ * days before is a later date, so it always moves a deadline toward the
+ * future — but it does not always reach it. On a trip ten days out, a
+ * deadline standing at 365 days before is deep in the past, and stepping down
+ * to 180 is still in the past. Refusing that step because the result is also
+ * historic would leave BOTH buttons dead and the operator unable to fix the
+ * very row they came to fix. A step that improves things is never blocked,
+ * even when it does not finish the job.
+ *
+ * False when the trip has no start date, and false at the ends of the scale —
+ * a step that cannot move is `isDeadlineAtEnd`'s business, and answering
+ * "true" here would disable the button for the wrong reason.
+ *
+ * TWIN: `deadlineStepBlocked` in the app's `tripDocumentsService.ts`.
+ */
+export function deadlineStepBlocked(
+  current: number,
+  direction: 1 | -1,
+  startDateISO: string | null,
+  today: string = todayISO(),
+): boolean {
+  if (direction === -1) return false;
+  if (!startDateISO) return false;
+  const next = stepDeadline(current, direction);
+  if (next === current) return false;
+  const due = resolveDeadlineISO(startDateISO, next);
+  if (!due) return false;
+  return due < today;
+}
+
+/** What the editor holds for one requirement. `daysBefore` is meaningless
+ *  while `skippable` is false — a must_have row stores no deadline — but it is
+ *  kept so switching the pills back and forth does not lose the number. */
+export type RequirementTiming = {
+  skippable: boolean;
+  daysBefore: number;
 };

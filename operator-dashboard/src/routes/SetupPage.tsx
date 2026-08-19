@@ -32,6 +32,7 @@ import {
   EMPTY_SETTINGS,
   fetchOperatorSettings,
   fetchPayoutState,
+  NO_PAYOUT,
   saveOperatorSettings,
   uploadDefaultWaiver,
   uploadOperatorInsurance,
@@ -47,13 +48,6 @@ import {
   type SetupStepKey,
 } from '../domain/operatorSetup';
 import { PRESET_LABEL, summarise } from '../domain/cancellation';
-
-const NO_PAYOUT: PayoutState = {
-  hasAccount: false,
-  chargesEnabled: false,
-  payoutsEnabled: false,
-  detailsSubmitted: false,
-};
 
 export function SetupPage() {
   const { user } = useAuth();

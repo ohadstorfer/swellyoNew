@@ -34,6 +34,9 @@ export type OperatorTrip = {
   cancellationPreset: string | null;
   cancellationRules: unknown;
   cancellationNotes: string | null;
+  /** Offline trips only: the full-payment deadline, days before departure.
+   *  Null on a managed trip, whose deadline is on the `balance` row. */
+  offlinePaymentDueDaysBefore: number | null;
   /**
    * True when this trip is on the list because the person is CREW, not because
    * they host it. Display only — what they may do inside is decided per page by
@@ -57,7 +60,11 @@ const TRIP_COLUMNS =
   // The trip's FROZEN cancellation terms, taken at publish. Read so the refund
   // dialog can show the operator the terms they are applying — never read from
   // `operator_settings`, which is today's default and may have changed since.
-  'cancellation_preset, cancellation_rules, cancellation_notes';
+  'cancellation_preset, cancellation_rules, cancellation_notes, ' +
+  // OFFLINE trips only. A managed trip's full-payment deadline lives on its
+  // `balance` requirement row instead — the database refuses pay rows on an
+  // offline trip, so this column is where theirs has to live.
+  'offline_payment_due_days_before';
 
 function toTrip(t: any, viaCrew = false): OperatorTrip {
   return {
@@ -75,6 +82,11 @@ function toTrip(t: any, viaCrew = false): OperatorTrip {
     cancellationPreset: t.cancellation_preset ?? null,
     cancellationRules: t.cancellation_rules ?? null,
     cancellationNotes: t.cancellation_notes ?? null,
+    offlinePaymentDueDaysBefore:
+      t.offline_payment_due_days_before === null ||
+      t.offline_payment_due_days_before === undefined
+        ? null
+        : Number(t.offline_payment_due_days_before),
     viaCrew,
   };
 }

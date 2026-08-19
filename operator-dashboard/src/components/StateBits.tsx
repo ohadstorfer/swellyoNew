@@ -97,10 +97,19 @@ export function CountPair({
   received,
   approved,
   expected,
+  late = 0,
 }: {
   received: number;
   approved: number;
   expected: number;
+  /**
+   * How many travelers are past this deadline.
+   *
+   * NOT the complement of `received`: a rejected upload past its due date
+   * counts here and in neither of the other two. Zero is not printed — "0 late"
+   * is not information, it is noise beside the counts that are.
+   */
+  late?: number;
 }) {
   return (
     <span>
@@ -108,6 +117,7 @@ export function CountPair({
         {received}/{expected} in
       </strong>
       <span className="muted"> · {approved}/{expected} approved</span>
+      {late > 0 && <span style={{ color: 'var(--danger)' }}> · {late} late</span>}
     </span>
   );
 }

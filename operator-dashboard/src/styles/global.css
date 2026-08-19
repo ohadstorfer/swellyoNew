@@ -495,6 +495,143 @@ input[type='text']:focus {
   border-color: transparent;
 }
 
+/* ── Editing requirements ───────────────────────────────────────────────────
+ * Inline inside the Documents card, not a dialog. Spec:
+ * docs/specs/operator-trips/deadline-editing.md
+ *
+ * The rows are quiet on purpose. This is a list an operator reads far more
+ * often than they change, so nothing here draws attention until it is being
+ * used — the only loud element is the save bar, and only once something moved. */
+.req-edit {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.req-edit:first-child {
+  padding-top: 4px;
+}
+
+/* A quiet divider-with-a-name, for the Payments and Not-asked-for groups. */
+.req-group {
+  font: 500 12px/1 var(--font);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 18px 0 8px;
+}
+
+.req-off {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  opacity: 0.75;
+}
+.req-off:last-child {
+  border-bottom: 0;
+}
+
+/* Segmented control: must-have vs skippable.
+ * One track, two halves — a pair of separate buttons would read as two
+ * unrelated choices rather than one either/or. */
+.seg {
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 2px;
+  gap: 2px;
+  background: var(--panel);
+  border-radius: 99px;
+}
+.seg-btn {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 99px;
+  padding: 6px 13px;
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+  /* Named properties, never `all`: only these three may move. */
+  transition: transform var(--t-press) var(--ease-out),
+    background-color var(--t-fast) ease, color var(--t-fast) ease;
+}
+.seg-btn:active {
+  transform: scale(0.97);
+}
+.seg-btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.seg-btn[aria-pressed='true'] {
+  background: #fff;
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+}
+@media (hover: hover) and (pointer: fine) {
+  .seg-btn:not([aria-pressed='true']):hover {
+    color: var(--text-2);
+  }
+}
+
+/* The deadline stepper. */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.stepper-btn {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--text);
+  border-radius: 99px;
+  font: 500 16px/1 var(--font);
+  cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out),
+    background-color var(--t-fast) ease, opacity var(--t-fast) ease;
+}
+.stepper-btn:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.stepper-btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .stepper-btn:hover:not(:disabled) {
+    background: var(--panel);
+  }
+}
+.stepper-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 14px;
+}
+
+/* The save bar. Enters with the card's own curve so it reads as part of the
+ * card arriving, not as an alert landing on top of it. */
+.savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  animation: enter var(--t-panel) var(--ease-out) both;
+}
+
 /* Motion sickness is real. Keep opacity, drop movement. */
 @media (prefers-reduced-motion: reduce) {
   *,

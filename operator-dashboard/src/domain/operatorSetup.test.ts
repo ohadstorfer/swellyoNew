@@ -10,7 +10,7 @@ import {
   type OperatorSetupInput,
 } from './operatorSetup';
 import { DEFAULT_POLICY } from './cancellation';
-import type { OperatorSettings, PayoutState } from '../services/settings';
+import { NO_PAYOUT, type OperatorSettings, type PayoutState } from '../services/settings';
 
 const EMPTY: OperatorSettings = {
   defaultCurrency: null,
@@ -37,10 +37,7 @@ const settings = (over: Partial<OperatorSettings> = {}): OperatorSettings => ({
 });
 
 const payout = (over: Partial<PayoutState> = {}): PayoutState => ({
-  hasAccount: false,
-  chargesEnabled: false,
-  payoutsEnabled: false,
-  detailsSubmitted: false,
+  ...NO_PAYOUT,
   ...over,
 });
 

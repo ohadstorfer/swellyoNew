@@ -4,6 +4,10 @@ import {
   compareRequirements,
   isUploadRequirement,
   todayISO,
+  deadlineStepBlocked,
+  resolveDeadlineISO,
+  stepDeadline,
+  isDeadlineAtEnd,
   type Requirement,
 } from './requirements';
 
@@ -17,6 +21,7 @@ const req = (o: Partial<Requirement> = {}): Requirement => ({
   dueDate: null,
   sortOrder: 0,
   skipAtOnboarding: 'must_have',
+  deadlineDaysBefore: null,
   ...o,
 });
 
@@ -178,5 +183,107 @@ describe('todayISO', () => {
 
   it('zero-pads months and days', () => {
     expect(todayISO(new Date(2026, 0, 5))).toBe('2026-01-05');
+  });
+});
+
+/* ── The deadline scale ──────────────────────────────────────────────────── */
+
+describe('resolveDeadlineISO', () => {
+  it('counts back from departure', () => {
+    expect(resolveDeadlineISO('2026-12-11', 30)).toBe('2026-11-11');
+  });
+
+  it('crosses a month and a year boundary correctly', () => {
+    expect(resolveDeadlineISO('2027-01-10', 30)).toBe('2026-12-11');
+  });
+
+  // A bare YYYY-MM-DD parses as UTC midnight, which west of Greenwich is the
+  // evening BEFORE — the app carried exactly that bug and rendered every
+  // deadline a day early for operators in the Americas. Working in calendar
+  // strings makes it unrepresentable, and this pins it.
+  it('does not shift by timezone', () => {
+    expect(resolveDeadlineISO('2026-09-18', 0)).toBe('2026-09-18');
+  });
+
+  it('is null on a months-only trip', () => {
+    expect(resolveDeadlineISO(null, 30)).toBeNull();
+  });
+});
+
+describe('stepDeadline', () => {
+  it('moves one notch along the scale', () => {
+    expect(stepDeadline(30, 1)).toBe(60);
+    expect(stepDeadline(30, -1)).toBe(21);
+  });
+
+  // An older row, or one written before the scale existed. It snaps rather
+  // than sticking between notches.
+  it('snaps an off-scale value to the nearest step', () => {
+    expect(stepDeadline(45, 1)).toBe(30);
+  });
+
+  it('stops at the ends', () => {
+    expect(stepDeadline(1, -1)).toBe(1);
+    expect(stepDeadline(365, 1)).toBe(365);
+    expect(isDeadlineAtEnd(1, -1)).toBe(true);
+    expect(isDeadlineAtEnd(365, 1)).toBe(true);
+    expect(isDeadlineAtEnd(30, 1)).toBe(false);
+  });
+});
+
+/**
+ * The past-date rule. TWIN of the app's `deadlineStepBlocked` test in
+ * src/services/trips/__tests__/tripDocumentsService.test.ts — the two must
+ * agree, or the same trip behaves differently depending on where it is edited.
+ *
+ * `today` is injected rather than read from the clock, so these are exact
+ * rather than relative-to-now.
+ */
+describe('deadlineStepBlocked', () => {
+  const TODAY = '2026-08-19';
+
+  // Trip 100 days out. Stepping 30 -> 60 lands 2026-09-28. Fine.
+  it('allows a step that still lands in the future', () => {
+    expect(deadlineStepBlocked(30, 1, '2026-11-27', TODAY)).toBe(false);
+  });
+
+  // Trip 10 days out. Stepping 7 -> 14 lands 2026-08-15, four days ago.
+  it('blocks a step that lands before today', () => {
+    expect(deadlineStepBlocked(7, 1, '2026-08-29', TODAY)).toBe(true);
+  });
+
+  // Trip 30 days out, standing on 21. Stepping up to 30 lands exactly today.
+  // Today is not the past — money due today is a legal thing to ask for.
+  it('allows a step that lands exactly today', () => {
+    expect(deadlineStepBlocked(21, 1, '2026-09-18', TODAY)).toBe(false);
+  });
+
+  it('blocks the step one day past that boundary', () => {
+    expect(deadlineStepBlocked(21, 1, '2026-09-17', TODAY)).toBe(true);
+  });
+
+  // Minus is fewer days before, which is a LATER date — always an improvement,
+  // so never blocked. Both cases below still resolve to a past date; refusing
+  // them would leave both buttons dead on the one row the operator came to
+  // fix. Improving is allowed even when it does not finish the job.
+  it('never blocks the minus direction, even when the result is still past', () => {
+    expect(deadlineStepBlocked(30, -1, '2026-08-29', TODAY)).toBe(false);
+    expect(deadlineStepBlocked(365, -1, '2026-08-21', TODAY)).toBe(false);
+  });
+
+  it('allows everything when the trip has no start date', () => {
+    expect(deadlineStepBlocked(7, 1, null, TODAY)).toBe(false);
+    expect(deadlineStepBlocked(365, 1, null, TODAY)).toBe(false);
+  });
+
+  // The ends of the scale belong to isDeadlineAtEnd. Answering true here would
+  // disable the button for the wrong reason and make the two guards disagree.
+  it('is false at the top of the scale, where no step exists', () => {
+    expect(deadlineStepBlocked(365, 1, '2026-08-20', TODAY)).toBe(false);
+  });
+
+  // 45 snaps to 30 first; the snapped value is judged, not the original.
+  it('judges the snapped value for an off-scale input', () => {
+    expect(deadlineStepBlocked(45, 1, '2026-08-29', TODAY)).toBe(true);
   });
 });

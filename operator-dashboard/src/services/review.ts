@@ -62,7 +62,7 @@ export async function fetchTripReview(
   const [reqRes, audienceRes, docRes, ackRes, medRes, waiver] = await Promise.all([
     supabase
       .from('organized_trip_requirements_resolved')
-      .select('id, kind, req_type, title, due_date, sort_order, skip_at_onboarding')
+      .select('id, kind, req_type, title, due_date, sort_order, skip_at_onboarding, deadline_days_before')
       .eq('trip_id', tripId)
       .eq('is_active', true),
     // Which of those rows are written for TRAVELERS.
@@ -120,6 +120,10 @@ export async function fetchTripReview(
       dueDate: r.due_date ?? null,
       sortOrder: r.sort_order ?? 0,
       skipAtOnboarding: r.skip_at_onboarding ?? null,
+      // The stored days-before, for the inline deadline editor. `due_date` is
+      // what it resolves to and is what the page reads; this is what the
+      // stepper moves. Null on a must_have row, which carries no deadline.
+      deadlineDaysBefore: (r.deadline_days_before as number | null) ?? null,
     }))
     .sort(compareRequirements);
 

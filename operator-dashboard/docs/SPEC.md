@@ -44,29 +44,20 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
 
 ## 2. Rules
 
-1. **Use what already exists.** No new database tables, no new functions, no migrations *driven by this site*. Every read it does is already live and already permitted.
+1. **This project invents no schema.** No tables, no functions, no migrations from here. Every table it writes and every capability it relies on was created and enforced by the app's migration set. What this site may do is exactly what RLS already lets the signed-in operator or crew member do — no more, and never through a path the app does not also have.
 
-   **Amended 2026-08-10.** The rule used to end "this project adds nothing to the database", and that was true until operator settings landed. It now writes, and the boundary is narrow on purpose:
+   **Rewritten 2026-08-19, by Ohad's ruling.** This rule used to read "no write anywhere else, ever — if a feature needs to change a trip, a traveler, a document or money, it belongs in the app". It had been amended three times (operator settings, the setup waiver PDF, the trip price) and was, by then, simply false: the site writes trip prices, traveler prices, refunds, document rejections and crew rows. A rule the code has already overtaken protects nothing and misleads whoever reads it next, so it was deleted rather than amended a fourth time for deadline editing.
 
-   - **One table, `operator_settings`.** Its RLS allows the owner and nobody else, so the worst a bug here can reach is one operator's own defaults.
-   - **Own row only.** No write anywhere else, ever. If a feature needs to change a trip, a traveler, a document or money, it belongs in the app — that is still the line.
-   - **The table was added by the app's migration set** (`20260810000700_operator_settings.sql`), not by this project. This site consumes it. Rule 1 still means "do not invent schema here".
+   What the original rule was protecting is kept above, and it is the part that was always doing the work: **the boundary is RLS, not this project's restraint.** A site that can only do what the database already permits cannot break the product, no matter how many buttons it grows.
 
-   The point of the original rule was that a read-only site cannot break the product. That is now "a site that can only damage its own operator's defaults", which is a real weakening — so it is written down rather than quietly dropped.
+   What that means in practice:
 
-   **Amended again 2026-08-11, for operator setup.** The boundary widened once more, in the same shape:
-
-   - **Storage, not just a table.** The site can now upload one PDF to `defaults/<user_id>/` in the `group-trip-documents` bucket — the operator's default waiver. The policies for that prefix (added by the app's `20260811000000_operator_onboarding.sql`, not by this project) allow only the owner to insert, read and delete.
-   - **Still own-data only.** It cannot touch `<trip_id>/` — the traveler documents and the per-trip waivers — which is where every sensitive file lives.
-   - **Why it is here at all:** setup is four steps, and three of them are already on this site. Sending an operator to their phone for one PDF, on the screen where they do everything else, is the kind of gap that makes people give up halfway.
-
-   **Amended again 2026-08-13, for the trip price.** Decided by Ohad. This is the first write that touches a trip rather than the operator's own defaults, so the boundary line above ("if a feature needs to change a trip, it belongs in the app") is narrowed, not dropped: everything about a trip *except its price* still belongs in the app.
-
-   - **What it writes:** `cost_per_person` and `deposit_amount` on `group_trips`, plus keeping the trip's two `pay` requirement rows in line with the deposit. Nothing else on the trip, ever.
-   - **Nothing new was permitted for it.** The UPDATE policy on `group_trips`, the FOR ALL requirements policy and the `operator_freeze_trip_prices` function all pre-date this site's use of them — the app's Edit-trip screen goes through the identical path (`updateOperatorTripPrice`), and this site copies its order exactly (§4.6).
-   - **The freeze is what makes it safe.** Everyone already aboard is pinned to their current price before the new one lands, so this write can only change what future joiners are quoted. The freeze RPC is also host_id-gated, which makes it the effective permission check.
+   - **Never invent a table, a function, a policy or a migration here.** If a feature needs one, it goes in the app's migration set and this site consumes it. That is how `operator_settings`, the `defaults/<user_id>/` storage policies and the staff capability functions all arrived.
+   - **Never route around a check the app respects.** Where the app calls an RPC, call the same RPC. Where the app writes in a particular order because a trigger demands it, copy the order (see §4.6 for the price freeze).
+   - **Traveler documents stay behind their policies.** The site can read and approve what `docs.view` / `docs.approve` allow, and can upload only to `defaults/<user_id>/` — never into `<trip_id>/`, which is where every sensitive file lives.
 
    **Stripe is the exception and stays one.** Connect onboarding needs the secret key and lives behind an edge function the app calls. Step 1 of setup reports the state and points at the app. Do not build a second onboarding path here.
+
 2. **The database is the security boundary.** Row Level Security decides what an operator can see. The website cannot see a trip it does not host, even if the code asks for it.
 3. **No backend.** The browser talks to Supabase directly. Netlify serves static files only.
 4. **Files are private.** Every view or download uses a short-lived signed link. There are no public file URLs.
@@ -146,7 +137,14 @@ The four things an operator settles before they can sell a trip: Stripe, price c
 - **Confirming counts as doing.** Currency and policy both have working defaults, so an operator can finish those without changing anything. What setup asks is that they *looked* — recorded in `currency_confirmed_at` / `policy_confirmed_at`. A null-check on the values would call an untouched operator finished, which is the whole reason those columns exist.
 - **A banner sits above every page** until setup is done, naming the next step with a 4-segment progress bar. Not dismissable: while it shows, the operator cannot sell a trip, and burying it would hide the only explanation. It renders nothing until both reads settle, so a finished operator never sees it flash.
 
-The shared rule lives in `src/domain/operatorSetup.ts`. It is **not** a byte copy of the app's, because the two learn about Stripe differently — the app reads Stripe's live `requirements` arrays through an edge function, this site reads four booleans off `operator_payout_accounts`. The steps and their meaning are shared; only the Stripe input differs. Anything else that drifts is a bug.
+The shared rule lives in `src/domain/operatorSetup.ts`. It is **not** a byte copy of the app's, because the two learn about Stripe differently — the app reads Stripe's live `requirements` arrays through an edge function, this site reads the same fields off `operator_payout_accounts`, kept current by the Connect webhook and the daily sweep. Both then run the SAME six-state rule: the app's `connectStatus.ts` and this project's `domain/connect.ts` twin. The steps and their meaning are shared; only where the fields come from differs. Anything else that drifts is a bug.
+
+**Six states, not four booleans — corrected 2026-08-19.** This site used to read `charges_enabled`, `payouts_enabled` and `details_submitted` and show four states, which meant an account Stripe had **refused** read as "Not finished — Stripe still needs information from you". The operator was sent to fill in a form that could not help them while no trip of theirs could take a cent. `requirements_due`, `requirements_past_due` and `disabled_reason` had been on the table since 2026-08-05; this site simply never selected them. Two rules come with them:
+
+- ⚠️ **`disabled_reason` is not a rejection flag.** Stripe reuses it for `under_review`, `pending_verification` and `past_due` — ordinary stages. Only `rejected.*`, `platform_paused` and `listed` are unrecoverable.
+- ⚠️ **`action_needed` is gated on charges already being enabled.** A failed SSN match leaves `past_due` on an account that was never live, and `action_needed` is a state that permits selling.
+
+`blocked` is no longer "done" on the checklist, either. It used to satisfy `details_submitted` and tick the step.
 
 ### 4.1 Trips list
 
@@ -156,20 +154,43 @@ Trips the person hosts, `hosting_style = 'C'` only. Each row: name, dates, how m
 
 Top to bottom:
 
+0. **Are you on track** — one line under the title: `12 days to go · 2 documents late`, or `Trip ended`. Added 2026-08-19; before it, "7/15 in" read exactly the same three months out and three days out, and nothing anywhere on the site was ever marked late. It renders nothing while the review is loading — a line that says "nothing late" and flips to "2 late" a second later is worse than a beat of nothing.
+
+   **What counts as late is NOT `state === 'overdue'`.** That state is only ever reached when the traveler sent NOTHING. Someone whose passport was rejected and never resent reads `'rejected'` for ever, months past the deadline, and they are the likeliest to miss the flight. The rule is `overdue || (rejected && dueDate < today)` and it lives in `domain/late.ts`, shared with the requirement rows and the traveler rows so all three agree. Same rule as the app's `dashboardWork.isLate`. `pay` rows can never be late — `fetchTripReview` has no ledger, so it hardcodes them to `not_started`.
+
 1. **Needs review** — "12 documents waiting for you". Opens the review list, oldest first. It is a shortcut, not a queue that must be cleared. Nothing happens automatically.
 2. **Money** — collected against expected, and how many have paid each step:
    `$1,000 collected of $6,000 · 1 of 2 paid the deposit`
    Travelers with no price set are counted in the denominator and named in a second line — someone with no price is not paid, and leaving them out would make the trip look further along than it is. Opens the money page.
    The card is hidden only when the trip has no payment steps and no price anywhere. A trip that never charged for anything has no money story.
+   Since 19 August it also names **when** the rest is due — `Final payment due 11 Dec 2026` — read-only, pointing at the Documents card where it is changed. It sits with the amounts it governs, but there is only ever one editor for it. A managed trip reads that date off its `balance` requirement row; an offline trip off `offline_payment_due_days_before`, because the database refuses pay rows on an offline trip and it has nowhere else to keep it.
    Full design: `docs/superpowers/specs/2026-08-04-operator-dashboard-money-design.md`.
+2b. **Travelers can't pay yet** — added 2026-08-19, the twin of the app's `StripeBanner`. On a `managed` trip whose operator cannot take charges yet: *"Stripe is still checking your details"*, *"Finish connecting Stripe"*, or, in red, *"Stripe turned down your payout account"*. Silent when the state is unknown, when money already works, and on offline trips, which have no Stripe account to wait on. **Only the operator of record sees it** — `operator_payout_accounts` is readable by its owner alone, which is also the right product answer: a Manager cannot fix somebody else's Stripe account.
+
 3. **Documents** — one line per requirement, showing **received** and **approved**:
-   `Passports 15/15 in · 3/15 approved`
-   Both numbers always. The gap is the operator's own backlog, and hiding it would make it look like a traveler problem.
+   `Passports 15/15 in · 3/15 approved · 2 late`
+   Both numbers always, and the late count when there is one — never `0 late`, which is not information. The gap is the operator's own backlog, and hiding it would make it look like a traveler problem.
    Waiver and medical are not uploads, so they get a short line: `Waiver signed 13/15 · Medical form 11/15`.
    Custom requirements go in a separate **Other requirements** list, one line each.
+   Each line also carries its own deadline — `Due 11 Dec 2026`, or `Needed to join` on a must-have — so the thing an operator came to change is visible before they press anything.
+
+#### Editing deadlines — added 2026-08-19
+
+Spec: `docs/specs/operator-trips/deadline-editing.md`. Until this, deadlines could only be changed from the phone; the editor there (`ManageRequirementsSheet`) had existed since publish and Ohad had not found it.
+
+**Edit** in the Documents card head swaps the card into the editor — inline, same card, no dialog and no route. Gated on `trip.edit`, the exact capability `organized_trip_req_write` checks, so the button and the database cannot disagree. Per requirement: the **When they join / They can skip** pair, and a stepper over the fixed scale (1, 3, 7, 14, 21, 30, 60, 90, 120, 180, 365 days before departure) printing the date it resolves to. Requirements that are switched off are listed under **Not asked for** with an Add button; pay rows sit under **Payments** and can only be re-timed, never added or removed.
+
+Three rules are load-bearing:
+
+- **A deadline may not be SET to a date that has already gone.** Not a warning — the `+` button is dead. (`+` means MORE days before departure, which is an EARLIER date; the scale runs backwards against the calendar.) `−` is never blocked, even when one notch is not enough to escape the past, or a row already in the past would have both buttons dead and be unfixable. The same rule was backported to the app the same day, so the two agree on what is legal.
+- **Card-level save, never autosave.** One press writes one diff, because one of the things a save can do is un-overdue four people — and that gets said out loud in a confirm first. Overdue is derived from the date, not stored, so pushing a deadline later genuinely forgives the miss.
+- **Nobody is notified.** Travelers see the new date next time they open the trip. Deliberate: a push for a date moving is noise.
+
+Moving the trip's own start date is untouched by all this — it still warns and still saves. Deadlines are relative to departure, so they follow it; refusing a real-world date change because paperwork would go overdue traps the operator in something worse.
+
 4. **Medical flags** — counts only, no names: "3 injuries", "2 allergies", "5 diet notes".
 5. **Surf stats** — levels, board types, age range, nationalities. Background awareness, not a to-do list.
-6. **Travelers** — everyone on the trip, one row each, alphabetical: photo, name, `3/5 approved · $500 of $1,200 paid`, and a `2 waiting` tag when they have documents to review. Opens their traveler page (§4.4).
+6. **Travelers** — everyone on the trip, one row each, alphabetical: photo, name, `3/5 approved · $500 of $1,200 paid`, a `2 late` tag when they are past a deadline, and a `2 waiting` tag when they have documents to review. Late comes first: chasing somebody takes days, saying yes to a file takes five seconds. Opens their traveler page (§4.4).
    This is the only per-person way into the site — every other card is per-requirement, so before this a traveler who had submitted nothing could not be opened at all.
    The roster comes from the member list, never from the review read: a slow or failed review must not make the trip look empty.
 
@@ -207,9 +228,20 @@ Every tile opens a full page: all travelers, their state, and **export**.
 | Passport | File + name, nationality, expiry | View · export · reject |
 | Insurance / Visa / Flights | File | View · export · reject |
 | Medical | Allergies, injuries, diet, medication | View · export |
-| Money | Total, each payment step, their payments | Read · set price (owner only) |
+| Money | Total, each payment step, their payments | Read · set price (owner only) · refund |
+| Remove | — | Remove from trip (added 2026-08-19) |
 
-Message, remove from trip, and editing the trip are **not here**. They stay on mobile.
+Message and editing the trip are **not here**. They stay on mobile.
+
+#### Removing a traveler — added 2026-08-19
+
+Spec: `docs/specs/operator-trips/dashboard-web-parity.md`. The twin of the app's `RemoveTravelerSheet`, last on the page, under Medical — this page exists to review someone, and the destructive action should be the one you travel to.
+
+- **Refund first, then remove.** The operator decides the money while looking at the person. A refund that fails does not trap them: the dialog says what happened and still offers **Remove anyway**, carrying whatever actually went back.
+- **Three options** when they have paid: everything, what the frozen policy gives at today's date, or a typed amount. ⚠️ A trip with no policy gets no policy option — null means "never stated terms", and `$0, per the policy` would invent one.
+- **Gated on `travelers.remove`**, the exact capability the participant DELETE policy checks. A Manager who holds it without `money.manage` gets a dialog that refuses and names who can: only the operator can remove someone who paid, because only they can refund.
+- **A failed ledger read blocks the button.** `money` is null on failure, which reads as "paid nothing" — and removing a traveler who had paid $2,000 with no refund step is the one mistake this must not make.
+- **Two calls, then a best-effort tail.** `trip-cancel` in single-traveler mode (it spreads the amount across their payments newest-first — `payments-refund` takes one payment, and a traveler is several), then the participant DELETE. Afterwards, never blocking and never able to fail the removal: the `X removed Y` line in the group chat, the join-request row, their `conversation_members` row, and `send-trip-removed-notification` carrying what actually went back. ⚠️ `refund_usd` is omitted, never zeroed.
 
 ### 4.6 Money page
 
@@ -258,7 +290,7 @@ The purge deletes the file and leaves the row.
 
 ## 6. Data
 
-Everything below is already live. **This project mostly reads. Every write it does is listed in Rule 1: `operator_settings`, and the trip-price path.**
+Everything below is already live. **This project invents no schema (Rule 1). Every write it makes goes through a policy or an RPC the app already uses:** `operator_settings` and the setup waiver PDF (own data), the trip and traveler price paths, refunds, document approve/reject, crew rows, and — since 19 August — the trip's requirement rows and their deadlines.
 
 | What | Where it comes from |
 |---|---|
@@ -316,7 +348,7 @@ Every amount here is US dollars, and the currency is baked into column names rat
 - Staff accounts or roles.
 - A view across several trips at once.
 - Charts. Counts and lists only.
-- Editing trips beyond their price and deposit; messaging; removing travelers.
+- Editing trips beyond their price and deposit; messaging. (Removing a traveler moved out of this list on 2026-08-19 — see §4.4.)
 - Changing `payment_mode`. Turning payment collection on or off reorders more than two columns (pay rows, freeze, revert on failure) and stays in the app's "Getting paid" sheet.
 
 ---
@@ -324,7 +356,7 @@ Every amount here is US dollars, and the currency is baked into column names rat
 ## 8. Still open
 
 1. **Custom requirements.** Operators can invent their own items, and the tiles are built around passport, visa, insurance and flights. For now they go in an "Other requirements" list with their own counts. How they should properly be counted and exported — **needs Eyal and Ohad**.
-2. **Removing a traveler who already paid.** Not a desktop action, so it does not block this site. The ledger is append-only, so their payment rows survive being removed from the trip — but nothing refunds them, and this site would stop showing the rows once they are no longer a member. Needs Eyal.
+2. ~~**Removing a traveler who already paid.**~~ **Answered 2026-08-19** — it is a desktop action now, and the money is decided before they leave the roster (§4.4). The old worry stands in one narrower form: the ledger is append-only, so their payment rows survive, but the per-traveler view of them disappears with their membership. The trip's Money page still lists every counted event, including from people who have left.
 
 3. **The price columns are world-readable.** `group_trip_participants` has a SELECT policy of `using(true)` for every logged-in user, and the payments work added `price_total_usd` and `deposit_usd` to that table. So any Swellyo user can read what any traveler paid for any trip. This site needs that read and did not create the hole, but it is real. Fixing it is a migration in the main project.
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
 import { fetchTripReview, type ReviewItem } from '../services/review';
 import { fetchMedicalForm, fetchProfiles } from '../services/travelers';
@@ -19,6 +19,8 @@ import { RejectDialog } from '../components/RejectDialog';
 import { RefundDialog } from '../components/RefundDialog';
 import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
 import { fetchRefunds } from '../services/refunds';
+import { RemoveTravelerDialog } from '../components/RemoveTravelerDialog';
+import { useTripAccess } from '../services/access';
 import { explain, policyFromTrip } from '../domain/cancellation';
 
 export function TravelerPage() {
@@ -246,6 +248,12 @@ export function TravelerPage() {
           form={medical.data ?? null}
           loading={medical.isPending}
         />
+
+        {/* ── Remove ────────────────────────────────────────────────────── */}
+        {/* Last on the page, and the only thing under Medical: this page exists
+            to review someone, and the destructive action should be the one you
+            travel to, not the one your cursor lands on. */}
+        <RemoveCard tripId={tripId} userId={userId} name={name} />
       </div>
 
       {viewing && (
@@ -457,7 +465,10 @@ function TravelerMoneyCard({
                           "failed", and a completed refund is neither. The
                           orange lines below are refunds that did NOT happen,
                           so a warning colour here would collide with them. */}
-                      {e.eventType === 'refunded' ? (
+                      {e.eventType === 'refunded' || e.eventType === 'dispute_lost' ? (
+                        /* A chargeback reverses the list the same way a refund
+                           does, so it gets the same structural chip — only the
+                           word changes, because the operator did not choose it. */
                         <span
                           className="row"
                           style={{ gap: 6, fontSize: 12, color: 'var(--text)' }}
@@ -472,10 +483,16 @@ function TravelerMoneyCard({
                               color: 'var(--text-2)',
                             }}
                           >
-                            Refund
+                            {e.eventType === 'refunded' ? 'Refund' : 'Chargeback'}
                           </span>
                           <strong>{formatUsd(e.amountUsd)}</strong>
                           <span className="muted">{formatDateTime(e.createdAt)}</span>
+                        </span>
+                      ) : e.eventType === 'disputed' ? (
+                        /* A marker, pinned to $0 by the DB — no amount shown,
+                           because no money has finally moved yet. */
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {formatDateTime(e.createdAt)} · Dispute opened
                         </span>
                       ) : (
                         <span className="muted" style={{ fontSize: 12 }}>
@@ -654,4 +671,117 @@ function Line({ label, value }: { label: string; value: string }) {
 function answer(text: string | null, none: boolean): string {
   if (none) return 'None';
   return text?.trim() ? text : 'Not answered';
+}
+
+/**
+ * Take this person off the trip.
+ *
+ * Hidden without `travelers.remove` — the same capability the participant
+ * DELETE policy checks, so the button and the database can never disagree.
+ * Everything about the money is decided inside the dialog, which is also where
+ * a Manager who cannot refund is told why they may not do this.
+ */
+function RemoveCard({
+  tripId,
+  userId,
+  name,
+}: {
+  tripId: string;
+  userId: string;
+  name: string;
+}) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const access = useTripAccess(tripId);
+  const { user } = useAuth();
+  const { money, trip, isOffline, isPending, isError } = useTripMoney(tripId);
+  const [open, setOpen] = useState(false);
+
+  // `ready`, not `can` alone: an unresolved query says no to everything, and a
+  // destructive button that appears a beat late is better than one that
+  // appears and vanishes.
+  if (!access.ready || !access.can('travelers.remove')) return null;
+
+  const me = money?.travelers.find(t => t.userId === userId) ?? null;
+  // Net of refunds already issued — the figure the dialog offers to send back.
+  const paidUsd = Math.max(0, me?.paidUsd ?? 0);
+
+  /**
+   * A failed ledger read must NEVER open this dialog.
+   *
+   * `money` is null on failure, which reads as "paid nothing" — and the dialog
+   * would then remove someone who had paid $2,000 with no refund step and no
+   * mention of money in their notification. Refusing until the read works is
+   * the only safe direction to be wrong in.
+   */
+  const moneyUnknown = isError || (!isPending && !money);
+
+  // Same test as the price and refund buttons: `money.manage` is the operator
+  // of record, and `trip-cancel` re-checks it. This only decides which face of
+  // the dialog opens.
+  const canRefund = !!user && !!trip && trip.hostId === user.id;
+
+  const policy = policyFromTrip(
+    trip
+      ? {
+          cancellation_preset: trip.cancellationPreset,
+          cancellation_rules: trip.cancellationRules,
+          cancellation_notes: trip.cancellationNotes,
+        }
+      : null,
+  );
+
+  return (
+    <>
+      <div className="card enter" style={{ borderColor: 'var(--line)' }}>
+        <div className="card-body row-between" style={{ gap: 12 }}>
+          <div>
+            <div className="small">
+              <strong>Remove {name} from this trip</strong>
+            </div>
+            <div className="muted small" style={{ marginTop: 2 }}>
+              {moneyUnknown
+                ? "We can't read what they have paid right now. Reload before removing them."
+                : isOffline
+                  ? 'They lose the plan and the group chat. Anything they paid you outside Swellyo is between you and them.'
+                  : 'They lose the plan and the group chat. Anything they paid is decided first.'}
+            </div>
+          </div>
+          <button
+            className="btn btn-sm btn-danger"
+            onClick={() => setOpen(true)}
+            disabled={isPending || moneyUnknown}
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <RemoveTravelerDialog
+          tripId={tripId}
+          userId={userId}
+          travelerName={name}
+          paidUsd={paidUsd}
+          isOffline={isOffline}
+          policy={policy}
+          tripStartDate={trip?.startDate ?? null}
+          canRefund={canRefund}
+          onCancel={() => setOpen(false)}
+          onDone={() => {
+            setOpen(false);
+            // Everything the roster feeds: the member list, both document
+            // queries, and the ledger the money cards read.
+            void qc.invalidateQueries({ queryKey: ['members', tripId] });
+            void qc.invalidateQueries({ queryKey: ['review', tripId] });
+            void qc.invalidateQueries({ queryKey: ['counts', tripId] });
+            void qc.invalidateQueries({ queryKey: ['payEvents', tripId] });
+            void qc.invalidateQueries({ queryKey: ['refunds', tripId] });
+            // This page is about someone who is no longer on the trip.
+            navigate(`/trips/${tripId}`);
+          }}
+        />
+      )}
+    </>
+  );
 }
