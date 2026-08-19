@@ -139,8 +139,14 @@ export function renderPush(
         body: 'You can now collect payment for your trips in Swellyo.',
       };
     case 'onboarding_unfinished': {
-      // Paid the deposit, never finished. Three stages, escalating — see
-      // scan-stalled-onboarding for the timing and why there is no fourth.
+      // Paid the deposit, never finished. Three voices, not three sends: the
+      // first at 4 hours, the second at 24, and then one that repeats daily for
+      // as long as they stay stuck. See scan-stalled-onboarding for the timing.
+      //
+      // The repeating one is the hardest to write, because it is the only push
+      // in the app a person can receive ten times. It stays a question rather
+      // than a reminder, and never counts the days back at them — "day 6" reads
+      // as a scolding, and the traveler already knows how long it has been.
       //
       // The list of outstanding steps leads the body wherever it fits. Someone
       // who stopped BECAUSE they were unsure which step it was is not helped by
@@ -154,18 +160,24 @@ export function renderPush(
         ? missing.slice(0, 2).map(m => String(m).toLowerCase()).join(' and ')
         : null;
 
-      if (stage === '3d') {
+      if (stage === '24h') {
+        // A day in, the missing step is no longer news to them — the thing they
+        // do not know is that the money did not buy the seat.
         return {
           title: "You're not on the list yet",
           body: `Your deposit for ${trip} is paid, but your spot isn't held until the last steps are done.`,
         };
       }
-      if (stage === '7d') {
+      if (stage === 'repeat') {
         return {
           title: `Still want your place on ${trip}?`,
-          body: 'Your deposit is paid and waiting. Finishing up takes a few minutes.',
+          body: names
+            ? `Your deposit is paid and waiting. We still need your ${names}.`
+            : 'Your deposit is paid and waiting. Finishing up takes a few minutes.',
         };
       }
+      // '4h', and the fallback. Four hours in they were probably still at the
+      // form, so this is the one that names what to go back to.
       return {
         title: 'Nearly on the trip',
         body: names

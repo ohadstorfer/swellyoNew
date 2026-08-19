@@ -1,4 +1,9 @@
-// ⚠️ MANUAL DEPLOY (CLI). Daily cron.
+// ⚠️ MANUAL DEPLOY (CLI). HOURLY cron — cron.job 8, `20 * * * *`.
+//
+// ⚠️ The hourly schedule is load-bearing, not tidiness. The first nudge is due
+// four hours after the traveler's last action; on the daily schedule this job
+// used to run, "4 hours" would have meant "some time tomorrow morning" and the
+// whole re-timing would have been silently inert.
 //
 // Nudges travelers who paid a deposit and never finished onboarding, and tells
 // the operator when someone is stuck. Spec: docs/operator-trips-checklist.html
@@ -11,32 +16,33 @@
 // would be feed-only and silent, and nothing would look broken.
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { dueStage, effectiveLastStage, stageKey } from "./ladder.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 /**
- * The traveler ladder. Three nudges, then silence.
+ * The traveler ladder: 4 hours, 24 hours, then every 24 hours, with no last
+ * rung.
  *
- * They paid — they are committed, not a cold lead — so a reminder is welcome
- * rather than spam. That is also why there is no fourth: money held does not
- * buy unlimited pushes.
+ * Four hours is short on purpose. They have paid and they hold no spot, and
+ * most people who stop mid-form stopped inside the same sitting — a nudge that
+ * arrives while they still remember what they were doing is worth more than
+ * three polite ones spread over a week.
  *
- * `column` is the claim: the scanner stamps it BEFORE sending, so a double cron
- * run, a retry or two overlapping invocations cannot send the same message
- * twice. A nudge lost to a failed insert is strictly better than a duplicate
- * push, which is the same trade stripe-connect-webhook makes.
+ * The daily repeat does not run away with itself, because the only thing that
+ * silences it is the problem going away: the moment the traveler acts, their
+ * clock restarts and `operator_stalled_onboarders` stops returning them, and it
+ * already drops anyone whose trip has started or been cancelled.
+ *
+ * The arithmetic lives in ladder.ts so it can be tested — `serve()` below runs
+ * at module load, so nothing declared in this file is importable.
  */
-const NUDGES = [
-  { key: "24h", afterHours: 24, column: "stall_nudge_24h_sent_at" },
-  { key: "3d", afterHours: 72, column: "stall_nudge_3d_sent_at" },
-  { key: "7d", afterHours: 168, column: "stall_nudge_7d_sent_at" },
-] as const;
 
-/** The operator hears nothing for three days — before that it is normal latency. */
-const OPERATOR_FIRST_HOURS = 72;
-/** Then at most weekly, while anyone is still stuck. */
-const OPERATOR_REPEAT_HOURS = 168;
+/** The operator joins at the 24-hour mark — the same one the traveler crosses. */
+const OPERATOR_FIRST_HOURS = 24;
+/** Then daily, while anyone is still stuck. */
+const OPERATOR_REPEAT_HOURS = 24;
 
 interface Stalled {
   user_id: string;
@@ -99,23 +105,67 @@ serve(async (req) => {
     const rows = (stalled ?? []) as Stalled[];
     if (rows.length === 0) continue;
 
+    // Where each traveler is on the ladder. The RPC deliberately does not carry
+    // this — it is the one definition shared with the dashboard, and the
+    // dashboard has no business knowing what we have already sent.
+    const { data: ladder, error: ladderErr } = await supabase
+      .from("group_trip_participants")
+      .select("user_id, stall_nudge_stage, stall_nudge_anchor_at")
+      .eq("trip_id", trip.id)
+      .in("user_id", rows.map((r) => r.user_id));
+
+    if (ladderErr) {
+      console.error(`[stalled ${reqId}] ladder read failed`, ladderErr.message);
+      continue;
+    }
+    const ladderByUser = new Map(
+      (ladder ?? []).map((l: any) => [l.user_id as string, l]),
+    );
+
     // ── The travelers ───────────────────────────────────────────────────────
     for (const row of rows) {
-      // The LAST nudge whose threshold has passed, not the first. Someone who
-      // shows up already 8 days stale gets the 7d message once, rather than
-      // three messages on three consecutive days.
-      const due = [...NUDGES].reverse().find((n) => row.stalled_hours >= n.afterHours);
-      if (!due) continue;
+      const stage = dueStage(row.stalled_hours);
+      if (stage === null) continue;
 
-      // Claim it. `.is(column, null)` is the whole guard: a second worker
-      // updating the same row matches nothing and sends nothing.
-      const { data: claimed, error: claimErr } = await supabase
+      const state = ladderByUser.get(row.user_id);
+      // The two columns are always written together, so a half-set pair can
+      // only come from a hand-written row. Treat it as unset rather than as
+      // state to match: `.eq(col, null)` is `eq.null` to PostgREST, which
+      // matches nothing, and that traveler would go silent forever.
+      const priorStage = typeof state?.stall_nudge_stage === "number"
+        ? state.stall_nudge_stage
+        : null;
+      const anchor = priorStage === null
+        ? null
+        : (state?.stall_nudge_anchor_at ?? null);
+
+      const lastStage = effectiveLastStage(
+        priorStage,
+        anchor,
+        row.last_activity_at,
+      );
+      if (stage <= lastStage) continue;
+
+      // Claim it by compare-and-set on the pair we just read: a second worker
+      // re-evaluates this after our update commits, finds the row changed, and
+      // matches nothing. Stamping BEFORE sending means a retry loses a nudge
+      // rather than duplicating a push — the same trade stripe-connect-webhook
+      // makes, and the same shape as the digest claim below.
+      const claim = supabase
         .from("group_trip_participants")
-        .update({ [due.column]: new Date().toISOString() })
+        .update({
+          stall_nudge_stage: stage,
+          stall_nudge_anchor_at: row.last_activity_at,
+        })
         .eq("trip_id", trip.id)
-        .eq("user_id", row.user_id)
-        .is(due.column, null)
-        .select("user_id");
+        .eq("user_id", row.user_id);
+      const { data: claimed, error: claimErr } = await (
+        anchor === null
+          ? claim.is("stall_nudge_anchor_at", null)
+          : claim
+            .eq("stall_nudge_anchor_at", anchor)
+            .eq("stall_nudge_stage", priorStage)
+      ).select("user_id");
 
       if (claimErr) {
         console.error(`[stalled ${reqId}] claim failed`, claimErr.message);
@@ -132,7 +182,8 @@ serve(async (req) => {
         entity_id: trip.id,
         data: {
           trip_title: trip.title,
-          stage: due.key,
+          stage: stageKey(stage),
+          stalled_days: Math.floor(row.stalled_hours / 24),
           // Rendered into the body so the nudge says what is actually blocking
           // them. A reminder that does not name the step is no help to someone
           // who stopped BECAUSE they were unsure which step it was.
@@ -150,6 +201,12 @@ serve(async (req) => {
     // One digest per trip, never one per stuck traveler: ten people stalling on
     // a big trip is one notification. Mirrors the "Remind N people" button they
     // already have on the dashboard.
+    //
+    // The first four hours are the traveler's alone. Someone who wandered off
+    // mid-form and comes back after lunch was never the operator's problem, and
+    // handing them a chore that usually resolves itself is how a to-do list
+    // stops being read. Past 24 hours it is real, and from then on they hear
+    // about it daily, for as long as it stays true.
     const worst = Math.max(...rows.map((r) => r.stalled_hours));
     if (worst < OPERATOR_FIRST_HOURS) continue;
 

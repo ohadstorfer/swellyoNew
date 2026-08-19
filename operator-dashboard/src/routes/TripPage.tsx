@@ -110,11 +110,11 @@ export function TripPage() {
             the operator knows about; a traveler who paid a week ago and is not
             on the trip is money and a person nobody was counting.
 
-            Only after a week. Before that the automatic nudges are still
-            working the problem — the traveler gets three (24h, 3 days, 7 days).
-            Surfacing it here on day one would hand the operator a chore that
-            usually resolves itself. Once all three have gone unanswered, there
-            is nothing left to try automatically, and it becomes theirs. */}
+            Only after a day. The first four hours are the traveler's alone —
+            they get a nudge, and someone who wandered off mid-form usually
+            comes back before this would have been worth reading. Past 24 hours
+            it is real, and this appears on the same mark the operator's daily
+            digest fires on, so the banner and the notification always agree. */}
         {(() => {
           const stuck = (stalled.data ?? []).filter(s => s.stalledDays >= STALLED_TODO_DAYS);
           if (stuck.length === 0) return null;

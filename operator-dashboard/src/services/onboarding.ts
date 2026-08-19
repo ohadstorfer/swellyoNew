@@ -17,12 +17,16 @@ export interface StalledOnboarder {
 }
 
 /**
- * After a week, being stuck stops being someone's busy fortnight and becomes
- * the operator's problem. That is also the point where the traveler has had all
- * three of their nudges (24h, 3 days, 7 days) and answered none of them, so
- * there is nothing left for the automatic path to try.
+ * After a day, being stuck stops being someone's busy afternoon and becomes the
+ * operator's problem. It is the same mark the operator's daily digest fires on,
+ * on purpose: a to-do the notification does not match, or a notification about
+ * something the trip page does not show, is worse than either alone.
+ *
+ * Before that the automatic path still has something to try — the traveler gets
+ * their first nudge four hours in, and most people who wandered off mid-form
+ * come back on their own.
  */
-export const STALLED_TODO_DAYS = 7;
+export const STALLED_TODO_DAYS = 1;
 
 /**
  * Reads the same RPC the nudge scanner does, so the to-do here and the

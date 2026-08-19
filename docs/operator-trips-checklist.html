@@ -1107,16 +1107,26 @@
         <span class="chip is-partly">partly</span>
         <div>
           <p class="what">Deposit paid, onboarding abandoned — and nobody notices<span class="built">18 aug</span></p>
-          <p class="note">Built. The traveler gets three nudges — 24 hours, 3 days, 7 days — and then silence;
-          they paid, so a reminder is welcome, but money held does not buy unlimited pushes. Each one names the
-          steps actually blocking them, because someone who stopped <em>because</em> they were unsure which step
-          it was is not helped by "you have steps left".</p>
-          <p class="note">The operator gets one digest per trip, never one push per stuck traveler, and after a
-          week the trip page carries it as a to-do — the point where all three nudges have gone unanswered and
-          there is nothing left to try automatically.</p>
-          <p class="note">The clock runs from the traveler's <em>last action</em>, not the deposit, so someone
-          steadily working a long list is never nagged. Database side is applied and the dashboard to-do works
-          today; the two edge functions and the cron are still to deploy, which is what makes the pushes start.</p>
+          <p class="note">Built. The traveler is nudged four hours after they stop, again at 24 hours, and then
+          every 24 hours for as long as they stay stuck. Four hours is short on purpose: most people who
+          abandon a form abandon it in the same sitting, and a nudge that lands while they still remember what
+          they were doing is worth more than three polite ones spread over a week. Each one names the steps
+          actually blocking them, because someone who stopped <em>because</em> they were unsure which step it
+          was is not helped by "you have steps left".</p>
+          <p class="note">The operator joins at the 24-hour mark and hears daily after that — one digest per
+          trip, never one push per stuck traveler — and the trip page carries it as a to-do from the same mark,
+          so the banner and the notification can never disagree. The first four hours stay the traveler's
+          alone; handing the operator a chore that usually resolves itself is how a to-do list stops being read.</p>
+          <p class="note">The repeat has no end, and does not need one. The clock runs from the traveler's
+          <em>last action</em>, not the deposit, so the only thing that silences it is the problem going away —
+          they act, or the trip starts, or it is cancelled. Someone steadily working a long list is never
+          nagged.</p>
+          <p class="note"><b>Re-timed 19 August</b> from the original 24h / 3 days / 7 days ladder, which ended
+          in silence. The three sent-at columns could not express a repeat and were replaced by a stage and an
+          anchor — the anchor being what lets one late upload restart the ladder instead of buying permanent
+          quiet. The cron moved from daily to hourly in the same change: on a daily schedule "four hours" would
+          have quietly meant "tomorrow morning".</p>
+          <p class="note">Live since 18 August — functions deployed, cron running, migration applied.</p>
         </div>
       </div>
 
