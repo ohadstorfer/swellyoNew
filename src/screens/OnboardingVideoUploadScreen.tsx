@@ -16,7 +16,7 @@ import { ff, fs } from '../theme/fonts';
 import { useRegisterOnboardingStep } from '../context/OnboardingStepContext';
 import { getSurfLevelMapping } from '../utils/surfLevelMapping';
 import { startProfileVideoUpload } from '../services/media/pendingProfileVideoUpload';
-import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
+import { getSurfLevelVideoUrl } from '../services/media/surfLevelVideos';
 import {
   launchSurfMediaPicker,
   pickSurfMediaOnWeb,
@@ -25,38 +25,6 @@ import {
   type PickedSurfMedia,
 } from '../services/media/surfMediaPicker';
 import { uploadAndSaveSurfPhoto, clearSurfPhoto } from '../services/media/surfSkillMedia';
-
-const BOARD_VIDEO_DEFINITIONS: { [boardType: number]: Array<{ name: string; videoFileName: string; thumbnailFileName: string }> } = {
-  0: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Snapping', videoFileName: 'Snapping.mp4', thumbnailFileName: 'Snapping thumbnail.PNG' },
-    { name: 'Charging', videoFileName: 'Charging.mp4', thumbnailFileName: 'Charging thumbnail.PNG' },
-  ],
-  1: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
-    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
-  ],
-  2: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
-    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
-  ],
-  3: [
-    { name: 'Dipping My Toes', videoFileName: 'Dipping My Toes.mp4', thumbnailFileName: 'Dipping My Toes thumbnail.PNG' },
-    { name: 'Cruising Around', videoFileName: 'Cruising Around.mp4', thumbnailFileName: 'Cruising Around thumbnail.PNG' },
-    { name: 'Trimming Lines', videoFileName: 'Trimming Lines.mp4', thumbnailFileName: 'Trimming Lines thumbnail.PNG' },
-    { name: 'Carving Turns', videoFileName: 'Carving Turns.mp4', thumbnailFileName: 'Carving Turns thumbnail.PNG' },
-  ],
-};
-
-const getBoardFolder = (boardType: number): string => {
-  const folderMap: { [key: number]: string } = { 0: 'shortboard', 1: 'midlength', 2: 'longboard', 3: 'softtop' };
-  return folderMap[boardType] || 'shortboard';
-};
 
 const getCategorySubtitle = (category: string): string => {
   const categoryMap: { [key: string]: string } = {
@@ -134,16 +102,10 @@ export const OnboardingVideoUploadScreen: React.FC<OnboardingVideoUploadScreenPr
   const displayName = surfLevelInfo?.description || 'Dipping My Toes';
   const subtitle = getCategorySubtitle(surfLevelInfo?.category || 'beginner');
 
-  // Compute default video URL from boardType (0-based) and surfLevel (0-based)
-  const defaultVideoUrl = (() => {
-    const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
-    if (!boardVideos) return '';
-    const videoIndex = Math.min(surfLevel, boardVideos.length - 1);
-    const video = boardVideos[videoIndex];
-    if (!video) return '';
-    const boardFolder = getBoardFolder(boardType);
-    return getSurfLevelVideoFromStorage(`${boardFolder}/${video.videoFileName}`);
-  })();
+  // The demo clip for this board + level (both 0-based), from the one shared
+  // table. This screen used to keep its own copy, and that copy is what went
+  // stale and showed a black card on longboard levels 3 and 4.
+  const defaultVideoUrl = getSurfLevelVideoUrl(boardType, surfLevel);
 
   const isInitialMountRef = useRef(true);
 
