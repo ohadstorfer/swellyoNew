@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
       "appleTeamId": "683UA9HZYT",
-      "buildNumber": "47",
+      "buildNumber": "48",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -44,15 +44,19 @@
         ],
         "NSUserTrackingUsageDescription": "Swellyo uses this to measure the performance of our ads and to show you more relevant content. Your data is never sold.",
         "SKAdNetworkItems": [
-          { "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork" },
-          { "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork" }
+          {
+            "SKAdNetworkIdentifier": "v9wttpbfk9.skadnetwork"
+          },
+          {
+            "SKAdNetworkIdentifier": "n38lu8286q.skadnetwork"
+          }
         ]
       },
       "runtimeVersion": "2.0.5"
     },
     "android": {
       "package": "com.swellyo.app",
-      "versionCode": 32,
+      "versionCode": 33,
       "userInterfaceStyle": "light",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
