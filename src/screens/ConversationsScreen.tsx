@@ -35,6 +35,8 @@ import { Images } from '../assets/images';
 import { MainHeader } from '../components/MainHeader';
 import { UserSearchModal } from '../components/UserSearchModal';
 import { CreateSurftripModal } from '../components/surftrips/CreateSurftripModal';
+import { NotificationPermissionModal } from '../components/notifications/NotificationPermissionModal';
+import { useNotificationPermissionPrompt } from '../hooks/notifications/useNotificationPermissionPrompt';
 import { TutorialOverlay, AnchorRect } from '../components/TutorialOverlay';
 import { getSurftripHeroImagesByConversation } from '../services/surftrips/surftripsService';
 import { getGroupTripHeroImagesByConversation } from '../services/trips/groupTripsService';
@@ -276,6 +278,10 @@ export default function ConversationsScreen({
   const [showWelcomePreview, setShowWelcomePreview] = useState(false);
   // Dev-menu preview of the post-publish "Share your trip" sheet.
   const [showShareTripPreview, setShowShareTripPreview] = useState(false);
+  // Dev-menu preview of the "Stay in the loop" notification-permission popup.
+  // `active: false` so only the menu item opens it — the real one is triggered
+  // from AppContent a couple of seconds after landing on Explore.
+  const notificationPopupPreview = useNotificationPermissionPrompt(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const isLoggingOutRef = useRef(false);
   const scrollViewRef = useRef<FlatList<Conversation>>(null);
@@ -1401,6 +1407,29 @@ export default function ConversationsScreen({
                   </TouchableOpacity>
                 )}
 
+                {/* Notification-permission popup — local mode only. Opens the
+                    real component with the real CTA, so "Turn on notifications"
+                    does fire the OS prompt (once per install) or open Settings
+                    if it was already refused. Dismissing the preview does NOT
+                    start the 7-day cooldown. */}
+                {process.env.EXPO_PUBLIC_LOCAL_MODE === 'true' && (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      // Same reason as the share sheet below: presenting a Modal
+                      // while this menu's Modal is still dismissing makes iOS
+                      // drop the new one straight back out.
+                      setTimeout(() => notificationPopupPreview.show(), 350);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="notifications-outline" size={20} color="#222B30" />
+                    <Text style={styles.menuItemText}>Notification popup</Text>
+                  </TouchableOpacity>
+                )}
+
                 {/* Post-publish share sheet — local mode only. Opens the
                     "Share your trip" sheet against a real trip so the design
                     can be checked without re-running the create wizard. */}
@@ -1513,6 +1542,13 @@ export default function ConversationsScreen({
           onDone={() => setShowShareTripPreview(false)}
         />
       )}
+
+      {/* "Stay in the loop" notification-permission popup preview (dev only). */}
+      <NotificationPermissionModal
+        visible={notificationPopupPreview.visible}
+        onTurnOn={notificationPopupPreview.onTurnOn}
+        onDismiss={notificationPopupPreview.onDismiss}
+      />
 
       {/* Global message search — full-screen overlay above the list */}
       <MessageSearchOverlay

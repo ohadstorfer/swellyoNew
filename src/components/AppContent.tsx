@@ -17,6 +17,8 @@ import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScr
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 // TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
+import { NotificationPermissionModal } from './notifications/NotificationPermissionModal';
+import { useNotificationPermissionPrompt } from '../hooks/notifications/useNotificationPermissionPrompt';
 import { pushRootCard, navigationRef } from '../navigation/navigationRef';
 import type { RootStackParamList } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
@@ -1731,6 +1733,20 @@ export const AppContent: React.FC = () => {
     }
   }, [shouldShowConversations]);
 
+  // "Stay in the loop" — the pre-permission popup, a couple of seconds after the
+  // user lands on Explore. It is the ONLY thing in the app that asks the OS for
+  // notification permission now; the registration above just picks the token up
+  // once permission exists. Held back while anything covers the navigator, so it
+  // never lands on top of the "You're in!" overlay or a full-screen editor.
+  const mainAppIsClear =
+    shouldShowConversations &&
+    !showSwellyShaper &&
+    !showProfile &&
+    !showConversationLoading &&
+    !showProfileEditor &&
+    !activeJoinDecision;
+  const notificationPrompt = useNotificationPermissionPrompt(mainAppIsClear);
+
   // Resume a profile-video upload a previous session started but didn't finish
   // (e.g. the user killed the app mid-upload — exactly what they do when the
   // first session feels stuck). No-op when nothing is pending. Fire-and-forget.
@@ -2376,6 +2392,11 @@ export const AppContent: React.FC = () => {
             onDismiss={handleJoinDecisionDismiss}
           />
         )}
+        <NotificationPermissionModal
+          visible={notificationPrompt.visible}
+          onTurnOn={notificationPrompt.onTurnOn}
+          onDismiss={notificationPrompt.onDismiss}
+        />
       </View>
       </MainNavProvider>
     );

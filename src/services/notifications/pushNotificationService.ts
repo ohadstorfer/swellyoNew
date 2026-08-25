@@ -4,6 +4,9 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 
+/** Result of asking (or checking) whether this device can receive push. */
+export type NotificationPermissionState = 'granted' | 'undetermined' | 'blocked' | 'unavailable';
+
 export interface NotificationTapPayload {
   type?: string;
   conversationId?: string;
@@ -82,17 +85,22 @@ class PushNotificationService {
         return null;
       }
 
-      // Request permission
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
+      // This method does NOT ask for permission — it only registers once
+      // permission already exists. The OS prompt belongs to the "Stay in the
+      // loop" popup (NotificationPermissionModal, a few seconds after the user
+      // lands on Explore), which calls requestPermission() below. Asking here
+      // would burn the single prompt iOS grants per install before the user has
+      // been told what the notifications are for, leaving nothing for the popup
+      // to trigger.
+      //
+      // All three callers — session restore, onboarding step 1, reaching the
+      // main app — therefore no-op until permission is granted, and pick the
+      // token up on the next call after it is. That is also why the early
+      // return below stays before `isRegistered` is set.
+      const { status } = await Notifications.getPermissionsAsync();
 
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-
-      if (finalStatus !== 'granted') {
-        console.log('[PushNotificationService] Permission not granted');
+      if (status !== 'granted') {
+        console.log('[PushNotificationService] Permission not granted yet — nothing to register');
         return null;
       }
 
@@ -187,6 +195,55 @@ class PushNotificationService {
     } catch (error) {
       console.error('[PushNotificationService] Registration failed:', error);
       return null;
+    }
+  }
+
+  /**
+   * Where this device currently stands on notification permission.
+   *
+   *  - `unavailable` — web, or a simulator: there is nothing to ask for.
+   *  - `undetermined` — never asked. The OS prompt will actually appear.
+   *  - `granted` — already on.
+   *  - `blocked` — asked and refused. iOS will NOT show the prompt again, so
+   *    the only way back is the system Settings screen.
+   */
+  async getPermissionState(): Promise<NotificationPermissionState> {
+    if (Platform.OS === 'web' || !Device.isDevice) return 'unavailable';
+    try {
+      const { status, canAskAgain } = await Notifications.getPermissionsAsync();
+      if (status === 'granted') return 'granted';
+      return canAskAgain ? 'undetermined' : 'blocked';
+    } catch (error) {
+      console.warn('[PushNotificationService] Permission check failed:', error);
+      return 'unavailable';
+    }
+  }
+
+  /**
+   * Show the OS permission prompt, and register the push token if it is granted.
+   *
+   * Only ever call this from a user action that explains itself first (the
+   * "Stay in the loop" popup) — the prompt is one-shot per install on iOS.
+   * Returns the resulting state; `blocked` means the prompt did not appear (or
+   * was refused) and Settings is the only remaining route.
+   */
+  async requestPermission(): Promise<NotificationPermissionState> {
+    const state = await this.getPermissionState();
+    if (state !== 'undetermined') {
+      // Already granted: make sure the token exists (a first grant on an older
+      // build, or a write that failed earlier, both land here).
+      if (state === 'granted') await this.registerForPushNotifications();
+      return state;
+    }
+
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return 'blocked';
+      await this.registerForPushNotifications();
+      return 'granted';
+    } catch (error) {
+      console.warn('[PushNotificationService] Permission request failed:', error);
+      return 'blocked';
     }
   }
 

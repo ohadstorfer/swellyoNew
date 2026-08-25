@@ -53,6 +53,45 @@ const blobUrlMap = new Map<string, string>();
 /** Native: original URL -> local file:// URI for instant playback (AVPlayer loads from disk) */
 const nativeFileMap = new Map<string, string>();
 const NATIVE_VIDEO_CACHE_DIR = `${FileSystem.cacheDirectory}video-preload/`;
+/**
+ * Local cache file name for a preloaded video.
+ *
+ * Must be unique per URL PATH, never per basename: the surf-level clips reuse the
+ * same file name across board folders ("shortboard/Dipping My Toes.mp4" and
+ * "longboard/Dipping My Toes.mp4" are different videos). Keying the cache on the
+ * basename alone made the three board types collide on one file — whichever board
+ * downloaded first was replayed for all of them, so picking shortboard played the
+ * longboard clip under the correct shortboard thumbnail.
+ *
+ * The query string is dropped on purpose so a signed URL still resolves to the
+ * same cached file in a later session, and a short hash of the full path keeps
+ * two videos that happen to share a folder + file name apart.
+ */
+const getCacheFileName = (url: string): string => {
+  const path = url.split('?')[0].split('#')[0];
+  const segments = path.split('/').filter(Boolean).slice(-2); // <folder>/<file>
+  const decoded = segments
+    .map(part => {
+      try {
+        return decodeURIComponent(part);
+      } catch {
+        return part;
+      }
+    })
+    .join('_');
+  const safe = decoded.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'video.mp4';
+  const ext = safe.match(/\.[a-zA-Z0-9]+$/)?.[0] || '.mp4';
+  const base = safe.slice(0, safe.length - (safe.endsWith(ext) ? ext.length : 0)) || 'video';
+
+  // djb2 over the full path — same input always yields the same name across sessions.
+  let hash = 5381;
+  for (let i = 0; i < path.length; i++) {
+    hash = ((hash << 5) + hash + path.charCodeAt(i)) >>> 0;
+  }
+
+  return `${base}-${hash.toString(36)}${ext}`;
+};
+
 const HAVE_CURRENT_DATA = 2; // Less strict - video can play (Best Practice)
 const HAVE_FUTURE_DATA = 3; // More strict - video can play through
 
@@ -348,7 +387,7 @@ const preloadVideoNative = async (url: string): Promise<VideoPreloadStatus> => {
   preloadStatusMap.set(url, { url, ready: false });
 
   try {
-    const fileName = encodeURIComponent(url.split('/').pop() || 'video.mp4');
+    const fileName = getCacheFileName(url);
     const localUri = `${NATIVE_VIDEO_CACHE_DIR}${fileName}`;
 
     // Check if already downloaded from a previous session
