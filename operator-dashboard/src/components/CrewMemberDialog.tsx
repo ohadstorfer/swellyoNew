@@ -33,16 +33,27 @@ export function CrewMemberDialog({
   tripId,
   member,
   roles,
+  isOwner,
   onClose,
 }: {
   tripId: string;
   member: CrewMember;
   /** Assignable tiers only — Operator is held by owning the trip, not by a row. */
   roles: StaffRole[];
+  /**
+   * Is the viewer the operator of record — the creator of the trip?
+   *
+   * A co-operator holds `staff.manage` and may hire crew, but appointing,
+   * demoting or removing another co-operator is the creator's alone
+   * (invariant I2', enforced by trg_owner_owns_top_tiers). This hides the
+   * controls the database would refuse.
+   */
+  isOwner: boolean;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const editable = canChangeTier(member);
+  const editable =
+    canChangeTier(member) && (isOwner || member.roleKey !== 'co_operator');
 
   const [name, setName] = useState(member.name);
   const [title, setTitle] = useState(member.title ?? '');
@@ -92,7 +103,11 @@ export function CrewMemberDialog({
   // A Listed credit with a blank name would write display_name = null, which
   // `ots_listed_needs_name` rejects — the row would have neither an account nor
   // a name, so nothing to show. Caught here rather than as a database error.
-  const canSave = !busy && (editable || !!name.trim());
+  // A co-operator's card belongs to the creator, the same as appointing them —
+  // so another co-operator can read this dialog and change nothing in it. The
+  // database refuses the write either way; this makes the button say so.
+  const mayEdit = isOwner || member.roleKey !== 'co_operator';
+  const canSave = !busy && mayEdit && (editable || !!name.trim());
 
   return (
     <div className="scrim" onClick={busy ? undefined : onClose} role="dialog" aria-modal="true">
@@ -174,13 +189,17 @@ export function CrewMemberDialog({
             </>
           ) : (
             <>
-              <button
-                className="btn btn-sm btn-danger"
-                disabled={busy}
-                onClick={() => setConfirmingRemove(true)}
-              >
-                Remove from crew
-              </button>
+              {/* A co-operator is removed by the creator alone — same rule as
+                  appointing one. The database refuses anyone else. */}
+              {isOwner || member.roleKey !== 'co_operator' ? (
+                <button
+                  className="btn btn-sm btn-danger"
+                  disabled={busy}
+                  onClick={() => setConfirmingRemove(true)}
+                >
+                  Remove from crew
+                </button>
+              ) : null}
               <span className="spacer" />
               <button className="btn btn-sm" disabled={busy} onClick={onClose}>
                 Cancel

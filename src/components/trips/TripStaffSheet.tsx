@@ -56,6 +56,15 @@ interface Props {
   tripId: string;
   /** The trip's host_id. The database checks this, but passing it avoids a read. */
   operatorId: string;
+  /**
+   * Is the viewer the operator of record — the person who created the trip?
+   *
+   * A co-operator holds `staff.manage` and may hire crew, but only the creator
+   * may appoint or change another co-operator. That is invariant I2' and the
+   * database enforces it (trg_owner_owns_top_tiers); this flag exists so the
+   * co-operator card is simply absent rather than offered and then refused.
+   */
+  isOwner: boolean;
   onClose: () => void;
 }
 
@@ -83,12 +92,16 @@ const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'trip.cancel': 'Cancel the trip',
 };
 
+// Co-operator shares the operator's purple: they run the trip together, and a
+// fifth unrelated hue would read as another rung on the ladder rather than as
+// the top of it. The deeper shade is the creator.
 const TIER_TINT: Record<StaffRoleKey, { bg: string; fg: string }> = {
-  listed:   { bg: '#F1F3F5', fg: '#6B7178' },
-  crew:     { bg: '#EDF3FF', fg: '#3A6DB0' },
-  guide:    { bg: '#E9F6EF', fg: '#1B8A4B' },
-  manager:  { bg: '#FFF3E4', fg: '#B4712A' },
-  operator: { bg: '#F0EBFB', fg: '#6A4BC0' },
+  listed:      { bg: '#F1F3F5', fg: '#6B7178' },
+  crew:        { bg: '#EDF3FF', fg: '#3A6DB0' },
+  guide:       { bg: '#E9F6EF', fg: '#1B8A4B' },
+  manager:     { bg: '#FFF3E4', fg: '#B4712A' },
+  co_operator: { bg: '#F0EBFB', fg: '#8467D6' },
+  operator:    { bg: '#F0EBFB', fg: '#6A4BC0' },
 };
 
 // 'add' is the fork: someone with a Swellyo account joins by link (they have to
@@ -111,7 +124,7 @@ type Mode =
   | { kind: 'linkPaperwork' }
   | { kind: 'edit'; member: TripStaffMember };
 
-export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) {
+export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
 
@@ -212,10 +225,19 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
     return load();
   }, [visible, load]);
 
-  // The Operator tier is the trip owner and is never assignable — they hold it
+  // The Operator tier is the trip creator and is never assignable — they hold it
   // by owning the trip, not by having a row. Offering it would create a second,
   // contradictory source of truth.
-  const assignableRoles = useMemo(() => roles.filter(r => r.role_key !== 'operator'), [roles]);
+  //
+  // Co-operator IS assignable, but only by the creator. A co-operator running
+  // this sheet can hire crew and stops one rung short of cloning themselves.
+  const assignableRoles = useMemo(
+    () =>
+      roles.filter(
+        r => r.role_key !== 'operator' && (isOwner || r.role_key !== 'co_operator'),
+      ),
+    [roles, isOwner],
+  );
   const roleByKey = useMemo(
     () => new Map(roles.map(r => [r.role_key, r])),
     [roles],
@@ -1053,7 +1075,14 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
   // four cards and refusing three of them is worse than offering none. What
   // that person's edit screen shows instead is what IS editable — their photo,
   // name and title.
-  const editable = mode.kind === 'edit' ? canChangeTier(mode.member) : false;
+  // Same rule one screen along: a co-operator's tier is the creator's to change.
+  // Without this a co-operator could demote the other co-operator to Listed,
+  // which the database refuses — better to not draw the picker at all.
+  const editable =
+    mode.kind === 'edit'
+      ? canChangeTier(mode.member) &&
+        (isOwner || mode.member.role_key !== 'co_operator')
+      : false;
 
   const editScreen = mode.kind === 'edit' ? (
     <>
@@ -1118,28 +1147,39 @@ export function TripStaffSheet({ visible, tripId, operatorId, onClose }: Props) 
               reloadToken={paperworkReload}
               onOpenDocument={row => setReviewingDoc(row)}
             />
-            <TouchableOpacity
-              // A Listed credit with a blank name would write display_name =
-              // null, which the ots_listed_needs_name CHECK rejects — the row
-              // would have neither an account nor a name, so nothing to show.
-              // Catch it here rather than turning it into a database error.
-              style={[styles.primaryButton, (saving || (!editable && !draftName.trim())) && styles.buttonBusy]}
-              activeOpacity={0.8}
-              disabled={saving || (!editable && !draftName.trim())}
-              onPress={handleSave}
-            >
-              {saving
-                ? <ActivityIndicator size="small" color="#FFFFFF" />
-                : <Text style={styles.primaryButtonText}>Save</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.removeButton}
-              activeOpacity={0.7}
-              disabled={saving}
-              onPress={() => handleRemove(mode.member)}
-            >
-              <Text style={styles.removeButtonText}>Remove from crew</Text>
-            </TouchableOpacity>
+            {/* A co-operator's card — their tier, their job title, the line
+                about them — belongs to the creator, the same as appointing
+                them. Another co-operator can read it and nothing more, so the
+                screen stays reachable and only Save goes away. */}
+            {isOwner || mode.member.role_key !== 'co_operator' ? (
+              <TouchableOpacity
+                // A Listed credit with a blank name would write display_name =
+                // null, which the ots_listed_needs_name CHECK rejects — the row
+                // would have neither an account nor a name, so nothing to show.
+                // Catch it here rather than turning it into a database error.
+                style={[styles.primaryButton, (saving || (!editable && !draftName.trim())) && styles.buttonBusy]}
+                activeOpacity={0.8}
+                disabled={saving || (!editable && !draftName.trim())}
+                onPress={handleSave}
+              >
+                {saving
+                  ? <ActivityIndicator size="small" color="#FFFFFF" />
+                  : <Text style={styles.primaryButtonText}>Save</Text>}
+              </TouchableOpacity>
+            ) : null}
+            {/* A co-operator is removed by the creator alone — the same rule
+                that governs appointing one, and the database refuses anyone
+                else (trg_owner_owns_top_tiers). */}
+            {isOwner || mode.member.role_key !== 'co_operator' ? (
+              <TouchableOpacity
+                style={styles.removeButton}
+                activeOpacity={0.7}
+                disabled={saving}
+                onPress={() => handleRemove(mode.member)}
+              >
+                <Text style={styles.removeButtonText}>Remove from crew</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         }
       />

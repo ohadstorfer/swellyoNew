@@ -19,8 +19,21 @@
 import { supabase } from '../../config/supabase';
 import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
 
-/** The five tiers. Order matters for display only — never for permission checks. */
-export type StaffRoleKey = 'listed' | 'crew' | 'guide' | 'manager' | 'operator';
+/**
+ * The six tiers. Order matters for display only — never for permission checks.
+ *
+ * 'operator' is the creator, the operator of record — they hold it by owning
+ * the trip (group_trips.host_id), never by having a row assigned. 'co_operator'
+ * is a real, assignable tier: a second person who runs the trip, appointed by
+ * the creator alone. See 20260901000000_co_operator_role.sql.
+ */
+export type StaffRoleKey =
+  | 'listed'
+  | 'crew'
+  | 'guide'
+  | 'manager'
+  | 'co_operator'
+  | 'operator';
 
 /**
  * A tier definition, read from the database. The capability list is DATA — we
@@ -83,7 +96,7 @@ export const STAFF_PROFESSIONS = [
 ] as const;
 
 /**
- * The five tier definitions. Cache these — they change roughly never, and every
+ * The six tier definitions. Cache these — they change roughly never, and every
  * staff screen needs them to draw the permission matrix.
  */
 export async function listStaffRoles(): Promise<StaffRole[]> {
@@ -124,7 +137,9 @@ export async function listTripStaff(tripId: string): Promise<TripStaffMember[]> 
     profiles = new Map((surfers ?? []).map(s => [s.user_id, s]));
   }
 
-  const TIER_ORDER: StaffRoleKey[] = ['listed', 'crew', 'guide', 'manager', 'operator'];
+  const TIER_ORDER: StaffRoleKey[] = [
+    'listed', 'crew', 'guide', 'manager', 'co_operator', 'operator',
+  ];
 
   return rows
     .map(r => {
@@ -188,6 +203,76 @@ export async function addTripStaff(params: {
     // An account has to accept before trip_staff_can() will match them.
     accepted_at: userId ? null : new Date().toISOString(),
   });
+  if (error) throw error;
+}
+
+/**
+ * Put the operator on their own crew list.
+ *
+ * Product Specs §3 removed the "About the operator" section from the trip
+ * overview, and §7b says the operator edits "your own description" — so the
+ * people running the trip, the operator included, live in the Crew section
+ * now. Nothing used to create that row: staff rows only ever came from
+ * invites, and nobody invites themselves.
+ *
+ * THREE THINGS MAKE THIS ROW LEGAL WHERE ANY OTHER WOULD BE REJECTED:
+ *
+ * 1. The operator is a participant on their own trip (every type-C trip
+ *    carries its host as one), and staff and travelers are exclusive — but
+ *    both `enforce_staff_not_traveler` and its mirror explicitly exempt
+ *    `t.host_id`. The rule was written to allow exactly this.
+ * 2. `accepted_at` is set NOW. Every other account row waits for the person to
+ *    accept, and `useTripCrew` hides anyone still pending. There is nobody to
+ *    accept an invitation from yourself, so an unaccepted row would simply
+ *    never appear.
+ * 3. RLS lets only the operator of record write staff — which is who is
+ *    calling this, at publish.
+ *
+ * Idempotent. `ots_one_live_row_per_user` already guarantees one live row per
+ * person per trip, so a duplicate insert comes back 23505 and is swallowed:
+ * this is called from a publish path that must never fail over a nice-to-have,
+ * and it makes the function safe to use for backfilling older trips.
+ */
+export async function ensureOperatorOnCrew(params: {
+  tripId: string;
+  operatorId: string;
+  bio?: string | null;
+}): Promise<void> {
+  const { tripId, operatorId, bio } = params;
+  const { error } = await supabase.from('organized_trip_staff').insert({
+    trip_id: tripId,
+    operator_id: operatorId,
+    user_id: operatorId,
+    role_key: 'operator',
+    // Name and photo come from the profile (see listTripStaff), so only the
+    // line under the name is ours to write.
+    title: 'Operator',
+    bio: bio?.trim() || null,
+    accepted_at: new Date().toISOString(),
+  });
+  if (error && (error as { code?: string }).code !== '23505') throw error;
+}
+
+/**
+ * Keep the operator's crew bio in step with the trip's "about you" note.
+ *
+ * The note is written on `group_trips.host_lead_note` and shown on the crew
+ * card, which is a copy on `organized_trip_staff.bio`. One editor, two rows —
+ * so the editor calls this. Silent when there is no crew row yet (an operator
+ * trip published before this existed): nothing to keep in step.
+ */
+export async function syncOperatorCrewBio(
+  tripId: string,
+  operatorId: string,
+  bio: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('organized_trip_staff')
+    .update({ bio: bio?.trim() || null })
+    .eq('trip_id', tripId)
+    .eq('user_id', operatorId)
+    .eq('role_key', 'operator')
+    .is('revoked_at', null);
   if (error) throw error;
 }
 

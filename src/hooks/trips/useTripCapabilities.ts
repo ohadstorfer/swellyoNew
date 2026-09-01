@@ -79,11 +79,17 @@ export function useTripCrew(tripId: string | null | undefined, enabled = true) {
           .filter(r => r.capabilities.includes('profile.shown_to_travelers'))
           .map(r => r.role_key),
       );
+      // Most senior first. `listTripStaff` sorts ascending by tier, which is
+      // right for the operator's own crew screen (a list you scan to manage)
+      // and wrong here: the operator is tier 5, so a traveler meeting the trip
+      // would find the person running it underneath the photographer.
+      const TIER_DESC = ['operator', 'co_operator', 'manager', 'guide', 'crew', 'listed'];
       return staff
         .filter(s => shown.has(s.role_key))
         // Someone who has not accepted yet is not on the crew yet. Showing them
         // to travelers would advertise a guide who may never join.
         .filter(s => !s.pending)
+        .sort((a, b) => TIER_DESC.indexOf(a.role_key) - TIER_DESC.indexOf(b.role_key))
         .map(s => ({
           id: s.id,
           name: s.name,

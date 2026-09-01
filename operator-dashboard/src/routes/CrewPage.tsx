@@ -5,12 +5,17 @@
  * Spec: docs/superpowers/specs/2026-08-14-crew-page.md
  *
  * ── Who gets in ────────────────────────────────────────────────────────────
- * The operator of record, and nobody else. `staff.manage` is held by the
- * operator alone — `my_trip_capabilities()` hands out the whole operator set to
- * `group_trips.host_id`, and no assignable tier carries the key — so asking
- * "can I?" is exactly "am I the operator", without this page ever branching on
- * a tier. A Manager reviewing documents never sees the link, and typing the URL
- * lands here on a sentence rather than on controls the database would refuse.
+ * Whoever holds `staff.manage`: the operator of record, and the co-operators
+ * they appointed. The page still never branches on a tier — it asks "can I?",
+ * and `my_trip_capabilities()` answers. A Manager reviewing documents never
+ * sees the link, and typing the URL lands here on a sentence rather than on
+ * controls the database would refuse.
+ *
+ * One thing IS branched on, and only one: `isOwner`. Appointing, demoting or
+ * removing a CO-OPERATOR belongs to `group_trips.host_id` alone (invariant I2',
+ * enforced by trg_owner_owns_top_tiers, deliberately not a capability — that is
+ * what stops a co-operator from cloning themselves). It is a fact about the
+ * trip, not a tier, so reading host_id here does not reintroduce tier logic.
  *
  * ── Rule 1 ─────────────────────────────────────────────────────────────────
  * No new table, no new function, no migration. Every read and write was already
@@ -23,6 +28,7 @@ import { fetchTrip } from '../services/trips';
 import { fetchCrew, fetchStaffRoles, type CrewMember } from '../services/staff';
 import { fetchStaffFulfilment, fetchStaffRequirements, isFulfilled } from '../services/staffRequirements';
 import { useTripAccess } from '../services/access';
+import { useAuth } from '../lib/auth';
 import { Avatar, ErrorBox, Loading } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { CrewMemberDialog } from '../components/CrewMemberDialog';
@@ -33,11 +39,12 @@ import { plural } from '../lib/format';
 export function CrewPage() {
   const { tripId = '' } = useParams();
   const access = useTripAccess(tripId);
+  const { user } = useAuth();
 
   const trip = useQuery({ queryKey: ['trip', tripId], queryFn: () => fetchTrip(tripId) });
   const crew = useQuery({ queryKey: ['crew', tripId], queryFn: () => fetchCrew(tripId) });
-  // The five tier definitions change roughly never and are the same on every
-  // trip, so this is read once per session.
+  // The tier definitions change roughly never and are the same on every trip,
+  // so this is read once per session.
   const roles = useQuery({
     queryKey: ['staffRoles'],
     queryFn: fetchStaffRoles,
@@ -78,8 +85,9 @@ export function CrewPage() {
           <div className="card-body">
             <p>Only the operator can manage this trip's crew.</p>
             <p className="muted small" style={{ marginTop: 8 }}>
-              That is the account Stripe pays. It is deliberate: if a Manager could edit the crew,
-              a Manager could give themselves the operator's permissions.
+              That is the person who created the trip — the account Stripe pays — and anyone they
+              made a co-operator. It is deliberate: if a Manager could edit the crew, a Manager
+              could give themselves the operator's permissions.
             </p>
           </div>
         </div>
@@ -87,9 +95,17 @@ export function CrewPage() {
     );
   }
 
+  // Is this the person who created the trip? Only they may appoint a
+  // co-operator; a co-operator managing crew stops one rung short of cloning
+  // themselves.
+  const isOwner = !!user?.id && trip.data.hostId === user.id;
+
   // The Operator tier is never assignable — it is held by owning the trip, not
   // by a row. Offering it would create a second, contradictory source of truth.
-  const assignable = (roles.data ?? []).filter(r => r.roleKey !== 'operator');
+  // Co-operator IS assignable, by the creator alone.
+  const assignable = (roles.data ?? []).filter(
+    r => r.roleKey !== 'operator' && (isOwner || r.roleKey !== 'co_operator'),
+  );
   const roleLabel = (key: string) =>
     roles.data?.find(r => r.roleKey === key)?.label ?? key;
 
@@ -178,6 +194,7 @@ export function CrewPage() {
           tripId={tripId}
           member={editing}
           roles={assignable}
+          isOwner={isOwner}
           onClose={() => setEditing(null)}
         />
       )}

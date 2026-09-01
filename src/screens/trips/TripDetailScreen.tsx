@@ -177,7 +177,9 @@ import {
   startCheckout,
   fetchTravelerPrices,
   fetchPaidByRequirement,
+  fetchInFlightByRequirement,
   fetchMyRefunds,
+  type InFlightPayment,
   type PayStep,
   type CheckoutOutcome,
   type TravelerPrices,
@@ -431,6 +433,11 @@ type PaymentsCache = {
   prices: TravelerPrices;
   paid: Record<string, number>;
   refunds: MyRefunds;
+  /** Bank payments still in transit, keyed by requirement id. Server-side
+   *  fact (a 'processing' ledger row), which is what lets the row say "on its
+   *  way" for three days without the device-local attempt store — and lets
+   *  the web say the same thing. */
+  inFlight: Record<string, InFlightPayment>;
 };
 
 // ---------------------------------------------------------------------------
@@ -526,7 +533,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     queryKey: tripsKeys.payments(tripId, currentUserId ?? ''),
     enabled: !!tripId && !!currentUserId && !isHostDerived && trip?.payment_mode === 'managed',
     queryFn: async () => {
-      const [prices, paid, refunds] = await Promise.all([
+      const [prices, paid, refunds, inFlight] = await Promise.all([
         fetchTravelerPrices(tripId, currentUserId as string),
         fetchPaidByRequirement(tripId, currentUserId as string),
         // Third read, same query: `paid` is already NET of refunds (they are
@@ -539,8 +546,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           lastAt: null,
           count: 0,
         })),
+        // Fourth read, same query, same non-fatal rule as refunds: losing
+        // this costs a calmer label, never the money section. Failing to {}
+        // means "no bank payment in flight", which falls back to the
+        // device-local attempt store — the behaviour before ACH existed.
+        fetchInFlightByRequirement(tripId, currentUserId as string).catch(
+          () => ({}) as Record<string, InFlightPayment>,
+        ),
       ]);
-      return { prices, paid, refunds };
+      return { prices, paid, refunds, inFlight };
     },
     staleTime: 0,
   });
@@ -588,6 +602,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     title: string;
     reason?: string | null;
     attemptAge?: string | null;
+    /** `clearing` only — what the bank transfer is for. */
+    amountUsd?: number | null;
   } | null>(null);
   const [recheckingPayment, setRecheckingPayment] = useState(false);
 
@@ -628,6 +644,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               : r.title,
           state: r.state as DocumentRow['state'],
           dueDate: r.dueDate,
+          // The unresolved deadline, carried alongside the resolved one for
+          // the Payment card: on a months-only trip `dueDate` is null and this
+          // is the only thing left that can say when the money is due.
+          dueDaysBefore: r.deadlineDaysBefore,
           note: r.note,
           amountUsd,
           amountError,
@@ -636,8 +656,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           // the moment the webhook lands the row is `approved` and must render
           // as Done, even if the background poll below hasn't yet noticed and
           // cleared the attempt.
+          // The server's own word outranks the local guess: a 'processing'
+          // ledger row means a bank payment IS in transit, so the row says
+          // so — and `pending` (the device-local "we lost track" state) is
+          // suppressed, or both hints would fight for the same line.
+          bankClearing:
+            r.state !== 'approved' && paymentsQuery.data?.inFlight?.[r.requirementId]
+              ? { amountUsd: paymentsQuery.data.inFlight[r.requirementId].amountUsd }
+              : undefined,
           pending:
             r.state !== 'approved' &&
+            !paymentsQuery.data?.inFlight?.[r.requirementId] &&
             attemptPhase(paymentAttempts[r.requirementId]?.at ?? 0, Date.now()) === 'pending',
         };
       }),
@@ -689,6 +718,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           // rather than recomputed — the Payment card must never name a date
           // or a lateness the task rows above disagree with.
           dueDate: r.dueDate ?? null,
+          dueDaysBefore: r.dueDaysBefore ?? null,
           overdue: r.state === 'overdue',
         };
       })
@@ -2066,6 +2096,28 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       // said nothing — which, to someone who has just been through Checkout
       // for $2,000, reads as "it didn't work, do it again". That is how people
       // pay twice. Say what we actually know instead: we don't know yet.
+      // A bank payment is the one case where "ran out of patience" is the
+      // expected outcome, not a problem: the loop above refetched the ledger,
+      // and if it now carries a 'processing' marker for this row the money is
+      // simply in transit. Say THAT — calmly, with the amount — and do NOT
+      // record a local attempt: the row's "on its way" comes from the server
+      // now, and a stored attempt would only age into the "pay anyway?" gate
+      // three days too early.
+      const clearing = currentUserId
+        ? queryClient.getQueryData<PaymentsCache>(tripsKeys.payments(tripId, currentUserId))
+            ?.inFlight?.[row.requirementId]
+        : undefined;
+      if (clearing) {
+        hapticSuccess();
+        setPaymentIssue({
+          mode: 'clearing',
+          requirementId: row.requirementId,
+          title: row.title,
+          amountUsd: clearing.amountUsd,
+        });
+        return;
+      }
+
       if (opts.quiet) return;
       const attempt = { at: Date.now(), basePaidUsd: opts.baselinePaidUsd };
       setPaymentAttempts(prev => {
@@ -2296,6 +2348,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           return;
         }
 
+        // A bank transfer in transit. Checked BEFORE the local attempt gate
+        // below: the server knows this payment exists, so the device-local
+        // "you already started this — pay anyway?" warning would be both
+        // redundant and wrong. Same shape as `pending`: the tap explains,
+        // and never charges.
+        if (row.bankClearing) {
+          setPaymentIssue({
+            mode: 'clearing',
+            requirementId: row.requirementId,
+            title: row.title,
+            amountUsd: row.bankClearing.amountUsd,
+          });
+          return;
+        }
+
         // Past the 30-minute window the row is back to a normal "Pay", but we
         // still remember the attempt for a week — and this is the gate that
         // memory buys. Letting expiry hand back a plain one-tap payment would
@@ -2419,7 +2486,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       ? 'confirming'
       : payTarget.pending
         ? 'processing'
-        : 'ready';
+        : payTarget.bankClearing
+          ? 'clearing'
+          : 'ready';
 
   const handlePayNow = useCallback(async () => {
     if (!payTarget) return;
@@ -2429,6 +2498,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     const attempt = paymentAttemptsRef.current[payTarget.requirementId];
     if (
       payTarget.pending ||
+      payTarget.bankClearing ||
       (attempt && attemptPhase(attempt.at, Date.now()) === 'unconfirmed')
     ) {
       void handlePressDocumentRow(payTarget);
@@ -2752,12 +2822,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         group: 2,
         onPress: () => onEditOperatorTrip?.(trip.id),
       },
-      // Crew — the operator OF RECORD only, on an operator trip. Same gate as
-      // the database: `staff.manage` is hard-locked to group_trips.host_id and
-      // is deliberately NOT readable from an editable capability set, so that
-      // no permission row can ever hand out the power to hand out power. Using
-      // isHost here would put a second, weaker door on the same room.
-      (isTripOwner && isOperatorTrip && !isLocked) && {
+      // Crew — anyone holding `staff.manage` on an operator trip: the creator,
+      // and the co-operators they appointed.
+      //
+      // Same gate as the database. `staff.manage` used to be hard-locked to
+      // group_trips.host_id so that no permission row could hand out the power
+      // to hand out power; since 20260901000000 the narrower rule is that only
+      // host_id may appoint or change a CO-OPERATOR (invariant I2'), enforced
+      // by trg_owner_owns_top_tiers, which is still not a capability. So the
+      // chain still stops. isHost would be a second, weaker door on the room —
+      // it means participants.role='host', which is not who runs a type-C trip.
+      ((isTripOwner || can('staff.manage')) && isOperatorTrip && !isLocked) && {
         key: 'staff',
         icon: 'people-outline' as const,
         label: 'Crew',
@@ -3746,6 +3821,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         title={paymentIssue?.title ?? 'This payment'}
         reason={paymentIssue?.reason}
         attemptAge={paymentIssue?.attemptAge}
+        amountUsd={paymentIssue?.amountUsd}
         busy={recheckingPayment}
         onClose={() => setPaymentIssue(null)}
         onRetry={handleRetryPayment}
@@ -3970,14 +4046,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         />
       )}
 
-      {/* Crew — operator of record only. Mounted on demand: it fetches the tier
-          definitions and the staff list on open, and nothing else on this
-          screen needs either. */}
+      {/* Crew — the creator and their co-operators. Mounted on demand: it
+          fetches the tier definitions and the staff list on open, and nothing
+          else on this screen needs either. */}
       {staffSheetVisible && (
         <TripStaffSheet
           visible={staffSheetVisible}
           tripId={trip.id}
           operatorId={trip.host_id ?? ''}
+          isOwner={isTripOwner}
           onClose={() => setStaffSheetVisible(false)}
         />
       )}

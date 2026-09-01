@@ -23,10 +23,23 @@
 import { supabase } from '../lib/supabase';
 import type { TripCapability } from './access';
 
-/** The five tiers. Order matters for display only — never for a permission check. */
-export type StaffRoleKey = 'listed' | 'crew' | 'guide' | 'manager' | 'operator';
+/**
+ * The six tiers. Order matters for display only — never for a permission check.
+ *
+ * 'operator' is the creator, held by owning the trip and never assigned.
+ * 'co_operator' is assignable, by the creator alone.
+ */
+export type StaffRoleKey =
+  | 'listed'
+  | 'crew'
+  | 'guide'
+  | 'manager'
+  | 'co_operator'
+  | 'operator';
 
-const TIER_ORDER: StaffRoleKey[] = ['listed', 'crew', 'guide', 'manager', 'operator'];
+const TIER_ORDER: StaffRoleKey[] = [
+  'listed', 'crew', 'guide', 'manager', 'co_operator', 'operator',
+];
 
 /**
  * A tier definition, read from the database.
@@ -89,7 +102,7 @@ export const STAFF_PROFESSIONS = [
 ] as const;
 
 /**
- * The five tier definitions. Cached hard by the caller — they change roughly
+ * The six tier definitions. Cached hard by the caller — they change roughly
  * never, and both the list and the editor need them.
  */
 export async function fetchStaffRoles(): Promise<StaffRole[]> {

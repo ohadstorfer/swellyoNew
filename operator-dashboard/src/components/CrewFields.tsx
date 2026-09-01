@@ -21,11 +21,14 @@ export const TIER_TAG: Record<StaffRoleKey, string> = {
   crew: 'tag-wait',
   guide: 'tag-ok',
   manager: 'tag-warn',
+  // A co-operator runs the trip with the creator, so they share the brand tag.
+  // A separate colour would read as another rung rather than the top of it.
+  co_operator: 'tag-brand',
   operator: 'tag-brand',
 };
 
 /**
- * The five cards, with the chosen one's capabilities listed underneath.
+ * The tier cards, with the chosen one's capabilities listed underneath.
  *
  * `role.capabilities` comes from `organized_trip_staff_roles`. Rendering the
  * database's own answer is the whole point of the permission design: what a
