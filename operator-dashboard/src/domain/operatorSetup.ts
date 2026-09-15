@@ -53,13 +53,20 @@ export const SETUP_STEP_ORDER: SetupStepKey[] = [
 /**
  * Which version of the operator terms is current.
  *
- * ⚠️ THERE ARE NO TERMS YET. Placeholder, so the flow and the re-accept
- * mechanism exist before the document does. Must stay identical to
- * `OPERATOR_TERMS_VERSION` in the app's `services/trips/operatorSetup.ts` — if
- * the two drift, agreeing on one surface leaves the step unfinished on the
- * other. Change both together when real terms are published.
+ * ⚠️ STILL NOT A LAWYER'S DOCUMENT. What the operator reads is a written
+ * summary of the arrangement the code already implements — `operatorAgreement.ts`
+ * beside this file, a copy of the app's. Accepting a `summary-` version records
+ * that the operator was shown that description and agreed to it.
+ *
+ * Must stay identical to `OPERATOR_TERMS_VERSION` in the app's
+ * `services/trips/operatorSetup.ts`. Both surfaces compute "done" as
+ * `termsVersion === OPERATOR_TERMS_VERSION`, so if the two drift, agreeing on
+ * one surface leaves the step unfinished on the other and the "you cannot sell
+ * yet" banner stays up. That happened: this sat on `placeholder-2026-08-11`
+ * for three weeks after the app moved on. `operatorSetup.test.ts` now reads
+ * the app's file and fails when they differ. Change both together.
  */
-export const OPERATOR_TERMS_VERSION = 'placeholder-2026-08-11';
+export const OPERATOR_TERMS_VERSION = 'summary-2026-08-12';
 
 export interface SetupStep {
   key: SetupStepKey;

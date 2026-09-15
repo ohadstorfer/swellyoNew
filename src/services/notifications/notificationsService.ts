@@ -109,7 +109,44 @@ export type NotificationType =
   // push and the bell say the same thing; `data.has_deadlines` says whether
   // this trip has any deadline to have moved, and is what decides where the row
   // taps through to.
-  | 'trip_dates_changed';
+  | 'trip_dates_changed'
+  // Paid the deposit and never finished onboarding. Written by the hourly
+  // `scan-stalled-onboarding` cron, which is also the only thing that decides
+  // the cadence: `data.stage` is '4h' | '24h' | 'repeat', and `repeat` really
+  // does repeat daily for as long as they stay stuck. `data.missing` is the
+  // must_have titles still blocking them, so the row can name the step instead
+  // of saying "you have steps left" at someone who stopped BECAUSE they were
+  // unsure which step it was.
+  //
+  // Was missing from this union until 20 Aug, which is the whole bug: the type
+  // shipped on 18 Aug with push copy in dispatch-notification-queue/render.ts,
+  // but nothing here knew it, so every one of these rendered in the bell as a
+  // blank "Notification" with an empty body — exactly what
+  // `operator_document_rejected` did before July.
+  | 'onboarding_unfinished'
+  // The operator's half of the same scan: one digest per TRIP, never one per
+  // stuck traveler, so `data.count` is the message and who they are is a tap
+  // away. Same 20 Aug fix as above.
+  | 'operator_onboarding_stalled'
+  // A traveler cleared onboarding and is really on the trip. Written by
+  // `tg_notify_member_joined` (20260820000800), which fires it ONLY on a
+  // hosting_style 'C' trip — on a peer trip approval and joining are the same
+  // moment and the host did it themselves.
+  //
+  // The operator's counterpart to `member_joined`, which deliberately excludes
+  // the host. It exists because on an operator trip approval and arrival are
+  // weeks apart: approval only creates a `status='onboarding'` row, and the
+  // seat is not claimed until the deposit and every must_have requirement are
+  // done. Feed-only by design (`notification_push_priority` returns -1) —
+  // fifteen travelers means fifteen of these, and the operator is not being
+  // asked to do anything.
+  | 'operator_traveler_confirmed'
+  // ACH (docs/specs/operator-trips/ach-bank-payments.md): the traveler's BANK
+  // payment cleared, about three business days after they made it. Written
+  // by `stripe-webhook` on `checkout.session.async_payment_succeeded`, once
+  // per payment. A card never produces this — it confirms on the spot. The
+  // row has said "on its way" for three days; this is the end of that wait.
+  | 'operator_payment_landed';
 
 /**
  * Every bell type, as a runtime set for the foreground push gate.
@@ -149,6 +186,10 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   operator_charge_disputed: true,
   operator_dispute_closed: true,
   trip_dates_changed: true,
+  onboarding_unfinished: true,
+  operator_onboarding_stalled: true,
+  operator_traveler_confirmed: true,
+  operator_payment_landed: true,
 };
 export const BELL_NOTIFICATION_TYPES: ReadonlySet<string> = new Set(
   Object.keys(BELL_TYPE_FLAGS)
@@ -219,8 +260,15 @@ export function tripFocusForNotification(
     case 'trip_join_request': // legacy push type (pre-queue webhook)
       return 'requests';
     case 'join_request_decided':
-      // Approved → next step is committing. Declined → can't see Plan anyway.
-      return data?.decision === 'approved' ? 'commit' : 'overview';
+      // Declined → can't see Plan anyway.
+      if (data?.decision !== 'approved') return 'overview';
+      // On an OPERATOR trip the next step is not committing — it is the
+      // onboarding flow (deposit, then every must_have requirement), and an
+      // onboarding traveler cannot open the Plan tab at all, so 'commit'
+      // degraded to the plain overview and left them to find the flow
+      // themselves. `needs_onboarding` comes from tg_notify_join_request_decided
+      // (20260820000500); absent on older rows, which keep 'commit'.
+      return data?.needs_onboarding ? 'onboarding' : 'commit';
     case 'commitment_request_received': // host: action lives in the bell buttons
     case 'commitment_decided':
       return 'commit';
@@ -258,7 +306,24 @@ export function tripFocusForNotification(
     // step. For someone already in (a balance payment), it resolves to the
     // plain overview, which the focus type documents as its fallback.
     case 'operator_payment_stuck':
+    // The nudge for someone who paid and stalled mid-onboarding. Its whole job
+    // is to put them back where they stopped, so 'overview' — what it fell to
+    // while this type was missing from the switch — was the one destination
+    // that does not help. `data.missing` already named the step in the body;
+    // this opens the flow at it.
+    //
+    // `operator_onboarding_stalled` deliberately does NOT land here: it is the
+    // operator's digest about other people, and the operator has no onboarding
+    // flow of their own. It falls to 'overview' below, which opens the trip —
+    // the Dashboard tab listing who is stuck is one tap from there, the same
+    // way operator_requirement_overdue_operator resolves.
+    case 'onboarding_unfinished':
       return 'onboarding';
+    // The bank payment cleared. The row that said "on its way" for three days
+    // is on the Plan tab's task list, and it has just ticked itself off —
+    // that is the thing worth seeing, not the overview.
+    case 'operator_payment_landed':
+      return 'documents';
     // The dates themselves are already in the notification body, so the reason
     // to tap is the part that is NOT there: which deadlines moved, and to when.
     // That is the Documents card. On a trip with no deadline-carrying
@@ -340,7 +405,16 @@ async function loadBellTemplates(): Promise<void> {
 function bellTemplateKey(n: NotificationRow): string {
   const d = n.data ?? {};
   if (n.type === 'join_request_decided' || n.type === 'commitment_decided' || n.type === 'gear_request_decided') {
-    return `${n.type}:${d.decision === 'approved' ? 'approved' : 'declined'}`;
+    const approved = d.decision === 'approved';
+    // Mirrors templateKey() in dispatch-notification-queue/render.ts. An
+    // approved request on an operator trip says something different from one on
+    // a peer trip, so it gets its own key — otherwise a row added for
+    // `join_request_decided:approved` would win over both and quietly put the
+    // peer copy back on operator trips.
+    if (n.type === 'join_request_decided' && approved && d.needs_onboarding) {
+      return 'join_request_decided:approved_onboarding';
+    }
+    return `${n.type}:${approved ? 'approved' : 'declined'}`;
   }
   if (n.type === 'trip_reminder') {
     const s = d.stage || '';
@@ -560,6 +634,17 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         bodyParts: [{ t: 'joined ' }, { t: tripName, b: true }],
         icon: 'person-add-outline',
       };
+    case 'operator_traveler_confirmed':
+      // Same name/action layout as `member_joined` above — it is the operator's
+      // version of the same event. "is on the trip", not "joined": on a type-C
+      // trip they joined weeks ago, at approval; what just happened is that the
+      // paperwork and the money finally cleared.
+      return {
+        title: who,
+        body: `is on ${tripName} — onboarding done`,
+        bodyParts: [{ t: 'is on ' }, { t: tripName, b: true }, { t: ' — onboarding done' }],
+        icon: 'checkmark-done-outline',
+      };
     case 'member_committed':
       return {
         title: who,
@@ -599,6 +684,18 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: decision === 'approved' ? 'checkmark-circle-outline' : 'close-circle-outline',
       };
     case 'join_request_decided':
+      // Same split as the push (dispatch-notification-queue/render.ts): on an
+      // operator trip, approval starts the onboarding flow rather than ending
+      // anything, so the row has to say what is still owed. Absent
+      // `needs_onboarding` — every row written before 20260820000500 — keeps
+      // the old wording.
+      if (decision === 'approved' && d.needs_onboarding) {
+        return {
+          title: `You're approved for ${trip}`,
+          body: 'Your spot is held once you pay the deposit and send what the trip needs.',
+          icon: 'checkmark-circle-outline',
+        };
+      }
       return {
         title: `Request ${decision}`,
         body: `Your request to join ${trip} was ${decision}.`,
@@ -644,8 +741,21 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         bodyParts: [{ t: 'left ' }, { t: tripName, b: true }],
         icon: 'exit-outline',
       };
-    case 'trip_cancelled':
-      return { title: 'Trip cancelled', body: `${trip} was cancelled.`, icon: 'close-circle-outline' };
+    case 'trip_cancelled': {
+      // Same rule as `member_removed` below: absent `refund_usd` means no money
+      // moved — say nothing rather than "$0". Written by
+      // tg_notify_trip_cancelled (20260820000900) only on managed trips where
+      // the traveler actually paid.
+      const cancelRefund =
+        typeof d.refund_usd === 'number' && d.refund_usd > 0 ? d.refund_usd : null;
+      return {
+        title: 'Trip cancelled',
+        body: cancelRefund
+          ? `${trip} was cancelled. $${cancelRefund.toFixed(2)} is on its way back.`
+          : `${trip} was cancelled.`,
+        icon: 'close-circle-outline',
+      };
+    }
     case 'member_removed': {
       // Absent `refund_usd` means no money moved — say nothing rather than "$0".
       const refund = typeof d.refund_usd === 'number' && d.refund_usd > 0 ? d.refund_usd : null;
@@ -751,17 +861,105 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: 'alert-circle-outline',
       };
     }
+    case 'onboarding_unfinished': {
+      // Three voices, one type — the same split dispatch-notification-queue/
+      // render.ts makes, kept word-for-word in intent so the push and the row
+      // it opens do not contradict each other.
+      //
+      // `missing` is must_have only, so every item named really does block
+      // them. Two at most: a bell row is one line of body, and someone owing
+      // five things is not helped by a list they cannot read.
+      const missing: string[] = Array.isArray(d.missing) ? d.missing : [];
+      const names = missing.length
+        ? missing.slice(0, 2).map((m: any) => String(m).toLowerCase()).join(' and ')
+        : null;
+      const stalledStage = d.stage || '';
+
+      if (stalledStage === '24h') {
+        // A day in, the missing step is no longer news to them. What they
+        // still do not know is that the money did not buy the seat.
+        return {
+          title: "You're not on the list yet",
+          body: `Your deposit for ${trip} is paid, but your spot isn't held until the last steps are done.`,
+          icon: 'hourglass-outline',
+        };
+      }
+      if (stalledStage === 'repeat') {
+        // The only row in the app a person can receive ten times. It stays a
+        // question rather than a reminder, and never counts the days back at
+        // them — they already know how long it has been.
+        return {
+          title: `Still want your place on ${trip}?`,
+          body: names
+            ? `Your deposit is paid and waiting. We still need your ${names}.`
+            : 'Your deposit is paid and waiting. Finishing up takes a few minutes.',
+          icon: 'hourglass-outline',
+        };
+      }
+      // '4h', and the fallback. Four hours in they were probably still at the
+      // form, so this is the one that names what to go back to.
+      return {
+        title: 'Nearly on the trip',
+        body: names
+          ? `Your deposit for ${trip} is paid. Still need your ${names}.`
+          : `Your deposit for ${trip} is paid. A few steps are left before your spot is held.`,
+        icon: 'hourglass-outline',
+      };
+    }
+    case 'operator_onboarding_stalled': {
+      // One row per TRIP, never one per stuck traveler — ten people stalling on
+      // a big trip is one notification. Same batching, and same reasoning, as
+      // `operator_requirement_overdue_operator` above.
+      const n2 = typeof d.count === 'number' ? d.count : Number(d.count) || 0;
+      return {
+        title: n2 === 1 ? "1 traveler hasn't finished" : `${n2} travelers haven't finished`,
+        body: `They've paid for ${trip} but still have steps left. Open the trip to see who.`,
+        icon: 'people-outline',
+      };
+    }
     case 'operator_payment_stuck':
       // "Nothing was charged" leads because it answers the traveler's actual
       // fear — a declined card leaves someone unsure whether money moved. The
-      // same copy for both reasons (declined / abandoned): the instruction is
-      // identical, and the reason only decides which one the traveler already
-      // knows.
+      // same copy for declined / abandoned: the instruction is identical, and
+      // the reason only decides which one the traveler already knows.
+      //
+      // 'bank_returned' is the exception (ACH, ach-bank-payments.md): the
+      // bounce arrives three days after they paid, so they DON'T already know
+      // — and a bank payer reading "card" concludes the message is about
+      // someone else. Name the bank, and suggest the other way to pay.
+      if (d.reason === 'bank_returned') {
+        return {
+          title: 'Your bank payment did not go through',
+          body: `Your bank returned the payment for ${trip}. Nothing was charged — you can pay again, by card if that's easier.`,
+          icon: 'business-outline',
+        };
+      }
       return {
         title: 'Your payment did not finish',
         body: `Nothing was charged for ${trip}. You can try again.`,
         icon: 'card-outline',
       };
+    case 'operator_payment_landed': {
+      // The end of the three-day wait. Amount and step from `data`, written
+      // by the webhook — the copy names what they paid, not "a payment".
+      const landedUsd = typeof d.amount_usd === 'number' ? `$${Math.round(d.amount_usd).toLocaleString('en-US')} ` : '';
+      const landedStep = String(d.item_name || 'payment').toLowerCase();
+      // The operator-facing variant: a bank payment that cleared AFTER the
+      // trip was cancelled. The money is real and sitting in their balance —
+      // the one right move is to send it back. No 🎉 here.
+      if (d.on_cancelled_trip === true) {
+        return {
+          title: `A ${landedUsd}bank payment landed on a cancelled trip`,
+          body: `The ${landedStep} for ${trip} cleared after the trip was cancelled. Refund it from the traveler's Money card.`,
+          icon: 'alert-circle-outline',
+        };
+      }
+      return {
+        title: `Your ${landedUsd}${landedStep} arrived 🎉`,
+        body: `The bank transfer for ${trip} cleared. You're all set on this one.`,
+        icon: 'checkmark-circle-outline',
+      };
+    }
     case 'operator_charge_disputed': {
       // The deadline leads the body: it is the only part of a chargeback with
       // a clock on it, and the operator's evidence (booking records, the

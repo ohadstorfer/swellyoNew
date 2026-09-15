@@ -90,7 +90,37 @@ export type StaffRequirement = {
   helpText: string | null;
   /** `organized_trip_staff` row ids this requirement is assigned to. */
   assignedStaffIds: string[];
+  /**
+   * The TRAVELERS' deadline for this same kind, in days before departure.
+   *
+   * Never stored on the staff row: it is read through to the traveler
+   * requirement of the same kind, so it can only ever say what the travelers
+   * were told, and moving theirs moves the crew's with it. Product Specs
+   * §"Manage active staff member": "deadlines will be similar to rest of
+   * travelers", and under Manage trip, "changing deadlines will effect the crew
+   * members deadlines accordingly". Server-side twin: `staff_my_requirements`
+   * (20260904000200).
+   *
+   * ⚠️ FLAGGED, NEVER GATED. A guide is not locked out of a trip over
+   * paperwork — that rule predates this field and survives it.
+   *
+   * Null when the travelers have no deadline for it, and always null for a
+   * staff-only `custom` ask, which has no traveler sibling to be similar to.
+   */
+  deadlineDaysBefore: number | null;
+  /** The same deadline against the trip's start date, `YYYY-MM-DD`, or null
+   *  when the trip has no dates yet. */
+  dueDate: string | null;
 };
+
+/** Past the travelers' deadline for the same thing, and still nothing sent. */
+export function isStaffRequirementLate(
+  dueDate: string | null,
+  fulfilled: boolean,
+  today: string = new Date().toISOString().slice(0, 10),
+): boolean {
+  return !fulfilled && !!dueDate && dueDate < today;
+}
 
 /**
  * Every staff-audience requirement on the trip, with its assignments.
@@ -116,6 +146,28 @@ export async function fetchStaffRequirements(tripId: string): Promise<StaffRequi
     .eq('trip_id', tripId);
   if (assignErr) throw assignErr;
 
+  // The travelers' deadline for each kind. One extra query, and the SQL side
+  // does the same left join inside `staff_my_requirements` — the two must
+  // answer the same way, so `custom` is excluded on both sides.
+  const [{ data: travelerReqs, error: twErr }, { data: tripRow }] = await Promise.all([
+    supabase
+      .from('organized_trip_requirements')
+      .select('kind, deadline_days_before')
+      .eq('trip_id', tripId)
+      .eq('audience', 'traveler')
+      .eq('is_active', true),
+    supabase.from('group_trips').select('start_date').eq('id', tripId).maybeSingle(),
+  ]);
+  if (twErr) throw twErr;
+
+  const startDate = (tripRow?.start_date as string | null) ?? null;
+  const deadlines = new Map<string, number | null>();
+  for (const r of travelerReqs ?? []) {
+    const kind = r.kind as string;
+    if (kind === 'custom') continue;
+    deadlines.set(kind, (r.deadline_days_before as number | null) ?? null);
+  }
+
   const byRequirement = new Map<string, string[]>();
   for (const a of assigns ?? []) {
     const key = a.requirement_id as string;
@@ -124,14 +176,31 @@ export async function fetchStaffRequirements(tripId: string): Promise<StaffRequi
     else byRequirement.set(key, [a.staff_id as string]);
   }
 
-  return (reqs as any[]).map(r => ({
-    requirementId: r.id,
-    kind: r.kind,
-    reqType: r.req_type,
-    title: r.title,
-    helpText: r.help_text ?? null,
-    assignedStaffIds: byRequirement.get(r.id) ?? [],
-  }));
+  return (reqs as any[]).map(r => {
+    const daysBefore = r.kind === 'custom' ? null : (deadlines.get(r.kind) ?? null);
+    return {
+      requirementId: r.id,
+      kind: r.kind,
+      reqType: r.req_type,
+      title: r.title,
+      helpText: r.help_text ?? null,
+      assignedStaffIds: byRequirement.get(r.id) ?? [],
+      deadlineDaysBefore: daysBefore,
+      dueDate: resolveDue(startDate, daysBefore),
+    };
+  });
+}
+
+/** `start_date - daysBefore`, as `YYYY-MM-DD`. Built from the date parts so it
+ *  cannot drift a day across a timezone. */
+function resolveDue(startDate: string | null, daysBefore: number | null): string | null {
+  if (!startDate || daysBefore === null) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(startDate);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - daysBefore);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /**
@@ -150,11 +219,14 @@ export async function fetchStaffRequirements(tripId: string): Promise<StaffRequi
  * guide's requirement rather than growing a duplicate — the assignment table is
  * what makes it personal, not the requirement.
  *
- * ⚠️ This can fail with 23505 on a trip that already asks TRAVELERS for the
- * same kind. `uq_organized_trip_req_kind_per_trip` is unique on
- * `(trip_id, kind)` and was never widened when `audience` was added, so one
- * trip cannot hold both a traveler passport and a crew passport. Every live
- * operator trip is in that state. See `friendlyStaffRequirementError`.
+ * ⚠️ THIS WARNING IS OUT OF DATE and is kept only so nobody re-derives it.
+ * It used to say a trip could not hold both a traveler passport and a crew
+ * passport, because `uq_organized_trip_req_kind_per_trip` was unique on
+ * `(trip_id, kind)`. 20260814000000 widened it to `(trip_id, kind, audience)`,
+ * and the live index was checked on 5 Sep 2026: it now carries `audience`. The
+ * two coexist, which is exactly what lets a crew deadline read through to the
+ * travelers' row. `friendlyStaffRequirementError` still handles a 23505 —
+ * there is one legitimate source left, two ticks racing on the same kind.
  */
 export async function ensureStaffRequirements(
   tripId: string,

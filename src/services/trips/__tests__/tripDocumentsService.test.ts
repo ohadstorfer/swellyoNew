@@ -18,7 +18,14 @@ jest.mock('expo-crypto', () => ({}));
 jest.mock('../../../utils/imageCompression', () => ({ compressImage: jest.fn() }));
 
 import { supabase } from '../../../config/supabase';
-import { removeRequirement, deadlineStepBlocked } from '../tripDocumentsService';
+import {
+  removeRequirement,
+  deadlineStepBlocked,
+  resolveTiming,
+  LOCKED_TIMING,
+  DEFAULT_TIMING,
+  ONBOARDING_REQUIREMENT_SPEC,
+} from '../tripDocumentsService';
 
 /**
  * Stands in for the three parallel reads plus the write.
@@ -241,5 +248,50 @@ describe('deadlineStepBlocked', () => {
     // 45 snaps to 30 (nearer than 60), which on a trip 10 days out is 20 days
     // ago. Blocked.
     expect(deadlineStepBlocked(45, 1, iso(10))).toBe(true);
+  });
+});
+
+
+// `resolveTiming` — the deposit is the WALL and cannot be made skippable.
+//
+// This is not a UI preference. `freeze_traveler_price` /
+// `operator_trip_full_payment_due` (migration 20260817000000) are built on
+// "the balance is skippable and the deposit is not". A skippable deposit lets
+// a traveler leave onboarding a full member having paid nothing, holding a
+// seat, owing the whole price — the exact hole that migration closed. Three
+// separate UIs hide the control; this pins the rule at the write path, which
+// is the only place that can actually enforce it.
+describe('resolveTiming', () => {
+  it('pins a deposit to must_have however it is asked for', () => {
+    expect(resolveTiming('deposit', { skippable: true, daysBefore: 30 })).toEqual({
+      skippable: false,
+      daysBefore: 0,
+    });
+  });
+
+  it('leaves the balance alone — its deadline is the operator\'s whole point', () => {
+    const chosen = { skippable: true, daysBefore: 45 };
+    expect(resolveTiming('balance', chosen)).toBe(chosen);
+  });
+
+  it('leaves every document kind alone', () => {
+    for (const kind of ['waiver', 'medical', 'insurance', 'passport', 'flights', 'visa']) {
+      const chosen = { skippable: true, daysBefore: 14 };
+      expect(resolveTiming(kind, chosen)).toBe(chosen);
+    }
+  });
+
+  it('pins deposit to exactly what the onboarding spec seeds it as', () => {
+    // If the two ever disagree, the wizard shows one thing and writes another.
+    const seed = ONBOARDING_REQUIREMENT_SPEC.find(s => s.kind === 'deposit');
+    expect(LOCKED_TIMING.deposit).toEqual({
+      skippable: seed!.skippable,
+      daysBefore: seed!.daysBefore,
+    });
+    expect(DEFAULT_TIMING.deposit.skippable).toBe(false);
+  });
+
+  it('pins nothing else — a second entry here is a product decision, not a tidy-up', () => {
+    expect(Object.keys(LOCKED_TIMING)).toEqual(['deposit']);
   });
 });

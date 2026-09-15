@@ -42,7 +42,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { ff } from '../../theme/fonts';
 
-export type PaymentStatusMode = 'failed' | 'pending' | 'unconfirmed';
+/**
+ * `clearing` (ACH, docs/specs/operator-trips/ach-bank-payments.md) — a BANK
+ * payment was made and the money is in transit, about three business days.
+ * Unlike `pending` this is not doubt: the server has a marker row saying so.
+ * There is nothing to retry and nothing to check — the primary action is to
+ * close the sheet and wait, and the copy's whole job is to make three days of
+ * "on its way" feel normal rather than alarming.
+ */
+export type PaymentStatusMode = 'failed' | 'pending' | 'unconfirmed' | 'clearing';
 
 export const PaymentStatusSheet: React.FC<{
   visible: boolean;
@@ -57,6 +65,9 @@ export const PaymentStatusSheet: React.FC<{
   /** `unconfirmed` only — how long ago the attempt was, already formatted by
    *  `describeAttemptAge` ("about 40 minutes ago"). */
   attemptAge?: string | null;
+  /** `clearing` only — what was authorised, so the sheet can say "$1,000 is on
+   *  its way" instead of "your payment". Null prints the generic line. */
+  amountUsd?: number | null;
   /** `failed` → retry the checkout. `pending` → refetch and see if the webhook
    *  has landed. `unconfirmed` → "Pay anyway", which forgets the attempt and
    *  starts a fresh checkout. Either way the sheet closes first and the caller
@@ -76,6 +87,7 @@ export const PaymentStatusSheet: React.FC<{
   title,
   reason,
   attemptAge,
+  amountUsd = null,
   onRetry,
   onMessageOrganiser,
   busy = false,
@@ -83,9 +95,10 @@ export const PaymentStatusSheet: React.FC<{
   const insets = useSafeAreaInsets();
   const pending = mode === 'pending';
   const unconfirmed = mode === 'unconfirmed';
+  const clearing = mode === 'clearing';
   // Both doubt states share the amber register. Only `failed` — where we know
   // for certain nothing happened — earns red.
-  const waiting = pending || unconfirmed;
+  const waiting = pending || unconfirmed || clearing;
 
   // `unconfirmed` is the one mode where paying is NOT the recommended action,
   // so it is the one mode where the retry button gives up the primary slot.
@@ -93,7 +106,17 @@ export const PaymentStatusSheet: React.FC<{
   // outline reads as having no action at all.
   const payIsPrimary = !unconfirmed || !onMessageOrganiser;
 
-  const retryLabel = unconfirmed ? 'Pay anyway' : pending ? 'Check again' : 'Try again';
+  // `clearing` has no retry at all: nothing to try again, and checking on
+  // day 0 of a three-day transfer only teaches people to keep checking. The
+  // primary button just closes — "Got it" is the honest verb, and reaching for
+  // the organiser is the outline underneath, not the headline.
+  const retryLabel = clearing
+    ? 'Got it'
+    : unconfirmed
+      ? 'Pay anyway'
+      : pending
+        ? 'Check again'
+        : 'Try again';
 
   // The server's generic failure message is "Could not start the payment" and
   // this sheet's title is "We couldn't start the payment" — printing both
@@ -114,7 +137,7 @@ export const PaymentStatusSheet: React.FC<{
   const retryButton = (
     <Pressable
       key="retry"
-      onPress={onRetry}
+      onPress={clearing ? onClose : onRetry}
       disabled={busy}
       style={({ pressed }) => [
         payIsPrimary ? styles.primaryBtn : styles.secondaryBtn,
@@ -159,7 +182,12 @@ export const PaymentStatusSheet: React.FC<{
             over a payment that is probably fine invites exactly the panicked
             second payment this sheet exists to prevent. */}
         <View style={[styles.iconRing, waiting ? styles.iconRingWait : styles.iconRingBad]}>
-          {waiting ? (
+          {clearing ? (
+            /* A bank, not a clock. The clock says "we are unsure"; this state
+               is certain, just slow — and naming the bank is what stops "on
+               its way" reading as a euphemism for "lost". */
+            <Ionicons name="business-outline" size={24} color="#B26B00" />
+          ) : waiting ? (
             <Ionicons name="time-outline" size={26} color="#B26B00" />
           ) : (
             <Ionicons name="alert-circle-outline" size={26} color="#C4361E" />
@@ -167,15 +195,27 @@ export const PaymentStatusSheet: React.FC<{
         </View>
 
         <Text style={styles.title}>
-          {pending
-            ? 'Still confirming your payment'
-            : unconfirmed
-              ? 'You already started this payment'
-              : "We couldn't start the payment"}
+          {clearing
+            ? amountUsd != null && amountUsd > 0
+              ? `$${Math.round(amountUsd).toLocaleString('en-US')} is on its way`
+              : 'Your bank payment is on its way'
+            : pending
+              ? 'Still confirming your payment'
+              : unconfirmed
+                ? 'You already started this payment'
+                : "We couldn't start the payment"}
         </Text>
 
         <Text style={styles.body}>
-          {pending ? (
+          {clearing ? (
+            <>
+              Bank transfers take up to 4 business days to arrive. {title} will tick
+              itself off the moment it lands, and we'll send you a message.
+              {'\n\n'}
+              <Text style={styles.bodyStrong}>There's nothing to do — please don't pay again.</Text>{' '}
+              If your bank turns it down, we'll tell you straight away.
+            </>
+          ) : pending ? (
             <>
               Your bank may have gone through — we just haven't heard back yet. This
               usually takes a few seconds, and {title.toLowerCase()} will tick itself off

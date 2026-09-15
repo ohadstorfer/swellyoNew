@@ -69,6 +69,8 @@ export interface TripStaffMember {
    *  display_name/photo_url stored on the staff row itself. */
   name: string;
   photo_url: string | null;
+  /** From the surfer's profile. Null for a Listed credit or an unset profile. */
+  country_from: string | null;
   /** True when they have an account but have not accepted the invite yet. */
   pending: boolean;
 }
@@ -127,11 +129,14 @@ export async function listTripStaff(tripId: string): Promise<TripStaffMember[]> 
   const rows = data ?? [];
   const userIds = rows.map(r => r.user_id).filter((id): id is string => !!id);
 
-  let profiles = new Map<string, { name: string | null; profile_image_url: string | null }>();
+  let profiles = new Map<
+    string,
+    { name: string | null; profile_image_url: string | null; country_from: string | null }
+  >();
   if (userIds.length > 0) {
     const { data: surfers, error: surferError } = await supabase
       .from('surfers')
-      .select('user_id, name, profile_image_url')
+      .select('user_id, name, profile_image_url, country_from')
       .in('user_id', userIds);
     if (surferError) throw surferError;
     profiles = new Map((surfers ?? []).map(s => [s.user_id, s]));
@@ -158,6 +163,7 @@ export async function listTripStaff(tripId: string): Promise<TripStaffMember[]> 
         // user does not show a stale name on every trip they crew.
         name: profile?.name ?? r.display_name ?? 'Unnamed',
         photo_url: profile?.profile_image_url ?? r.photo_url ?? null,
+        country_from: profile?.country_from ?? null,
         pending: !!r.user_id && !r.accepted_at,
       };
     })
@@ -277,6 +283,46 @@ export async function syncOperatorCrewBio(
 }
 
 /**
+ * The signed-in person's OWN crew row on this trip, or null if they are not crew.
+ *
+ * `ots_select` has always allowed `user_id = auth.uid()`, so this needed no
+ * migration to READ. What 20260904000300 added is the right to write it — see
+ * `updateTripStaffProfile`.
+ *
+ * Live rows only, and a revoked row is not "no row" by accident: somebody taken
+ * off a trip should stop seeing an editor for how they are introduced on it.
+ */
+export async function fetchMyStaffRow(tripId: string): Promise<TripStaffMember | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data, error } = await supabase
+    .from('organized_trip_staff')
+    .select(STAFF_COLUMNS)
+    .eq('trip_id', tripId)
+    .eq('user_id', user.id)
+    .is('revoked_at', null)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    id: data.id as string,
+    trip_id: data.trip_id as string,
+    user_id: data.user_id as string | null,
+    role_key: data.role_key as StaffRoleKey,
+    title: (data.title as string | null) ?? null,
+    bio: (data.bio as string | null) ?? null,
+    invited_at: data.invited_at as string,
+    accepted_at: (data.accepted_at as string | null) ?? null,
+    // Their own row, so the display fallbacks the crew list applies are not
+    // needed: whoever is asking already knows who they are.
+    name: (data.display_name as string | null) ?? '',
+    photo_url: (data.photo_url as string | null) ?? null,
+    country_from: null,
+    pending: !data.accepted_at,
+  };
+}
+
+/**
  * Move someone to a different tier.
  *
  * Only meaningful for a row with a `user_id`. A Listed credit has nobody who
@@ -307,8 +353,22 @@ export function canChangeTier(member: Pick<TripStaffMember, 'user_id'>): boolean
 /**
  * Edit how travelers see this person: what they do, and the line about them.
  *
- * Works for every row, unlike `updateTripStaffListed` — an account-holding
- * guide's job and blurb belong to the OPERATOR, not to them. They are how this
+ * Works for every row, unlike `updateTripStaffListed`.
+ *
+ * ⚠️ TWO PEOPLE MAY CALL THIS NOW, and that is the point. The operator writes
+ * anyone's job and blurb — that is what makes the crew section one coherent
+ * piece of copy — and since 20260904000300 the person themselves may write
+ * their own two fields as well (Product Specs §"Manage self", decision D3).
+ * Last write wins, which is the right outcome for two people editing one
+ * sentence about one of them.
+ *
+ * The database decides which of the two you are: `ots_write` (staff.manage) or
+ * `ots_self_profile` (your own live row), with `trg_guard_ots_self_edit`
+ * refusing every column but these two to the second. So this function stays a
+ * plain UPDATE and needs no caller flag.
+ *
+ * The original note is still worth keeping, because it is why the operator
+ * keeps the power at all: an account-holding guide's job and blurb are how the
  * trip introduces its crew, and the same person can be "Head guide" on one trip
  * and "Photographer" on the next.
  */

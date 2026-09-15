@@ -8,6 +8,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from './BottomSheetShell';
 
 const ITEM_HEIGHT = 50;
@@ -55,6 +56,7 @@ export const DateOfBirthSheet: React.FC<Props> = ({
   subtitle = 'Please enter your date of birth.',
   saveLabel = 'Save',
 }) => {
+  const insets = useSafeAreaInsets();
   const currentYear = new Date().getFullYear();
   const defaultDate = parseISOOrDefault(initialDOB, new Date(currentYear - 18, 0, 1));
 
@@ -128,7 +130,7 @@ export const DateOfBirthSheet: React.FC<Props> = ({
   return (
     <BottomSheetShell visible={visible} onClose={onClose} backdropColor="rgba(0,0,0,0.4)">
       {({ panHandlers }) => (
-        <View style={styles.sheet}>
+        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 40) }]}>
           {/* Drag area — swipe down on the handle/title to dismiss */}
           <View {...panHandlers}>
             <View style={styles.handle} />
@@ -232,7 +234,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    // paddingBottom comes in INLINE from the safe-area inset (floor 40): a 48dp
+    // Android nav bar covers the bottom of the Continue button otherwise.
     paddingTop: 12,
   },
   handle: {

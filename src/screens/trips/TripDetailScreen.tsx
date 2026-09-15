@@ -101,9 +101,13 @@ import { AddPersonalGearSheet } from '../../components/trips/gear/AddPersonalGea
 import { ReportTripSheet } from '../../components/ReportTripSheet';
 import { ShareTripStorySheet } from '../../components/trips/ShareTripStorySheet';
 import { TripStaffSheet } from '../../components/trips/TripStaffSheet';
-import { CrewSection } from '../../components/trips/CrewSection';
+import { travelerCounts } from '../../components/trips/dashboard/dashboardWork';
+import { CrewSection, CrewCards } from '../../components/trips/CrewSection';
 import { useTripCrew, useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
 import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
+import { fetchMyStaffRow, ensureOperatorOnCrew } from '../../services/trips/tripStaffService';
+import { StaffSelfProfileSheet } from '../../components/trips/StaffSelfProfileSheet';
+import { formatOperatorAmount, type CurrencyCode } from '../../utils/currency';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
 import { hapticMedium, hapticLight, hapticSuccess, hapticError } from '../../utils/haptics';
 import { toWidthThumbUrl } from '../../services/media/thumbnails';
@@ -129,7 +133,7 @@ import {
 import { PayAmountSheet } from '../../components/trips/PayAmountSheet';
 import { TripPolicyConsentSheet } from '../../components/trips/TripPolicyConsentSheet';
 import { useTripPolicyConsent } from '../../hooks/useTripPolicyConsent';
-import { policyFromTrip } from '../../services/trips/cancellationPolicy';
+import { policyFromTrip, PRESET_LABEL } from '../../services/trips/cancellationPolicy';
 import { RequirementUploadFlow } from '../../components/trips/RequirementUploadFlow';
 import { WaiverAgreeSheet } from '../../components/trips/WaiverAgreeSheet';
 import { MedicalFormSheet } from '../../components/trips/MedicalFormSheet';
@@ -209,6 +213,8 @@ interface TripDetailScreenProps {
   onEditOperatorTrip?: (tripId: string) => void;
   /** Tap on a participant opens their profile. Back from the profile returns here. */
   onViewUserProfile?: (userId: string) => void;
+  /** Push the trip's payments ledger. Absent on a build with no route for it. */
+  onOpenPayments?: (tripId: string, tripTitle: string | null) => void;
   /** Optional — wires the header notification bell (Figma). Bell is hidden when
    *  not provided, since a non-functional bell is worse than none. */
   onOpenNotifications?: () => void;
@@ -441,7 +447,7 @@ type PaymentsCache = {
 };
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenPayments, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
@@ -780,6 +786,17 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     () => reviewTravelers.map(t => t.userId).sort(),
     [reviewTravelers],
   );
+  // How full the trip is, for the Dashboard's summary tiles. Built from
+  // `participants` rather than from `reviewTravelers`, because the whole point
+  // of the figure is the `status` the review list drops. See travelerCounts.
+  const dashboardCounts = useMemo(
+    () =>
+      travelerCounts({
+        travelers: participants.filter(p => p.role !== 'host'),
+        maxParticipants: trip?.max_participants ?? null,
+      }),
+    [participants, trip?.max_participants],
+  );
   // Only worth fetching once this trip actually asks for something. On a peer
   // trip `documentRows` is empty and this never runs.
   const hasRequirements = documentRows.length > 0;
@@ -791,9 +808,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     tripId,
     (isHostDerived && hasRequirements) || can('docs.view'),
     reviewUserIds,
+    // Same test the Dashboard tab's Medical flags block uses (canViewMedical
+    // below). `isHostDerived`, not `isHost`: that alias is declared further
+    // down this component and is the same value. A Manager fails it and gets a
+    // review with no medical form, instead of one that says nobody filled it in.
+    isHostDerived || can('medical.view'),
   );
   const reviewData = reviewQuery.data?.travelers ?? [];
   const travelersFinished = reviewData.filter(r => r.total > 0 && r.done === r.total).length;
+  /** Who wears the passport badge on the operator's Member row: every document
+   *  this trip asks them for is approved (Ohad, 14 Sep). Only built from the
+   *  review, so a viewer without it gets no badges rather than wrong ones. */
+  const docsApprovedIds = useMemo(
+    () => new Set(reviewData.filter(r => r.total > 0 && r.done === r.total).map(r => r.userId)),
+    [reviewData],
+  );
   const [reviewOpen, setReviewOpen] = useState(false);
   /** Set when the Dashboard's Travelers list opens review on ONE person; null
    *  opens the whole queue, which is every other entry point. */
@@ -882,6 +911,23 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     enabled: !!currentUserId && trip?.hosting_style === 'C',
     staleTime: 60_000,
   });
+
+  /**
+   * The viewer's own crew row — the target of "Your details".
+   *
+   * Product Specs §"Manage self". Writable since 20260904000300; readable all
+   * along, which is why this needs no gate beyond being on an operator trip.
+   * Null for a traveler, and for an operator whose trip published before
+   * `ensureOperatorOnCrew` existed — that second case is what the "Add yourself
+   * to the crew" action below repairs.
+   */
+  const myStaffRow = useQuery({
+    queryKey: ['tripStaff', 'mine', tripId],
+    queryFn: () => fetchMyStaffRow(tripId),
+    enabled: !!currentUserId && trip?.hosting_style === 'C',
+    staleTime: 60_000,
+  });
+  const [selfProfileOpen, setSelfProfileOpen] = useState(false);
 
   // ── Editing what the trip asks for (host) ─────────────────────────────────
   //
@@ -1157,12 +1203,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // the right key because it is exactly what Plan shows — members, updates,
   // gear. A Listed credit has no account and no `roster.view`, so nothing
   // changes for them, and on peer trips `can()` is always false.
-  const canSeePlan = (isHost || isApprovedMember || can('roster.view')) && !isLockedForTabs;
-
-  /** A staff viewer: on the trip through the staff table, not as a traveler.
-   *  Drives the Plan sections that must not assume a participant row. */
-  const isStaffViewer = !isHost && !isApprovedMember && can('roster.view');
-
   /**
    * The Dashboard tab — running the trip, not going on it.
    *
@@ -1188,11 +1228,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     can('trip.edit');
   const canSeeDashboard = (isHost || hasDashboardCap) && !!isOperatorTrip;
 
+  // Plan is merged INTO Dashboard for whoever has the Dashboard (Figma
+  // 14980-65921): they get Dashboard + Overview, and Plan's sections render
+  // inside the Dashboard. Travelers — and every peer-trip member — keep Plan.
+  const canSeePlan =
+    (isHost || isApprovedMember || can('roster.view')) && !isLockedForTabs && !canSeeDashboard;
+
+  /** A staff viewer: on the trip through the staff table, not as a traveler.
+   *  Drives the Plan sections that must not assume a participant row. */
+  const isStaffViewer = !isHost && !isApprovedMember && can('roster.view');
+
+
   const visibleTabs = useMemo<TripTab[]>(() => {
-    const tabs: TripTab[] = ['overview'];
-    if (canSeePlan) tabs.push('plan');
-    if (canSeeDashboard) tabs.push('dashboard');
-    return tabs;
+    // Overview on the left, like the traveler's pair (Ohad, 14 Sep). They
+    // still OPEN on Dashboard — see the default-tab effect below.
+    if (canSeeDashboard) return ['overview', 'dashboard'];
+    return canSeePlan ? ['overview', 'plan'] : ['overview'];
   }, [canSeePlan, canSeeDashboard]);
 
   // A tab that stops being available must not leave the screen showing nothing
@@ -1243,7 +1294,26 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const scrollY = useRef(new Animated.Value(0)).current;
   const toggleYRef = useRef(0);
   const [toggleY, setToggleY] = useState(0);
+  const toggleYTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (toggleYTimer.current) clearTimeout(toggleYTimer.current);
+  }, []);
   const [toggleStuck, setToggleStuck] = useState(false);
+  /** Set by the first tab TAP. The hero only animates away on a tap — when the
+   *  screen picks the tab itself (default tab, a notification) it just lands. */
+  const [tabTapped, setTabTapped] = useState(false);
+  const handleTabChange = useCallback(
+    (tab: TripTab) => {
+      if (tab === activeTab) return;
+      setTabTapped(true);
+      // Tapped from the sticky clone, deep in the page: go back to the top
+      // first, so the hero leaving (or coming back) is something you see and
+      // the new tab starts at its beginning rather than mid-way down.
+      if (toggleStuck) scrollRef.current?.scrollTo({ y: 0, animated: false });
+      setActiveTab(tab);
+    },
+    [activeTab, toggleStuck],
+  );
   const sectionYs = useRef<Record<string, number>>({});
   const appliedFocusRef = useRef<string | null>(null);
   const registerSection = useCallback(
@@ -1293,10 +1363,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       return;
     }
 
-    const canSeePlanNow = (isHost || isApprovedMember) && !locked;
+    // Plan's sections live in the Dashboard for whoever has one — including on
+    // a locked trip, where the Dashboard stays and Plan does not.
+    const canSeePlanNow = canSeeDashboard || ((isHost || isApprovedMember) && !locked);
     if (initialFocus === 'overview' || !canSeePlanNow) return; // fallback: Overview
 
-    setActiveTab('plan');
+    setActiveTab(canSeeDashboard ? 'dashboard' : 'plan');
     if (initialFocus === 'gear-requests' && isHost) setRequestsSheetVisible(true);
 
     // Scroll once the Plan sections have mounted and reported layout. If the
@@ -1324,7 +1396,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     return () => {
       cancelled = true;
     };
-  }, [trip, tripId, initialFocus, isHost, isApprovedMember, isOnboardingTraveler, membershipKnown, onStartOnboarding]);
+  }, [trip, tripId, initialFocus, isHost, isApprovedMember, isOnboardingTraveler, membershipKnown, onStartOnboarding, canSeeDashboard]);
   const meParticipant = useMemo(
     () => participants.find(p => p.user_id === currentUserId),
     [participants, currentUserId]
@@ -1711,9 +1783,41 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   const handleLeaveTrip = () => {
     if (!currentUserId) return;
+
+    // What leaving actually costs, said before they press it.
+    //
+    // Until 6 Sep 2026 this said only "you'll be removed from the group chat"
+    // — on an operator trip where the traveler had paid a $1,000 deposit that
+    // stayed with the operator, with no refund and no ledger row (test X-07).
+    // Nothing is refunded automatically now either: the terms may be
+    // non-refundable and the decision is the operator's. What changed is that
+    // the traveler hears the terms first, and the operator hears about the
+    // money after (fn_notify_member_left carries `paid_usd` since
+    // 20260906000400).
+    //
+    // `paid` is net of refunds — they are negative ledger rows — so somebody
+    // already refunded in full reads $0 and gets the plain message.
+    const paidUsd = Object.values(paymentsQuery.data?.paid ?? {}).reduce((a, b) => a + b, 0);
+    // `policyFromTrip` returns null when the trip never stated terms — the same
+    // "nobody ever said" that X-03 refuses to turn into $0. Naming a preset
+    // that does not exist would be inventing the deal at the worst moment, so
+    // that case says less rather than more.
+    const policy = policyFromTrip(trip);
+    const terms = policy
+      ? ` The refund terms you agreed to are "${PRESET_LABEL[policy.preset]}".`
+      : '';
+    const money =
+      isOperatorTrip && paidUsd > 0
+        ? `\n\nYou have paid ${formatOperatorAmount(
+            paidUsd,
+            (trip?.budget_currency as CurrencyCode) ?? 'USD',
+            trip?.budget_fx_rate,
+          )}. That stays with the organiser.${terms} Ask them about a refund.`
+        : '';
+
     Alert.alert(
       'Leave trip',
-      "You'll be removed from the group chat. You can request to join again later.",
+      `You'll be removed from the group chat. You can request to join again later.${money}`,
       [
         { text: 'Stay', style: 'cancel' },
         {
@@ -2743,6 +2847,13 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
 
   // canSeePlan / canSeeDashboard / visibleTabs are computed above the early
   // returns — see the "Which tabs exist" block — so their hooks always run.
+  // Same gate as the menu's "Crew" entry (see its comment): `staff.manage`, or
+  // the operator of record. Opens the crew manager from the staff cards.
+  const canManageCrew = (isTripOwner || can('staff.manage')) && !!isOperatorTrip && !isLocked;
+  // Same gate as the menu's "Edit trip" entry. Operator trips only — the pill
+  // on a peer trip's cover stays "Edit cover".
+  const canEditOperatorTrip =
+    (isTripOwner || can('trip.edit')) && !!isOperatorTrip && !isLocked && !!onEditOperatorTrip;
   const showPlan = canSeePlan && activeTab === 'plan';
   const showDashboard = canSeeDashboard && activeTab === 'dashboard';
   /** Anything that replaces the Overview body. */
@@ -2838,6 +2949,48 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         label: 'Crew',
         group: 2,
         onPress: () => setStaffSheetVisible(true),
+      },
+      // Your details — anyone with a live crew row, tier regardless. Product
+      // Specs §"Manage self", and it is the first thing on this menu a GUIDE
+      // can act on: everything above it is the operator's.
+      //
+      // The row is the gate, same shape as "Your paperwork" below. A traveler
+      // has none, so they see nothing rather than an editor that would be
+      // refused.
+      (!!myStaffRow.data && !isLocked) && {
+        key: 'selfProfile',
+        tripIcon: 'edit-02' as const,
+        label: 'Your details',
+        group: 2,
+        onPress: () => setSelfProfileOpen(true),
+      },
+      // Put yourself on the crew — the operator of a trip published before
+      // `ensureOperatorOnCrew` ran at publish. Without a row of their own the
+      // trip's Crew section shows nobody running it, and "Your details" above
+      // has nothing to edit. Idempotent, so a double tap is harmless.
+      (isTripOwner && isOperatorTrip && !isLocked && !myStaffRow.isPending && !myStaffRow.data) && {
+        key: 'joinCrew',
+        icon: 'person-add-outline' as const,
+        label: 'Add yourself to the crew',
+        group: 2,
+        onPress: async () => {
+          if (!currentUserId) return;
+          try {
+            await ensureOperatorOnCrew({
+              tripId: trip.id,
+              operatorId: currentUserId,
+              bio: trip.host_lead_note ?? null,
+            });
+            await Promise.all([myStaffRow.refetch(), crewQuery.refetch()]);
+            setSelfProfileOpen(true);
+          } catch (e) {
+            showErrorAlert(
+              'Could not add you',
+              e,
+              'Could not add you to this trip’s crew. Please try again.',
+            );
+          }
+        },
       },
       // Your paperwork — crew only, and only once they have been asked for
       // something. The list is the gate: a guide asked for nothing sees no
@@ -2983,6 +3136,32 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               : undefined
           }
           crew={crewQuery.data ?? []}
+          onViewAllCrew={canManageCrew ? () => setStaffSheetVisible(true) : undefined}
+          onEditTrip={canEditOperatorTrip ? () => onEditOperatorTrip?.(trip.id) : undefined}
+          // Operator trips: the Member section, in the Figma position
+          // (14980-66208). Badges only for someone who can see the review.
+          membersSlot={
+            isOperatorTrip ? (
+              <TripMemberSection
+                variant="overview"
+                title="Member"
+                members={memberList}
+                participantCount={participants.length}
+                maxParticipants={trip.max_participants}
+                committedCount={committedCount}
+                showCommitment={false}
+                onViewAll={onViewAllMembers}
+                passportIds={isHost || can('docs.view') ? docsApprovedIds : undefined}
+                onMemberPress={
+                  onViewUserProfile
+                    ? userId => {
+                        if (userId !== currentUserId) onViewUserProfile(userId);
+                      }
+                    : undefined
+                }
+              />
+            ) : undefined
+          }
           onSeeAllParticipants={onViewAllMembers}
           onLeaderPress={
             onViewUserProfile && trip.host_id && trip.host_id !== currentUserId
@@ -2998,14 +3177,22 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   // so this equals the scroll offset where it reaches the header.
                   const y = e.nativeEvent.layout.y;
                   toggleYRef.current = y;
-                  setToggleY(y);
+                  // Debounced: while the hero slides away this fires every
+                  // frame, and each setState re-renders the whole screen. The
+                  // ref above is already current; the state only feeds the
+                  // sticky clone's fade, which needs the resting value.
+                  if (toggleYTimer.current) clearTimeout(toggleYTimer.current);
+                  toggleYTimer.current = setTimeout(() => setToggleY(y), 60);
                 }}
               >
-                <TripTabToggle value={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
+                <TripTabToggle value={activeTab} onChange={handleTabChange} tabs={visibleTabs} />
               </View>
             ) : null
           }
           bodyHidden={bodyReplaced}
+          // Dashboard and Plan slide the cover + countdown away (Ohad, 14 Sep).
+          heroCollapsed={bodyReplaced}
+          animateHeroCollapse={tabTapped}
           // Members who have the Plan tab now see the participants there (Figma
           // 13455-38686), so drop the Overview Participants row for them. Locked
           // trips (no Plan tab) and non-members keep it as the only member view.
@@ -3068,50 +3255,41 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           <View style={styles.dashboardWrap}>
             <TripDashboardTab
               tripId={tripId}
-              // The tab's only sense of time. Without these it cannot tell a
-              // passport missing three months out from one missing in three
-              // days, and both read as the same number.
-              startDateISO={trip.start_date}
-              endDateISO={trip.end_date}
               // Per-card gates. The host gets everything, staff get what their
-              // tier's capability row says — a Guide's dashboard is just the
-              // group stats, and that is the design. RLS enforces each one
-              // again server-side.
+              // tier's capability row says. RLS enforces each one again.
               canViewMoney={isHost || can('payments.view_status')}
               canViewDocs={isHost || can('docs.view')}
-              canViewMedical={isHost || can('medical.view')}
-              canViewStats={isHost || can('travelers.view_stats')}
-              travelers={reviewTravelers}
+              counts={dashboardCounts}
+              // `payments.view_status` is the same gate the money tiles use;
+              // the ledger shows nothing they do not already imply.
+              onOpenPayments={
+                onOpenPayments && (isHost || can('payments.view_status'))
+                  ? () => onOpenPayments(trip.id, trip.title ?? null)
+                  : undefined
+              }
               review={reviewData}
               reviewLoading={reviewQuery.isLoading}
-              onOpenReview={userId => {
-                setReviewFocusUserId(userId ?? null);
+              onOpenReview={() => {
+                setReviewFocusUserId(null);
                 setReviewFocusRequirementId(null);
                 setReviewWaiting(false);
                 setReviewOpen(true);
               }}
-              onOpenRequirement={requirementId => {
-                setReviewFocusUserId(null);
-                setReviewFocusRequirementId(requirementId);
-                setReviewWaiting(false);
-                setReviewOpen(true);
-              }}
-              onOpenWaiting={() => {
-                setReviewFocusUserId(null);
-                setReviewFocusRequirementId(null);
-                setReviewWaiting(true);
-                setReviewOpen(true);
-              }}
-              onManageRequirements={
-                canManageRequirements ? openManageRequirements : undefined
+              // Requests are decided on the Members screen — the same gate the
+              // Plan's "Requests pending" link used.
+              pendingRequestCount={pendingRequests.length}
+              onOpenJoinRequests={
+                (isHost || can('trip.edit')) && !isLocked ? onViewAllMembers : undefined
               }
             />
           </View>
         )}
 
         {/* ============================== PLAN ============================== */}
-        {/* Interactive / operational content — members only. */}
-        {showPlan && (
+        {/* Interactive / operational content — members only. On an operator
+            trip these same sections render inside the Dashboard, below the
+            summary and actions, in the Figma order (14980-65921). */}
+        {(showPlan || showDashboard) && (
         <>
         {/* Redesigned Plan (Figma 12557-5860 / 12716-6927): commit pill →
             admin updates → Packing & Gear. Operational/host sections (join
@@ -3128,7 +3306,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             committedCount={committedCount}
             showCommitment={!isOperatorTrip}
             onViewAll={onViewAllMembers}
-            pendingCount={isHost || can('trip.edit') ? pendingRequests.length : 0}
+            // The Dashboard has its own Join Request card, so the amber nudge
+            // on this link would say the same thing twice.
+            pendingCount={
+              !showDashboard && (isHost || can('trip.edit')) ? pendingRequests.length : 0
+            }
+            title={showDashboard ? 'Member' : undefined}
+            passportIds={
+              showDashboard && (isHost || can('docs.view')) ? docsApprovedIds : undefined
+            }
             onMemberPress={
               onViewUserProfile
                 ? userId => {
@@ -3144,12 +3330,14 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             now answering "who is running your trip" instead of selling it.
             Renders nothing on peer trips: the query is disabled there and
             CrewSection returns null on an empty list. */}
-        <View onLayout={registerSection('crew')}>
-          <CrewSection
-            crew={crewQuery.data ?? []}
-            style={{ marginTop: 24, paddingHorizontal: 4 }}
-          />
-        </View>
+        {!showDashboard && (
+          <View onLayout={registerSection('crew')}>
+            <CrewSection
+              crew={crewQuery.data ?? []}
+              style={{ marginTop: 24, paddingHorizontal: 4 }}
+            />
+          </View>
+        )}
 
         {/* 1.5) Commit pill — below the members + commitment bar (approved
             members only; the host can't commit). Never on an operator trip:
@@ -3179,8 +3367,36 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
+        {/* 2.5) My staff — Dashboard only (Figma 14980-65921). Travelers meet the
+            crew as a list higher up; the operator manages it from here. */}
+        {showDashboard && (
+          <View style={styles.planSection} onLayout={registerSection('crew')}>
+            <CrewCards
+              crew={crewQuery.data ?? []}
+              title="My staff"
+              variant="dashboard"
+              onViewAll={canManageCrew ? () => setStaffSheetVisible(true) : undefined}
+              onAddStaff={canManageCrew ? () => setStaffSheetVisible(true) : undefined}
+            />
+          </View>
+        )}
+
         {/* 3) Packing & Gear — Group Gear + Your Gear */}
         <View style={styles.planSection} onLayout={registerSection('gear')}>
+          {/* Dashboard: "What should members pack?" is in the Figma; Group Gear
+              and the host's own gear are kept under it (Ohad, 14 Sep). */}
+          {isHost && showDashboard && (
+            <View onLayout={registerSection('members-gear')}>
+              <YourGearCard
+                rows={gearAllRows}
+                totalCount={gearTotalCount}
+                mode="suggestions"
+                onOpen={onManageSuggestedGear ?? (() => {})}
+                onToggleItem={() => {}}
+                onAddItem={!isCancelled ? (onManageSuggestedGear ?? undefined) : undefined}
+              />
+            </View>
+          )}
           <GroupGearCard
             items={gearItems}
             isHost={isHost}
@@ -3211,8 +3427,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             />
           </View>
           {/* Host only — a separate section for the gear the host suggests that
-              members pack for themselves (kept apart from the host's own gear). */}
-          {isHost && (
+              members pack for themselves (kept apart from the host's own gear).
+              On the Dashboard it leads the gear block instead (see above). */}
+          {isHost && !showDashboard && (
             <View onLayout={registerSection('members-gear')}>
               <YourGearCard
                 rows={gearAllRows}
@@ -3411,7 +3628,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             },
           ]}
         >
-          <TripTabToggle value={activeTab} onChange={setActiveTab} tabs={visibleTabs} />
+          <TripTabToggle value={activeTab} onChange={handleTabChange} tabs={visibleTabs} />
         </Animated.View>
       )}
       </KeyboardAvoidingView>
@@ -3619,6 +3836,21 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   setReviewOpen(false);
                   onMessageUser?.(userId, t?.name ?? undefined, t?.avatarUrl ?? null);
                 }}
+                avatarUrl={t?.avatarUrl ?? null}
+                // Product Specs §"Trip dashboard space": the operator opens the
+                // person, not their board type. Same Modal-first rule as
+                // onMessage — a profile pushed from under a presented Modal is
+                // stranded behind it. Never for yourself: the operator tapping
+                // their own row would be pushed their own profile from inside
+                // their own trip.
+                onOpenProfile={
+                  onViewUserProfile && userId !== currentUserId
+                    ? () => {
+                        setReviewOpen(false);
+                        onViewUserProfile(userId);
+                      }
+                    : undefined
+                }
               />
             );
           }}
@@ -4049,6 +4281,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       {/* Crew — the creator and their co-operators. Mounted on demand: it
           fetches the tier definitions and the staff list on open, and nothing
           else on this screen needs either. */}
+      {/* Your details — the crew member's own two fields. Mounted next to the
+          operator's crew sheet, but it is the other half of the same idea: the
+          operator writes anyone, you write yourself. */}
+      <StaffSelfProfileSheet
+        visible={selfProfileOpen}
+        onClose={() => setSelfProfileOpen(false)}
+        member={myStaffRow.data ?? null}
+        onSaved={() => {
+          void myStaffRow.refetch();
+          void crewQuery.refetch();
+        }}
+      />
+
       {staffSheetVisible && (
         <TripStaffSheet
           visible={staffSheetVisible}

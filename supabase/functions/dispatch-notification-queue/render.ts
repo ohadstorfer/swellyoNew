@@ -11,7 +11,16 @@ export type PushTemplateMap = Record<string, PushTemplate>;
 /** Template row key for a notification: type, or type:variant for splits. */
 export function templateKey(type: string, data: Record<string, any>): string {
   if (type === 'join_request_decided' || type === 'commitment_decided' || type === 'gear_request_decided') {
-    return `${type}:${data?.decision === 'approved' ? 'approved' : 'declined'}`;
+    const approved = data?.decision === 'approved';
+    // An approved request on an operator trip is a DIFFERENT message from an
+    // approved request on a peer trip — see the switch below. They must not
+    // share a template key: a row added for `join_request_decided:approved`
+    // wins over the switch (line ~44) and would silently put the peer copy
+    // back on operator trips, which is the exact bug the split exists to fix.
+    if (type === 'join_request_decided' && approved && data?.needs_onboarding) {
+      return 'join_request_decided:approved_onboarding';
+    }
+    return `${type}:${approved ? 'approved' : 'declined'}`;
   }
   if (type === 'trip_reminder') {
     const s = data?.stage || '';
@@ -58,9 +67,31 @@ export function renderPush(
     case 'join_request_received':
       return { title: 'New trip request', body: `${actor} requested to join ${trip}` };
     case 'join_request_decided':
-      return decision === 'approved'
-        ? { title: "You're in! 🌊", body: `Your request to join ${trip} was approved` }
-        : { title: 'Trip request update', body: `Your request for ${trip} wasn't accepted this time` };
+      if (decision !== 'approved') {
+        return { title: 'Trip request update', body: `Your request for ${trip} wasn't accepted this time` };
+      }
+      // ⚠️ On an OPERATOR trip, approval is the starting line, not the finish
+      // line. `enforce_participant_status` puts them in `status='onboarding'`,
+      // they owe a deposit and every must_have requirement, and
+      // `activate_trip_membership` will not promote them until those are done.
+      // "You're in" is simply false there, and it is the push people act on.
+      //
+      // `needs_onboarding` is written by `tg_notify_join_request_decided`
+      // (20260820000500). A row created before that migration has no such key
+      // and falls to the peer copy below — today's behaviour, the safe half,
+      // same fallback rule as `has_deadlines` on trip_dates_changed.
+      //
+      // Still celebrates: they WERE approved, and burying that would read as a
+      // rejection. It just refuses to say the spot is held when it is not —
+      // the same sentence `onboarding_unfinished` has to say at 24 hours,
+      // moved to where the traveler first needs it.
+      if (data?.needs_onboarding) {
+        return {
+          title: `You're approved for ${trip} 🌊`,
+          body: 'Your spot is held once you pay the deposit and send what the trip needs.',
+        };
+      }
+      return { title: "You're in! 🌊", body: `Your request to join ${trip} was approved` };
     case 'commitment_request_received':
       return { title: 'Commit request', body: `${actor} wants to commit to ${trip}` };
     case 'commitment_decided': // only the approved path reaches push (see mapping)
@@ -79,10 +110,45 @@ export function renderPush(
       return { title: 'Group gear update', body: `The group gear list changed in ${trip} — go check it out!` };
     case 'personal_gear_updated':
       return { title: 'Personal packing list', body: `Your packing list for ${trip} was updated` };
-    case 'member_left':
+    case 'member_left': {
+      // Same convention as `trip_cancelled` and `member_removed` below:
+      // `paid_usd` is only written when there is money sitting with the
+      // operator, so its absence is the "say nothing about money" case. Never
+      // render a zero.
+      //
+      // On an operator trip this is the ONLY signal that money went quiet —
+      // the traveler keeps nothing back, nothing is refunded automatically,
+      // and a sad face about a free seat is not a prompt to decide a refund.
+      // fn_notify_member_left sends it to whoever holds `money.manage`
+      // (20260906000400), so everyone who reads this line can act on it.
+      const paid = Number(data?.paid_usd);
+      if (Number.isFinite(paid) && paid > 0) {
+        return {
+          title: `${actor} left ${trip}`,
+          body: `They paid $${paid.toFixed(2)}, and it is still with you. Decide their refund from their page.`,
+        };
+      }
       return { title: 'Oh no! Someone left your trip 📉', body: `A member left ${trip}` };
-    case 'trip_cancelled':
-      return { title: 'Your trip was cancelled', body: `${trip} was cancelled by the admin — see why` };
+    }
+    case 'trip_cancelled': {
+      // Same convention as `member_removed` right below, and for the same
+      // reason: `refund_usd` is only written when money is actually coming
+      // back, so its absence is the "say nothing about money" case. Never
+      // render a zero.
+      //
+      // On a managed trip, cancelling refunds everyone in full (`trip-cancel`,
+      // 2026-08-19) — and until 20 Aug this push did not mention it, leaving
+      // someone who had paid $3,000 to work it out for themselves. The amount
+      // is written by `tg_notify_trip_cancelled` (20260820000900), read off the
+      // ledger before the refunds run.
+      const refund = typeof data?.refund_usd === 'number' && data.refund_usd > 0 ? data.refund_usd : null;
+      return {
+        title: 'Your trip was cancelled',
+        body: refund
+          ? `${trip} was cancelled. $${refund.toFixed(2)} is being refunded — it reaches you in 5–10 business days`
+          : `${trip} was cancelled by the admin — see why`,
+      };
+    }
     case 'member_removed': {
       // `refund_usd` is only written when money actually went back, so its
       // absence is the "say nothing about money" case — never render a zero.
@@ -177,6 +243,29 @@ export function renderPush(
         title: `Your payment for ${trip} did not go through`,
         body: 'Nothing was charged — you can try again',
       };
+    case 'operator_payment_landed': {
+      // ACH (ach-bank-payments.md): the bank payment the traveler made three
+      // days ago has cleared. No template row on purpose — the copy carries
+      // the amount and `fill()` knows no {amount}. The step is named from
+      // `item_name` ("Deposit") so it reads as the thing they paid, not "a
+      // payment". 🎉 is earned here: three days of "on its way" ends now.
+      const landedAmount =
+        typeof data?.amount_usd === 'number' ? `$${Math.round(data.amount_usd).toLocaleString('en-US')} ` : '';
+      const step = (data?.item_name || 'payment').toString().toLowerCase();
+      // Operator-facing variant: the payment cleared AFTER the trip was
+      // cancelled, so the recipient is the OPERATOR and the message is a
+      // to-do, not a celebration.
+      if (data?.on_cancelled_trip === true) {
+        return {
+          title: `A ${landedAmount}bank payment landed on ${trip}`,
+          body: "It cleared after the trip was cancelled — refund it from the traveler's Money card.",
+        };
+      }
+      return {
+        title: `Your ${landedAmount}${step} for ${trip} arrived 🎉`,
+        body: "The bank transfer cleared — you're all set on this one.",
+      };
+    }
     case 'operator_charge_disputed': {
       // Phase 3 (refunds-and-merchant-of-record.md): a traveler's bank opened
       // a chargeback. No template row on purpose — the copy needs the amount
@@ -235,6 +324,59 @@ export function renderPush(
         body: range ? `It now runs ${range}.${moved}` : `The dates changed.${moved}`,
       };
     }
+    case 'operator_traveler_confirmed':
+      // Feed-only today — `notification_push_priority` returns -1, so this is
+      // never reached. Written anyway: the three cases directly below spent a
+      // month pushing "You have a new trip update" for exactly this reason, and
+      // a one-line priority change is all it would take to repeat it.
+      return {
+        title: `${actor} is on ${trip}`,
+        body: 'Deposit paid and paperwork done — their place is confirmed.',
+      };
+    case 'operator_staff_invited': {
+      // ⚠️ Until 20 Aug this type had NO case here and no template row, so it
+      // fell to the default at the bottom and every crew invite went out as
+      // "You have a new trip update" — verified on a real device 20 Aug. It is
+      // the worst type to lose: priority 0, so it always pushes and always
+      // bypasses quiet hours, and it is a QUESTION, not news.
+      //
+      // The tier leads, matching the bell row word for word. "Ohad invited you
+      // to El Salvador 26" says nothing about what is being handed over, and
+      // Crew and Manager are very different jobs — a Manager can read every
+      // traveler's passport. Naming it means the answer is informed before the
+      // accept sheet is even open.
+      const tier = data?.role_label || data?.item_name || 'crew';
+      return {
+        title: `Join ${trip} as ${tier}?`,
+        body: `${actor} wants you on the crew.`,
+      };
+    }
+    case 'operator_setup_required':
+      // Same 20 Aug gap as above. Never about a trip — it fires when a Swellyo
+      // admin flips `surfers.operator`, usually long before the operator's
+      // first trip exists, so `trip` here would render as the "your trip"
+      // fallback and read like a bug. Same arrangement as
+      // `operator_stripe_ready` below.
+      //
+      // Says what they GET, not what we need, word for word with the bell row:
+      // "Finish your setup" is a chore; being told you can now sell trips is
+      // the reason to open it.
+      return {
+        title: 'You can now run trips on Swellyo',
+        body: 'Four quick things to set up before you create your first one.',
+      };
+    case 'operator_requirement_added':
+      // The third of the 20 Aug gap. NOTHING PRODUCES THIS TYPE YET — the enum
+      // value and its push priority (1) have existed since July with no writer,
+      // so this case is here so that whoever adds the producer does not ship
+      // "You have a new trip update" with it. Reads `item_name` /
+      // `requirement_title`, the pair every other requirement type already
+      // writes, so a producer that follows the existing shape works with no
+      // change here.
+      return {
+        title: `Something new to send for ${trip}`,
+        body: `Your organiser added ${data?.requirement_title || item} to what the trip needs.`,
+      };
     case 'operator_stripe_ready':
       // The one push here that deliberately never mentions a trip: it fires on
       // the operator's ACCOUNT, usually before their first trip exists, so

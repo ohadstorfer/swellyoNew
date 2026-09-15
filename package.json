@@ -76,6 +76,7 @@
     "expo-video-thumbnails": "~10.0.8",
     "expo-web-browser": "~15.0.9",
     "ffmpeg": "^0.0.4",
+    "jszip": "^3.10.1",
     "mrz": "^5.0.2",
     "next": "^15.5.2",
     "posthog-react-native": "^4.19.0",

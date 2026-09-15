@@ -31,6 +31,7 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
+import type { LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../hooks/useSheetTransition';
 
@@ -83,6 +84,14 @@ function useIosKeyboardInset(enabled: boolean): number {
 
   return height;
 }
+
+/**
+ * Tallest height the Modal's own native window has ever reported, in dp. App-session scoped
+ * because it is a property of the OS and the device, not of any one sheet: measuring it once
+ * keeps every later sheet from re-rendering on layout. See `uncoveredBottom` below.
+ */
+let cachedWindowHeight = 0;
+
 
 /** Gesture props to spread onto a drag handle (returned via the render-prop form). */
 type SheetApi = { panHandlers: ReturnType<typeof useSheetTransition>['panHandlers'] };
@@ -153,20 +162,88 @@ export function BottomSheetShell({
   // keyboard inset from the last time it was open.
   const keyboardInset = useIosKeyboardInset(avoidKeyboard && visible);
 
-  // Android edge-to-edge: the RN Modal draws in its OWN window and anchors content to
-  // the SAFE AREA (window height excludes the nav bar), so a bottom-anchored sheet
-  // floats `insets.bottom` above the physical bottom and the screen behind shows
-  // through. The "correct" native fix (`navigationBarTranslucent` on the Modal) does
-  // NOT work on Expo SDK 54 — verified broken in BOTH Expo Go AND a dev build, and it
-  // matches the open Expo bug expo/expo#39749 (RN Modal forces the nav-bar inset). So we
-  // nudge the sheet down into the nav-bar region on ALL Android with a transform
-  // (transform, not margin, so measured height — and thus the slide-out animation — is
-  // unaffected). Individual sheets pad `insets.bottom` to keep content clear of the nav
-  // bar. When #39749 is fixed, drop this nudge and use navigationBarTranslucent instead.
+  // Android: the RN Modal draws in its OWN native window, and how much of the navigation bar
+  // that window covers is not ours to decide — so MEASURE it, never assume.
+  //
+  // MEASURED ON DEVICE (Android 13 / api 33, Expo Go, 3-button nav, 2026-09-06):
+  //   Dimensions screen = 800dp, Dimensions window = 722dp, insets t34 b44 (722 = 800 - 34 - 44),
+  //   and the Modal's OWN box = 800dp. The modal window covers the WHOLE screen there.
+  // So a bottom-anchored sheet already sits on the physical bottom and must NOT be moved.
+  //
+  // The previous fix here read `Dimensions.get('window')` (722 — the ACTIVITY's window, not the
+  // Modal's), concluded the modal window stopped above the nav bar, and nudged every Android
+  // sheet down by `insets.bottom`. That pushed the sheet a whole nav bar BELOW the screen: the
+  // sheet's own `paddingBottom: insets.bottom` went off-screen instead of clearing the nav bar,
+  // and pinned footers (the Save button) ended up under the system buttons.
+  //
+  // A nudge is still right on any device whose modal window really does stop short — RN sets
+  // `setDecorFitsSystemWindows(true)` on the dialog when `navigationBarTranslucent` is off, and
+  // whether that has any effect depends on the OS version (Android 15+ enforces edge-to-edge and
+  // ignores it). `probe` below is an absolutely-filled, untouchable view sized to the modal
+  // window, so `screen height - probe height` IS the slice of the bottom the window does not
+  // cover; clamped to `insets.bottom` it is 0 on this device and one nav bar where the old
+  // assumption held. Transform, not margin, so the measured sheet height — and with it the
+  // slide-out animation — is unaffected. Sheets keep padding `insets.bottom` themselves; that is
+  // correct either way. (expo/expo#39749 is why `navigationBarTranslucent` is still not the fix.)
+  //
+  // The probe sits OUTSIDE the KeyboardAvoidingView deliberately: KAV shrinks its own box, and a
+  // reading from inside it says "the window misses the bottom" and nudges the sheet down over the
+  // keyboard. The value is latched to the tallest reading and cached for the app session (the
+  // window only ever shrinks, and the app is portrait-locked), so it is measured once and never
+  // re-renders a sheet again.
+  const [measuredWindowH, setMeasuredWindowH] = React.useState(cachedWindowHeight);
+  // Sheets are mounted with their screen, long before they are opened, so most of them mount
+  // BEFORE anything has measured — their state starts at 0 and would never learn the cached
+  // value. (That is what pushed the operator-terms sheet 44dp down while the cancellation
+  // sheet, which happened to measure first, was correct.) Re-read the cache on every open.
+  React.useEffect(() => {
+    if (mounted && cachedWindowHeight !== measuredWindowH) setMeasuredWindowH(cachedWindowHeight);
+  }, [mounted, measuredWindowH]);
+  const onProbeLayout = React.useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    if (h > cachedWindowHeight) cachedWindowHeight = h;
+    // Sync even when this sheet did not raise the cache — see the effect above.
+    setMeasuredWindowH(prev => (prev === cachedWindowHeight ? prev : cachedWindowHeight));
+    if (h <= 0) return;
+    if (__DEV__) {
+      const screen = Dimensions.get('screen');
+      const win = Dimensions.get('window');
+      console.log(
+        `[SheetMetrics] api=${Platform.Version} screenH=${screen.height} windowH=${win.height} ` +
+          `modalWindowH=${h} insets={t:${insets.top},b:${insets.bottom}} ` +
+          `nudge=${Math.max(0, Math.min(insets.bottom, Math.round(screen.height - h)))}`,
+      );
+    }
+  }, [insets.top, insets.bottom]);
+
+  const uncoveredBottom =
+    measuredWindowH > 0
+      ? Math.max(
+          0,
+          Math.min(insets.bottom, Math.round(Dimensions.get('screen').height - measuredWindowH)),
+        )
+      : // Nothing measured yet (first sheet of the session, mid-first-frame). Fail SAFE with
+        // no nudge: the worst case is the sheet resting on the modal window's bottom edge,
+        // which is a cosmetic gap on a device whose window stops short — where nudging blind
+        // is what buries a pinned button under the nav bar.
+        0;
+
   const androidNavBarNudge =
-    Platform.OS === 'android' && insets.bottom > 0
-      ? { transform: [{ translateY: insets.bottom }] }
+    Platform.OS === 'android' && uncoveredBottom > 0
+      ? { transform: [{ translateY: uncoveredBottom }] }
       : undefined;
+
+  // Sized to the modal window, invisible, and untouchable. Android only — iOS never nudges.
+  // Kept mounted for as long as the sheet is open, NOT removed after the first reading: the
+  // dialog window can report a short first layout (the activity's height, before the window's
+  // own insets are applied) and only on a later pass its full height. Removing the probe on
+  // the first reading latched that short value for the whole session and nudged every later
+  // sheet down by a nav bar. It is one pointer-transparent view; the state only changes when
+  // the reading grows, so it costs at most two renders per app launch.
+  const probe =
+    Platform.OS === 'android' ? (
+      <View pointerEvents="none" style={StyleSheet.absoluteFill} onLayout={onProbeLayout} />
+    ) : null;
 
   // `onDismiss` is iOS-only. Everywhere else the Modal has no teardown callback, so
   // fall back to the unmount of our own `mounted` flag — safe there because those
@@ -188,13 +265,23 @@ export function BottomSheetShell({
     : children;
 
   const body = (
-    // Plain Pressable for the tap-to-close target (Animated-wrapped Pressables
-    // don't reliably capture touches — taps would leak to the screen behind).
-    <Pressable style={styles.container} onPress={onClose}>
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { backgroundColor: backdropColor, opacity: backdropOpacity }]}
-      />
+    <View style={styles.container}>
+      {/* Tap-to-close lives on the SCRIM — a sibling painted BELOW the sheet — and never on
+          an ancestor of the sheet.
+          WHY: a Pressable claims the touch on finger-DOWN. Wrapped around the sheet (which is
+          what this used to be, plus an inner Pressable calling stopPropagation), it sits above
+          every sheet's ScrollView, and on Android that fights the scroll: the first drag is
+          swallowed and only a second one, after the responder has been handed over, scrolls.
+          As a sibling it cannot: a tap on the sheet finds no responder among the sheet's own
+          ancestors and correctly does nothing, while a tap outside the sheet lands here.
+          Plain Pressable, not Animated-wrapped — those don't reliably capture touches, and the
+          taps would leak to the screen behind. */}
+      <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { backgroundColor: backdropColor, opacity: backdropOpacity }]}
+        />
+      </Pressable>
       {/* The keyboard inset lives HERE, on a spacer wrapper — never on
           `styles.container` and never on the sheet itself.
           • Not the container: it is the full-screen `flex-end` box, and padding
@@ -202,21 +289,22 @@ export function BottomSheetShell({
           • Not the sheet: `onSheetLayout` measures the view below this one, and
             an inset folded into that measurement would make the slide-out
             animation travel the sheet's height PLUS the keyboard's.
-          The scrim above is `absoluteFill` on the container, so it keeps
-          covering the whole screen regardless of what happens in here. */}
+          The scrim above is `absoluteFill`, so it keeps covering the whole screen
+          regardless of what happens in here. */}
       <View style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : null}>
         <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
-          {/* Whole-sheet swipe only when NOT using the render-prop (caller places it). */}
-          <Pressable
-            onPress={e => e.stopPropagation()}
+          {/* Whole-sheet swipe only when NOT using the render-prop (caller places it).
+              A plain View, not a Pressable: nothing here needs to answer a tap, and a
+              Pressable would put the responder back above the sheet's ScrollView. */}
+          <View
             style={androidNavBarNudge}
             {...(swipeToDismiss && !isRenderProp ? panHandlers : {})}
           >
             {content}
-          </Pressable>
+          </View>
         </Animated.View>
       </View>
-    </Pressable>
+    </View>
   );
 
   // Android only. iOS is handled by `keyboardInset` above — see
@@ -231,7 +319,13 @@ export function BottomSheetShell({
     );
 
   // A layer, not a window. `mounted` (not `visible`) so the slide-out still plays.
-  if (inline) return mounted ? <View style={styles.layer}>{wrapped}</View> : null;
+  if (inline)
+    return mounted ? (
+      <View style={styles.layer}>
+        {probe}
+        {wrapped}
+      </View>
+    ) : null;
 
   return (
     <Modal
@@ -246,6 +340,7 @@ export function BottomSheetShell({
       // `androidNavBarNudge` above instead.
       statusBarTranslucent
     >
+      {probe}
       {wrapped}
     </Modal>
   );

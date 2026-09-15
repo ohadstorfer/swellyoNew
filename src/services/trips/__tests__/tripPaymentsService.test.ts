@@ -478,3 +478,84 @@ describe('startCheckout partial amounts', () => {
     await expect(mod.startCheckout('req1')).resolves.toBe('returned');
   });
 });
+
+// ── readTravelerPrices ───────────────────────────────────────────────────────
+// Migration 20260906000100 withholds the price columns from
+// group_trip_participants and serves them through organized_trip_traveler_prices.
+// The reader uses the view and NEVER falls back to the table: the table
+// refuses those columns now, so a retry turns a lagging schema cache into
+// "permission denied" and, through friendlyError, into "you have no access".
+describe('readTravelerPrices', () => {
+  const { supabase } = jest.requireMock('../../../config/supabase');
+  const { readTravelerPrices, isMissingRelation } = jest.requireActual('../tripPaymentsService');
+
+  const source = (result: { data: any; error: any }) => ({
+    select: jest.fn(() => ({ eq: jest.fn(() => ({ maybeSingle: jest.fn().mockResolvedValue(result) })) })),
+  });
+  const run = (q: any) => q.select('price_total_usd').eq('trip_id', 't1').maybeSingle();
+
+  beforeEach(() => (supabase.from as jest.Mock).mockReset());
+
+  it('reads the view and never touches the table when the view answers', async () => {
+    const tables: Record<string, any> = {
+      organized_trip_traveler_prices: source({ data: { price_total_usd: 3000 }, error: null }),
+    };
+    (supabase.from as jest.Mock).mockImplementation((t: string) => {
+      if (!tables[t]) throw new Error(`unexpected table ${t}`);
+      return tables[t];
+    });
+
+    const res = await readTravelerPrices(run);
+
+    expect(res.data).toEqual({ price_total_usd: 3000 });
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+    expect(supabase.from).toHaveBeenCalledWith('organized_trip_traveler_prices');
+  });
+
+  it.each(['42P01', 'PGRST205'])(
+    'reports a missing view by name instead of retrying the table (%s)',
+    async code => {
+      // It used to retry `group_trip_participants` here — asking for the very
+      // columns 20260906000100 revoked, so a lagging PostgREST schema cache
+      // came back "permission denied" and the screen told an operator looking
+      // at their own trip they had no access. The table must not be touched.
+      const tables: Record<string, any> = {
+        organized_trip_traveler_prices: source({ data: null, error: { code, message: 'nope' } }),
+      };
+      (supabase.from as jest.Mock).mockImplementation((t: string) => {
+        if (!tables[t]) throw new Error(`unexpected table ${t}`);
+        return tables[t];
+      });
+
+      const res = await readTravelerPrices(run);
+
+      expect(res.data).toBeNull();
+      expect(res.error.message).toMatch(/20260906000100/);
+      expect(supabase.from).toHaveBeenCalledTimes(1);
+      expect(supabase.from).not.toHaveBeenCalledWith('group_trip_participants');
+    },
+  );
+
+  it('returns any OTHER view error untouched', async () => {
+    const denied = { code: '42501', message: 'permission denied' };
+    const tables: Record<string, any> = {
+      organized_trip_traveler_prices: source({ data: null, error: denied }),
+    };
+    (supabase.from as jest.Mock).mockImplementation((t: string) => {
+      if (!tables[t]) throw new Error(`unexpected table ${t}`);
+      return tables[t];
+    });
+
+    const res = await readTravelerPrices(run);
+
+    expect(res.error).toBe(denied);
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+  });
+
+  it('isMissingRelation knows both spellings and nothing else', () => {
+    expect(isMissingRelation({ code: '42P01' })).toBe(true);
+    expect(isMissingRelation({ code: 'PGRST205' })).toBe(true);
+    expect(isMissingRelation({ code: '42501' })).toBe(false);
+    expect(isMissingRelation(null)).toBe(false);
+  });
+});

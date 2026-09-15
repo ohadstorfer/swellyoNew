@@ -14,7 +14,13 @@ jest.mock('../../../config/supabase', () => ({ supabase: { from: jest.fn() } }))
 jest.mock('expo-web-browser', () => ({}));
 jest.mock('expo-linking', () => ({ createURL: () => '' }));
 
-import { buildTripMoney, buildSurfStats, toNumber, type TripMoneyInput } from '../operatorDashboardService';
+import {
+  buildTripMoney,
+  buildSurfStats,
+  genderOf,
+  toNumber,
+  type TripMoneyInput,
+} from '../operatorDashboardService';
 
 const DEPOSIT = { requirementId: 'r-dep', kind: 'deposit' as const, title: 'Deposit' };
 const BALANCE = { requirementId: 'r-bal', kind: 'balance' as const, title: 'Final payment' };
@@ -294,5 +300,67 @@ describe('buildSurfStats', () => {
       { countryFrom: null },
     ]);
     expect(s.countryCount).toBe(2);
+  });
+
+  it('splits men and women, and counts the rest as unknown', () => {
+    const s = buildSurfStats([
+      { pronoun: 'bro' },
+      { pronoun: 'Bro' },
+      { pronoun: 'sis' },
+      { pronoun: 'name only' },
+      { pronoun: null },
+    ]);
+    expect(s.genders).toEqual([
+      ['men', 2],
+      ['women', 1],
+    ]);
+    expect(s.genderUnknown).toBe(2);
+  });
+
+  it('keeps only the interests at least two travelers share', () => {
+    const s = buildSurfStats([
+      { lifestyle: ['yoga', 'hiking'] },
+      { lifestyle: ['yoga', 'gaming'] },
+      { lifestyle: ['yoga', 'hiking'] },
+    ]);
+    expect(s.lifestyles).toEqual([
+      ['yoga', 3],
+      ['hiking', 2],
+    ]);
+  });
+
+  it('reads interests case- and space-insensitively', () => {
+    const s = buildSurfStats([{ lifestyle: [' Yoga'] }, { lifestyle: ['yoga '] }]);
+    expect(s.lifestyles).toEqual([['yoga', 2]]);
+  });
+
+  // One person picking the same tag twice is one person, not a pair — otherwise
+  // a solo traveler would show up under "in common".
+  it('gives one traveler one vote per interest', () => {
+    const s = buildSurfStats([{ lifestyle: ['yoga', 'Yoga'] }]);
+    expect(s.lifestyles).toEqual([]);
+  });
+
+  it('has no interests in common when nobody picked any', () => {
+    const s = buildSurfStats([{ lifestyle: [] }, { lifestyle: null }, {}]);
+    expect(s.lifestyles).toEqual([]);
+  });
+});
+
+describe('genderOf', () => {
+  it('reads the two pronouns that carry a signal', () => {
+    expect(genderOf('bro')).toBe('men');
+    expect(genderOf('Bro')).toBe('men');
+    expect(genderOf(' sis ')).toBe('women');
+  });
+
+  // "name only" means "do not call me bro/sis". Folding it into either bucket
+  // would be inventing the answer, so it stays unknown.
+  it('refuses to guess from anything else', () => {
+    expect(genderOf('name only')).toBeNull();
+    expect(genderOf('neither')).toBeNull();
+    expect(genderOf('none')).toBeNull();
+    expect(genderOf(null)).toBeNull();
+    expect(genderOf(undefined)).toBeNull();
   });
 });

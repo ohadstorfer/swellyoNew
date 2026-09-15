@@ -67,7 +67,12 @@ export async function fetchTripRefunds(tripId: string): Promise<TripRefund[]> {
 }
 
 export type IssueRefundResult =
-  | { ok: true; amountUsd: number; remainingUsd: number }
+  /**
+   * `bankRefund` marks an ACH (US bank) refund: it arrives as a separate
+   * ~3-business-day credit that is NOT labeled a refund on the traveler's
+   * statement, so the UI should tell the operator to give them a heads-up.
+   */
+  | { ok: true; amountUsd: number; remainingUsd: number; bankRefund: boolean }
   | { ok: false; error: string };
 
 /**
@@ -115,5 +120,10 @@ export async function issueRefund(args: {
   if (!data?.ok) {
     return { ok: false, error: data?.error ?? 'Could not issue the refund. Please try again.' };
   }
-  return { ok: true, amountUsd: Number(data.amountUsd), remainingUsd: Number(data.remainingUsd) };
+  return {
+    ok: true,
+    amountUsd: Number(data.amountUsd),
+    remainingUsd: Number(data.remainingUsd),
+    bankRefund: data.bankRefund === true,
+  };
 }

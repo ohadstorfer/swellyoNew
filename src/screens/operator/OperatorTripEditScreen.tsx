@@ -6,6 +6,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import type { RootStackParamList } from '../../navigation/navigationRef';
 import { EditSection } from '../../components/trips/edit/EditSection';
+import { syncOperatorCrewBio } from '../../services/trips/tripStaffService';
 import { EditRow } from '../../components/trips/edit/EditRow';
 import { EditFieldSheet, CANCELLED } from '../../components/trips/edit/EditFieldSheet';
 import {
@@ -62,6 +63,8 @@ import {
 } from '../../services/trips/groupTripsService';
 import { resolveDeadlineDate, type EditableRequirement } from '../../services/trips/tripDocumentsService';
 import { ManageRequirementsSheet } from '../../components/trips/ManageRequirementsSheet';
+import { CancellationPolicySheet } from '../../components/settings/CancellationPolicySheet';
+import { policyFromTrip, PRESET_LABEL } from '../../services/trips/cancellationPolicy';
 import { validateAgeRange, validateSpots, validatePrice, validateDeposit } from '../../services/trips/tripValidation';
 import {
   type PriceInclusions,
@@ -128,7 +131,7 @@ type SheetKey =
   | 'when' | 'spots'
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
-  | 'price' | 'includes' | 'gettingPaid' | 'payDeadline'
+  | 'price' | 'includes' | 'gettingPaid' | 'payDeadline' | 'cancellation'
   | 'visibility'
   | 'requirements'
   | null;
@@ -421,8 +424,27 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   // line that keeps money away from them: the Price section below renders on
   // `isOwner` alone, because `operator_set_traveler_price` and the payment
   // columns authorise on `host_id`, so a Manager tapping them would only be
-  // handed a raw server error. Everything else on this screen is `trip.edit`,
-  // which RLS already allows a Manager.
+  // handed a raw server error.
+  //
+  // `isOwner` also gates WHERE and WHEN — Product Specs §5c ("edit anything
+  // besides dates & destinations"), decided 23 Aug 2026. A Manager may still
+  // rename the trip, rewrite the description and change the spots; they may
+  // not move the trip in space or time, because both are what a traveler
+  // booked flights around and `trg_notify_trip_dates_changed` mails everyone
+  // who signed up on the old dates.
+  //
+  // Both halves are enforced in the database too, so this is a wall and not
+  // just a fence — but by two different mechanisms, because the two fields
+  // live in two different places:
+  //   WHERE — `group_trip_destinations` is its own table, and all four of its
+  //           policies are literally `auth.uid() = host_id`. Always was.
+  //   WHEN  — `start_date` / `end_date` are columns on `group_trips`, whose
+  //           UPDATE policy is `trip.edit`, which a Manager holds. RLS cannot
+  //           exclude two columns from a row, so a trigger does it:
+  //           `trg_guard_operator_trip_dates` (migration 20260903000000),
+  //           the same shape as the money guard from 20260813200000.
+  //
+  // Everything else on this screen is `trip.edit`, which RLS already allows.
   const isOwner = !!currentUserId && trip?.host_id === currentUserId;
 
   // Same test TripDetailScreen uses to decide whether the operator may CREATE
@@ -477,6 +499,24 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     () => (data?.participants ?? []).filter(p => p.role !== 'host').length,
     [data?.participants],
   );
+
+  /**
+   * Is the trip still empty, for the cancellation-policy carve-out?
+   *
+   * The SAME set `datesNotifyCount` counts, and deliberately so: a traveler
+   * mid-onboarding has already ticked the terms, so `participant_count` — which
+   * gives them no seat — is the wrong number here for exactly the reason it is
+   * the wrong number there.
+   *
+   * This only decides whether a row is offered. The database decides whether
+   * the write lands, and it has one test this cannot make: whether anyone has
+   * consented (RLS shows this client only its own consent rows).
+   */
+  const travelersJoined = datesNotifyCount;
+
+  /** The terms frozen on this trip, or null on a trip that never stated any —
+   *  every A/B trip, and every operator trip published before the columns. */
+  const tripPolicy = useMemo(() => policyFromTrip(trip ?? null), [trip]);
 
   // The stored requirement rows, so a date change can report what it does to
   // their deadlines. Same query TripDetailScreen's own requirements editor
@@ -773,11 +813,21 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         <EditSection title="The basics">
           <EditRow label="Trip name" onPress={() => setSheet('title')} />
           <EditRow label="Description" onPress={() => setSheet('description')} />
+          {/* Owner only — see `isOwner` above. Shown-and-disabled rather than
+              hidden: a Manager who cannot find "When" at all reads it as a bug
+              and asks the operator to look for it. The value says who can. */}
           <EditRow
             label="Where"
+            value={isOwner ? undefined : 'Operator only'}
+            disabled={!isOwner}
             onPress={() => navigation.navigate('OperatorEditDestination', { tripId })}
           />
-          <EditRow label="When" onPress={() => setSheet('when')} />
+          <EditRow
+            label="When"
+            value={isOwner ? undefined : 'Operator only'}
+            disabled={!isOwner}
+            onPress={() => setSheet('when')}
+          />
           <EditRow label="Spots" onPress={() => setSheet('spots')} />
         </EditSection>
 
@@ -838,6 +888,28 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
               onPress={() => setSheet('payDeadline')}
             />
           )}
+          {/* ── Cancellation policy ────────────────────────────────────
+              Product Specs §"Manage trip": editable "only before any traveler
+              joined". Frozen on the trip at publish, exactly like the waiver,
+              and for the same reason — a traveler ticked these terms on the way
+              to Stripe and they must not be rewritten underneath them.
+
+              HIDDEN, not disabled, once anyone has joined. A greyed row invites
+              the question and the answer is a paragraph; the trip's terms are
+              still visible to travelers where they always were.
+
+              This is the client's half of the rule. The wall is
+              trg_guard_operator_trip_cancellation_policy (20260904000100),
+              which also refuses on a consent nobody here can see: RLS shows a
+              traveler only their OWN consent row, so the count that actually
+              matters is one only the server can take. */}
+          {isOperatorTrip && travelersJoined === 0 && (
+            <EditRow
+              label="Cancellation policy"
+              value={tripPolicy ? PRESET_LABEL[tripPolicy.preset] : 'Not set'}
+              onPress={() => setSheet('cancellation')}
+            />
+          )}
         </EditSection>
         )}
 
@@ -854,6 +926,33 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* Refund terms — owner only, empty trip only. Same component the
+          operator's Settings uses, pointed at the TRIP's own columns instead of
+          `operator_settings`: the trip's terms are a frozen copy, and editing
+          the default afterwards must never reach a published trip. */}
+      <CancellationPolicySheet
+        visible={sheet === 'cancellation'}
+        onClose={close}
+        value={tripPolicy ?? { preset: 'standard', rules: [], notes: null }}
+        onSave={async next => {
+          // Thrown, not swallowed: CancellationPolicySheet keeps itself open
+          // and shows the message when this rejects, which is what turns the
+          // guard's "2 travelers on this trip" into something a person reads.
+          // `saveField`, not `save`: it rethrows WITHOUT an alert of its own,
+          // and CancellationPolicySheet already shows the message. `save` would
+          // stack two.
+          //
+          // `rules` are written empty for a preset: PRESET_RULES is the source
+          // of truth for the two ready-made policies, and storing a copy is how
+          // a trip ends up with terms that disagree with their own name.
+          await saveField({
+            cancellation_preset: next.preset,
+            cancellation_rules: next.preset === 'custom' ? next.rules : [],
+            cancellation_notes: next.notes?.trim() || null,
+          });
+        }}
+      />
 
       <EditCoverSheet
         visible={sheet === 'cover'}
@@ -905,7 +1004,22 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         initialValue={trip.host_lead_note ?? ''}
         maxLength={1000}
         onClose={close}
-        onSave={(value) => save({ host_lead_note: value.trim() || null })}
+        // Two rows carry this text: the trip's own note, and the operator's
+        // crew card, which is where a traveler now reads it (the overview has
+        // no "About the operator" section any more). The trip write is the one
+        // that must land; the card is best-effort, and silently does nothing on
+        // a trip published before the operator was put on their own crew.
+        onSave={async (value) => {
+          const next = value.trim() || null;
+          await save({ host_lead_note: next });
+          if (currentUserId) {
+            try {
+              await syncOperatorCrewBio(tripId, currentUserId, next);
+            } catch (bioErr) {
+              console.warn('[OperatorTripEditScreen] syncOperatorCrewBio failed:', bioErr);
+            }
+          }
+        }}
       />
 
       <EditDatesSheet

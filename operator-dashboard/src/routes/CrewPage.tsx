@@ -65,11 +65,11 @@ export function CrewPage() {
   const [editing, setEditing] = useState<CrewMember | null>(null);
   const [adding, setAdding] = useState(false);
 
-  if (trip.isError) return <ErrorBox error={trip.error} onRetry={() => void trip.refetch()} />;
-  if (crew.isError) return <ErrorBox error={crew.error} onRetry={() => void crew.refetch()} />;
+  if (trip.isError) return <ErrorBox what="This trip" error={trip.error} onRetry={() => void trip.refetch()} />;
+  if (crew.isError) return <ErrorBox what="The crew" error={crew.error} onRetry={() => void crew.refetch()} />;
   // Without the tier definitions there is no picker and no pill, which is most
   // of the page. Better to say so than to render a crew list with blank tiers.
-  if (roles.isError) return <ErrorBox error={roles.error} onRetry={() => void roles.refetch()} />;
+  if (roles.isError) return <ErrorBox what="The crew roles" error={roles.error} onRetry={() => void roles.refetch()} />;
   if (trip.isPending || crew.isPending || roles.isPending || access.isPending) {
     return <Loading what="Loading the crew" />;
   }

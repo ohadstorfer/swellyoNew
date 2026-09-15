@@ -8,6 +8,8 @@ import {
   stepState,
   sumPaidUsd,
   toNumber,
+  travelerCounts,
+  tripSummary,
   validateTripPrice,
   type PaymentEvent,
   type TripPrice,
@@ -421,5 +423,100 @@ describe('formatUsd', () => {
 
   it('handles a negative, for an over-refund', () => {
     expect(formatUsd(-250)).toBe('-$250');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Trip summary — Frame 39433
+// ---------------------------------------------------------------------------
+//
+// ⚠️ These assertions are the TWIN of the ones in the app's
+// dashboardWork.test.ts. If one changes, the other has to: two apps disagreeing
+// about how many people have fully paid is worse than either being wrong alone.
+
+describe('tripSummary', () => {
+  const payer = (
+    totalUsd: number | null,
+    paidUsd: number,
+    steps: Array<{ state: string }> = [],
+  ) => ({ totalUsd, paidUsd, steps });
+
+  it('counts a traveler as fully paid only when EVERY step is settled', () => {
+    const s = tripSummary({
+      collectedUsd: 1000,
+      expectedUsd: 6000,
+      travelers: [
+        payer(3000, 3000, [{ state: 'paid' }, { state: 'paid' }]),
+        payer(3000, 500, [{ state: 'paid' }, { state: 'unpaid' }]),
+      ],
+    });
+    expect(s.fullyPaid).toBe(1);
+    expect(s.priced).toBe(2);
+    expect(s.fullyPaidUsd).toBe(3000);
+  });
+
+  it('leaves a traveler with no price out of BOTH halves of the fraction', () => {
+    const s = tripSummary({
+      collectedUsd: 3000,
+      expectedUsd: 3000,
+      travelers: [
+        payer(3000, 3000, [{ state: 'paid' }]),
+        payer(null, 0, [{ state: 'no_price' }]),
+      ],
+    });
+    expect(s.fullyPaid).toBe(1);
+    expect(s.priced).toBe(1);
+  });
+
+  it('falls back to the paid total on an offline trip, which has no steps', () => {
+    const s = tripSummary({
+      collectedUsd: 0,
+      expectedUsd: 2000,
+      travelers: [payer(2000, 2000, []), payer(2000, 1000, [])],
+    });
+    expect(s.fullyPaid).toBe(1);
+  });
+
+  it('does not call a zero-price traveler fully paid', () => {
+    const s = tripSummary({ collectedUsd: 0, expectedUsd: 0, travelers: [payer(0, 0, [])] });
+    expect(s.fullyPaid).toBe(0);
+    expect(s.priced).toBe(1);
+  });
+
+  it('is empty, not broken, on a trip with nobody on it', () => {
+    expect(tripSummary({ collectedUsd: 0, expectedUsd: 0, travelers: [] })).toEqual({
+      collectedUsd: 0,
+      expectedUsd: 0,
+      fullyPaid: 0,
+      priced: 0,
+      fullyPaidUsd: 0,
+    });
+  });
+});
+
+describe('travelerCounts', () => {
+  it('separates people mid-onboarding from people holding a seat', () => {
+    // The whole point: participant_count cannot see the onboarding group, so a
+    // trip that is selling well reads as empty.
+    expect(
+      travelerCounts({
+        travelers: [
+          { status: 'active' },
+          { status: 'active' },
+          { status: 'onboarding' },
+          { status: 'onboarding' },
+          { status: 'onboarding' },
+        ],
+        maxParticipants: 12,
+      }),
+    ).toEqual({ going: 2, onboarding: 3, capacity: 12 });
+  });
+
+  it('treats a missing status as a seat, not as onboarding', () => {
+    expect(travelerCounts({ travelers: [{}, { status: null }], maxParticipants: null })).toEqual({
+      going: 2,
+      onboarding: 0,
+      capacity: null,
+    });
   });
 });

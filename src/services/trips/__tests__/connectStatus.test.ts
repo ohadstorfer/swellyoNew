@@ -1,6 +1,7 @@
 import {
   deriveConnectState,
   canCollectPayments,
+  canManageStripeAccount,
   paymentsAreLive,
   describeConnectState,
   UNKNOWN_CONNECT_STATUS,
@@ -257,5 +258,40 @@ describe('describeConnectState', () => {
       expect(describeConnectState(state, status()).done).toBe(false);
     }
     expect(describeConnectState('ready', status({ chargesEnabled: true })).done).toBe(true);
+  });
+});
+
+describe('canManageStripeAccount', () => {
+  it('is false before there is an account at all', () => {
+    expect(canManageStripeAccount(UNKNOWN_CONNECT_STATUS)).toBe(false);
+  });
+
+  it('is false until the onboarding form has been submitted', () => {
+    // Stripe REFUSES a login link for an account that has not finished
+    // onboarding, so offering the link here would be a button that errors.
+    expect(canManageStripeAccount(status({ detailsSubmitted: false }))).toBe(false);
+    expect(
+      canManageStripeAccount(status({ detailsSubmitted: false, currentlyDue: ['dob.day'] })),
+    ).toBe(false);
+  });
+
+  it('is true once details are in, in every state that follows', () => {
+    // under_review — waiting on Stripe, but their bank details are editable.
+    expect(canManageStripeAccount(status({ detailsSubmitted: true }))).toBe(true);
+    // ready
+    expect(
+      canManageStripeAccount(status({ detailsSubmitted: true, chargesEnabled: true })),
+    ).toBe(true);
+    // action_needed
+    expect(
+      canManageStripeAccount(
+        status({ detailsSubmitted: true, chargesEnabled: true, pastDue: ['individual.id_number'] }),
+      ),
+    ).toBe(true);
+    // blocked — deliberately still true. A refused account still holds a real
+    // bank account and real tax documents the operator may look at.
+    expect(
+      canManageStripeAccount(status({ detailsSubmitted: true, disabledReason: 'rejected.fraud' })),
+    ).toBe(true);
   });
 });

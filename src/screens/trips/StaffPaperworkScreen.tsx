@@ -55,6 +55,7 @@ import {
 } from '../../services/trips/tripDocumentsService';
 import {
   fetchMyStaffRequirements,
+  isStaffRequirementLate,
   fetchStaffRequirementsAsMe,
   ensureStaffRequirements,
   STAFF_REQUIREMENT_KINDS,
@@ -370,6 +371,16 @@ export default function StaffPaperworkScreen({
                     <Text style={styles.rowSub} numberOfLines={2}>
                       {row.helpText ?? catalog?.helpText ?? ''}
                     </Text>
+                    {/* The travelers' deadline for the same thing, read through
+                        rather than stored (20260904000200). Shown, never
+                        enforced — missing it flags the row and does nothing
+                        else, which is the rule this whole feature was built
+                        around. */}
+                    {!row.fulfilled && (row.dueDate || row.deadlineDaysBefore != null) ? (
+                      <Text style={dueLate(row) ? styles.rowDueLate : styles.rowDue}>
+                        {dueLabel(row)}
+                      </Text>
+                    ) : null}
                   </View>
                   {row.fulfilled ? (
                     <View style={[styles.pill, styles.pillDone]}>
@@ -421,6 +432,27 @@ export default function StaffPaperworkScreen({
     </View>
   );
 }
+
+/**
+ * "Due 12 Oct" / "Due 30 days before the trip".
+ *
+ * The second form is not a fallback for a missing deadline — it is the honest
+ * answer on a trip that only has months, where there is no date to count back
+ * from. Same split `PaymentSection` makes for the balance.
+ */
+function dueLabel(row: MyStaffRequirement): string {
+  if (row.dueDate) {
+    const d = new Date(`${row.dueDate}T00:00:00`);
+    const when = Number.isNaN(d.getTime())
+      ? row.dueDate
+      : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    return dueLate(row) ? `Was due ${when}` : `Due ${when}`;
+  }
+  const n = row.deadlineDaysBefore ?? 0;
+  return `Due ${n} ${n === 1 ? 'day' : 'days'} before the trip`;
+}
+
+const dueLate = (row: MyStaffRequirement): boolean => isStaffRequirementLate(row);
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
@@ -537,6 +569,20 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   rowTitleDim: { color: C.muted },
+  rowDue: {
+    fontFamily: ff('Inter', '500'),
+    fontSize: 12,
+    color: C.muted,
+    marginTop: 3,
+    includeFontPadding: false,
+  },
+  rowDueLate: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 12,
+    color: '#C4361E',
+    marginTop: 3,
+    includeFontPadding: false,
+  },
   rowSub: {
     fontFamily: ff('Inter', '400'),
     fontSize: 12.5,

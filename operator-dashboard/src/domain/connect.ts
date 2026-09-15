@@ -118,6 +118,34 @@ export function paymentsAreLive(s: ConnectStatus): boolean {
   return s.chargesEnabled;
 }
 
+/**
+ * May this operator open their Stripe dashboard and CHANGE things?
+ *
+ * ⚠️ Kept in step with the app's `canManageStripeAccount` — same rule, same
+ * reasons. See the header: an operator who reads their Stripe state on their
+ * phone and again here must be told the same thing.
+ *
+ * A different question from "can they sell". This is about editing details
+ * they already gave — the bank account money lands in, the payout schedule,
+ * their address, their tax documents. Stripe's Express Dashboard is where all
+ * of that lives.
+ *
+ * Gated on `detailsSubmitted` because Stripe REFUSES to create a login link
+ * for an account that has not finished onboarding. Before that point the only
+ * honest instruction is "finish Stripe in the app", which is what the card
+ * already says.
+ *
+ * `blocked` accounts qualify. An account Stripe turned off still holds a real
+ * bank account and real tax documents the operator has every right to see —
+ * we just cannot promise that editing anything brings the account back.
+ */
+export function canManageStripeAccount(s: ConnectStatus): boolean {
+  return !!s.accountId && s.detailsSubmitted;
+}
+
+/** The label on that link. Same words as the app. */
+export const MANAGE_STRIPE_CTA = 'Update your details in Stripe';
+
 export interface ConnectCopy {
   /** Short label for the tag beside a heading. */
   tag: string;

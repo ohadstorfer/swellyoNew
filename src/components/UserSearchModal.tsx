@@ -16,6 +16,7 @@ import { supabase } from '../config/supabase';
 import { ProfileImage } from './ProfileImage';
 import { getStorageThumbUrl } from '../services/media/imageService';
 import { BottomSheetShell } from './BottomSheetShell';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -37,6 +38,7 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
   onClose,
   onUserSelect,
 }) => {
+  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(false);
@@ -168,7 +170,7 @@ export const UserSearchModal: React.FC<UserSearchModalProps> = ({
       swipeToDismiss={false}
       backdropColor="rgba(0, 0, 0, 0.5)"
     >
-        <View style={styles.modalContent}>
+        <View style={[styles.modalContent, { paddingBottom: insets.bottom }]}>
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Search Users</Text>

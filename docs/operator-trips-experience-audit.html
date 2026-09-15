@@ -1,0 +1,690 @@
+<title>The Operator Trip Walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F6F7F6;
+    --panel:       #FFFFFF;
+    --ink:         #10171A;
+    --ink-soft:    #45565C;
+    --ink-faint:   #7C8B90;
+    --rule:        #DCE2E1;
+    --rule-soft:   #E9EDEC;
+    --accent:      #0D6B72;
+    --accent-soft: #E2EEEE;
+    --crit:        #A93521;
+    --crit-soft:   #F6E5E1;
+    --watch:       #8A6110;
+    --watch-soft:  #F5ECD9;
+    --good:        #2F6B3E;
+    --good-soft:   #E4EFE6;
+
+    --measure: 66ch;
+    --f-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --f-body: "Newsreader", Georgia, "Times New Roman", serif;
+    --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0D1215;
+      --panel:       #141C1F;
+      --ink:         #E7EDED;
+      --ink-soft:    #A3B2B5;
+      --ink-faint:   #71827F;
+      --rule:        #253034;
+      --rule-soft:   #1C262A;
+      --accent:      #52B7BC;
+      --accent-soft: #10312F;
+      --crit:        #E88A72;
+      --crit-soft:   #331914;
+      --watch:       #D9AC55;
+      --watch-soft:  #2C2314;
+      --good:        #7FBF8C;
+      --good-soft:   #16281A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0D1215;
+    --panel:       #141C1F;
+    --ink:         #E7EDED;
+    --ink-soft:    #A3B2B5;
+    --ink-faint:   #71827F;
+    --rule:        #253034;
+    --rule-soft:   #1C262A;
+    --accent:      #52B7BC;
+    --accent-soft: #10312F;
+    --crit:        #E88A72;
+    --crit-soft:   #331914;
+    --watch:       #D9AC55;
+    --watch-soft:  #2C2314;
+    --good:        #7FBF8C;
+    --good-soft:   #16281A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 17px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 28px 120px;
+  }
+
+  /* ── Masthead ─────────────────────────────────────────── */
+
+  header.masthead {
+    padding: 68px 0 34px;
+    border-bottom: 2px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 800;
+    font-size: clamp(38px, 6.4vw, 62px);
+    line-height: 1.02;
+    letter-spacing: -0.025em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 20px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  .method {
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    color: var(--ink-faint);
+    border-left: 2px solid var(--rule);
+    padding-left: 14px;
+    max-width: 62ch;
+  }
+
+  /* ── Verdict ──────────────────────────────────────────── */
+
+  .verdict {
+    margin: 44px 0 0;
+    padding: 30px 32px;
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--accent);
+  }
+  .verdict p { margin: 0 0 14px; max-width: var(--measure); }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict strong { font-weight: 500; color: var(--ink); background: var(--accent-soft); padding: 0 3px; }
+
+  /* ── Section headings ─────────────────────────────────── */
+
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 72px 0 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  /* ── Scoreboard ───────────────────────────────────────── */
+
+  .board {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 22px;
+    font-family: var(--f-display);
+    font-size: 14.5px;
+  }
+  .board th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 0 12px 9px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .board td {
+    padding: 11px 12px 11px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  .board td.stage { color: var(--ink-soft); white-space: nowrap; }
+  .board td.count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .board tr:last-child td { border-bottom: none; }
+
+  /* ── Stage blocks ─────────────────────────────────────── */
+
+  .stage-head {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 20px;
+    align-items: baseline;
+    margin: 56px 0 8px;
+  }
+  .stage-num {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    padding-top: 10px;
+  }
+  .stage-title {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(25px, 3.4vw, 33px);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0;
+  }
+  .stage-lede {
+    grid-column: 2;
+    margin: 6px 0 0;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+  }
+
+  .findings { display: flex; flex-direction: column; gap: 18px; margin-top: 26px; }
+
+  .finding {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    padding: 22px 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .finding.crit  { border-left: 4px solid var(--crit); }
+  .finding.watch { border-left: 4px solid var(--watch); }
+  .finding.gap   { border-left: 4px solid var(--rule); }
+
+  .f-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+
+  .chip {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+  .chip.crit  { background: var(--crit-soft);  color: var(--crit); }
+  .chip.watch { background: var(--watch-soft); color: var(--watch); }
+  .chip.gap   { background: var(--rule-soft);  color: var(--ink-faint); }
+  .chip.good  { background: var(--good-soft);  color: var(--good); }
+
+  .f-id {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.06em;
+  }
+
+  h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 21px;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    margin: 0;
+    flex-basis: 100%;
+    text-wrap: balance;
+  }
+
+  .finding p { margin: 0; max-width: var(--measure); }
+  .finding p + p { margin-top: -2px; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: 0.84em;
+    background: var(--rule-soft);
+    padding: 1px 5px;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  .evidence {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: 11px;
+    overflow-x: auto;
+  }
+  .evidence b { color: var(--ink-soft); font-weight: 600; }
+  .evidence code { background: none; padding: 0; font-size: 1em; }
+
+  .cost {
+    font-size: 15.5px;
+    font-style: italic;
+    color: var(--ink-soft);
+    border-left: 2px solid var(--rule);
+    padding-left: 13px;
+    max-width: var(--measure);
+  }
+
+  /* ── Strong / closing ─────────────────────────────────── */
+
+  .prose { max-width: var(--measure); }
+  .prose p { margin: 16px 0 0; }
+
+  ul.plain { margin: 18px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 13px; }
+  ul.plain li { padding-left: 20px; position: relative; max-width: var(--measure); }
+  ul.plain li::before {
+    content: "";
+    position: absolute; left: 0; top: 0.62em;
+    width: 7px; height: 7px;
+    background: var(--accent);
+  }
+
+  ol.order { margin: 22px 0 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 16px; }
+  ol.order li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 16px;
+    align-items: baseline;
+    max-width: 78ch;
+  }
+  ol.order li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  ol.order b { font-family: var(--f-display); font-weight: 600; font-size: 17px; }
+
+  footer {
+    margin-top: 84px;
+    padding-top: 22px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    line-height: 1.8;
+  }
+
+  a { color: var(--accent); }
+  a:focus-visible, li:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .wrap { padding: 0 18px 80px; }
+    .stage-head { grid-template-columns: 1fr; gap: 4px; }
+    .stage-lede { grid-column: 1; }
+    .stage-num { padding-top: 0; }
+    ol.order li { grid-template-columns: 32px 1fr; gap: 10px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Group trips · hosting style C · 20 August 2026</div>
+    <h1>The Operator Trip Walkthrough</h1>
+    <p class="standfirst">Reading the paid operator trip the way a tour operator and a paying traveler would read it — start to finish, listing to homecoming — and naming what a real season would break on.</p>
+    <p class="method">Method: traced against the repo, not against the specs. Every finding below was checked in code or in a migration, and the file and line are given. Where a spec and the code disagree, the code wins. Known engineering blockers already tracked elsewhere (Stripe test mode, the operator agreement, chargeback go-live) are noted at the end and not re-argued.</p>
+  </header>
+
+  <div class="verdict">
+    <p>The machinery underneath this product is genuinely good. The money is a signed append-only ledger, prices and cancellation terms are frozen per traveler at the moment of the deal, the waiver is a versioned document with a hash and a captured IP, the seat is claimed under a row lock, and the notification layer has been closed hole by hole all week.</p>
+    <p>What is missing is not plumbing. It is <strong>the operator's side of running a season</strong>: chasing the final payment, letting someone cancel, knowing who to call if a traveler is hurt, and being worth booking a second time. A trip sold today can be taken, paid for, and travelled. It cannot be <em>run</em> — not without the operator keeping a spreadsheet and a WhatsApp thread beside the app.</p>
+    <p>Four findings would embarrass you in front of the first paying customer. Six more would cost money over a season. The rest are the difference between a working product and one an operator would switch to.</p>
+  </div>
+
+  <h2>Where it breaks, by stage</h2>
+
+  <table class="board">
+    <thead>
+      <tr><th>Stage of the journey</th><th>Blocker</th><th>Serious</th><th>Gap</th><th>The one that matters most</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="stage">1 · The listing</td>
+        <td class="count">1</td><td class="count">4</td><td class="count">—</td>
+        <td>Nothing tells a stranger you are worth $3,000</td>
+      </tr>
+      <tr>
+        <td class="stage">2 · Booking</td>
+        <td class="count">1</td><td class="count">2</td><td class="count">1</td>
+        <td>You cannot book for two people</td>
+      </tr>
+      <tr>
+        <td class="stage">3 · The money</td>
+        <td class="count">3</td><td class="count">2</td><td class="count">—</td>
+        <td>Nothing chases the final payment. Ever.</td>
+      </tr>
+      <tr>
+        <td class="stage">4 · Before departure</td>
+        <td class="count">1</td><td class="count">2</td><td class="count">1</td>
+        <td>No emergency contact is collected anywhere</td>
+      </tr>
+      <tr>
+        <td class="stage">5 · On trip &amp; after</td>
+        <td class="count">1</td><td class="count">—</td><td class="count">2</td>
+        <td>The trip ends and the product stops existing</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ═══════════ STAGE 1 ═══════════ -->
+
+  <h2>Stage by stage</h2>
+
+  <div class="stage-head">
+    <div class="stage-num">STAGE 1</div>
+    <h3 class="stage-title">The listing — the shop window</h3>
+    <p class="stage-lede">A stranger lands on the trip page. Everything they need to hand over three thousand dollars has to be on this screen. Today the page shows: cover, host, About this trip, Accommodation, What's included, Surf style, How this trip works, Participants, Who it's for, Wave information.</p>
+  </div>
+
+  <div class="findings">
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">L1</span>
+        <h3>Nothing on the page says why this operator can be trusted with the money</h3></div>
+      <p>There are no reviews and no ratings anywhere in the product — not on the trip, not on the operator, not after the trip. There is no trip count, no years-running, no licence, and the insurance certificate the operator is now made to upload during setup is never shown to a single traveler. The whole case for spending three thousand dollars with a stranger is a bio and a cover photo.</p>
+      <p>Every operator-marketplace that works — Airbnb Experiences, Viator, GetYourGuide, Surfholidays — is really a review engine with a booking form attached. Without one, each trip has to be sold from scratch, by the operator, off-platform, and Swellyo is a payment page rather than a place people find trips.</p>
+      <div class="evidence"><b>checked:</b> no <code>trip_reviews</code> / <code>operator_reviews</code> / <code>review_rating</code> anywhere in <code>src/</code> or <code>supabase/</code> · insurance stored at <code>operator_settings.insurance_path</code> (<code>operatorSettingsService.ts:165</code>), read by no traveler-facing screen</div>
+      <p class="cost">Cost: the conversion rate of the entire product. This is the one that decides whether operator trips are a business or a favour.</p>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">L2</span>
+        <h3>There is no "what's not included"</h3></div>
+      <p>The inclusions model is rich — eight sections, meals through sound healing — and it is one-directional. There is no way to say <em>flights are not included</em>, <em>board rental is extra</em>, <em>dinners are on you from Wednesday</em>. Every brochure in the industry runs the two lists side by side, and it is not decoration: the excluded list is what stops the argument at the airport.</p>
+      <div class="evidence"><b>checked:</b> <code>src/services/trips/priceInclusions.ts</code> — zero occurrences of exclusion / not-included in the model or the sheets</div>
+      <p class="cost">Cost: refund arguments the operator loses, because nothing written down says otherwise.</p>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">L3</span>
+        <h3>The cancellation policy is invisible until after they decide</h3></div>
+      <p>The policy is real, it is frozen on the trip, and the traveler ticks it — but the sheet only ever opens on the way to Stripe. A person weighing up the trip cannot see what happens if they have to pull out, and neither can they see the deposit-versus-balance split or when the balance falls due. All three arrive after they have committed.</p>
+      <p>On every booking site the refund terms sit on the listing, above the fold, because they are part of the price.</p>
+      <div class="evidence"><b>checked:</b> <code>TripPolicyConsentSheet</code> rendered only at <code>TripDetailScreen.tsx:3766</code> and <code>TravelerOnboardingScreen.tsx:1054</code>, both on the pay path · no policy text in <code>TripDetailViewRedesigned.tsx</code></div>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">L4</span>
+        <h3>No itinerary — not even a typical day</h3></div>
+      <p>"How this trip works" describes the mechanics of booking, not the week. There is nowhere to put dawn patrol at six, breakfast at nine, the boat on Thursday, the day off. An itinerary can only reach a traveler as a delivered PDF after they have paid, through <code>deliveredDocumentsService</code> — which is exactly backwards. The itinerary <em>is</em> the product; it is what a person is buying, and it is the last thing they are shown.</p>
+      <div class="evidence"><b>checked:</b> section list in <code>TripDetailViewRedesigned.tsx:716–1008</code> · delivery is post-booking and free-form (<code>deliveredDocumentsService.ts</code>)</div>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">L5</span>
+        <h3>A trip that is selling well looks empty, and sinks in Explore</h3></div>
+      <p>Approval on an operator trip deliberately takes no seat, so a traveler mid-onboarding sits at <code>status='onboarding'</code> and is excluded from <code>participant_count</code>. That is right for capacity. It is wrong for everything the count is also used for: the trip page reads "2/10 going" while eight people are actively paying, and <code>explore_feed</code> sorts the deck by that same number — so the trip that is genuinely selling is the one that falls to the bottom of the deck.</p>
+      <div class="evidence"><b>checked:</b> <code>sync_group_trip_participant_count</code> filters on status · <code>20260701010000_explore_feed_sort_by_participants.sql</code> orders by <code>participant_count</code> · label at <code>TripDetailViewRedesigned.tsx:291</code></div>
+      <p class="cost">Cost: social proof inverted at exactly the moment it matters.</p>
+    </div>
+
+  </div>
+
+  <!-- ═══════════ STAGE 2 ═══════════ -->
+
+  <div class="stage-head">
+    <div class="stage-num">STAGE 2</div>
+    <h3 class="stage-title">Booking — request, approve, begin</h3>
+    <p class="stage-lede">A traveler requests, the operator approves, and approval opens the onboarding rather than granting a seat. That design is correct and unusually well thought through. What sits around it is not.</p>
+  </div>
+
+  <div class="findings">
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">B1</span>
+        <h3>One person, one account, one seat — you cannot book for two</h3></div>
+      <p>There is no concept of a companion, a guest count, or a second traveler on a booking anywhere in the schema or the client. A couple has to hold two accounts, send two requests, be approved twice, pay twice, and hope they end up in the same room. A friend cannot book a friend. A parent cannot book a teenager.</p>
+      <p>Couples and pairs are the majority of surf-camp bookings. This is not a missing convenience — it is a missing half of the market, and it is the kind of thing that is far cheaper to model now than after a hundred bookings exist in the single-traveler shape.</p>
+      <div class="evidence"><b>checked:</b> no <code>guest_count</code> / <code>companion</code> / <code>plus_one</code> / <code>num_travelers</code> in <code>src/</code> or <code>supabase/</code> · <code>group_trip_participants</code> is one row per <code>user_id</code></div>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">B2</span>
+        <h3>Rooming is a trip-level checkbox, not a traveler's choice</h3></div>
+      <p><code>private_room</code> and <code>shared_room</code> exist as inclusion slugs on the trip, so a trip is either one or the other for everybody. There is no per-traveler occupancy, no single supplement, no roommate preference, no "I'll share with Maya". Operators price by occupancy — it is the main lever they have — and the model cannot express it, which means either every trip is priced at its worst case or the difference is settled off-platform.</p>
+      <div class="evidence"><b>checked:</b> <code>priceInclusions.ts:23–24</code> — trip-level slugs · no occupancy field on <code>group_trip_participants</code></div>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">B3</span>
+        <h3>An approval that is never paid is chased by nobody, and never expires</h3></div>
+      <p>The stalled-onboarding nudges — good, and live since Tuesday — join the payment ledger. Someone who was approved and never paid a cent is not in that join, so they are nudged by nothing, and there is no expiry on the approval either: they simply sit at <code>status='onboarding'</code> forever, invisible.</p>
+      <p>That is the single biggest drop in any booking funnel — approved, saw the price, hesitated, drifted. The one nudge that matters most is the one that does not exist. And because approval is open-ended, the operator's onboarding list silently fills with people who are never coming.</p>
+      <div class="evidence"><b>checked:</b> <code>operator_stalled_onboarders</code> — <code>join paid pd on pd.user_id = p.user_id</code>, <code>20260818000300_stalled_onboarding.sql:183</code> · no expiry on <code>group_trip_join_requests</code> or on the onboarding row</div>
+    </div>
+
+    <div class="finding gap">
+      <div class="f-top"><span class="chip gap">Gap</span><span class="f-id">B4</span>
+        <h3>No screening questions on the request</h3></div>
+      <p>A join request carries one free-text <code>request_note</code>. An operator taking people to a reef break wants to know surf level, years surfing, biggest wave ridden, and whether they can duck-dive, before saying yes — not after, buried in a profile. This is safety information, and it is the one moment the operator has real leverage to ask for it.</p>
+      <div class="evidence"><b>checked:</b> <code>20260429000000_create_trip_join_requests.sql:9–21</code> — <code>request_note text</code> and nothing else</div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════ STAGE 3 ═══════════ -->
+
+  <div class="stage-head">
+    <div class="stage-num">STAGE 3</div>
+    <h3 class="stage-title">The money — deposit, balance, and getting out</h3>
+    <p class="stage-lede">A deposit is taken during onboarding and is the wall: no deposit, no membership. The balance is a second requirement, skippable, due a set number of days before departure. That split is exactly right, and then nothing enforces the second half of it.</p>
+  </div>
+
+  <div class="findings">
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">M1</span>
+        <h3>Nothing — automatic or manual — ever chases a payment</h3></div>
+      <p>The deadline scanner that nudges at 14, 7, 3, 2 and 1 days filters to <code>req_type in ('upload','acknowledge')</code>. Payment requirements are not in it. And the dashboard's "Remind" button refuses them outright: the RPC raises <code>0A000 · Payment reminders are not supported yet</code>.</p>
+      <p>So the final balance — normally two thirds to four fifths of the trip price, due thirty days out — is chased by no cron and by no button. The operator's only instrument is to remember, open a DM, and ask. Chasing the balance is the single most repetitive job in running trips, and it is the one job the product does not do.</p>
+      <div class="evidence"><b>checked:</b> <code>20260820000000_requirement_deadline_scan.sql:64</code> — <code>and r.req_type in ('upload','acknowledge')</code> · <code>20260805000300_operator_remind_requirement.sql:169</code> — <code>if v_req_type = 'pay' then raise …</code></div>
+      <p class="cost">Cost: money that arrives late or not at all, on a trip the operator has already committed beds and flights against.</p>
+    </div>
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">M2</span>
+        <h3>Missing the balance deadline has no consequence at all</h3></div>
+      <p>The balance is skippable, so <code>activate_trip_membership</code> does not wait for it. A traveler pays the deposit, clears the must-haves, becomes a full member — and can travel owing most of the price. When the balance deadline passes, nothing happens: no forfeit, no automatic cancellation, no release of the seat, no flag on the roster. (The one deliberate exception is right: a <em>late joiner</em>, past the deadline, has the whole price frozen as their deposit.)</p>
+      <p>Every operator's terms end the same way — pay by the date or lose the deposit and the place. Without that, the balance deadline is a suggestion, and the seat cannot be resold in time.</p>
+      <div class="evidence"><b>checked:</b> <code>ONBOARDING_REQUIREMENT_SPEC</code> — balance absent, <code>DEFAULT_TIMING.balance = { skippable: true, daysBefore: 30 }</code> (<code>tripDocumentsService.ts:933–968</code>) · late-joiner rule at <code>20260817000000_full_payment_after_deadline.sql</code></div>
+    </div>
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">M3</span>
+        <h3>"Exit trip" lets someone walk away from a paid booking as if it were free</h3></div>
+      <p>An approved member sees <em>Exit trip</em> in the menu. It calls <code>leaveTrip()</code>, which posts "X left the group" in the chat, fires a member-left notification, deletes the participant row, and deletes the join request. It never reads <code>payment_mode</code>, never touches the ledger, never opens the frozen cancellation policy the traveler ticked at checkout, and never says the word money. The confirmation reads, in full: <em>"You'll be removed from the group chat. You can request to join again later."</em></p>
+      <p>So a traveler who paid three thousand dollars taps a button, is warned about a group chat, and is gone. No refund, no refund request, no cancellation record, and the operator is told only that somebody left. The mirror case is already built properly — when the <em>operator</em> removes a paid traveler, the refund is decided first and the notification carries the amount. The traveler's own exit skipped it.</p>
+      <p>There is a second-order effect. The dashboard's money view maps over participant rows, so a leaver's payments become unattributable — the code even says so in a comment — while <code>collectedUsd</code> still counts them. The trip total no longer reconciles against the roster, and there is no former-traveler anywhere to refund from.</p>
+      <div class="evidence"><b>checked:</b> <code>TripDetailScreen.tsx:1682–1709</code> (copy at 1685) and the menu entry at 2795 · <code>groupTripsService.ts:1626–1685</code> · <code>operatorDashboardService.ts:170,222</code> — <code>travelers = members.map(…)</code> vs <code>collectedUsd</code> over all events</div>
+      <p class="cost">Cost: the first chargeback, and it will be won by the traveler.</p>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">M4</span>
+        <h3>No receipt, no invoice, no proof of anything</h3></div>
+      <p><code>payments-checkout</code> never sets <code>receipt_email</code>, so Stripe sends nothing, and no document is produced on our side either. The traveler's only record of a three-thousand-dollar purchase is a progress bar inside the app. Nobody can expense the trip, claim it on insurance, show it at a border, or hold anything up in a dispute — and neither can the operator.</p>
+      <div class="evidence"><b>checked:</b> zero occurrences of <code>receipt_email</code> in the repository · no invoice or statement generation anywhere</div>
+      <p class="cost">Cost: near-zero to fix — one Stripe field for the first half of it.</p>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">M5</span>
+        <h3>The traveler has no way to cancel — only to vanish</h3></div>
+      <p>The counterpart to M3, and worth stating on its own: there is no "cancel my booking" anywhere. No screen shows what the traveler would get back under the policy they agreed to, no request reaches the operator, nothing is recorded. The policy machinery exists, is frozen per trip, and computes refunds correctly for the operator-initiated cases — the traveler simply has no door into it.</p>
+      <div class="evidence"><b>checked:</b> <code>cancellationPolicy.ts</code> consumed by ten screens, none of them a traveler-cancellation flow · <code>refundsService.issueRefund</code> is host-side only</div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════ STAGE 4 ═══════════ -->
+
+  <div class="stage-head">
+    <div class="stage-num">STAGE 4</div>
+    <h3 class="stage-title">Before departure — the paperwork that keeps people safe</h3>
+    <p class="stage-lede">Waiver, medical form, deposit, then insurance, passport, flights and visa as optional items with their own deadlines. The structure here is the best part of the product. Three fields are missing from it, and they are the three an operator would notice on day one.</p>
+  </div>
+
+  <div class="findings">
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">P1</span>
+        <h3>No emergency contact is collected — while the app already promises one</h3></div>
+      <p>The medical form holds allergies, diet, injuries and medication. There is no next of kin, no emergency contact, no phone number to ring. For a trip that puts strangers in open ocean, this is the one field no operator ships without: it is on the first page of every registration form in adventure travel, and insurers ask for it.</p>
+      <p>Worse, the product already claims to have it. The staff permission <code>travelers.view_profiles</code> is labelled <em>"Traveler profiles + emergency contact"</em>, and the invite sheet a guide accepts says <em>"See traveler profiles and emergency contacts"</em>. A permission is being granted over data that does not exist.</p>
+      <div class="evidence"><b>checked:</b> <code>organized_trip_medical_forms</code> columns at <code>20260724000200_operator_evidence_tables.sql:158–176</code> · the promise at <code>TripStaffSheet.tsx:70</code> and <code>StaffInviteAcceptSheet.tsx:29</code> · zero <code>emergency_contact</code> columns anywhere</div>
+      <p class="cost">Cost: one bad afternoon. This is a single column and a single field — fix it this week.</p>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">P2</span>
+        <h3>Passport expiry is captured, parsed, and never checked</h3></div>
+      <p>The MRZ reader pulls the expiry date and stores it as a typed column that survives the file purge — excellent. Nothing then compares it to anything. No six-month-validity rule, no warning when the passport expires before the return flight, no flag on the operator's roster. The document is approved, everyone relaxes, and the problem surfaces at the check-in desk.</p>
+      <p>The data is already in hand. This is a comparison, not a feature.</p>
+      <div class="evidence"><b>checked:</b> <code>expiry_date date</code> at <code>20260724000200:37</code>, parsed at <code>passportMrz.ts:314</code> · no consumer compares it to <code>start_date</code>, <code>end_date</code>, or <code>current_date</code></div>
+    </div>
+
+    <div class="finding watch">
+      <div class="f-top"><span class="chip watch">Serious</span><span class="f-id">P3</span>
+        <h3>Flight details arrive as a picture, not as information</h3></div>
+      <p><code>flights</code> is an upload kind — a photo or a PDF of a booking confirmation. Its own help text says "so the pickup can be planned", and planning a pickup means arrival time, flight number and terminal, sorted, in one list. Instead the operator opens fifteen PDFs one at a time behind sixty-second signed URLs and copies the times into a spreadsheet. Departure day is the same job again.</p>
+      <div class="evidence"><b>checked:</b> <code>REQUIREMENT_CATALOG.flights</code> — <code>reqType: 'upload'</code> (<code>tripDocumentsService.ts</code>) · typed fields on the documents table are <code>full_name</code>, <code>nationality</code>, <code>expiry_date</code> only</div>
+    </div>
+
+    <div class="finding gap">
+      <div class="f-top"><span class="chip gap">Gap</span><span class="f-id">P4</span>
+        <h3>Nothing stops an active member departing with outstanding paperwork</h3></div>
+      <p>Only must-haves gate activation. Passport, insurance and visa are skippable, so a member can reach the airport with an insurance document rejected in July and never resent. The reminder side of this was closed today; the roster side was not — there is no pre-departure readiness view that says <em>these four people are not cleared to travel</em>, which is the checklist an operator actually runs the week before.</p>
+      <div class="evidence"><b>checked:</b> <code>activate_trip_membership</code> re-derives must-haves only · reminder gap closed by <code>20260820000600_deadline_owed_includes_rejected.sql</code></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════ STAGE 5 ═══════════ -->
+
+  <div class="stage-head">
+    <div class="stage-num">STAGE 5</div>
+    <h3 class="stage-title">On the trip, and after it</h3>
+    <p class="stage-lede">Group chat, trip updates, packing and gear all work. Then the trip ends.</p>
+  </div>
+
+  <div class="findings">
+
+    <div class="finding crit">
+      <div class="f-top"><span class="chip crit">Blocker</span><span class="f-id">A1</span>
+        <h3>There is no after</h3></div>
+      <p><code>completeTrip()</code> sets one column to <code>'completed'</code> and does nothing else. No review request — which is what would fix L1. No receipt or statement. No recap, no shared album, no "book next year's" prompt, no payout summary for the operator, no thank-you to the traveler.</p>
+      <p>Repeat and referral are how surf operators survive; a camp with no returning guests is a camp with no business. The moment right after a good trip is the highest-intent moment the product will ever have with a customer, and the product currently spends it flipping a status column.</p>
+      <div class="evidence"><b>checked:</b> <code>groupTripsService.ts:1089–1098</code> — the whole function</div>
+    </div>
+
+    <div class="finding gap">
+      <div class="f-top"><span class="chip gap">Gap</span><span class="f-id">A2</span>
+        <h3>Trips never complete themselves</h3></div>
+      <p>Nothing flips a finished trip to <code>completed</code>. The daily scanner only reads trips where <code>status = 'active'</code> and sends a trip-ended notification; the status itself waits for a human to tap a button. So a trip that ended in March is still "active" in every list, count and feed until someone remembers. Whatever gets built for A1 will hang off a status nobody sets.</p>
+      <div class="evidence"><b>checked:</b> <code>scan-trip-reminders/index.ts:28–30</code> — filters <code>status = 'active'</code>, never writes status</div>
+    </div>
+
+    <div class="finding gap">
+      <div class="f-top"><span class="chip gap">Gap</span><span class="f-id">A3</span>
+        <h3>No schedule during the week</h3></div>
+      <p>Once people are on the ground, the only channels are group chat and trip updates — both linear feeds. There is no day view, no "tomorrow: 6am, boat, bring booties", no meeting point, no local emergency numbers, no operator phone number for the traveler who is lost at midnight. This is the same absence as L4 seen from the other end of the trip.</p>
+    </div>
+
+  </div>
+
+  <!-- ═══════════ STRONG ═══════════ -->
+
+  <h2>What is already better than it needs to be</h2>
+
+  <div class="prose">
+    <p>Worth saying plainly, because most of it is invisible and all of it is hard to retrofit later:</p>
+    <ul class="plain">
+      <li><b>The evidence model.</b> There is no per-traveler state table — every requirement's state is derived from the evidence itself. That is why the roster cannot drift from reality.</li>
+      <li><b>The waiver record.</b> Versioned, append-only, SHA-256 hashed, with server-captured IP, user agent and the name at signing time, pinned to the exact document version agreed to. This is the machinery the operator agreement and the policy acceptance should reuse rather than reinvent.</li>
+      <li><b>Frozen deals.</b> Price, deposit and cancellation policy are all frozen per traveler at join time, so repricing a trip or moving its dates cannot rewrite a bargain that was already struck.</li>
+      <li><b>The seat is real.</b> Claimed under a row lock at activation, and <code>payments-checkout</code> refuses a full trip <em>before</em> charging — so "sorry, full" happens before the money moves, not after.</li>
+      <li><b>Refunds as negative ledger rows.</b> The paid arithmetic self-corrects and survives webhook redelivery.</li>
+      <li><b>Deadlines stored relative to departure.</b> Move the dates and every due date stays correct. Absolute dates would have broken silently.</li>
+      <li><b>Documents expire.</b> Passports are re-encoded to JPEG on device (dropping the GPS of someone's living room), signed for sixty seconds rather than an hour, and purged thirty days after the trip.</li>
+    </ul>
+  </div>
+
+  <!-- ═══════════ ORDER ═══════════ -->
+
+  <h2>What I would fix, in this order</h2>
+
+  <div class="prose">
+    <p>Ordered by damage per hour of work, not by size.</p>
+  </div>
+
+  <ol class="order">
+    <li><b>Emergency contact.</b> One column on the medical form, one field in the sheet, one row in the staff view. The app already promises it in two places. Half a day. <span class="f-id">P1</span></li>
+    <li><b>Make "Exit trip" a cancellation.</b> On a managed trip, route it through the frozen policy: show what comes back, record the cancellation, refund it, tell the operator the amount. The operator-side twin already does all of this — reuse it. <span class="f-id">M3 · M5</span></li>
+    <li><b>Set <code>receipt_email</code>.</b> One field in <code>payments-checkout</code> buys a real receipt from Stripe for every payment. Do it before the live-mode switch, so the first live charge already has one. <span class="f-id">M4</span></li>
+    <li><b>Let payment requirements be chased.</b> Load the ledger in <code>fetchTripReview</code> so pay rows stop reading as <code>not_started</code>, then drop the two exclusions — the scanner's <code>req_type</code> filter and the RPC's raise. That is automatic balance reminders and a working "Remind" button in one change. <span class="f-id">M1</span></li>
+    <li><b>Give the balance deadline teeth.</b> Past the date and unpaid: flag on the roster, then a decision the operator makes with one tap — extend, or cancel and forfeit per the policy. <span class="f-id">M2</span></li>
+    <li><b>Nudge the approved-but-unpaid.</b> Widen the stalled-onboarding query beyond people who already paid, and put an expiry on an approval so the onboarding list stays true. <span class="f-id">B3</span></li>
+    <li><b>Put the terms and the exclusions on the listing.</b> Cancellation policy, deposit/balance split with dates, and a "not included" list beside the included one. All three are display work over data that mostly exists. <span class="f-id">L2 · L3</span></li>
+    <li><b>Check the passport expiry you already have.</b> A comparison against the return date and the six-month rule, surfaced on the roster. <span class="f-id">P2</span></li>
+    <li><b>Reviews, and the post-trip moment that collects them.</b> Auto-complete the trip, ask the traveler how it went, show the result on the listing. This is the biggest build on the list and the one that decides whether Explore is worth having. <span class="f-id">L1 · A1 · A2</span></li>
+    <li><b>Book for two.</b> The largest schema change here, and the one that gets more expensive with every booking made in the single-traveler shape. Worth scoping now even if it ships later. <span class="f-id">B1</span></li>
+  </ol>
+
+  <!-- ═══════════ ALREADY TRACKED ═══════════ -->
+
+  <h2>Already tracked, not re-argued</h2>
+
+  <div class="prose">
+    <p>These are known and sit on other lists; they are named here only so the walkthrough is honest about what else stands between this and a live season.</p>
+    <ul class="plain">
+      <li><b>Stripe is still in test mode.</b> Four switches flip together — the live key, <code>app.stripe_livemode</code>, and the two client env vars. Missing one is silent; the totals simply disagree.</li>
+      <li><b>The operator agreement is a summary, not a contract.</b> <code>OPERATOR_TERMS_VERSION = 'summary-2026-08-12'</code>. No insurance minimum, no indemnity, no refund duty, and the 12% commission lives in the database and in no document. The waiver releases the operator, not Swellyo.</li>
+      <li><b>Chargeback handling is built and not live</b>, and the merchant-of-record reversal is Phase 1 with its migration unapplied. Until then Swellyo eats disputes.</li>
+      <li><b>The web dashboard's parity work has never been opened in a browser.</b></li>
+    </ul>
+  </div>
+
+  <footer>
+    Swellyo · group trips, hosting style C (Operator) · walkthrough dated 20 August 2026<br>
+    Findings verified against the working tree at <code>f0d76d1</code> plus the five uncommitted migrations dated 20 August.<br>
+    Specs referenced but not trusted over code: <code>docs/specs/operator-trips/</code>
+  </footer>
+
+</div>

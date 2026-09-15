@@ -76,7 +76,12 @@ interface Props {
 const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'profile.shown_to_travelers': 'Shown to travelers',
   'roster.view': 'Logs in · sees the roster',
-  'travelers.view_profiles': 'Traveler profiles + emergency contact',
+  // NOT the emergency contact, which this used to claim. That is a medical
+  // record and 20260824000000 gave it to the operator of record alone, by
+  // name; the field itself only arrived on 4 Sep 2026 (20260904000000), so
+  // nothing was ever leaked — but a permission matrix that advertises a field
+  // it does not grant is how the next person builds the leak. Decision D1.
+  'travelers.view_profiles': 'Traveler profiles',
   'travelers.view_stats': 'Surf & travel stats',
   'chat.participate': 'Group chat · updates · 1:1',
   'payments.view_status': 'Payment status',

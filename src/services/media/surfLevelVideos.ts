@@ -65,6 +65,37 @@ const THUMBNAIL_MAP: Record<string, Record<string, any>> = {
 
 const videoUrlCache = new Map<string, string>();
 
+/**
+ * Storage URL of the demo clip for one board + level (app level, 0-based).
+ *
+ * This is the ONLY place that turns (board, level) into a file name. The
+ * onboarding "Surf Skill" card used to carry its own copy of the table, and
+ * that copy drifted: on longboard it asked for "Trimming Lines.mp4" and
+ * "Carving Turns.mp4", files that never existed in the bucket, so anyone past
+ * level 2 on a longboard saw a black card (since 2026-03-18). The names here
+ * are checked against surfLevelMapping (the label source) and against the
+ * real bucket listing by surfLevelVideos.test.ts.
+ *
+ * Softtop skips the level picker (AppContent forces surfLevel 0) and the bucket
+ * holds exactly one softtop clip, so every softtop level maps to it. It stays
+ * out of BOARD_VIDEO_DEFINITIONS on purpose: getSurfLevelVideos(3) falling back
+ * to the four shortboard clips is what the Edit Surf Skill carousel relies on.
+ *
+ * Returns the plain storage URL, not the preload cache — same as the screen
+ * always did. Callers that want the cached file:// go through getSurfLevelVideos.
+ */
+export const getSurfLevelVideoUrl = (boardType: number, surfLevel: number): string => {
+  if (boardType === 3) {
+    return getSurfLevelVideoFromStorage('softtop/Dipping My Toes.mp4');
+  }
+  const knownBoard = boardType in BOARD_VIDEO_DEFINITIONS ? boardType : 0;
+  const boardVideos = BOARD_VIDEO_DEFINITIONS[knownBoard];
+  const level = Number.isFinite(surfLevel) ? surfLevel : 0;
+  const index = Math.max(0, Math.min(level, boardVideos.length - 1));
+  return getSurfLevelVideoFromStorage(`${getBoardFolder(knownBoard)}/${boardVideos[index].videoFileName}`);
+};
+
+
 export const getSurfLevelVideos = (boardType: number): VideoLevel[] => {
   const boardVideos = BOARD_VIDEO_DEFINITIONS[boardType];
   if (!boardVideos) {

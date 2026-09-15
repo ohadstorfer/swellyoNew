@@ -52,6 +52,7 @@ import {
   fetchWaiver,
   isDeadlineAtEnd,
   isPayKind,
+  LOCKED_TIMING,
   publishWaiverPdf,
   replaceWaiverPdf,
   resolveDeadlineDate,
@@ -71,6 +72,30 @@ import { amountDue, type PayStep } from '../../services/trips/tripPaymentsServic
 // (see the `kinds` filter below), so that sentence is never actionable here.
 const PAY_KIND_EDITOR_SUB: Partial<Record<RequirementKind, string>> = {
   deposit: 'A first payment, collected when they join.',
+};
+
+/**
+ * The requirements an operator may not switch OFF.
+ *
+ * Only the waiver, and not for a technical reason — it is the one agreement
+ * the product has (there is no terms acceptance and no separate liability
+ * form), so a trip running without it has no record of what anyone agreed to.
+ *
+ * ⚠️ Locks OFF, never ON. A trip whose waiver is already inactive — removed
+ * before this rule existed — still shows an unticked, tappable card, so the
+ * operator can put it back. Forcing it on instead would make every Save on
+ * such a trip silently re-create a requirement they had deliberately removed.
+ *
+ * ⚠️ TWIN of `LOCKED_ON_KINDS` in `CreateTripFlowA` and of the `lockedOn` rule
+ * in the operator dashboard's `RequirementsEditor`. All three have to agree, or
+ * "always on" is only true on whichever screen the operator did not use.
+ */
+const LOCKED_ON_KINDS: RequirementKind[] = ['waiver'];
+
+/** Said on the card, in place of the catalog's `operatorSub`, so the missing
+ *  checkbox explains itself where it is missing. */
+const LOCKED_ON_SUB: Partial<Record<RequirementKind, string>> = {
+  waiver: 'On every trip — it is the only record of what travelers agreed to.',
 };
 
 type Draft = Record<string, RequirementTiming>;
@@ -280,6 +305,9 @@ export const ManageRequirementsSheet: React.FC<{
   const toggle = useCallback(
     (kind: RequirementKind) => {
       const isOn = on.includes(kind);
+      // Locked OFF only — see LOCKED_ON_KINDS. Switching one back ON is
+      // exactly what a trip that lost its waiver needs.
+      if (isOn && LOCKED_ON_KINDS.includes(kind)) return;
       setDirty(true);
       if (!isOn) {
         setOn(prev => [...prev, kind]);
@@ -469,8 +497,15 @@ export const ManageRequirementsSheet: React.FC<{
               // controls, there is just nothing to tap in the header.
               const noToggle = isPayKind(kind);
               const isOn = noToggle || on.includes(kind);
-              const t = timing[kind] ?? DEFAULT_TIMING[kind];
+              // LOCKED_TIMING wins over the stored row and over the draft.
+              // `saveRequirementChanges` clamps it anyway, so anything else
+              // shown here would be a promise the save does not keep.
+              const pinned = LOCKED_TIMING[kind];
+              const t = pinned ?? timing[kind] ?? DEFAULT_TIMING[kind];
               const locked = kind === 'passport' && passportBlocked;
+              // On and not removable. Reads exactly like a pay row: the tick
+              // stays, the timing controls stay, only the press does nothing.
+              const lockedOn = isOn && LOCKED_ON_KINDS.includes(kind);
               return (
                 <View
                   key={kind}
@@ -478,7 +513,7 @@ export const ManageRequirementsSheet: React.FC<{
                 >
                   <Pressable
                     onPress={() => toggle(kind)}
-                    disabled={locked || noToggle}
+                    disabled={locked || noToggle || lockedOn}
                     // Tint on press, not scale: the border belongs to the parent
                     // card, so scaling this row would read as the content
                     // shrinking inside a fixed frame.
@@ -487,14 +522,17 @@ export const ManageRequirementsSheet: React.FC<{
                       pressed &&
                         !locked &&
                         !noToggle &&
+                        !lockedOn &&
                         (isOn ? styles.reqHeaderPressedOn : styles.reqHeaderPressed),
                     ]}
                     // A pay row's header is not disabled — its timing controls
                     // below still work — only the toggle press is a no-op, and
                     // there is no toggle state left to announce once the role
                     // is 'text' rather than 'checkbox'.
-                    accessibilityRole={noToggle ? 'text' : 'checkbox'}
-                    accessibilityState={noToggle ? undefined : { checked: isOn, disabled: locked }}
+                    accessibilityRole={noToggle || lockedOn ? 'text' : 'checkbox'}
+                    accessibilityState={
+                      noToggle || lockedOn ? undefined : { checked: isOn, disabled: locked }
+                    }
                   >
                     <View style={styles.reqIconWrap}>
                       {kind === 'passport' ? (
@@ -508,7 +546,9 @@ export const ManageRequirementsSheet: React.FC<{
                       <Text style={styles.reqSub}>
                         {locked
                           ? 'Only on operator trips. Change this trip to an organised trip to ask for it.'
-                          : (noToggle && PAY_KIND_EDITOR_SUB[kind]) || c.operatorSub}
+                          : (lockedOn && LOCKED_ON_SUB[kind]) ||
+                            (noToggle && PAY_KIND_EDITOR_SUB[kind]) ||
+                            c.operatorSub}
                       </Text>
                       {/* The trip's DEFAULT amount — every other card here
                           describes itself; a pay row asking to set a deadline
@@ -528,6 +568,9 @@ export const ManageRequirementsSheet: React.FC<{
                     {locked ? (
                       <Ionicons name="lock-closed" size={16} color="#9A9A9A" style={styles.reqLock} />
                     ) : noToggle ? null : (
+                      /* A locked-on card keeps its tick — it IS on, and an
+                         empty space there would read as "off but somehow
+                         expanded". It is just not a control any more. */
                       <View style={[styles.reqCheck, isOn && styles.reqCheckOn]}>
                         {isOn ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
                       </View>
@@ -539,32 +582,46 @@ export const ManageRequirementsSheet: React.FC<{
                       <View style={styles.reqDivider} />
 
                       <View style={styles.timingRow}>
-                        <Pressable
-                          onPress={() => setKindTiming(kind, { skippable: false })}
-                          style={[styles.timingPill, !t.skippable && styles.timingPillOn]}
-                        >
-                          <Text
-                            style={[
-                              styles.timingPillText,
-                              !t.skippable && styles.timingPillTextOn,
-                            ]}
-                          >
-                            When they join
-                          </Text>
-                        </Pressable>
-                        <Pressable
-                          onPress={() => setKindTiming(kind, { skippable: true })}
-                          style={[styles.timingPill, t.skippable && styles.timingPillOn]}
-                        >
-                          <Text
-                            style={[
-                              styles.timingPillText,
-                              t.skippable && styles.timingPillTextOn,
-                            ]}
-                          >
-                            They can skip
-                          </Text>
-                        </Pressable>
+                        {pinned ? (
+                          /* One flat pill, not two with one disabled. A greyed
+                             "They can skip" reads as an option the operator
+                             has not earned yet and sends them hunting for the
+                             setting that unlocks it; there is none. */
+                          <View style={[styles.timingPill, styles.timingPillOn]}>
+                            <Text style={[styles.timingPillText, styles.timingPillTextOn]}>
+                              {pinned.skippable ? 'They can skip' : 'When they join'}
+                            </Text>
+                          </View>
+                        ) : (
+                          <>
+                            <Pressable
+                              onPress={() => setKindTiming(kind, { skippable: false })}
+                              style={[styles.timingPill, !t.skippable && styles.timingPillOn]}
+                            >
+                              <Text
+                                style={[
+                                  styles.timingPillText,
+                                  !t.skippable && styles.timingPillTextOn,
+                                ]}
+                              >
+                                When they join
+                              </Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => setKindTiming(kind, { skippable: true })}
+                              style={[styles.timingPill, t.skippable && styles.timingPillOn]}
+                            >
+                              <Text
+                                style={[
+                                  styles.timingPillText,
+                                  t.skippable && styles.timingPillTextOn,
+                                ]}
+                              >
+                                They can skip
+                              </Text>
+                            </Pressable>
+                          </>
+                        )}
                       </View>
 
                       {t.skippable ? (

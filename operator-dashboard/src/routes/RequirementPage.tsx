@@ -2,14 +2,16 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
-import { fetchTripReview, type ReviewItem } from '../services/review';
+import type { ReviewItem } from '../services/review';
+import { useTripReview } from '../services/useTripReview';
+import { DASHBOARD_CAPABILITY, useTripAccess } from '../services/access';
 import { fetchProfiles } from '../services/travelers';
 import { isUploadRequirement } from '../domain/requirements';
 import { approveDocuments, rejectDocument } from '../services/actions';
 import { downloadAll, safeFileName } from '../services/files';
 import { fileNameFor, formatDate, plural } from '../lib/format';
 import { friendlyError } from '../lib/errors';
-import { ErrorBox, Loading, StateTag } from '../components/StateBits';
+import { ErrorBox, Loading, NoPaperworkAccess, StateTag } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { RejectDialog } from '../components/RejectDialog';
@@ -19,6 +21,7 @@ type Row = { userId: string; name: string; item: ReviewItem };
 export function RequirementPage() {
   const { tripId = '', requirementId = '' } = useParams();
   const qc = useQueryClient();
+  const access = useTripAccess(tripId);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [viewing, setViewing] = useState<Row | null>(null);
@@ -30,11 +33,10 @@ export function RequirementPage() {
   const members = useQuery({ queryKey: ['members', tripId], queryFn: () => fetchMembers(tripId) });
   const userIds = useMemo(() => (members.data ?? []).map(m => m.userId), [members.data]);
 
-  const review = useQuery({
-    queryKey: ['review', tripId, userIds],
-    queryFn: () => fetchTripReview(tripId, userIds),
-    enabled: members.isSuccess,
-  });
+  // Through the hook, not a bare useQuery: it strips the medical form for
+  // anyone without medical.view, so no count on this page can show the false
+  // zero a Manager saw on 9 Sep 2026. See domain/visibleReview.
+  const review = useTripReview(tripId, userIds, members.isSuccess);
   const profiles = useQuery({
     queryKey: ['profiles', userIds],
     queryFn: () => fetchProfiles(userIds),
@@ -69,17 +71,42 @@ export function RequirementPage() {
     onError: e => setActionError(friendlyError(e)),
   });
 
-  if (trip.isError) return <ErrorBox error={trip.error} onRetry={() => void trip.refetch()} />;
-  if (review.isError) return <ErrorBox error={review.error} onRetry={() => void review.refetch()} />;
-  if (trip.isPending || members.isPending || review.isPending)
+  if (trip.isError) return <ErrorBox what="This trip" error={trip.error} onRetry={() => void trip.refetch()} />;
+  if (review.isError) return <ErrorBox what="The documents" error={review.error} onRetry={() => void review.refetch()} />;
+  if (trip.isPending || members.isPending || review.isPending || access.isPending)
     return <Loading what="Loading documents" />;
+
+  // The same sentence TripPage gives, for the same reason: a crew member below
+  // Manager reached this by URL. Without it a Guide read "not on this trip"
+  // about somebody who is — the roster is refused to them, so the page found
+  // nobody and said so as if it were a fact about the traveler.
+  if (access.ready && !access.can(DASHBOARD_CAPABILITY)) {
+    return (
+      <>
+        <PageHead back={`/trips/${tripId}`} backLabel={trip.data.title} title={trip.data.title} />
+        <NoPaperworkAccess />
+      </>
+    );
+  }
 
   const requirement = review.data.requirements.find(r => r.id === requirementId);
   if (!requirement) {
+    // Hidden is not the same as gone. A Manager who follows a link to the
+    // medical form must not be told it "is no longer on this trip" — that is
+    // a second false statement in place of the false zero it replaced.
+    const hidden = review.data.hiddenRequirementIds?.includes(requirementId) ?? false;
     return (
       <>
-        <PageHead back={`/trips/${tripId}`} backLabel={trip.data.title} title="Not found" />
-        <p className="muted">That requirement is no longer on this trip.</p>
+        <PageHead
+          back={`/trips/${tripId}`}
+          backLabel={trip.data.title}
+          title={hidden ? 'Medical form' : 'Not found'}
+        />
+        <p className="muted">
+          {hidden
+            ? 'Medical answers are for the operator and co-operators only.'
+            : 'That requirement is no longer on this trip.'}
+        </p>
       </>
     );
   }

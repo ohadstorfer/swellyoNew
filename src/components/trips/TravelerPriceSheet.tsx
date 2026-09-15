@@ -39,13 +39,14 @@ import {
  * the same family of bug behind the iOS touch-lock freeze this project has
  * already lost days to.
  *
- * Dropping the price BELOW what they have already paid is warned about the
- * same way, and for a harder reason: there is no refund path anywhere in this
- * codebase. `amountOutstanding` clamps at zero, so the row simply reads
- * approved and nothing anywhere records that the traveler is owed money. The
- * warning (and the overpaid figure in the summary line) is the only trace it
- * leaves, so the operator has to settle it outside the app knowingly rather
- * than discover it later.
+ * Dropping the price BELOW what they have already paid is BLOCKED, here and in
+ * `operator_set_traveler_price` (20260906000200). It used to be a warning the
+ * operator could click past, on the reasoning that there was no refund path;
+ * there is one now (RefundSheet), and `amountOutstanding` clamps at zero, so a
+ * price under the paid amount would read "fully paid" while nothing anywhere
+ * recorded that the traveler is owed money. The block names the refund as the
+ * way through: refund the difference first, then lower the price. A refund is
+ * a negative ledger row, so the floor drops by itself once it lands.
  *
  * Inputs are shown in the currency THIS TRIP was priced in (`budget_currency`),
  * converted to/from the canonical USD columns with the trip's frozen
@@ -154,14 +155,11 @@ export const TravelerPriceSheet: React.FC<{
   // that deposit, which is the common case, not the exceptional one.
   const [originalTotalUsd, setOriginalTotalUsd] = useState<number | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  // Two different things to say out loud before saving, one control: 'raise'
-  // reopens a balance, 'drop' leaves the traveler overpaid with no refund
-  // path. They can both be true at once (raising a price that is still under
-  // what was already paid), so `kind` is decided in one place — handleSave —
-  // rather than by two independent booleans racing in the render.
-  const [confirm, setConfirm] = useState<
-    { t: number; d: number | null; kind: 'raise' | 'drop' } | null
-  >(null);
+  // One thing to say out loud before saving: raising the price of somebody
+  // who already paid reopens their balance. Dropping it below what they paid
+  // is not a confirm — it is refused outright in handleSave, with the refund
+  // named as the way through.
+  const [confirm, setConfirm] = useState<{ t: number; d: number | null } | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -248,18 +246,20 @@ export const TravelerPriceSheet: React.FC<{
       return;
     }
 
-    // Overpayment first: it is the more consequential of the two, and both
-    // can be true at once (raising a price that is still below what has
-    // already been paid). There is no refund path in the app, so this is the
-    // only moment the operator is told they will owe money back.
+    // Below what they already paid: refused, not confirmed. The server refuses
+    // it too (20260906000200); this is the half the operator sees first, with
+    // the way through named. Checked before the raise case because both can
+    // be true at once (raising a price that is still under the paid amount).
     if (paid > 0 && t < paid) {
-      setConfirm({ t, d, kind: 'drop' });
+      setFormError(
+        `${travelerName} has already paid ${paidLabel}, which is more than this. Refund the difference first, then lower the price.`,
+      );
       return;
     }
     // Only warn when it actually reopens something. Lowering the price, or
     // editing someone who has paid nothing, needs no ceremony.
     if (paid > 0 && originalTotalUsd != null && t > originalTotalUsd) {
-      setConfirm({ t, d, kind: 'raise' });
+      setConfirm({ t, d });
       return;
     }
     void commit(t, d);
@@ -344,8 +344,8 @@ export const TravelerPriceSheet: React.FC<{
 
             {overpaidUsd > 0 ? (
               <Text style={styles.overpaid}>
-                {travelerName} has paid {overpaidLabel} more than this. Swellyo cannot refund
-                it — you will need to settle that with them yourself.
+                {travelerName} has paid {overpaidLabel} more than this. Refund the difference
+                first, then lower the price.
               </Text>
             ) : null}
 
@@ -354,9 +354,7 @@ export const TravelerPriceSheet: React.FC<{
             {confirm ? (
               <View style={styles.confirmBox}>
                 <Text style={styles.confirmText}>
-                  {confirm.kind === 'raise'
-                    ? `${travelerName} has already paid ${paidLabel}. Raising their price will ask them for the difference.`
-                    : `${travelerName} has already paid ${paidLabel}, which is more than this new price. They will be marked as fully paid and Swellyo will not refund the ${overpaidLabel} difference — that is between you and them.`}
+                  {`${travelerName} has already paid ${paidLabel}. Raising their price will ask them for the difference.`}
                 </Text>
                 <View style={styles.confirmActions}>
                   <Pressable
@@ -373,9 +371,7 @@ export const TravelerPriceSheet: React.FC<{
                     }}
                     style={({ pressed }) => [styles.confirmAsk, pressed && styles.pressedScale]}
                   >
-                    <Text style={styles.confirmAskText}>
-                      {confirm.kind === 'raise' ? 'Ask for it' : 'Lower it anyway'}
-                    </Text>
+                    <Text style={styles.confirmAskText}>Ask for it</Text>
                   </Pressable>
                 </View>
               </View>

@@ -1,0 +1,303 @@
+<title>Bank Payment Journey</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap">
+<style>
+:root{
+  --ground:#F7F8F9; --surface:#FFFFFF; --surface-2:#F0F2F4;
+  --ink:#212121; --ink-2:#4A5158; --muted:#7A838C;
+  --line:#E4E7EA; --line-strong:#C9CFD5;
+  --accent:#4EB4C9; --accent-ink:#1F7F92; --accent-soft:#E6F5F8;
+  --wait:#B26B00; --wait-bg:#FDF1DC;
+  --bad:#C4361E; --bad-bg:#FBEAE6;
+  --ok:#1E8E5A; --ok-bg:#E3F4EA;
+  --off:#8A8F96; --off-bg:#EEEFF1;
+  --shadow:0 1px 2px rgba(33,33,33,.06), 0 4px 16px rgba(33,33,33,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F1416; --surface:#161C1F; --surface-2:#1D2428;
+    --ink:#EDF0F2; --ink-2:#C2CAD1; --muted:#8B959E;
+    --line:#26303A; --line-strong:#3A4651;
+    --accent:#5EC4D8; --accent-ink:#8ADCEA; --accent-soft:#132A30;
+    --wait:#E4A64A; --wait-bg:#2A2114;
+    --bad:#E88A78; --bad-bg:#2C1A17;
+    --ok:#5FCB92; --ok-bg:#11291C;
+    --off:#8B959E; --off-bg:#1E252A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 18px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F1416; --surface:#161C1F; --surface-2:#1D2428;
+  --ink:#EDF0F2; --ink-2:#C2CAD1; --muted:#8B959E;
+  --line:#26303A; --line-strong:#3A4651;
+  --accent:#5EC4D8; --accent-ink:#8ADCEA; --accent-soft:#132A30;
+  --wait:#E4A64A; --wait-bg:#2A2114;
+  --bad:#E88A78; --bad-bg:#2C1A17;
+  --ok:#5FCB92; --ok-bg:#11291C;
+  --off:#8B959E; --off-bg:#1E252A;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 18px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding:0 24px 96px}
+header{padding:56px 0 32px;border-bottom:1px solid var(--line)}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+h1{font-family:Montserrat,Inter,sans-serif;font-weight:700;font-size:clamp(28px,4.5vw,40px);line-height:1.12;letter-spacing:-.015em;margin:0 0 14px;text-wrap:balance}
+.lede{font-size:17px;color:var(--ink-2);max-width:62ch;margin:0}
+h2{font-family:Montserrat,Inter,sans-serif;font-weight:700;font-size:22px;letter-spacing:-.01em;margin:48px 0 6px}
+.dek{color:var(--muted);margin:0 0 22px;max-width:66ch}
+p{max-width:66ch}
+
+/* legend */
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin:18px 0 0;font-size:13px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.sw{width:12px;height:12px;border-radius:3px;border:1px solid var(--line-strong)}
+.sw.now{background:var(--accent-soft);border-color:var(--accent)}
+.sw.wait{background:var(--wait-bg);border-color:var(--wait)}
+.sw.ok{background:var(--ok-bg);border-color:var(--ok)}
+.sw.bad{background:var(--bad-bg);border-color:var(--bad)}
+.sw.off{background:var(--off-bg);border-color:var(--off)}
+
+/* the journey: a vertical spine with steps; each step = when | what happens | what they see */
+.journey{display:flex;flex-direction:column;margin-top:8px}
+.step{display:grid;grid-template-columns:84px 28px minmax(0,1fr);gap:0 14px;align-items:stretch}
+.when{padding-top:14px;font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);text-align:right;line-height:1.35}
+.when b{display:block;color:var(--ink-2);font-size:13px;letter-spacing:0;text-transform:none;font-weight:600}
+.rail{position:relative;display:flex;justify-content:center}
+.rail::before{content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--line-strong)}
+.step:first-child .rail::before{top:22px}
+.step:last-child .rail::before{bottom:auto;height:22px}
+.dot{position:relative;z-index:1;margin-top:16px;width:14px;height:14px;border-radius:50%;background:var(--surface);border:2.5px solid var(--accent);flex:none}
+.dot.wait{border-color:var(--wait)}
+.dot.ok{border-color:var(--ok);background:var(--ok)}
+.dot.bad{border-color:var(--bad);background:var(--bad)}
+.dot.off{border-color:var(--off)}
+.card{margin:8px 0 10px;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.card.off{opacity:.72;border-style:dashed;box-shadow:none}
+.card-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:14px 16px 8px}
+.card-h h3{margin:0;font-size:16px;font-weight:600;letter-spacing:-.005em}
+.tag{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.tag.now{background:var(--accent-soft);color:var(--accent-ink)}
+.tag.wait{background:var(--wait-bg);color:var(--wait)}
+.tag.ok{background:var(--ok-bg);color:var(--ok)}
+.tag.bad{background:var(--bad-bg);color:var(--bad)}
+.tag.off{background:var(--off-bg);color:var(--off)}
+.card-b{padding:0 16px 14px;color:var(--ink-2);font-size:14.5px}
+.card-b p{margin:0 0 8px}
+.card-b p:last-child{margin:0}
+/* the "what they see" strip — a tiny phone-ish surface */
+.sees{margin-top:10px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.sees .lbl{font-size:10.5px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13.5px}
+.row .t{font-weight:600;color:var(--ink)}
+.row .s{font-size:12px;color:var(--muted)}
+.row .pill{font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px}
+.pill.pay{background:var(--accent);color:#fff}
+.pill.quiet{color:var(--muted)}
+.pill.done{color:var(--ok)}
+.sheet{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13.5px}
+.sheet .st{font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.sheet .ic{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+.ic.wait{background:var(--wait-bg);color:var(--wait)}
+.ic.ok{background:var(--ok-bg);color:var(--ok)}
+.ic.bad{background:var(--bad-bg);color:var(--bad)}
+.sheet .sb{color:var(--ink-2);font-size:13px}
+.push{display:flex;gap:10px;align-items:flex-start;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 12px;font-size:13px}
+.push .app{width:26px;height:26px;border-radius:7px;background:var(--accent);flex:none}
+.push b{display:block;color:var(--ink);font-weight:600;font-size:13.5px}
+.push span{color:var(--ink-2)}
+
+/* branch labels */
+.branch{margin:26px 0 8px;display:flex;align-items:center;gap:12px}
+.branch h3{margin:0;font-family:Montserrat,Inter,sans-serif;font-size:15px;font-weight:700;letter-spacing:.01em}
+.branch .line{flex:1;height:1px;background:var(--line-strong)}
+.note{border-left:3px solid var(--line-strong);padding:2px 0 2px 14px;margin:18px 0;color:var(--ink-2);font-size:14.5px}
+.note.warn{border-left-color:var(--wait)}
+.note.bad{border-left-color:var(--bad)}
+.note b{color:var(--ink)}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:18px 0}
+.cmp>div{background:var(--surface);padding:14px 16px}
+.cmp .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.cmp .v{font-size:20px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.cmp .v small{font-size:13px;font-weight:500;color:var(--muted);margin-left:4px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:var(--surface-2);padding:1px 5px;border-radius:4px}
+@media (max-width:640px){.step{grid-template-columns:60px 24px minmax(0,1fr)}.when{font-size:11px}}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">Operator trips · ACH bank payments</p>
+  <h1>What a traveller goes through when they pay by bank</h1>
+  <p class="lede">A card confirms while they watch. A bank transfer doesn't — the money takes up to four business days, and the app has to carry them through the wait without either alarming them or inviting a second payment. This is that journey, step by step, with exactly what the screen says at each point.</p>
+  <div class="legend">
+    <span><i class="sw now"></i>Happening now</span>
+    <span><i class="sw wait"></i>Waiting</span>
+    <span><i class="sw ok"></i>Landed</span>
+    <span><i class="sw bad"></i>Bounced</span>
+    <span><i class="sw off"></i>Turned off 27 Aug</span>
+  </div>
+</header>
+
+<h2>The journey</h2>
+<p class="dek">Sababa books El Salvador 26. Deposit is $1,000. She picks "US bank account" in Stripe Checkout.</p>
+
+<div class="journey">
+
+  <div class="step">
+    <div class="when"><b>Day 0</b>In Checkout</div>
+    <div class="rail"><div class="dot"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>She picks "US bank account" and logs into her bank</h3><span class="tag now">Instant</span></div>
+      <div class="card-b">
+        <p>Stripe opens a bank-login popup (Financial Connections). She picks her bank, signs in, chooses the checking account. Verification is instant — the account is proven the moment she logs in.</p>
+        <p>This is now the <b>only</b> bank path. "Enter bank details manually" is switched off — see why below.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="when"><b>Day 0</b>+ a few seconds</div>
+    <div class="rail"><div class="dot"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>She taps Pay $1,000 and accepts the mandate</h3><span class="tag now">Authorised</span></div>
+      <div class="card-b">
+        <p>Stripe accepts the authorisation and starts the transfer. Nothing has moved yet. Checkout closes and she's back in the app.</p>
+        <p>Behind the scenes: <code>checkout.session.completed</code> arrives with <code>payment_status: processing</code>. The ledger gets a <b>processing</b> marker row — worth $0, so no total moves — that says "a bank payment is in flight for this step".</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="when"><b>Day 0</b>+ 15 seconds</div>
+    <div class="rail"><div class="dot wait"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>The app tells her what's happening</h3><span class="tag wait">On its way</span></div>
+      <div class="card-b">
+        <p>The app polls for ~15 s, sees the marker, and shows the calm sheet — a bank icon, not a clock, and a single button.</p>
+        <div class="sees">
+          <div class="lbl">What she sees</div>
+          <div class="sheet">
+            <div class="st"><span class="ic wait">🏦</span>$1,000 is on its way</div>
+            <div class="sb">Bank transfers take up to 4 business days to arrive. Deposit will tick itself off the moment it lands, and we'll send you a message. <b>There's nothing to do — please don't pay again.</b> If your bank turns it down, we'll tell you straight away.</div>
+            <div class="sb" style="margin-top:8px"><b>[ Got it ]</b> &nbsp; Message your organiser</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="when"><b>Days 1–4</b>Waiting</div>
+    <div class="rail"><div class="dot wait"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>For up to four days the row says so — and never offers Pay</h3><span class="tag wait">On its way</span></div>
+      <div class="card-b">
+        <p>Every time she opens the trip, the Deposit row and the Payment card both read "On its way". Tapping either reopens the same calm sheet. There is no path to a second checkout: the row routes to the sheet before any pay gate, and the server would refuse anyway.</p>
+        <div class="sees">
+          <div class="lbl">What she sees — Plan tab</div>
+          <div class="row"><div><div class="t">Deposit</div><div class="s">Bank transfer · up to 4 business days</div></div><span class="pill quiet">On its way</span></div>
+          <div class="row"><div><div class="t">Final payment &nbsp;<span class="s">$2,000</span></div><div class="s">by 10 Dec</div></div><span class="pill pay">Pay</span></div>
+        </div>
+        <p style="margin-top:10px">This survives closing the app, reinstalling, or opening the web — it comes from the server's marker row, not from the phone.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="branch"><h3>Then one of two things happens</h3><div class="line"></div></div>
+
+  <div class="step">
+    <div class="when"><b>Day 2–4</b>It lands</div>
+    <div class="rail"><div class="dot ok"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>The money arrives — she's told, and the row ticks off</h3><span class="tag ok">Paid</span></div>
+      <div class="card-b">
+        <p>Stripe sends <code>async_payment_succeeded</code>. The ledger gets a real <b>paid</b> row for $1,000 on the same PaymentIntent, which resolves the marker. The step is settled, the seat is hers, and she hears about it — the one thing you must not do after a three-day wait is stay silent.</p>
+        <div class="sees">
+          <div class="lbl">What she gets</div>
+          <div class="push"><div class="app"></div><div><b>Your $1,000 deposit for El Salvador 26 arrived 🎉</b><span>The bank transfer cleared — you're all set on this one.</span></div></div>
+          <div class="row"><div><div class="t">Deposit</div></div><span class="pill done">Done ✓</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="when"><b>Day 2–4</b>It bounces</div>
+    <div class="rail"><div class="dot bad"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>Or her bank says no — she's told, and can pay another way</h3><span class="tag bad">Returned</span></div>
+      <div class="card-b">
+        <p>Stripe sends <code>async_payment_failed</code>. The ledger gets a <b>failed</b> row that resolves the marker, the Deposit row goes back to <b>Pay</b>, and the message names the bank — a bank payer who reads "card declined" assumes it's about someone else.</p>
+        <div class="sees">
+          <div class="lbl">What she gets</div>
+          <div class="push"><div class="app"></div><div><b>Your bank payment did not go through</b><span>Your bank returned the payment for El Salvador 26. Nothing was charged — you can pay again, by card if that's easier.</span></div></div>
+          <div class="row"><div><div class="t">Deposit &nbsp;<span class="s">$1,000</span></div></div><span class="pill pay">Pay</span></div>
+        </div>
+        <p style="margin-top:10px">Nothing was taken — a bounce means the debit never cleared. She simply pays again.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<h2>The path that was turned off</h2>
+<p class="dek">This is the screen you hit: "One more step… microdeposit verification". Here is what it would have put a traveller through.</p>
+
+<div class="journey">
+  <div class="step">
+    <div class="when"><b>Day 0</b></div>
+    <div class="rail"><div class="dot off"></div></div>
+    <div class="card off">
+      <div class="card-h"><h3>"Enter bank details manually"</h3><span class="tag off">Off</span></div>
+      <div class="card-b"><p>She types a routing and account number instead of logging in. Stripe can't prove the account is hers, so it falls back to proving it the slow way.</p></div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="when"><b>Day 0</b></div>
+    <div class="rail"><div class="dot off"></div></div>
+    <div class="card off">
+      <div class="card-h"><h3>"One more step" — the screen you saw</h3><span class="tag off">Off</span></div>
+      <div class="card-b"><p>Checkout completes with <b>nothing charged and nothing in flight</b>. Stripe sends two cents-sized deposits to her account.</p></div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="when"><b>Days 1–2</b></div>
+    <div class="rail"><div class="dot off"></div></div>
+    <div class="card off">
+      <div class="card-h"><h3>Deposits appear · an email arrives with a link</h3><span class="tag off">Off</span></div>
+      <div class="card-b"><p>She has to open her bank statement, find two amounts like $0.32 and $0.45, follow the email, and type them in. She has <b>10 days</b> and <b>10 attempts</b>. Only after that does the actual $1,000 transfer begin.</p></div>
+    </div>
+  </div>
+  <div class="step">
+    <div class="when"><b>Days 3–5</b></div>
+    <div class="rail"><div class="dot off"></div></div>
+    <div class="card off">
+      <div class="card-h"><h3>Now the up-to-4-day transfer starts</h3><span class="tag off">Off</span></div>
+      <div class="card-b"><p>Best case, the deposit lands about a <b>week</b> after she "paid". Worst case she never finds the email, the 10 days lapse, and it fails — which is roughly what happened on the test, just faster.</p></div>
+    </div>
+  </div>
+</div>
+
+<div class="cmp">
+  <div><div class="k">Instant login</div><div class="v">2–4<small>business days</small></div></div>
+  <div><div class="k">Manual + microdeposits</div><div class="v">5–7<small>days, best case</small></div></div>
+  <div><div class="k">Give-up window</div><div class="v">10<small>days</small></div></div>
+  <div><div class="k">Steps for the traveller</div><div class="v">1 <small>vs</small> 4</div></div>
+</div>
+
+<div class="note">
+  <b>How long, exactly.</b> Stripe's standard ACH settlement is <b>T+4</b> — up to four business days from the payment, cutoff 21:00 US/Eastern. Stripe also offers <b>T+2</b> for eligible US accounts, and on Connect the <em>platform</em> controls the speed for every operator — one toggle in Settings → Payment methods. Weekends and US bank holidays don't count. In the sandbox it takes seconds.
+</div>
+<div class="note warn">
+  <b>Why it's off.</b> A week of limbo on a $1,000 deposit isn't a payment method, it's a support ticket. A traveller whose bank can't do instant login should pay by card — the option is right there. Checkout now sends <code>verification_method: instant</code>, so the manual link no longer appears.
+</div>
+
+<div class="note bad">
+  <b>What the test found.</b> That microdeposit attempt completed Checkout with a status our webhook silently ignored, then failed 20 seconds later. The silence is fixed (it now logs the status and event id), and the path is closed. The $200 "Final payment" attempt it left behind is correctly recorded as <b>failed</b> — nothing was charged.
+</div>
+
+<h2>How to run the test now</h2>
+<p>Log in as Sababa → El Salvador 26 → Deposit → <b>US bank account</b> → <b>Test (Non-OAuth)</b> bank tile → pick the "Success" checking account → Pay $1,000. In the sandbox the day-3 event arrives within a minute or two, so you'll see the whole journey compressed: the calm sheet, the "On its way" row, then the 🎉 push and the tick.</p>
+<p>To see the bounce instead: same steps, but choose the "Insufficient funds" account in the test bank.</p>
+</div>

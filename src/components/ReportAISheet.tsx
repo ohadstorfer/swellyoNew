@@ -10,6 +10,7 @@ import {
   PanResponder,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../config/supabase';
 
@@ -66,6 +67,7 @@ async function sendAIReport(messageText: string, reason: string, chatType: strin
 }
 
 export function ReportAISheet({ visible, messageText, messageTimestamp, messageX, messageY, chatType, onClose, onReported }: ReportAISheetProps) {
+  const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(300)).current;
   // Scrim fades in/out (matches the global bottom-sheet effect). This sheet keeps
   // its own structure rather than BottomSheetShell because of the floating
@@ -214,8 +216,10 @@ export function ReportAISheet({ visible, messageText, messageTimestamp, messageX
               </View>
             )}
 
-            {/* Bottom spacing for safe area */}
-            <View style={styles.bottomSpacer} />
+            {/* Bottom spacing for safe area — the sheet is pinned to bottom: 0 in the
+                app's edge-to-edge window, so the nav bar / home indicator eats a fixed
+                spacer. */}
+            <View style={[styles.bottomSpacer, { height: Math.max(insets.bottom, Platform.OS === 'web' ? 24 : 40) }]} />
           </Animated.View>
         </>
       ) : (

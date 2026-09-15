@@ -276,3 +276,14 @@ export function getCountryFlag(countryName?: string): string | null {
   return `https://flagcdn.com/w${FLAG_IMAGE_WIDTH}/${iso}.png`;
 }
 
+
+/**
+ * Flag emoji for a country name ("Brazil" → 🇧🇷), or null when unknown.
+ * For inline text next to a caption, where a flagcdn image would be a network
+ * request per row. US states fall back to the US flag — there are no state emoji.
+ */
+export function getCountryFlagEmoji(countryName?: string | null): string | null {
+  const iso = getCountryISO(countryName ?? undefined)?.slice(0, 2).toUpperCase();
+  if (!iso || !/^[A-Z]{2}$/.test(iso)) return null;
+  return String.fromCodePoint(...[...iso].map(ch => 0x1f1e6 + ch.charCodeAt(0) - 65));
+}

@@ -1,0 +1,2 @@
+- [WeTravel FX markup research](project_wetravel_fx_markup_research.md) — no published spread anywhere; verified quotes + review claims, 2026-08-25
+- [Trustpilot fetch unreliable](reference_trustpilot_fetch_unreliable.md) — identical WebFetch calls to same Trustpilot URL return different content; cross-check before citing

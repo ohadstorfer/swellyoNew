@@ -10,6 +10,7 @@
 // it under RLS.
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { hasClearingBankPayment } from './inflight.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -410,7 +411,7 @@ serve(async req => {
     // `.neq(...)` here would silently narrow both.
     const { data: events, error: eventsErr } = await supabase
       .from('organized_trip_payment_events')
-      .select('amount_usd, event_type, is_livemode')
+      .select('amount_usd, event_type, is_livemode, provider_object_id, created_at')
       .eq('trip_id', req_.trip_id)
       .eq('user_id', userId)
       .eq('requirement_id', requirementId);
@@ -439,8 +440,47 @@ serve(async req => {
     // switch documented in 20260803000000, which must be set to match the
     // key that is installed.
     const isLivemode = STRIPE_SECRET_KEY.startsWith('sk_live_');
+
+    // ── A bank payment already on its way blocks a second one.
+    //
+    // ACH takes up to 4 business days (docs/specs/operator-trips/
+    // ach-bank-payments.md). For that whole window the traveler has paid and
+    // the ledger shows nothing collected — `paid` below is unmoved, because a
+    // 'processing' row's amount_usd is pinned to 0. Without this guard the
+    // screen offers "Pay" again 30 minutes in, and someone who has just been
+    // through Checkout for $6,250 pays it twice.
+    //
+    // Resolution is by shared PaymentIntent: the day-3 'paid' row (from
+    // async_payment_succeeded) and the day-3 'failed' row (from
+    // async_payment_failed) both carry the marker's provider_object_id. A
+    // marker with neither is still in flight. The 'failed' half is what stops
+    // a bounce from blocking the requirement permanently — see the webhook.
+    //
+    // Deliberately blocks PARTIAL payments too, not just a repeat of the same
+    // amount. Letting someone card-pay the balance while an ACH deposit is
+    // clearing is not a double charge and would work — but it produces a
+    // half-settled requirement that nobody can explain over chat, and the cost
+    // of waiting is three days rather than money.
+    // Bounded, and the bound matters as much as the guard — `inflight.ts` has
+    // the reasoning and the tests.
+    if (hasClearingBankPayment(events ?? [], isLivemode)) {
+      return json(
+        {
+          error:
+            "Your bank payment is still on its way. Bank transfers take up to 4 business days — we'll update this as soon as it lands.",
+        },
+        400,
+      );
+    }
+
     const paid = (events ?? [])
-      .filter(e => e.event_type !== 'failed' && e.is_livemode === isLivemode)
+      // 'processing' joins 'failed' here. Both are pinned to amount_usd = 0 by
+      // otpe_amount_sign_matches_type, so neither can move this sum — the
+      // exclusion is the same belt-and-suspenders the 'failed' filter is, kept
+      // explicit so the arithmetic never depends on a CHECK holding.
+      .filter(
+        e => e.event_type !== 'failed' && e.event_type !== 'processing' && e.is_livemode === isLivemode,
+      )
       .reduce((s, e) => s + Number(e.amount_usd), 0);
     const outstanding = Math.max(0, due - paid);
     if (outstanding <= 0) return json({ error: 'Already paid' }, 400);
@@ -651,11 +691,52 @@ serve(async req => {
     // note above records that this exact mistake took the whole payment flow
     // down once.
     // m3 → m4: `payment_intent_data[on_behalf_of]` joined the create call.
-    const idempotencyKey = `checkout:m4:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
+    // m4 → m5: `payment_method_types` joined it (ACH).
+    // m5 → m6: `payment_method_options[us_bank_account]` joined it (instant-only).
+    const idempotencyKey = `checkout:m6:${userId}:${requirementId}:${amountCents}:${(events ?? []).length}${idempotencySuffix}`;
     const session = await stripe(
       'checkout/sessions',
       {
         mode: 'payment',
+        // ⚠️ Set EXPLICITLY rather than left to Stripe's dynamic payment
+        // methods, which take whatever is ticked in the Dashboard. Two
+        // reasons, both about predictability of money:
+        //
+        //   • what a traveler is offered stops depending on a setting nobody
+        //     in this repo can see, in an account that is shared with the
+        //     Connect work;
+        //   • a method enabled in the Dashboard for some unrelated reason
+        //     cannot silently appear on a surf-trip checkout and settle on
+        //     rails the webhook has never been tested against.
+        //
+        // `us_bank_account` is ACH Direct Debit — Stripe charges 0.8% capped
+        // at $5.00, against 2.9% + $0.30 uncapped for a card. Above roughly
+        // $625 the bank rail is always cheaper, and operator trips are all
+        // above $625.
+        //
+        // ⚠️ ACH DOES NOT SETTLE AT CHECKOUT. It completes with
+        // `payment_status: 'processing'` and resolves about three business
+        // days later. The whole of docs/specs/operator-trips/
+        // ach-bank-payments.md exists because of that one fact — do not add a
+        // delayed-settlement method here without reading it.
+        'payment_method_types[0]': 'card',
+        'payment_method_types[1]': 'us_bank_account',
+        // ⚠️ INSTANT VERIFICATION ONLY. Without this, Checkout also offers
+        // "enter bank details manually", which routes through MICRODEPOSITS:
+        // Stripe sends two cents-sized deposits (1–2 business days), emails the
+        // traveler a link, they type the amounts in, and only THEN does the
+        // ~3-day transfer begin — with a 10-day window to give up. On a real
+        // test (27 Aug 2026, Sababa on El Salvador 26) that path completed
+        // Checkout with a payment_status this webhook does not treat as
+        // in-flight, and failed 20 seconds later. A traveler who cannot log
+        // into their bank should pay by card; a week-long limbo on a $1,000
+        // deposit is not a payment method, it is a support ticket.
+        //
+        // `financial_connections[permissions][0]=payment_method` is the
+        // minimum permission the instant flow needs — nothing else about the
+        // account is read.
+        'payment_method_options[us_bank_account][verification_method]': 'instant',
+        'payment_method_options[us_bank_account][financial_connections][permissions][0]': 'payment_method',
         'line_items[0][quantity]': '1',
         'line_items[0][price_data][currency]': 'usd',
         'line_items[0][price_data][unit_amount]': String(amountCents),

@@ -5,24 +5,27 @@
  * a flight for a person, so "is Maya ready?" is the question they actually have;
  * "are all the passports in?" is not.
  *
- * Three levels, one Modal:
- *   1. Everyone on the trip, people who need a decision first.
- *   2. One traveler's items — OR one requirement across every traveler.
- *   3. The document itself (DocumentViewer), with Approve / Ask again.
+ * Organised BY DOCUMENT since the Figma redesign (Ohad, 14 Sep — frames
+ * 14980-66552 / -66698 / 14981-68385 / 14980-67220). Four steps, one Modal:
+ *   1. Documents — every requirement, "Passport 2/3 approved".
+ *   2. One requirement across every traveler — totals, filters, and a
+ *      "Send reminder" on each person who has not sent it.
+ *   3. One traveler's file — preview, facts, Approve / Request Resubmission.
+ *   4. The file full screen (DocumentViewer), read-only, from the expand button.
  *
- * Level 2 has TWO shapes because there are two honest ways to ask the question,
- * and the Dashboard offers both doors (Ohad, 5 Aug). "Is Maya ready?" opens the
- * traveler shape; tapping "Passport" in the Documents card opens the requirement
- * shape — every traveler's passport, one row each. Level 3 is the same viewer
- * either way, so approving from one door behaves exactly like the other.
+ * The traveler shape and the waiting queue below are still reachable through
+ * `initialUserId` / `initialWaiting`; nothing on the Dashboard opens them today.
+ *
+ * Level 3 is the same screen whichever list opened it, so approving from one
+ * door behaves exactly like the other.
  *
  * Only UPLOADS are approvable. A waiver is agreed to and a medical form is
  * filled in — both are self-completing, so this shows them as facts and offers
  * no decision. Pretending otherwise would leave the host tapping Approve on
  * something the RPCs cannot record.
  *
- * Nothing here caches a signed URL: the viewer mints its own, per open, and the
- * list never renders a thumbnail. A row of passport thumbnails would mean a
+ * Nothing here caches a signed URL: the preview and the viewer each mint their
+ * own, per open, and no LIST ever renders a thumbnail. A row of passport thumbnails would mean a
  * signed URL per row and a decrypted copy in the image cache, which is exactly
  * what the private bucket exists to prevent.
  */
@@ -37,7 +40,9 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  StatusBar,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,16 +52,35 @@ import { TripIcon } from './tripIcons';
 import { DOC_ICON } from './plan/PlanSections';
 import { DocumentViewer } from './DocumentViewer';
 import { RejectDocumentSheet } from './RejectDocumentSheet';
+import { PressableScale } from './PressableScale';
 import { ff } from '../../theme/fonts';
 import { plural } from './dashboard/dashboardFormat';
 import {
   approveDocuments,
   rejectDocument,
-  remindRequirement,
+  remindTravelerRequirement,
   type ReviewItem,
   type TravelerReview,
 } from '../../services/trips/tripDocumentsService';
-import { PressableScale } from './PressableScale';
+import {
+  DarkHeader,
+  DocumentDetail,
+  DocumentsList,
+  HeaderPill,
+  RequirementPeople,
+  canOpenFile,
+  type PeopleFilter,
+  type PersonRow,
+  type RequirementSummary,
+} from './documents/DocumentReviewParts';
+import {
+  exportDocumentsAsZip,
+  shareSingleDocument,
+  safeFileName as exportSafeName,
+  CAN_EXPORT,
+  EXPORT_MAX_FILES,
+  type ExportFile,
+} from '../../services/trips/exportService';
 import { showErrorAlert } from '../../utils/friendlyError';
 import { SkeletonBase } from '../skeletons/SkeletonPrimitives';
 
@@ -141,6 +165,12 @@ function waitingNames(r: TravelerReview | undefined): string | null {
   if (names.length === 0) return null;
   if (names.length <= 2) return names.join(', ');
   return `${names[0]}, ${names[1]} +${names.length - 2}`;
+}
+
+/** Level 3 offers a decision on an upload that is waiting or approved. A file
+ *  already sent back has nothing left to decide on. */
+function isUploadDecidable(item: ReviewItem): boolean {
+  return canOpenFile(item) && (item.state === 'submitted' || item.state === 'approved');
 }
 
 const ItemIcon: React.FC<{ kind: string }> = ({ kind }) =>
@@ -321,21 +351,52 @@ export const DocumentReviewScreen: React.FC<{
     setLevel2(initialLevel2(initialUserId, initialRequirementId, initialWaiting));
   }, [visible, initialUserId, initialRequirementId, initialWaiting]);
 
+  useEffect(() => {
+    if (!visible) return;
+    setDetail(null);
+  }, [visible]);
+
   const openUserId = level2?.kind === 'traveler' ? level2.userId : null;
   const openRequirementId = level2?.kind === 'requirement' ? level2.requirementId : null;
   const waitingMode = level2?.kind === 'waiting';
+
+  // A filter chosen on one document must not follow you into the next.
+  useEffect(() => {
+    setFilter('all');
+  }, [openRequirementId]);
+
+  useEffect(
+    () => () => {
+      const paths = sharedPaths.current;
+      sharedPaths.current = [];
+      if (paths.length === 0) return;
+      const FileSystem = require('expo-file-system/legacy');
+      paths.forEach(p =>
+        FileSystem.deleteAsync(p, { idempotent: true }).catch(() => {
+          // Best effort — the OS reclaims its cache directory.
+        }),
+      );
+    },
+    [],
+  );
 
   // The viewer needs to name the traveler whose file it is showing, and from
   // the requirement door that is NOT the traveler who is "open" — there isn't
   // one. So the owner rides along with the item rather than being inferred.
   const [viewing, setViewing] = useState<{ item: ReviewItem; userId: string } | null>(null);
+  /** Level 3: one traveler's file. By ids, not by item, so an approval that
+   *  refetches the review re-renders it in its new state. */
+  const [detail, setDetail] = useState<{ userId: string; requirementId: string } | null>(null);
   const [rejecting, setRejecting] = useState<ReviewItem | null>(null);
   const [busy, setBusy] = useState(false);
-  // Reminders: whether one is in flight, and what the last send reported.
-  // Keyed by requirement so walking to another document and back does not show
-  // a message about the one before it.
-  const [sending, setSending] = useState(false);
-  const [sent, setSent] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState<PeopleFilter>('all');
+  // Per-person reminders, keyed `${requirementId}:${userId}`. What the server
+  // said is kept for the session so the row stops offering a second push.
+  const [reminded, setReminded] = useState<Record<string, 'sending' | 'sent' | 'skipped'>>({});
+  const [downloading, setDownloading] = useState(false);
+  /** Files handed to the share sheet from level 3. Deleted when this closes —
+   *  not when the share resolves; see shareSingleDocument. */
+  const sharedPaths = React.useRef<string[]>([]);
 
   const byUser = useMemo(() => {
     const m = new Map<string, TravelerReview>();
@@ -396,23 +457,68 @@ export const DocumentReviewScreen: React.FC<{
   const openRequirement = requirementRows?.[0]?.item ?? null;
 
   /**
-   * How many people this requirement is still waiting on.
+   * Export what is on screen — one traveler's documents, or one document type
+   * across everyone. Product Specs §"Manage trip": "export all docs."
    *
-   * Counted off the SAME rows the list above renders, so the number on the
-   * button and the names on screen can never disagree — that was the risk in
-   * deriving it from a separate tally on the Dashboard card.
+   * NOT the whole trip. Decision D4, 4 Sep 2026: JSZip builds the archive in
+   * memory, and sixty phone photos is how a mid-range Android kills the app.
+   * The trip-wide export streams to disk in the operator dashboard, which is
+   * where it stays. See exportService's header.
+   *
+   * Same `canApprove` gate the single-file export in DocumentViewer uses — a
+   * traveler never reaches this screen, but the rule is worth stating once
+   * rather than assumed twice.
    */
-  const owed =
-    requirementRows?.filter(
-      r => r.item.state !== 'submitted' && r.item.state !== 'approved',
-    ).length ?? 0;
+  const [exportingZip, setExportingZip] = useState<string | null>(null);
 
-  // Pay rows never offer Remind: fetchTripReview hardcodes them to
-  // `not_started`, so `owed` would read as everybody — including the people who
-  // have already paid. The RPC refuses them too, so the two sides agree rather
-  // than one being quietly wrong. (D3.)
-  const canRemind =
-    canApprove && !!openRequirement && owed > 0 && openRequirement.reqType !== 'pay';
+  const runExport = useCallback(
+    async (files: ExportFile[], zipName: string, key: string) => {
+      if (exportingZip || files.length === 0) return;
+      setExportingZip(key);
+      try {
+        const res = await exportDocumentsAsZip(files, zipName, (done, total) =>
+          setExportingZip(`${key}:${done}/${total}`),
+        );
+        if (res.failed > 0 || res.trimmed) {
+          // Said after the share sheet, not instead of it: the archive is
+          // real and already in their hands. This explains what is not in it.
+          Alert.alert(
+            'Some files are missing',
+            [
+              res.failed > 0
+                ? `${plural(res.failed, 'file')} could not be downloaded.`
+                : null,
+              res.trimmed
+                ? `Only the first ${EXPORT_MAX_FILES} were included. Use the operator dashboard on a computer for the rest.`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' '),
+          );
+        }
+      } catch (e) {
+        showErrorAlert('Could not export', e, 'Could not package those documents.');
+      } finally {
+        setExportingZip(null);
+      }
+    },
+    [exportingZip],
+  );
+
+  /** Only rows that still have a file behind them. A waiver signature and a
+   *  medical form are rows, not documents, and there is nothing to put in a
+   *  zip for them. */
+  const exportableOf = (items: { item: ReviewItem; name: string | null }[]): ExportFile[] =>
+    items
+      .filter(
+        ({ item }) =>
+          !!item.storagePath && !item.fileDeleted && item.kind !== 'medical',
+      )
+      .map(({ item, name }) => ({
+        storagePath: item.storagePath as string,
+        name: exportSafeName([name, item.title].filter(Boolean).join(' - ')),
+        isPdf: /\.pdf$/i.test(item.storagePath ?? ''),
+      }));
 
   /**
    * Level 2, waiting shape: everything the operator has to act on, whoever
@@ -443,8 +549,105 @@ export const DocumentReviewScreen: React.FC<{
     [travelers],
   );
 
+  /**
+   * Level 1: one line per requirement — approved of everyone asked (Ohad,
+   * 14 Sep). Pay rows are money, not documents, and the review data cannot even
+   * tell who paid (see fetchTripReview), so they are left out.
+   */
+  const requirementSummaries = useMemo<RequirementSummary[]>(() => {
+    const out = new Map<string, RequirementSummary>();
+    for (const t of travelers) {
+      for (const item of byUser.get(t.userId)?.items ?? []) {
+        if (item.reqType === 'pay') continue;
+        const row = out.get(item.requirementId) ?? {
+          requirementId: item.requirementId,
+          title: item.title,
+          kind: item.kind,
+          approved: 0,
+          total: 0,
+        };
+        row.total += 1;
+        if (item.state === 'approved') row.approved += 1;
+        out.set(item.requirementId, row);
+      }
+    }
+    return [...out.values()];
+  }, [travelers, byUser]);
+
+  const detailRow = useMemo<PersonRow | null>(() => {
+    if (!detail) return null;
+    const traveler = travelers.find(t => t.userId === detail.userId);
+    const item = byUser.get(detail.userId)?.items.find(i => i.requirementId === detail.requirementId);
+    return traveler && item ? { traveler, item } : null;
+  }, [detail, travelers, byUser]);
+
+  /** What the file is called in Mail or WhatsApp — never the storage key. */
+  const fileNameOf = (row: PersonRow) =>
+    `${exportSafeName([row.traveler.name, row.item.title].filter(Boolean).join(' - '))}.${
+      /\.pdf$/i.test(row.item.storagePath ?? '') ? 'pdf' : 'jpg'
+    }`;
+
+  const shareDetailFile = useCallback(async () => {
+    if (!detailRow?.item.storagePath || downloading) return;
+    setDownloading(true);
+    try {
+      const uri = await shareSingleDocument({
+        storagePath: detailRow.item.storagePath,
+        name: [detailRow.traveler.name, detailRow.item.title].filter(Boolean).join(' - '),
+        isPdf: /\.pdf$/i.test(detailRow.item.storagePath),
+      });
+      sharedPaths.current.push(uri);
+    } catch (e) {
+      // Never log the path or the raw error — either can carry the storage key.
+      console.error('[DocumentReview] share failed');
+      showErrorAlert('Could not export', e, 'Could not export this document.');
+    } finally {
+      setDownloading(false);
+    }
+  }, [detailRow, downloading]);
+
+  /**
+   * Remind ONE traveler about this document.
+   *
+   * Confirmed first: it is a real push to a real phone, with no undo. The server
+   * skips anyone reminded about this in the last day, and the row says which
+   * of the two happened rather than claiming a send that did not go out.
+   */
+  const remindOne = useCallback(
+    (row: PersonRow) => {
+      const key = `${row.item.requirementId}:${row.traveler.userId}`;
+      if (reminded[key]) return;
+      const who = row.traveler.name ?? 'this traveler';
+      Alert.alert(`Remind ${who}?`, `They get a notification to send “${row.item.title}”.`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send',
+          onPress: async () => {
+            setReminded(r => ({ ...r, [key]: 'sending' }));
+            try {
+              const n = await remindTravelerRequirement(
+                tripId,
+                row.item.requirementId,
+                row.traveler.userId,
+              );
+              setReminded(r => ({ ...r, [key]: n > 0 ? 'sent' : 'skipped' }));
+            } catch (e) {
+              setReminded(r => {
+                const { [key]: _drop, ...rest } = r;
+                return rest;
+              });
+              showErrorAlert('Could not send the reminder', e, 'Please try again.');
+            }
+          },
+        },
+      ]);
+    },
+    [reminded, tripId],
+  );
+
   const close = useCallback(() => {
     setLevel2(null);
+    setDetail(null);
     setViewing(null);
     setRejecting(null);
     onClose();
@@ -458,66 +661,19 @@ export const DocumentReviewScreen: React.FC<{
    * it on the way out is a screen nobody asked for.
    */
   const goBack = useCallback(() => {
-    if (level2?.root === true || !level2) close();
+    if (detail) setDetail(null);
+    else if (level2?.root === true || !level2) close();
     else setLevel2(null);
-  }, [level2, close]);
+  }, [detail, level2, close]);
 
-  // `waitingMode`, not `waitingRows.length` — approving the last document must
-  // leave the operator on an empty queue that says so, not drop them back to
-  // the traveler list mid-tap.
-  const inLevel2 = !!openReview || !!openRequirement || waitingMode;
-
-  /**
-   * Chase everyone who still owes this one.
-   *
-   * Confirmed first, always. It sends a real push to real phones, and no undo
-   * exists — the only protection against notifying fifteen people by accident
-   * is the operator having said yes twice.
-   */
-  const remind = useCallback(() => {
-    if (!openRequirement || sending) return;
-    const { requirementId, title } = openRequirement;
-    Alert.alert(
-      `Remind ${plural(owed, 'person', 'people')}?`,
-      `Everyone who has not sent “${title}” gets a notification. Anyone already reminded about it today is skipped.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send',
-          onPress: async () => {
-            setSending(true);
-            try {
-              const n = await remindRequirement(tripId, requirementId);
-              setSent(s => ({
-                ...s,
-                // The honest number. `n` is what the server actually sent — the
-                // cooldown may have dropped some — and an operator told
-                // "reminded 8" who then hears nothing back needs to know
-                // whether the message went out at all.
-                [requirementId]:
-                  n === 0
-                    ? 'Everyone was already reminded today'
-                    : n < owed
-                      ? `Reminded ${n} · ${owed - n} already reminded today`
-                      : `Reminded ${plural(n, 'person', 'people')}`,
-              }));
-            } catch (e) {
-              showErrorAlert('Could not send reminders', e, 'Please try again.');
-            } finally {
-              setSending(false);
-            }
-          },
-        },
-      ],
-    );
-  }, [openRequirement, owed, sending, tripId]);
 
   const handleApprove = useCallback(async () => {
-    if (!viewing?.item.documentId || busy) return;
+    const item = detailRow?.item;
+    if (!item?.documentId || busy) return;
     setBusy(true);
     try {
-      await approveDocuments([viewing.item.documentId]);
-      setViewing(null);
+      await approveDocuments([item.documentId]);
+      // Stay on the file: the refetch redraws it as approved (Figma 14980-67220).
       onChanged();
     } catch (e) {
       console.error('[DocumentReview] approve failed:', e);
@@ -525,7 +681,7 @@ export const DocumentReviewScreen: React.FC<{
     } finally {
       setBusy(false);
     }
-  }, [viewing, busy, onChanged]);
+  }, [detailRow, busy, onChanged]);
 
   const handleReject = useCallback(
     async (note: string) => {
@@ -538,6 +694,8 @@ export const DocumentReviewScreen: React.FC<{
         );
         setRejecting(null);
         setViewing(null);
+        // Sending it back deletes the file, so there is nothing left to show.
+        setDetail(null);
         onChanged();
       } catch (e) {
         console.error('[DocumentReview] reject failed:', e);
@@ -553,12 +711,32 @@ export const DocumentReviewScreen: React.FC<{
     // Only an upload has anything to open. A waiver or medical row is a fact,
     // not a document.
     if (item.reqType === 'acknowledge' || item.kind === 'medical') return;
-    if (!item.storagePath || item.fileDeleted) {
+    if (!canOpenFile(item)) {
       Alert.alert('No longer available', 'This file has been deleted.');
       return;
     }
-    setViewing({ item, userId });
+    setDetail({ userId, requirementId: item.requirementId });
   }, []);
+
+  const headerTitle = detailRow
+    ? detailRow.traveler.name ?? 'Traveler'
+    : waitingMode
+      ? 'Waiting for you'
+      : openRequirement
+        ? openRequirement.title
+        : openTraveler
+          ? openTraveler.name ?? 'Traveler'
+          : 'Documents';
+
+  /** Everything this document type has on file, for the header's Export all. */
+  const requirementExport =
+    !detailRow && openRequirement && requirementRows && CAN_EXPORT && canApprove
+      ? exportableOf(requirementRows.map(r => ({ item: r.item, name: r.traveler.name })))
+      : [];
+
+  // The footer only exists on level 3, and only for someone who may decide.
+  const footer =
+    detailRow && canApprove && isUploadDecidable(detailRow.item) ? detailRow.item.state : null;
 
   return (
     <>
@@ -574,64 +752,39 @@ export const DocumentReviewScreen: React.FC<{
             ? () => setRejecting(null)
             : viewing
             ? () => setViewing(null)
-            : goBack
+            : goBack // goBack steps out of level 3 first
         }
         statusBarTranslucent
         {...(Platform.OS === 'android' ? { navigationBarTranslucent: true } : {})}
       >
-        <View style={[styles.root, { paddingTop: insets.top }]}>
-          <View style={styles.header}>
-            <Pressable
-              onPress={goBack}
-              hitSlop={12}
-              style={styles.headerBtn}
-            >
-              {/* A chevron whenever there is somewhere to go back TO — which
-                  from a landed level 2 is the Dashboard row that opened it, not
-                  a screen inside here. The X is for the traveler root, the one
-                  place where back and dismiss are the same thing. */}
-              <Ionicons
-                name={inLevel2 ? 'chevron-back' : 'close'}
-                size={inLevel2 ? 24 : 26}
-                color="#212121"
-              />
-            </Pressable>
-            <View style={styles.headerText}>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {waitingMode
-                  ? 'Waiting for you'
-                  : openRequirement
-                  ? openRequirement.title
-                  : openTraveler
-                  ? openTraveler.name ?? 'Traveler'
-                  : 'Review documents'}
-              </Text>
-              <Text style={styles.headerSub} numberOfLines={1}>
-                {waitingRows
-                  ? waitingRows.length === 0
-                    ? 'Nothing to review'
-                    : `${plural(waitingRows.length, 'document')} across ${plural(
-                        new Set(waitingRows.map(r => r.traveler.userId)).size,
-                        'traveler',
-                      )}`
-                  : openRequirement && requirementRows
-                  ? requirementSummary(
-                      openRequirement,
-                      requirementRows.filter(
-                        r => r.item.state === 'submitted' || r.item.state === 'approved',
-                      ).length,
-                      requirementRows.filter(r => r.item.state === 'approved').length,
-                      requirementRows.length,
+        <View style={styles.root}>
+          {/* The dark header runs up under the status bar. */}
+          <View style={[styles.statusBarFill, { height: insets.top }]} />
+          <StatusBar barStyle="light-content" />
+          <DarkHeader
+            title={headerTitle}
+            topInset={0}
+            onBack={goBack}
+            right={
+              requirementExport.length > 0 && openRequirement ? (
+                <HeaderPill
+                  label={
+                    exportingZip?.startsWith(`req:${openRequirement.requirementId}`)
+                      ? `Packaging ${exportingZip.split(':')[2] ?? ''}…`
+                      : 'Export all'
+                  }
+                  disabled={!!exportingZip}
+                  onPress={() =>
+                    runExport(
+                      requirementExport,
+                      `${openRequirement.title} (${requirementExport.length})`,
+                      `req:${openRequirement.requirementId}`,
                     )
-                  : openReview
-                  ? `${openReview.done} of ${openReview.total} done`
-                  : totalToReview > 0
-                  ? `${totalToReview} waiting for you`
-                  : 'Nothing waiting'}
-              </Text>
-            </View>
-            <View style={styles.headerBtn} />
-          </View>
+                  }
+                />
+              ) : null
+            }
+          />
 
           {loading ? (
             // Round leading shape for the traveler queue (avatars), square for
@@ -641,11 +794,24 @@ export const DocumentReviewScreen: React.FC<{
             <ScrollView
               contentContainerStyle={[
                 styles.body,
-                { paddingBottom: Math.max(insets.bottom, 16) + 24 },
+                // Clear the footer's buttons when level 3 shows them.
+                { paddingBottom: Math.max(insets.bottom, 16) + (footer ? 170 : 24) },
               ]}
             >
-              {/* ── Level 2c: everything waiting, whoever sent it ───────── */}
-              {waitingRows ? (
+              {/* ── Level 3: one traveler's file ───────────────────────── */}
+              {detailRow ? (
+                <DocumentDetail
+                  row={detailRow}
+                  fileName={fileNameOf(detailRow)}
+                  onExpand={() =>
+                    setViewing({ item: detailRow.item, userId: detailRow.traveler.userId })
+                  }
+                  onDownload={CAN_EXPORT && canApprove ? shareDetailFile : undefined}
+                  downloading={downloading}
+                />
+              ) :
+              /* ── Level 2c: everything waiting, whoever sent it ───────── */
+              waitingRows ? (
                 <View style={styles.card}>
                   {waitingRows.length === 0 ? (
                     <View style={[styles.row, styles.rowLast]}>
@@ -691,83 +857,19 @@ export const DocumentReviewScreen: React.FC<{
                 </View>
               ) : /* ── Level 2b: one requirement, everyone ───────────────── */
               openRequirement && requirementRows ? (
-                <>
-                <View style={styles.card}>
-                  {requirementRows.map(({ traveler, item }, i) => {
-                    const reviewable = item.state === 'submitted' && !!item.documentId;
-                    const viewable =
-                      item.reqType !== 'acknowledge' &&
-                      item.kind !== 'medical' &&
-                      !!item.storagePath &&
-                      !item.fileDeleted;
-                    const isLast = i === requirementRows.length - 1;
-                    return (
-                      <Pressable
-                        key={traveler.userId}
-                        onPress={viewable ? () => openItem(item, traveler.userId) : undefined}
-                        disabled={!viewable}
-                        style={({ pressed }) => [
-                          styles.row,
-                          isLast && styles.rowLast,
-                          pressed && styles.rowPressed,
-                        ]}
-                      >
-                        {/* The person, not the document type — every row here
-                            IS this document type, so repeating its icon seven
-                            times would carry no information. */}
-                        <Avatar uri={traveler.avatarUrl} />
-                        <View style={styles.rowText}>
-                          <Text style={styles.rowTitle} numberOfLines={1}>
-                            {traveler.name ?? 'Traveler'}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.rowSub,
-                              (item.state === 'overdue' || item.state === 'rejected') &&
-                                styles.rowSubBad,
-                            ]}
-                            numberOfLines={2}
-                          >
-                            {itemSubtitle(item)}
-                          </Text>
-                        </View>
-                        {reviewable ? (
-                          <Text style={styles.pillAccent}>Review</Text>
-                        ) : item.state === 'approved' ? (
-                          <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                        ) : viewable ? (
-                          <Ionicons name="chevron-forward" size={18} color="#C9C9C9" />
-                        ) : null}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-
-                {/* The chase, under the list of the very people it notifies.
-                    Reads as a sentence with the rows above it: these three have
-                    not done it, remind them. Tinted rather than filled — it is
-                    the only action on this screen, but it fires a push to other
-                    people's phones, so it should not look like a Continue. */}
-                {sent[openRequirement.requirementId] ? (
-                  <View style={styles.remindDoneRow}>
-                    <Ionicons name="checkmark-circle" size={16} color="#34C759" />
-                    <Text style={styles.remindDoneText}>
-                      {sent[openRequirement.requirementId]}
-                    </Text>
-                  </View>
-                ) : canRemind ? (
-                  <PressableScale onPress={remind} disabled={sending} style={styles.remindBtn}>
-                    {sending ? (
-                      <ActivityIndicator size="small" color="#05BCD3" />
-                    ) : (
-                      <Ionicons name="notifications-outline" size={17} color="#05BCD3" />
-                    )}
-                    <Text style={styles.remindBtnText}>
-                      Remind {plural(owed, 'person', 'people')}
-                    </Text>
-                  </PressableScale>
-                ) : null}
-                </>
+                <RequirementPeople
+                  rows={requirementRows}
+                  filter={filter}
+                  onFilter={setFilter}
+                  onOpen={row => openItem(row.item, row.traveler.userId)}
+                  // Pay rows are refused by the server; see remindRequirement.
+                  onRemind={canApprove && openRequirement.reqType !== 'pay' ? remindOne : undefined}
+                  reminded={Object.fromEntries(
+                    Object.entries(reminded)
+                      .filter(([k]) => k.startsWith(`${openRequirement.requirementId}:`))
+                      .map(([k, v]) => [k.split(':')[1], v]),
+                  )}
+                />
               ) : /* ── Level 2: one traveler's items ────────────────────── */
               openReview ? (
                 <>
@@ -818,69 +920,105 @@ export const DocumentReviewScreen: React.FC<{
                     );
                   })}
                 </View>
+                {/* This person's whole file, as one archive. */}
+                {CAN_EXPORT && canApprove
+                  ? (() => {
+                      const files = exportableOf(
+                        openReview.items.map(item => ({ item, name: null })),
+                      );
+                      if (files.length === 0) return null;
+                      const key = `trav:${openReview.userId}`;
+                      const busy = exportingZip?.startsWith(key);
+                      const who = openTraveler?.name ?? 'Traveler';
+                      return (
+                        <PressableScale
+                          onPress={() => runExport(files, `${who} (${files.length})`, key)}
+                          disabled={!!exportingZip}
+                          style={styles.exportBtn}
+                          accessibilityLabel={`Export ${who}'s documents`}
+                        >
+                          <Ionicons name="download-outline" size={15} color="#5A5A5A" />
+                          <Text style={styles.exportText}>
+                            {busy
+                              ? `Packaging ${exportingZip?.split(':')[2] ?? ''}…`
+                              : `Export their documents (${files.length})`}
+                          </Text>
+                        </PressableScale>
+                      );
+                    })()
+                  : null}
+
                 {/* Money, medical and the per-person actions. Supplied by the
                     Dashboard tab; absent everywhere else, which is what keeps
                     this screen usable on its own. */}
                 {renderTravelerExtras?.(openReview.userId)}
                 </>
               ) : (
-                /* ── Level 1: everyone ─────────────────────────────────── */
-                <View style={styles.card}>
-                  {ordered.length === 0 ? (
-                    <View style={[styles.row, styles.rowLast]}>
-                      <Text style={styles.empty}>No travelers on this trip yet.</Text>
-                    </View>
-                  ) : (
-                    ordered.map((t, i) => {
-                      const r = byUser.get(t.userId);
-                      const waiting = (r?.toReview ?? 0) > 0;
-                      const complete = !!r && r.done === r.total && r.total > 0;
-                      const isLast = i === ordered.length - 1;
-                      // Names first, progress second. Whoever is at the top of
-                      // this queue is there because something needs deciding,
-                      // and "which one?" is the question they have; the ratio
-                      // still rides along and truncates if it must.
-                      const names = waitingNames(r);
-                      const progress = r ? `${r.done} of ${r.total} done` : 'nothing yet';
-                      return (
-                        <Pressable
-                          key={t.userId}
-                          onPress={() => setLevel2({ kind: 'traveler', userId: t.userId })}
-                          style={({ pressed }) => [
-                            styles.row,
-                            isLast && styles.rowLast,
-                            pressed && styles.rowPressed,
-                          ]}
-                        >
-                          <Avatar uri={t.avatarUrl} />
-                          <View style={styles.rowText}>
-                            <Text style={styles.rowTitle} numberOfLines={1}>
-                              {t.name ?? 'Traveler'}
-                            </Text>
-                            <Text style={styles.rowSub} numberOfLines={1}>
-                              {names ? `${names} · ${progress}` : progress}
-                            </Text>
-                          </View>
-                          {waiting ? (
-                            <Text style={styles.pillAccent}>
-                              {r!.toReview} to review
-                            </Text>
-                          ) : complete ? (
-                            <Ionicons name="checkmark-circle" size={20} color="#34C759" />
-                          ) : (
-                            <Ionicons name="chevron-forward" size={18} color="#C9C9C9" />
-                          )}
-                        </Pressable>
-                      );
-                    })
-                  )}
-                </View>
+                /* ── Level 1: every document ───────────────────────────── */
+                <DocumentsList
+                  rows={requirementSummaries}
+                  onOpen={requirementId => setLevel2({ kind: 'requirement', requirementId })}
+                />
               )}
             </ScrollView>
           )}
+
+          {/* Level 3's decision, over a fade like the trip screen's Trip Chat. */}
+          {footer ? (
+            <View style={styles.footer} pointerEvents="box-none">
+              <LinearGradient
+                colors={['rgba(250,250,250,0)', 'rgba(250,250,250,0.85)', '#FAFAFA']}
+                locations={[0, 0.35, 0.7]}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+              <View style={[styles.footerInner, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+                {footer === 'submitted' ? (
+                  <Pressable
+                    onPress={handleApprove}
+                    disabled={busy}
+                    style={({ pressed }) => [styles.cta, styles.ctaAccent, (pressed || busy) && styles.ctaDim]}
+                    accessibilityRole="button"
+                  >
+                    {busy ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.ctaText}>Approve document</Text>
+                    )}
+                  </Pressable>
+                ) : CAN_EXPORT ? (
+                  <Pressable
+                    onPress={shareDetailFile}
+                    disabled={downloading}
+                    style={({ pressed }) => [styles.cta, styles.ctaBlack, (pressed || downloading) && styles.ctaDim]}
+                    accessibilityRole="button"
+                  >
+                    {downloading ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <>
+                        <TripIcon name="upload-01" size={24} color="#FFFFFF" strokeWidth={1.17} />
+                        <Text style={styles.ctaText}>Export file</Text>
+                      </>
+                    )}
+                  </Pressable>
+                ) : null}
+                {/* Allowed on an approved file too: the server's reject clears
+                    the approval, deletes the file and tells the traveler. */}
+                <Pressable
+                  onPress={() => detailRow && setRejecting(detailRow.item)}
+                  disabled={busy}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.ctaSecondary}>Request Resubmission</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
         </View>
 
-        {/* ── Level 3: the document itself ───────────────────────────────── */}
+        {/* ── Level 4: the file full screen ──────────────────────────────── */}
         {/* INSIDE this Modal, as a layer (`inline`), never as a Modal of its
             own. Two RN Modals presented at once is what strands an invisible
             view controller on iOS when they dismiss in overlapping frames —
@@ -895,21 +1033,10 @@ export const DocumentReviewScreen: React.FC<{
           onClose={() => setViewing(null)}
           storagePath={viewing?.item.storagePath ?? null}
           title={viewing?.item.title ?? 'Document'}
-          // A decision is only offered while there is one to make — and only
-          // to a viewer who may make it. An already approved file stays
-          // viewable, read-only.
-          onApprove={
-            canApprove && viewing?.item.state === 'submitted' ? handleApprove : undefined
-          }
-          onReject={
-            canApprove && viewing?.item.state === 'submitted'
-              ? () => setRejecting(viewing.item)
-              : undefined
-          }
-          busy={busy}
-          // This screen is the host's, so export belongs here and nowhere a
-          // traveler can reach. See the note on `allowExport`.
-          allowExport
+          // Read-only: the decision lives on level 3, under the facts it is
+          // made from. This is only the full-size look (the expand button).
+          // Export stays a host capability — see the note on `allowExport`.
+          allowExport={canApprove}
           // Offer "Copy details" on passports only. The operator retypes these
           // into a flight booking, which is the whole reason we hold a passport
           // at all — see passport-upload-v1.md §1.
@@ -953,6 +1080,37 @@ export const DocumentReviewScreen: React.FC<{
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FAFAFA' },
+  statusBarFill: { backgroundColor: '#212121' },
+  footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 60 },
+  footerInner: { paddingHorizontal: 40, gap: 16, alignItems: 'stretch' },
+  cta: {
+    height: 56,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 24,
+  },
+  ctaAccent: { backgroundColor: '#05BCD3' },
+  ctaBlack: { backgroundColor: '#212121' },
+  ctaDim: { opacity: 0.85 },
+  ctaText: {
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  // Size/md 14/18 (get_variable_defs on 14981:68554; the export says 18/22).
+  ctaSecondary: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
+    color: '#333333',
+    textAlign: 'center',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -970,7 +1128,7 @@ const styles = StyleSheet.create({
   },
   headerSub: { fontFamily: ff('Inter', '400'), fontSize: 12, color: '#7B7B7B', marginTop: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  body: { padding: 16 },
+  body: { paddingHorizontal: 16, paddingTop: 24 },
   card: {
     borderRadius: 12,
     borderWidth: 1,
@@ -1014,6 +1172,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#05BCD3',
+  },
+  // Quiet, outlined — an export takes files out of the product, so it should
+  // not look like the primary thing to do on the screen.
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    marginTop: 14,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
+  },
+  exportText: {
+    fontFamily: ff('Inter', '500'),
+    fontSize: 13.5,
+    color: '#5A5A5A',
   },
   remindDoneRow: {
     flexDirection: 'row',

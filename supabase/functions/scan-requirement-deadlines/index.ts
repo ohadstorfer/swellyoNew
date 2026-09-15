@@ -52,6 +52,31 @@ function dueDateLabel(dateStr: string): string {
   }
 }
 
+/**
+ * Everyone who runs this trip: the operator of record, plus any co-operator
+ * they appointed (20260901000000_co_operator_role.sql).
+ *
+ * A co-operator holds `money.manage` — they can issue the refund an alert is
+ * asking for — so an alert only the creator receives is a power granted to
+ * someone who is never told to use it.
+ *
+ * Falls back to host_id alone if the RPC fails. Being told once is a smaller
+ * problem than not being told at all, and this runs inside webhook and cron
+ * paths that must not throw over a fan-out.
+ */
+async function operatorRecipients(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  hostId: string | null,
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc("trip_operator_ids", { p_trip_id: tripId });
+  if (error || !Array.isArray(data) || data.length === 0) {
+    if (error) console.error("[operatorRecipients] falling back to host_id:", error.message);
+    return hostId ? [hostId] : [];
+  }
+  return (data as string[]).filter(Boolean);
+}
+
 serve(async (req) => {
   const reqId = crypto.randomUUID().substring(0, 8);
 
@@ -177,20 +202,30 @@ serve(async (req) => {
         if (hoursSince < OPERATOR_DIGEST_COOLDOWN_HOURS) continue;
       }
 
-      const { error: digestErr } = await supabase.from("notifications").insert({
-        recipient_id: trip.host_id,
-        trip_id: trip.id,
-        type: "operator_requirement_overdue_operator",
-        audience: "admin",
-        entity_type: "requirement",
-        entity_id: requirementId,
-        data: {
-          trip_title: trip.title,
-          requirement_title: group[0].requirement_title,
-          item_name: group[0].requirement_title,
-          count: group.length,
-        },
-      });
+      // Creator plus co-operators. The cooldown above is still read off
+      // host_id alone, and stays correct: the batch below is one statement, so
+      // the creator has a row if and only if every co-operator does.
+      const operators = await operatorRecipients(supabase, trip.id, trip.host_id);
+      if (operators.length === 0) {
+        console.error(`[req-deadlines ${reqId}] no operator to notify on trip ${trip.id}`);
+        continue;
+      }
+      const { error: digestErr } = await supabase.from("notifications").insert(
+        operators.map((rid) => ({
+          recipient_id: rid,
+          trip_id: trip.id,
+          type: "operator_requirement_overdue_operator",
+          audience: "admin",
+          entity_type: "requirement",
+          entity_id: requirementId,
+          data: {
+            trip_title: trip.title,
+            requirement_title: group[0].requirement_title,
+            item_name: group[0].requirement_title,
+            count: group.length,
+          },
+        })),
+      );
       if (digestErr) {
         console.error(`[req-deadlines ${reqId}] operator notify failed`, digestErr.message);
         continue;

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  canManageStripeAccount,
   deriveConnectState,
   describeConnectState,
   tripPaymentWarning,
@@ -112,5 +113,49 @@ describe('what the operator is told', () => {
     expect(tripPaymentWarning('under_review')).toContain("can't pay yet");
     expect(tripPaymentWarning('incomplete')).toContain("can't pay yet");
     expect(tripPaymentWarning('blocked')).toContain('turned down');
+  });
+});
+
+describe('canManageStripeAccount', () => {
+  it('is false with no account, and until the form has been submitted', () => {
+    expect(canManageStripeAccount(UNKNOWN_CONNECT_STATUS)).toBe(false);
+    // Stripe REFUSES a login link for an account that has not finished
+    // onboarding, so the button would only ever error here.
+    expect(canManageStripeAccount(status({ detailsSubmitted: false }))).toBe(false);
+    expect(
+      canManageStripeAccount(status({ detailsSubmitted: false, currentlyDue: ['dob.day'] })),
+    ).toBe(false);
+  });
+
+  it('is true once details are in, in every state that follows', () => {
+    // under_review
+    expect(canManageStripeAccount(status({ detailsSubmitted: true }))).toBe(true);
+    // ready
+    expect(canManageStripeAccount(status({ detailsSubmitted: true, chargesEnabled: true }))).toBe(
+      true,
+    );
+    // action_needed
+    expect(
+      canManageStripeAccount(
+        status({ detailsSubmitted: true, chargesEnabled: true, pastDue: ['individual.id_number'] }),
+      ),
+    ).toBe(true);
+    // blocked — deliberately still true: a refused account still holds a real
+    // bank account and real tax documents the operator may look at.
+    expect(
+      canManageStripeAccount(status({ detailsSubmitted: true, disabledReason: 'rejected.fraud' })),
+    ).toBe(true);
+  });
+
+  it('agrees with the app, which is the whole point of this file', () => {
+    // The app's rule is `!!accountId && detailsSubmitted` — see
+    // src/services/trips/connectStatus.ts. If that changes, this fails.
+    for (const acct of [null, 'acct_1']) {
+      for (const submitted of [false, true]) {
+        expect(canManageStripeAccount(status({ accountId: acct, detailsSubmitted: submitted }))).toBe(
+          !!acct && submitted,
+        );
+      }
+    }
   });
 });

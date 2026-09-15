@@ -1,4 +1,5 @@
 import { supabase } from '../../config/supabase';
+import { STRIPE_LIVEMODE } from './tripPaymentsService';
 import { messagingService } from '../messaging/messagingService';
 import { logEvent } from '../analytics/eventLogger';
 import type { PriceInclusions } from './priceInclusions';
@@ -295,6 +296,25 @@ export interface ParticipantProfile {
  * Spec: docs/specs/operator-trips/traveler-onboarding.md
  */
 export type ParticipantStatus = 'onboarding' | 'active';
+
+/**
+ * Somebody who is no longer on the trip, and how they went.
+ *
+ * On an operator trip the participant row is kept and marked rather than
+ * deleted (20260906000300), so the money they paid, the documents they sent
+ * and the terms they agreed to stay reachable to the operator. Peer trips
+ * still delete — they have none of those things.
+ */
+export type DepartedStatus = 'left' | 'removed';
+
+/**
+ * The two statuses that mean "on this trip".
+ *
+ * 'onboarding' counts: an approved traveler part-way through their paperwork
+ * holds no seat but is very much on the trip. 'left' and 'removed' do not.
+ * Mirrors the same predicate in the database.
+ */
+export const PRESENT_PARTICIPANT_STATUSES: ParticipantStatus[] = ['onboarding', 'active'];
 
 export interface EnrichedParticipant extends ParticipantProfile {
   role: 'host' | 'member';
@@ -868,6 +888,8 @@ export async function getTripCardMeta(
     .from('group_trip_participants')
     .select('trip_id, user_id, role, joined_at')
     .in('trip_id', tripIds)
+    // Somebody who left is not a face on the trip card.
+    .in('status', PRESENT_PARTICIPANT_STATUSES)
     .order('joined_at', { ascending: true });
 
   const partsByTrip = new Map<string, string[]>();
@@ -1619,9 +1641,52 @@ export async function getCommitmentStatusesByRequestIds(
 }
 
 /**
- * Member self-leaves a trip. Removes from group_trip_participants and from the
- * linked group conversation, and clears their join_request row so the
- * "Request to join" CTA re-appears if they ever want to rejoin.
+ * "Function not found" from PostgREST — the RPC's migration is not applied to
+ * this database yet. Anything else is a real failure and must not be swallowed
+ * into the old delete path.
+ */
+function isMissingFunction(err: { code?: string; message?: string } | null | undefined): boolean {
+  return err?.code === 'PGRST202' || /function .* does not exist/i.test(err?.message ?? '');
+}
+
+/**
+ * Take somebody off a trip, keeping the record on an operator trip.
+ *
+ * Returns true when the database marked the row and the caller must NOT delete
+ * it; false when this is a peer trip (or the migration is not applied yet) and
+ * the old delete is still the right move.
+ *
+ * Two departure RPCs, one shape: `leave_operator_trip` for the traveler's own
+ * Exit and `operator_remove_traveler` for a removal. Both answer 'peer'
+ * untouched on a non-operator trip, which is what keeps G-01/G-02 true —
+ * peer trips have no money and no documents, so there is nothing to keep.
+ *
+ * See docs/specs/operator-trips/departed-members.md and migration
+ * 20260906000400.
+ */
+async function markDeparted(
+  rpc: 'leave_operator_trip' | 'operator_remove_traveler',
+  args: Record<string, unknown>,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc(rpc, args as never);
+  if (error) {
+    if (isMissingFunction(error)) return false; // migration not applied — delete as before
+    console.error(`[groupTripsService] ${rpc} error:`, error);
+    throw new Error(error.message);
+  }
+  return data !== 'peer';
+}
+
+/**
+ * Member self-leaves a trip.
+ *
+ * On an OPERATOR trip the participant row is kept and marked 'left', so the
+ * money they paid, the documents they sent and the terms they agreed to stay
+ * reachable to the operator — and still refundable. On a peer trip the row is
+ * deleted exactly as before.
+ *
+ * Either way they leave the group conversation and their join_request row is
+ * cleared so the "Request to join" CTA re-appears if they ever want to rejoin.
  */
 export async function leaveTrip(tripId: string, userId: string): Promise<void> {
   // Post the "<X> left the group" banner BEFORE deleting membership so RLS
@@ -1641,23 +1706,31 @@ export async function leaveTrip(tripId: string, userId: string): Promise<void> {
     console.warn('[groupTripsService] leaveTrip banner failed:', bannerError);
   }
 
-  // Notify the host that a member left (opens a spot). Best-effort: never block leaving.
-  // Must run BEFORE the delete — fn_notify_member_left verifies the caller is still a participant.
-  try {
-    await supabase.rpc('fn_notify_member_left', { p_trip_id: tripId });
-  } catch (e) {
-    console.warn('[groupTripsService] leaveTrip member_left notify failed (non-fatal):', e);
-  }
+  // Mark first. On an operator trip this both notifies the people who can
+  // decide the refund (with what was paid) and keeps the row, so nothing below
+  // may delete it. `false` means peer trip, or the migration is not applied.
+  const kept = await markDeparted('leave_operator_trip', { p_trip_id: tripId });
 
-  const { error } = await supabase
-    .from('group_trip_participants')
-    .delete()
-    .eq('trip_id', tripId)
-    .eq('user_id', userId);
+  if (!kept) {
+    // Notify the host that a member left (opens a spot). Best-effort: never block
+    // leaving. Must run BEFORE the delete — fn_notify_member_left verifies the
+    // caller is still a participant. On the kept path the RPC has already done it.
+    try {
+      await supabase.rpc('fn_notify_member_left', { p_trip_id: tripId });
+    } catch (e) {
+      console.warn('[groupTripsService] leaveTrip member_left notify failed (non-fatal):', e);
+    }
 
-  if (error) {
-    console.error('[groupTripsService] leaveTrip error:', error);
-    throw new Error(error.message);
+    const { error } = await supabase
+      .from('group_trip_participants')
+      .delete()
+      .eq('trip_id', tripId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('[groupTripsService] leaveTrip error:', error);
+      throw new Error(error.message);
+    }
   }
 
   // Drop the join_request row so a fresh "Request to join" can be inserted.
@@ -1725,7 +1798,13 @@ export async function removeParticipant(
    * who removed them. Omitted (or 0) means the push says nothing about money —
    * never "$0.00 is being refunded".
    */
-  refundedUsd?: number
+  refundedUsd?: number,
+  /**
+   * The operator's note on why, kept on the participant row alongside who
+   * removed them and when. Operator trips only — a peer trip deletes the row
+   * and has nowhere to put it. Optional: X-02's dialog does not ask for one.
+   */
+  reason?: string | null
 ): Promise<void> {
   // Only the participant delete is awaited — it's what makes the member row
   // disappear. The banner, join-request cleanup, chat removal, and push all
@@ -1767,15 +1846,27 @@ export async function removeParticipant(
     }
   })();
 
-  const { error } = await supabase
-    .from('group_trip_participants')
-    .delete()
-    .eq('trip_id', tripId)
-    .eq('user_id', userId);
+  // Same two paths as leaveTrip: an operator trip keeps the row, marked
+  // 'removed' with who did it and why, so the money and documents stay with
+  // the operator and the person can still be refunded from their page. A peer
+  // trip (or an unapplied migration) deletes exactly as before.
+  const kept = await markDeparted('operator_remove_traveler', {
+    p_trip_id: tripId,
+    p_user_id: userId,
+    p_reason: reason ?? null,
+  });
 
-  if (error) {
-    console.error('[groupTripsService] removeParticipant error:', error);
-    throw new Error(error.message);
+  if (!kept) {
+    const { error } = await supabase
+      .from('group_trip_participants')
+      .delete()
+      .eq('trip_id', tripId)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('[groupTripsService] removeParticipant error:', error);
+      throw new Error(error.message);
+    }
   }
 
   // Post-success cleanup — fire-and-forget from here down.
@@ -1866,6 +1957,11 @@ export async function getTripParticipants(
     .from('group_trip_participants')
     .select('role, status, joined_at, user_id, committed, commitment_status, commitment_items, commitment_note, personal_gear_by_host, personal_gear_by_me')
     .eq('trip_id', tripId)
+    // PRESENT only. Since 20260906000300 a departure from an operator trip
+    // keeps the row and marks it 'left' or 'removed'; this list is the roster,
+    // the member count and the committed count, and somebody who left must be
+    // in none of them. `getDepartedParticipants` lists them separately.
+    .in('status', PRESENT_PARTICIPANT_STATUSES)
     .order('joined_at', { ascending: true });
   if (signal) q1 = q1.abortSignal(signal);
   const { data: rows, error } = await q1;
@@ -1934,6 +2030,108 @@ export async function getTripParticipants(
   });
 
   return enriched;
+}
+
+/** One person who is no longer on the trip, with what their money did. */
+export interface DepartedParticipant {
+  user_id: string;
+  name: string | null;
+  profile_image_url: string | null;
+  status: DepartedStatus;
+  left_at: string | null;
+  /** Null when they left themselves; otherwise who removed them. */
+  left_by: string | null;
+  left_by_name: string | null;
+  left_reason: string | null;
+  /** Everything paid minus everything refunded. Never negative. */
+  net_paid_usd: number;
+  /** Total sent back, as a positive number. 0 when nothing was refunded. */
+  refunded_usd: number;
+}
+
+/**
+ * Travelers who left this trip or were removed from it.
+ *
+ * Operator trips only, in practice: a peer-trip departure still deletes the
+ * row, so there is nothing to list and nothing worth listing — no money, no
+ * documents. See docs/specs/operator-trips/departed-members.md.
+ *
+ * Returns [] rather than throwing when `left_at` does not exist yet, so this
+ * ships safely before migration 20260906000300 is applied. Before it, nothing
+ * writes 'left' or 'removed' either, so an empty list is also the true answer.
+ *
+ * The money is read straight off the ledger, in the mode the app is running
+ * in — the same sum the operator sees everywhere else. A refund is a negative
+ * row, which is why `refunded_usd` is negated back to a positive: the operator
+ * is reading "how much went back", not a minus sign.
+ */
+export async function getDepartedParticipants(
+  tripId: string,
+  signal?: AbortSignal,
+): Promise<DepartedParticipant[]> {
+  let q = supabase
+    .from('group_trip_participants')
+    .select('user_id, status, left_at, left_by, left_reason')
+    .eq('trip_id', tripId)
+    .eq('role', 'member')
+    .in('status', ['left', 'removed'])
+    .order('left_at', { ascending: false });
+  if (signal) q = q.abortSignal(signal);
+  const { data: rows, error } = await q;
+
+  if (error) {
+    if (isAbortError(error, signal)) return [];
+    // 42703 "column does not exist" — the migration has not run here yet.
+    if (error.code === '42703' || error.code === '42P01') return [];
+    console.error('[groupTripsService] getDepartedParticipants error:', error);
+    return [];
+  }
+  if (!rows || rows.length === 0) return [];
+
+  const leftIds = rows.map((r: any) => r.user_id);
+  const removerIds = rows.map((r: any) => r.left_by).filter(Boolean);
+  const allIds = [...new Set([...leftIds, ...removerIds])];
+
+  const [{ data: surfers }, { data: events }] = await Promise.all([
+    supabase.from('surfers').select('user_id, name, profile_image_url').in('user_id', allIds),
+    supabase
+      .from('organized_trip_payment_events')
+      .select('user_id, event_type, amount_usd')
+      .eq('trip_id', tripId)
+      .in('user_id', leftIds)
+      .neq('event_type', 'failed')
+      .eq('is_livemode', STRIPE_LIVEMODE),
+  ]);
+
+  const nameById = new Map<string, { name: string | null; photo: string | null }>();
+  (surfers || []).forEach((s: any) =>
+    nameById.set(s.user_id, { name: s.name ?? null, photo: s.profile_image_url ?? null }),
+  );
+
+  const money = new Map<string, { net: number; refunded: number }>();
+  (events || []).forEach((e: any) => {
+    const amount = Number(e.amount_usd) || 0;
+    const m = money.get(e.user_id) ?? { net: 0, refunded: 0 };
+    m.net += amount;
+    if (e.event_type === 'refunded') m.refunded -= amount;
+    money.set(e.user_id, m);
+  });
+
+  return rows.map((r: any) => {
+    const m = money.get(r.user_id) ?? { net: 0, refunded: 0 };
+    return {
+      user_id: r.user_id,
+      name: nameById.get(r.user_id)?.name ?? null,
+      profile_image_url: nameById.get(r.user_id)?.photo ?? null,
+      status: r.status === 'removed' ? 'removed' : 'left',
+      left_at: r.left_at ?? null,
+      left_by: r.left_by ?? null,
+      left_by_name: r.left_by ? (nameById.get(r.left_by)?.name ?? null) : null,
+      left_reason: r.left_reason ?? null,
+      net_paid_usd: Math.max(0, Math.round(m.net * 100) / 100),
+      refunded_usd: Math.max(0, Math.round(m.refunded * 100) / 100),
+    };
+  });
 }
 
 export async function requestToJoinTrip(
@@ -2873,6 +3071,8 @@ export async function listUnseenJoinDecisions(
     .from('group_trip_participants')
     .select('trip_id, user_id, role, joined_at')
     .in('trip_id', tripIds)
+    // Somebody who left is not a face on the trip card.
+    .in('status', PRESENT_PARTICIPANT_STATUSES)
     .order('joined_at', { ascending: true });
 
   const memberIdsByTrip = new Map<string, string[]>();

@@ -14,7 +14,7 @@
  * The card that renders this is presentational and knows nothing about where
  * it is. A new surface is `useConnectStatus()` plus markup.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchConnectStatus } from '../../services/trips/tripPaymentsService';
 import {
@@ -22,25 +22,15 @@ import {
   canCollectPayments,
   paymentsAreLive,
   UNKNOWN_CONNECT_STATUS,
+  WATCH_WINDOW_MS,
+  watchInterval,
   type ConnectState,
   type ConnectStatus,
 } from '../../services/trips/connectStatus';
+import { onNotification } from '../../services/notifications/notificationsRealtimeHub';
 
 /** Not under `tripsKeys` on purpose: this belongs to the operator, not a trip. */
 export const connectStatusKey = ['stripe', 'connect-status'] as const;
-
-/**
- * How long to keep watching after the operator closes the Stripe sheet.
- *
- * Stripe usually settles a test account in seconds and a real one in minutes.
- * This window only covers the "they are still standing there looking at it"
- * case, so that the card flips to "Stripe connected" in front of them instead
- * of on their next visit. Everything past it is the webhook's job
- * (`stripe-connect-webhook`), which pushes them a notification — so there is
- * no reason to poll for minutes and every reason not to.
- */
-const WATCH_WINDOW_MS = 60_000;
-const WATCH_INTERVAL_MS = 4_000;
 
 export interface UseConnectStatus {
   status: ConnectStatus;
@@ -85,15 +75,7 @@ export function useConnectStatus({ enabled = true }: { enabled?: boolean } = {})
     // Takes the query as an argument rather than closing over `query` — that
     // variable is still being defined here, and reading it would be a
     // temporal-dead-zone bug that only bites once polling actually starts.
-    refetchInterval: q => {
-      if (Date.now() >= watchUntil) return false;
-      // Stop as soon as there is nothing left to wait for. Any state other
-      // than "Stripe is thinking" is a final answer for now — including
-      // 'incomplete', where the next move is the operator's, not Stripe's.
-      const data = q.state.data;
-      if (data && deriveConnectState(data) !== 'under_review') return false;
-      return WATCH_INTERVAL_MS;
-    },
+    refetchInterval: q => watchInterval(q.state.data, watchUntil),
   });
 
   // A failed status read means "we do not know", and the safe reading of that
@@ -101,6 +83,35 @@ export function useConnectStatus({ enabled = true }: { enabled?: boolean } = {})
   // surfaced through the query itself, not thrown.
   const status = query.data ?? UNKNOWN_CONNECT_STATUS;
   const state = deriveConnectState(status);
+
+  // Stripe can approve long after the 60s watch window has closed, and the
+  // operator may well still be sitting on the setup checklist when it does.
+  //
+  // `operator_stripe_ready` is written by `trg_notify_connect_status`, an AFTER
+  // UPDATE trigger on `operator_payout_accounts` (20260818000600), on the
+  // charges_enabled false→true edge. It is deliberately row-driven, so the
+  // Connect webhook, this hook's own poll and the daily sweep all produce it
+  // identically — which is what makes it a signal worth listening to rather
+  // than polling for minutes.
+  //
+  // ⚠️ The poll is one of those writers: `stripe-connect-onboard` caches every
+  // status read back into that row. So when OUR poll is what discovers the
+  // approval, this row arrives as an echo of a refetch we just did. The guard
+  // below is what stops that echo costing a second Stripe round trip — it only
+  // re-reads when the cache does not already know, i.e. when the webhook or
+  // the sweep got there first, which is the only case this listener exists for.
+  useEffect(
+    () =>
+      onNotification({
+        onInsert: row => {
+          if (row.type !== 'operator_stripe_ready') return;
+          const cached = queryClient.getQueryData<ConnectStatus>(connectStatusKey);
+          if (cached && deriveConnectState(cached) === 'ready') return;
+          void queryClient.invalidateQueries({ queryKey: connectStatusKey });
+        },
+      }),
+    [queryClient],
+  );
 
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: connectStatusKey });

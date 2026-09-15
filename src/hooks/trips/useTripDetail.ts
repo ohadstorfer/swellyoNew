@@ -5,8 +5,10 @@
  * so the trip header renders immediately on first open — no spinner needed for
  * users coming from Explore or My Trips.
  */
+import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { InfiniteData } from '@tanstack/react-query';
+import { withoutMedicalReview } from '../../services/trips/visibleReview';
 import {
   GroupTrip,
   EnrichedParticipant,
@@ -189,14 +191,33 @@ export function useTripDocuments(tripId: string, isMember: boolean) {
  * evidence rows, so a cached value can claim something is still waiting for a
  * decision that the host already made on another device.
  */
-export function useTripReview(tripId: string, isHost: boolean, userIds: string[]) {
+export function useTripReview(
+  tripId: string,
+  isHost: boolean,
+  userIds: string[],
+  /**
+   * False for a viewer without `medical.view` — a Manager. Their copy has no
+   * medical form and every count is recomputed, because RLS reads their
+   * medical forms as "not filled in" and the review screen would print that
+   * false zero as "0 of 1 filled in". See services/trips/visibleReview.
+   * Defaults to true, so any caller not yet updated sees exactly what it did.
+   */
+  canViewMedical: boolean = true,
+) {
   const key = userIds.join(',');
-  return useQuery<TripReview>({
+  // `select`, not a second query: the cache keeps the one real answer and this
+  // viewer's copy is derived from it.
+  const select = useCallback(
+    (data: TripReview) => (canViewMedical ? data : withoutMedicalReview(data)),
+    [canViewMedical],
+  );
+  return useQuery<TripReview, Error, TripReview>({
     queryKey: tripsKeys.detailReview(tripId, key),
     enabled: isHost && userIds.length > 0,
     queryFn: () => fetchTripReview(tripId, userIds),
     staleTime: 0,
     gcTime: TRIP_DETAIL_GC_MS,
+    select,
   });
 }
 

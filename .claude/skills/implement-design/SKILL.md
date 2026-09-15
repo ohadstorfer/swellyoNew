@@ -32,6 +32,15 @@ Call `mcp__figma__get_design_context` with:
 
 This returns React+Tailwind reference code, a screenshot, and metadata. **The code is a REFERENCE, not final code.**
 
+### 1b. Resolve EVERY text size with `get_variable_defs` (mandatory)
+
+Never take a font size or line height from the design-context code — not the `var(--size/…, Npx)` fallbacks, and **not bare `text-[Npx]` values either**. The export flattens sizes in a larger typography mode, and when a text layer overrides the weight (bold) it drops the variable and prints the inflated number as if it were a literal: bold `20px` is really `Size/lg 16`, `18px` is `Size/md 14`, bold `16px` is `Size/s 12`, `12px/14` is `Size/xxs 9`. Tell-tale: a `text-[0px]` wrapper around a bold `<p>`.
+
+1. `mcp__figma__get_metadata` on the node → list the text node ids.
+2. `mcp__figma__get_variable_defs` on each text node. For an instance child (`I123:45;67:89`, which the tool rejects), query the parent instance and match each text by its line height / box height.
+3. If the size you are about to write is not in that node's variable list, it is wrong. A size is a true literal only when the node has no size variable at all.
+4. Put the resolved token in a style comment, e.g. `// Size/lg 16/24 (get_variable_defs 14984:68574)`.
+
 ### 2. Analyze the design
 
 From the returned code and screenshot, identify:
@@ -45,15 +54,14 @@ From the returned code and screenshot, identify:
 ### 3. Map Figma tokens to project tokens
 
 **Typography mapping** (Figma → Project):
-| Figma CSS Variable | Project Token |
+
+⚠️ The px in `var(--size/…, Npx)` fallbacks are the LARGER mode. On mobile (the mode the frames use) the tokens resolve to: `Size/xxs` 9 · `Size/xs` 10 · `Size/s` 12 · `Size/md` 14 · `Size/lg` 16 · `Size/xl` 18 · `Size/2 xl` 22 · `Size/3 xl` 24 — confirm per node with step 1b, never from this table alone.
+
+| Figma variable | Project |
 |---|---|
 | `family/headings, Montserrat:Bold` | `typography.fontFamilies.headings` (`Montserrat_700Bold`) |
 | `family/body, Inter:Regular` | `typography.fontFamilies.body` (`Inter_400Regular`) |
-| `size/lg` (18px) | `typography.fontSizes.lg` |
-| `size/md` (16px) | `typography.fontSizes.md` |
-| `size/s` (14px) | `typography.fontSizes.s` |
-| `size/2-xl` (24px) | `typography.fontSizes['2xl']` |
-| `size/3-xl` (32px) | `typography.fontSizes['3xl']` |
+| `Size/*` | the px `get_variable_defs` returns for that node (use `ff()` for the family) |
 
 **Color mapping** (Figma → Project):
 | Figma CSS Variable | Project Token |

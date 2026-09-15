@@ -13,10 +13,13 @@
  * have deliberately opened that person.
  */
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useQuery } from '@tanstack/react-query';
 import { ff } from '../../../theme/fonts';
+import Thumb from '../../Thumb';
+import { Images } from '../../../assets/images';
 import { PressableScale } from '../PressableScale';
 import { fetchMyMedicalForm } from '../../../services/trips/tripDocumentsService';
 import type { TravelerMoney } from '../../../services/trips/operatorDashboardService';
@@ -70,6 +73,22 @@ export const TravelerExtras: React.FC<{
    * decided inside the sheet this opens, not here — it has the paid figure.
    */
   onRemove?: () => void;
+  /**
+   * Open this person's Swellyo profile.
+   *
+   * Product Specs §"Trip dashboard space": "clicking members opens the personal
+   * full profile, not the surf-travel one". The dashboard's own list opens the
+   * REVIEW flow, which is the job the screen exists for and must not be taken
+   * over by a profile — so the profile hangs off the person once you are
+   * already looking at them.
+   *
+   * Absent when the viewer has no profile navigator to hand (the review screen
+   * opened from somewhere without one), and for yourself.
+   */
+  onOpenProfile?: () => void;
+  /** Their photo, for the identity row. Comes from the same review row the
+   *  screen already holds — never fetched again here. */
+  avatarUrl?: string | null;
 }> = ({
   tripId,
   userId,
@@ -83,6 +102,8 @@ export const TravelerExtras: React.FC<{
   justRefunded,
   onMessage,
   onRemove,
+  onOpenProfile,
+  avatarUrl,
 }) => {
   const medical = useQuery({
     queryKey: ['operatorDashboard', 'medicalForm', tripId, userId],
@@ -93,6 +114,30 @@ export const TravelerExtras: React.FC<{
 
   return (
     <View style={styles.root}>
+      {/* ── Who this is ────────────────────────────────────────────────── */}
+      {/* A person, before the money and the medical answers about them. Reads
+          as a header for everything below rather than as another block. */}
+      {onOpenProfile && (
+        <PressableScale
+          onPress={onOpenProfile}
+          style={styles.identity}
+          accessibilityLabel={`Open ${name}'s profile`}
+        >
+          {avatarUrl ? (
+            <Thumb uri={avatarUrl} size={96} style={styles.identityAvatar} contentFit="cover" />
+          ) : (
+            <Image source={Images.defaultAvatar} style={styles.identityAvatar} contentFit="cover" />
+          )}
+          <View style={styles.identityText}>
+            <Text style={styles.identityName} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={styles.identityLink}>View full profile</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={D.muted} />
+        </PressableScale>
+      )}
+
       {/* ── Money ──────────────────────────────────────────────────────── */}
       <Block
         title="Money"
@@ -191,6 +236,14 @@ export const TravelerExtras: React.FC<{
                       <Text style={styles.muted}>
                         {formatDay(e.createdAt)} · Dispute opened
                       </Text>
+                    ) : e.eventType === 'processing' ? (
+                      /* Same shape of marker: an ACH payment still clearing
+                         (up to 4 business days). Its own 'paid' row lands when the
+                         money does, so this line never turns into an amount —
+                         the next one does. */
+                      <Text style={styles.muted}>
+                        {formatDay(e.createdAt)} · Bank payment on its way
+                      </Text>
                     ) : (
                       <Text style={styles.muted}>
                         {formatDay(e.createdAt)} · Payment {formatUsd(e.amountUsd)}
@@ -243,6 +296,46 @@ export const TravelerExtras: React.FC<{
           <Text style={styles.muted}>Not filled in yet.</Text>
         ) : (
           <View style={{ gap: 6 }}>
+            {/* The emergency contact leads, and is TAPPABLE. Everything else in
+                this block is read while planning; this is the line somebody
+                needs at speed, and making them copy a number out by hand is
+                exactly the wrong moment to save a component. */}
+            {form.emergencyName.trim() || form.emergencyPhone.trim() ? (
+              <Pressable
+                onPress={
+                  form.emergencyPhone.trim()
+                    ? () => Linking.openURL(`tel:${form.emergencyPhone.replace(/\s+/g, '')}`)
+                    : undefined
+                }
+                disabled={!form.emergencyPhone.trim()}
+                style={styles.emergency}
+                accessibilityRole={form.emergencyPhone.trim() ? 'button' : undefined}
+                accessibilityLabel={
+                  form.emergencyPhone.trim()
+                    ? `Call ${form.emergencyName || 'emergency contact'}`
+                    : undefined
+                }
+              >
+                <Ionicons name="call-outline" size={16} color={D.danger} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.emergencyName} numberOfLines={1}>
+                    {form.emergencyName.trim() || 'Emergency contact'}
+                    {form.emergencyRelation.trim() ? (
+                      <Text style={styles.muted}>{`  ${form.emergencyRelation.trim()}`}</Text>
+                    ) : null}
+                  </Text>
+                  <Text style={styles.emergencyPhone} numberOfLines={1}>
+                    {form.emergencyPhone.trim() || 'No number given'}
+                  </Text>
+                </View>
+              </Pressable>
+            ) : (
+              // A form saved before the contact existed. Say which piece is
+              // missing rather than reporting the whole form as done.
+              <Text style={styles.emergencyMissing}>
+                No emergency contact — they filled this in before we asked for one.
+              </Text>
+            )}
             <Line label="Allergies" value={answer(form.allergies, form.allergiesNone)} />
             <Line label="Dietary" value={answer(form.dietary, form.dietaryNone)} />
             <Line label="Injuries" value={answer(form.injuries, form.injuriesNone)} />
@@ -342,6 +435,52 @@ function formatDay(iso: string | null): string {
 // §6 of `docs/specs/operator-trips/dashboard-tab-design.md`.
 const styles = StyleSheet.create({
   root: { gap: 12, marginTop: 12 },
+  // Identity row — a header for the blocks below, so no card border of its own.
+  identity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 4,
+  },
+  identityAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E7EDEE' },
+  identityText: { flex: 1, gap: 1 },
+  identityName: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 15,
+    fontWeight: '600',
+    color: D.ink,
+  },
+  identityLink: { fontFamily: ff('Inter', '500'), fontSize: 12, color: D.wait },
+  // Emergency contact — tinted with the danger hue, not filled with it: it is
+  // information you reach for in a bad moment, not a warning about one.
+  emergency: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    borderRadius: 10,
+    backgroundColor: D.dangerBg,
+    marginBottom: 4,
+  },
+  emergencyName: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: D.ink,
+  },
+  emergencyPhone: {
+    fontFamily: ff('Inter', '500'),
+    fontSize: 13,
+    color: D.danger,
+  },
+  emergencyMissing: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: D.muted,
+    marginBottom: 4,
+  },
   // 14/14 matches `PlanSections.card`.
   block: {
     borderWidth: 1,

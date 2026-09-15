@@ -50,6 +50,14 @@ export function RefundDialog({
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Set (to the refunded amount) after an ACH refund succeeded. A bank refund
+   * is a separate ~3-business-day credit that is NOT labeled a refund on the
+   * traveler's statement, so instead of closing silently the dialog stays for
+   * one more click to say so — otherwise "I refunded them" and "they see
+   * nothing for days" are both true, and that reads as a support ticket.
+   */
+  const [bankDone, setBankDone] = useState<number | null>(null);
 
   const parsed = Number(amount);
   const valid = Number.isFinite(parsed) && parsed > 0 && parsed <= paidUsd + 0.001;
@@ -70,12 +78,47 @@ export function RefundDialog({
 
     setBusy(false);
     if (result.ok) {
+      if (result.bankRefund) {
+        setBankDone(result.amountUsd);
+        return;
+      }
       // The server's figure, not `parsed`: it refunds whatever is actually
       // left, which can be less than was asked for.
       onDone(result.amountUsd);
       return;
     }
     setError(result.error);
+  }
+
+  if (bankDone !== null) {
+    return (
+      <div className="scrim" role="dialog" aria-modal="true">
+        <div className="modal">
+          <div className="card-head">
+            <strong>Refund on its way</strong>
+          </div>
+          <div className="card-body">
+            <p className="small">
+              {formatUsd(bankDone)} is going back to {travelerName}. Bank refunds take up to{' '}
+              <strong>3 business days</strong> to reach their account, and won't be labeled as a
+              refund on their statement — worth letting them know it's coming.
+            </p>
+          </div>
+          <div
+            className="row"
+            style={{
+              borderTop: '1px solid var(--line)',
+              padding: '12px 16px',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <button className="btn btn-sm" onClick={() => onDone(bankDone)}>
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

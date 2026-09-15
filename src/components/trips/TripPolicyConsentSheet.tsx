@@ -44,10 +44,17 @@ export const TripPolicyConsentSheet: React.FC<{
   saving?: boolean;
   onAgree: () => void;
   onClose: () => void;
+  /**
+   * Fires once this sheet's Modal is FULLY torn down. The hook resolves its
+   * `ensureConsent()` promise here rather than on the tap, because what comes
+   * next always presents natively (PayAmountSheet, or Stripe's browser sheet)
+   * and iOS refuses to present over a controller that is still dismissing.
+   */
+  onDismissed?: () => void;
   /** See BottomSheetShell — set when opened from a screen that is itself a
    *  presented Modal, or the sheet silently never appears on iOS. */
   inline?: boolean;
-}> = ({ visible, policy, saving = false, onAgree, onClose, inline }) => {
+}> = ({ visible, policy, saving = false, onAgree, onClose, onDismissed, inline }) => {
   const insets = useSafeAreaInsets();
   const [checked, setChecked] = useState(false);
 
@@ -62,7 +69,7 @@ export const TripPolicyConsentSheet: React.FC<{
   const copy = consentCopy(policy);
 
   return (
-    <BottomSheetShell visible={visible} onClose={onClose} inline={inline}>
+    <BottomSheetShell visible={visible} onClose={onClose} onDismissed={onDismissed} inline={inline}>
       <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
         <View style={styles.grabWrap}>
           <View style={styles.grabber} />

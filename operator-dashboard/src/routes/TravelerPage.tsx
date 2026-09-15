@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
-import { fetchTripReview, type ReviewItem } from '../services/review';
+import type { ReviewItem } from '../services/review';
+import { useTripReview } from '../services/useTripReview';
 import { fetchMedicalForm, fetchProfiles } from '../services/travelers';
 import { isUploadRequirement } from '../domain/requirements';
 import { approveDocuments, rejectDocument, setTravelerPrice } from '../services/actions';
@@ -12,7 +13,7 @@ import { STEP_STATE_LABEL } from '../domain/money';
 import { useAuth } from '../lib/auth';
 import { fileNameFor, formatDate, formatDateTime, formatUsd, plural } from '../lib/format';
 import { friendlyError } from '../lib/errors';
-import { ErrorBox, Loading, StateTag } from '../components/StateBits';
+import { ErrorBox, Loading, NoPaperworkAccess, StateTag } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { RejectDialog } from '../components/RejectDialog';
@@ -20,12 +21,13 @@ import { RefundDialog } from '../components/RefundDialog';
 import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
 import { fetchRefunds } from '../services/refunds';
 import { RemoveTravelerDialog } from '../components/RemoveTravelerDialog';
-import { useTripAccess } from '../services/access';
+import { DASHBOARD_CAPABILITY, useTripAccess } from '../services/access';
 import { explain, policyFromTrip } from '../domain/cancellation';
 
 export function TravelerPage() {
   const { tripId = '', userId = '' } = useParams();
   const qc = useQueryClient();
+  const access = useTripAccess(tripId);
 
   const [viewing, setViewing] = useState<ReviewItem | null>(null);
   const [rejecting, setRejecting] = useState<ReviewItem | null>(null);
@@ -36,19 +38,27 @@ export function TravelerPage() {
   const members = useQuery({ queryKey: ['members', tripId], queryFn: () => fetchMembers(tripId) });
   const userIds = useMemo(() => (members.data ?? []).map(m => m.userId), [members.data]);
 
-  const review = useQuery({
-    queryKey: ['review', tripId, userIds],
-    queryFn: () => fetchTripReview(tripId, userIds),
-    enabled: members.isSuccess,
-  });
+  // Through the hook, not a bare useQuery: it strips the medical form for
+  // anyone without medical.view, so no count on this page can show the false
+  // zero a Manager saw on 9 Sep 2026. See domain/visibleReview.
+  const review = useTripReview(tripId, userIds, members.isSuccess);
   const profiles = useQuery({
     queryKey: ['profiles', userIds],
     queryFn: () => fetchProfiles(userIds),
     enabled: userIds.length > 0,
   });
+  // `medical.view` is Operator and Co-operator only — a Manager lost it on
+  // 24 August (20260824000000_manager_no_medical). RLS already refuses them
+  // the row, so this is not the boundary; without it a Manager reads "Not
+  // filled in yet." under a Medical heading on a traveler who filled it in
+  // that morning, which is worse than no card at all. The app hides the same
+  // block on the same capability (TripDashboardTab's "Medical flags").
+  const canViewMedical = access.can('medical.view');
+
   const medical = useQuery({
     queryKey: ['medical', tripId, userId],
     queryFn: () => fetchMedicalForm(tripId, userId),
+    enabled: canViewMedical,
   });
 
   const refreshAll = () => {
@@ -78,10 +88,23 @@ export function TravelerPage() {
     onError: e => setActionError(friendlyError(e)),
   });
 
-  if (trip.isError) return <ErrorBox error={trip.error} onRetry={() => void trip.refetch()} />;
-  if (review.isError) return <ErrorBox error={review.error} onRetry={() => void review.refetch()} />;
-  if (trip.isPending || members.isPending || review.isPending)
+  if (trip.isError) return <ErrorBox what="This trip" error={trip.error} onRetry={() => void trip.refetch()} />;
+  if (review.isError) return <ErrorBox what="This traveler's documents" error={review.error} onRetry={() => void review.refetch()} />;
+  if (trip.isPending || members.isPending || review.isPending || access.isPending)
     return <Loading what="Loading traveler" />;
+
+  // The same sentence TripPage gives, for the same reason: a crew member below
+  // Manager reached this by URL. Without it a Guide read "not on this trip"
+  // about somebody who is — the roster is refused to them, so the page found
+  // nobody and said so as if it were a fact about the traveler.
+  if (access.ready && !access.can(DASHBOARD_CAPABILITY)) {
+    return (
+      <>
+        <PageHead back={`/trips/${tripId}`} backLabel={trip.data.title} title={trip.data.title} />
+        <NoPaperworkAccess />
+      </>
+    );
+  }
 
   const traveler = review.data.travelers.find(t => t.userId === userId);
   const profile = profiles.data?.get(userId);
@@ -146,26 +169,69 @@ export function TravelerPage() {
           <div className="card-head">
             <h2>Profile</h2>
           </div>
+          {/* Product Specs §"Trip dashboard space": "clicking members opens
+              the personal full profile, not the surf-travel one". This card
+              used to BE the surf-travel one — age, country, level, board, in a
+              single grey line. The surf numbers are still useful to a guide
+              planning sessions, so they stay; they stop being the whole person. */}
           <div className="card-body row" style={{ gap: 16, alignItems: 'flex-start' }}>
             {profile?.photoUrl && (
               <img
                 src={profile.photoUrl}
                 alt=""
-                style={{ width: 56, height: 56, borderRadius: 99, objectFit: 'cover' }}
+                style={{ width: 72, height: 72, borderRadius: 99, objectFit: 'cover' }}
               />
             )}
-            <div>
-              <h3>{name}</h3>
+            <div style={{ minWidth: 0 }}>
+              <h3>
+                {name}
+                {profile?.pronoun && (
+                  <span className="muted small" style={{ marginLeft: 8, fontWeight: 400 }}>
+                    {profile.pronoun}
+                  </span>
+                )}
+              </h3>
               <p className="muted small" style={{ marginTop: 3 }}>
                 {[
                   profile?.age ? `${profile.age}` : null,
                   profile?.countryFrom,
-                  profile?.surfLevel?.replace(/_/g, ' '),
-                  profile?.boardType?.replace(/_/g, ' '),
+                  profile?.homeBreak ? `surfs ${profile.homeBreak}` : null,
                 ]
                   .filter(Boolean)
                   .join(' · ') || 'No profile details'}
               </p>
+
+              {profile?.bio && (
+                <p className="small" style={{ marginTop: 10, whiteSpace: 'pre-wrap', maxWidth: '62ch' }}>
+                  {profile.bio}
+                </p>
+              )}
+
+              {profile?.lifestyle && profile.lifestyle.length > 0 && (
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                  {profile.lifestyle.map(k => (
+                    <span key={k} className="tag tag-idle">
+                      {k.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* The surf-travel numbers, still here and now clearly a
+                  subsection rather than the headline. */}
+              {(profile?.surfLevel || profile?.boardType || profile?.travelExperience != null) && (
+                <p className="muted small" style={{ marginTop: 12 }}>
+                  {[
+                    profile?.surfLevel?.replace(/_/g, ' '),
+                    profile?.boardType?.replace(/_/g, ' '),
+                    profile?.travelExperience != null
+                      ? `${profile.travelExperience} surf trips`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -243,11 +309,16 @@ export function TravelerPage() {
         <TravelerMoneyCard tripId={tripId} userId={userId} name={name} />
 
         {/* ── Medical ───────────────────────────────────────────────────── */}
-        <MedicalCard
-          name={name}
-          form={medical.data ?? null}
-          loading={medical.isPending}
-        />
+        {/* `can()` alone, not `ready && can()`: an unresolved query says no to
+            everything, so the card arrives a beat late instead of flashing
+            someone's allergies and then vanishing. */}
+        {canViewMedical && (
+          <MedicalCard
+            name={name}
+            form={medical.data ?? null}
+            loading={medical.isPending}
+          />
+        )}
 
         {/* ── Remove ────────────────────────────────────────────────────── */}
         {/* Last on the page, and the only thing under Medical: this page exists
@@ -494,6 +565,14 @@ function TravelerMoneyCard({
                         <span className="muted" style={{ fontSize: 12 }}>
                           {formatDateTime(e.createdAt)} · Dispute opened
                         </span>
+                      ) : e.eventType === 'processing' ? (
+                        /* Same shape of marker: an ACH payment still clearing
+                           (~3 business days). Its own 'paid' row lands when
+                           the money does, so this line never turns into an
+                           amount — the next one does. */
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {formatDateTime(e.createdAt)} · Bank payment on its way
+                        </span>
                       ) : (
                         <span className="muted" style={{ fontSize: 12 }}>
                           {formatDateTime(e.createdAt)} · Payment {formatUsd(e.amountUsd)}
@@ -593,6 +672,9 @@ function MedicalCard({
 }: {
   name: string;
   form: {
+    emergencyName: string | null;
+    emergencyPhone: string | null;
+    emergencyRelation: string | null;
     allergies: string | null;
     allergiesNone: boolean;
     dietary: string | null;
@@ -610,6 +692,13 @@ function MedicalCard({
     const lines = [
       `Medical notes — ${name}`,
       `Completed: ${formatDate(form.completedAt)}`,
+      '',
+      // First in the file too. Whoever opens this on a laptop at a clinic is
+      // looking for one line, and it is this one.
+      `Emergency contact: ${[form.emergencyName, form.emergencyRelation]
+        .filter(Boolean)
+        .join(' — ') || 'Not given'}`,
+      `Emergency phone: ${form.emergencyPhone ?? 'Not given'}`,
       '',
       `Allergies: ${answer(form.allergies, form.allergiesNone)}`,
       `Dietary: ${answer(form.dietary, form.dietaryNone)}`,
@@ -645,6 +734,46 @@ function MedicalCard({
         )}
         {form?.completedAt && (
           <div className="stack" style={{ gap: 8 }}>
+            {/* The emergency contact leads, and the number is a link. Everything
+                else in this card is read while planning; this is the line
+                somebody needs at speed, and making them copy a number out by
+                hand is exactly the wrong moment to save a component. */}
+            {form.emergencyName || form.emergencyPhone ? (
+              <div
+                style={{
+                  background: 'var(--danger-bg)',
+                  borderRadius: 8,
+                  padding: '10px 12px',
+                }}
+              >
+                <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.4px' }}>
+                  Emergency contact
+                </div>
+                <div className="small" style={{ marginTop: 3 }}>
+                  <strong>{form.emergencyName?.trim() || 'Not named'}</strong>
+                  {form.emergencyRelation?.trim() && (
+                    <span className="muted"> · {form.emergencyRelation.trim()}</span>
+                  )}
+                </div>
+                {form.emergencyPhone?.trim() ? (
+                  <a
+                    className="small"
+                    href={`tel:${form.emergencyPhone.replace(/\s+/g, '')}`}
+                    style={{ color: 'var(--danger)' }}
+                  >
+                    {form.emergencyPhone}
+                  </a>
+                ) : (
+                  <span className="muted small">No number given</span>
+                )}
+              </div>
+            ) : (
+              // A form saved before the contact existed. Say which piece is
+              // missing rather than reporting the whole form as done.
+              <p className="muted small">
+                No emergency contact — they filled this in before we asked for one.
+              </p>
+            )}
             <Line label="Allergies" value={answer(form.allergies, form.allergiesNone)} />
             <Line label="Dietary" value={answer(form.dietary, form.dietaryNone)} />
             <Line label="Injuries" value={answer(form.injuries, form.injuriesNone)} />

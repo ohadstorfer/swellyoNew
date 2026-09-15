@@ -28,12 +28,10 @@ type Props = {
 /**
  * Set one traveler's price.
  *
- * Every rule below is also enforced by operator_set_traveler_price. They are
- * repeated here so the operator finds out before submitting, not after — the
- * server's errors are raw Postgres text.
- *
- * The one rule the server does NOT have is the overpayment block. See
- * checkPriceChange().
+ * Every rule below — the overpayment block included, since 20260906000200 —
+ * is also enforced by operator_set_traveler_price. They are repeated here so
+ * the operator finds out before submitting, not after — the server's errors
+ * are raw Postgres text. See checkPriceChange().
  */
 export function TravelerPriceDialog({
   travelerName,

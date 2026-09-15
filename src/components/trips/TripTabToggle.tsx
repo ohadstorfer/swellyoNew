@@ -3,10 +3,10 @@
 // switching animates smoothly: the weight crossfades (two stacked text layers)
 // and the accent underline slides between segments.
 //
-// Overview and Plan are the traveler's two tabs. An operator hosting the trip
-// gets a third, Dashboard — so this takes a LIST of tabs rather than the two it
-// used to hardcode. Everything below is sized off `tabs.length`, never off a
-// literal 2.
+// Overview and Plan are the traveler's two tabs. Whoever runs an operator trip
+// gets Dashboard + Overview instead — Plan's sections moved into Dashboard — so
+// this takes a LIST of tabs rather than a hardcoded pair. Everything below is
+// sized off `tabs.length`, never off a literal 2.
 //
 // Only shown to members (host + approved); non-members never see it.
 
@@ -20,6 +20,7 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { ff } from '../../theme/fonts';
+import { TripIcon, type TripIconName } from './tripIcons';
 
 export type TripTab = 'overview' | 'plan' | 'dashboard';
 
@@ -36,6 +37,16 @@ interface Props {
   tabs?: TripTab[];
 }
 
+/**
+ * The operator's pair carries icons (Figma 14980-65921). Plan has none in any
+ * frame, so icons render only when EVERY tab has one — the traveler's
+ * Overview/Plan pair stays text-only instead of getting one lopsided icon.
+ */
+const TAB_ICON: Partial<Record<TripTab, TripIconName>> = {
+  dashboard: 'layout-alt-04',
+  overview: 'sun-setting-03',
+};
+
 const DEFAULT_TABS: TripTab[] = ['overview', 'plan'];
 
 // The indicator MOVES across the screen rather than entering or leaving it, so
@@ -46,6 +57,7 @@ const SLIDE = { duration: 220, easing: Easing.bezier(0.77, 0, 0.175, 1) };
 export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT_TABS }) => {
   const count = tabs.length;
   const index = Math.max(0, tabs.indexOf(value));
+  const withIcons = tabs.every(t => !!TAB_ICON[t]);
 
   // Animated in tab-INDEX units, not pixels, so the same value drives both the
   // slide and each label's weight crossfade.
@@ -75,6 +87,7 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT
         <TabSegment
           key={tab}
           label={TAB_LABEL[tab]}
+          icon={withIcons ? TAB_ICON[tab] : undefined}
           index={i}
           position={position}
           selected={tab === value}
@@ -96,11 +109,12 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT
  */
 const TabSegment: React.FC<{
   label: string;
+  icon?: TripIconName;
   index: number;
   position: SharedValue<number>;
   selected: boolean;
   onPress: () => void;
-}> = ({ label, index, position, selected, onPress }) => {
+}> = ({ label, icon, index, position, selected, onPress }) => {
   // 1 when this tab is active, 0 once the indicator is a full tab away. The
   // clamp is what keeps a three-tab jump (Overview -> Dashboard) from flashing
   // the middle label as it passes over Plan.
@@ -122,16 +136,19 @@ const TabSegment: React.FC<{
       accessibilityState={{ selected }}
       accessibilityLabel={label}
     >
-      <View style={styles.labelWrap}>
-        <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, weight]}>
-          {label}
-        </Animated.Text>
-        <Animated.Text
-          numberOfLines={1}
-          style={[styles.label, styles.reg, styles.overlay, regular]}
-        >
-          {label}
-        </Animated.Text>
+      <View style={styles.segmentRow}>
+        {icon ? <TripIcon name={icon} size={16} color="#333333" /> : null}
+        <View style={styles.labelWrap}>
+          <Animated.Text numberOfLines={1} style={[styles.label, styles.bold, weight]}>
+            {label}
+          </Animated.Text>
+          <Animated.Text
+            numberOfLines={1}
+            style={[styles.label, styles.reg, styles.overlay, regular]}
+          >
+            {label}
+          </Animated.Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -153,6 +170,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  segmentRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   // Sized by the (always-present) bold layer so the width never reflows; the
   // regular layer is overlaid and crossfaded on top.
   labelWrap: {

@@ -3,18 +3,22 @@
 // sheet itself SLIDES up from below. (The default Modal animationType="slide"
 // slides everything together, so the scrim looked like it slid in too.)
 //
-// Usage — the tap-to-close target is a plain <Pressable> (a Pressable wrapped by
-// Animated.createAnimatedComponent does NOT reliably capture touches, so taps
-// leak through to the screen behind). The dim is a separate non-interactive
-// layer so it can fade independently of the sliding sheet:
+// Usage — tap-to-close belongs on the SCRIM, a sibling painted BELOW the sheet, never on a
+// Pressable wrapped around the sheet: a Pressable claims the touch on finger-down and fights
+// any ScrollView inside the sheet on Android (the first drag scrolls nothing). The scrim is a
+// plain <Pressable> (one wrapped by Animated.createAnimatedComponent does NOT reliably capture
+// touches, so taps leak to the screen behind), and the dim is a separate non-interactive layer
+// so it can fade independently of the sliding sheet:
 //   const { mounted, backdropOpacity, translateY, onSheetLayout } = useSheetTransition(visible);
 //   <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
-//     <Pressable style={{ flex: 1, justifyContent: 'flex-end' }} onPress={onClose}>
-//       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: backdropOpacity }]} />
+//     <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+//       <Pressable style={StyleSheet.absoluteFill} onPress={onClose}>
+//         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)', opacity: backdropOpacity }]} />
+//       </Pressable>
 //       <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
-//         <Pressable onPress={e => e.stopPropagation()}>…sheet…</Pressable>
+//         <View>…sheet…</View>
 //       </Animated.View>
-//     </Pressable>
+//     </View>
 //   </Modal>
 //
 // Keep the Modal mounted via `mounted` (not `visible`) so the exit animation can

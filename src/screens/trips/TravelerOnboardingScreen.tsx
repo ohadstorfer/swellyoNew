@@ -74,6 +74,7 @@ import {
 import {
   fetchTravelerPrices,
   fetchPaidByRequirement,
+  fetchInFlightByRequirement,
   amountOutstanding,
   isPayingInFull,
   startCheckout,
@@ -478,6 +479,24 @@ export default function TravelerOnboardingScreen({
         // slow webhook is the common case and telling someone their payment
         // failed when it did not is worse than telling them to wait.
         setConfirming(false);
+
+        // A BANK payment is the one case where this is the expected outcome
+        // (ACH, ach-bank-payments.md): the ledger carries a 'processing'
+        // marker and the money is in transit for up to 4 business days. Say that,
+        // with the amount and the timescale, instead of "a moment" — the
+        // generic line below promises something that will not happen today.
+        // Non-fatal: a failed read falls through to the generic copy.
+        const inFlight = await fetchInFlightByRequirement(tripId, userId).catch(() => null);
+        if (stale()) return;
+        const clearing = inFlight?.[step.requirement.requirementId];
+        if (clearing) {
+          const usd = clearing.amountUsd > 0 ? `$${Math.round(clearing.amountUsd).toLocaleString('en-US')} ` : '';
+          setPaymentNote(
+            `Your ${usd}bank payment is on its way. Bank transfers take up to 4 business days — this step will complete itself when it lands, and we'll send you a message. There's nothing to do now; please don't pay again.`,
+          );
+          return;
+        }
+
         setPaymentNote(
           "Your payment is still being confirmed. This usually takes a moment — you can close this and come back, nothing is lost.",
         );

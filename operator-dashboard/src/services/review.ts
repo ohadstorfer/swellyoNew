@@ -42,6 +42,13 @@ export type TripReview = {
   travelers: TravelerReview[];
   totalToReview: number;
   currentWaiverId: string | null;
+  /**
+   * Requirements removed because this viewer may not see them — today only the
+   * medical form, for anyone without `medical.view`. Set by `withoutMedical`,
+   * absent on the unfiltered review. A page reached by URL uses it to say
+   * "not yours to see" rather than "no longer exists".
+   */
+  hiddenRequirementIds?: string[];
 };
 
 /**

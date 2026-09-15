@@ -104,8 +104,10 @@ import {
   resolveDeadlineDate,
   stepDeadline,
   isDeadlineAtEnd,
+  deadlineStepBlocked,
   isPayKind,
   DEFAULT_TIMING,
+  LOCKED_TIMING,
   FIXED_DOCUMENT_KINDS,
   REQUIREMENT_CATALOG,
   REQUIREMENT_ORDER,
@@ -128,6 +130,7 @@ import {
 // Existing dependencies still used (preview card)
 import { TripPreviewCard } from '../../components/trips/TripPreviewCard';
 import { type TripDetailVM } from '../../components/trips/TripDetailView';
+import { ensureOperatorOnCrew } from '../../services/trips/tripStaffService';
 import { TripDetailViewRedesigned } from '../../components/trips/TripDetailViewRedesigned';
 import { TripPublishedScreen } from './TripPublishedScreen';
 import { TripTagPicker } from '../../components/trips/TripTagPicker';
@@ -490,10 +493,12 @@ const INITIAL_STATE: WizardState = {
   priceInclusions: {},
   paymentMode: 'offline',
   depositAmount: '',
-  // NOT a default — the rule. Every operator trip asks for the same seven
-  // things, split the same way, so a traveler who has done one operator trip
-  // knows what the next will ask (Ohad, 10 Aug). The operator no longer picks.
-  // Single source of truth: ONBOARDING_REQUIREMENT_SPEC.
+  // The starting point, not the rule (Ohad, 21 Aug). Every operator trip is
+  // seeded with the same seven things, split the same way, so a traveler who
+  // has done one operator trip knows roughly what the next will ask — but the
+  // operator switches off what their trip genuinely does not need, here and
+  // afterwards in ManageRequirementsSheet / the operator dashboard.
+  // Single source of truth for the seed: ONBOARDING_REQUIREMENT_SPEC.
   requirementKinds: [...FIXED_DOCUMENT_KINDS],
   requirementTiming: { ...DEFAULT_TIMING },
   waiverFile: null,
@@ -529,6 +534,30 @@ const REQ_ICON: Record<Exclude<RequirementKind, 'passport'>, any> = {
 // insert of the whole batch, so the failure would silently drop every other
 // requirement too.
 const DOCUMENT_REQUIREMENT_ORDER = REQUIREMENT_ORDER.filter(k => !isPayKind(k));
+/**
+ * The requirements an operator may NOT switch off.
+ *
+ * Only the waiver, and not for a technical reason — it is the one agreement
+ * the product has (there is no terms-of-service acceptance, no separate
+ * liability form), so a trip published without it has no record of what
+ * anyone agreed to. Everything else on this step is a judgement call about one
+ * trip; this one is not.
+ *
+ * It is still shown as a checked card rather than hidden: the operator has to
+ * upload the PDF travelers agree to, and a card with no checkbox that still
+ * demands a file reads as broken.
+ *
+ * ⚠️ TWIN of the same rule in `ManageRequirementsSheet` (`LOCKED_ON_KINDS`)
+ * and `RequirementsEditor` on the operator dashboard. All three have to agree,
+ * or "always on" is only true on whichever screen the operator did not use.
+ */
+const LOCKED_ON_KINDS: RequirementKind[] = ['waiver'];
+/** Why a locked card has no checkbox, said on the card rather than in a
+ *  footnote nobody reads. Replaces the catalog's `operatorSub`, which describes
+ *  the requirement rather than the lock. */
+const LOCKED_ON_SUB: Partial<Record<RequirementKind, string>> = {
+  waiver: 'On every trip — it is the only record of what travelers agreed to.',
+};
 /** The money rows, in catalog order. Rendered on this step as TIMING-ONLY
  *  cards: which payments exist is decided on the budget step (payment mode +
  *  whether a deposit amount was typed), so they carry no on/off toggle — the
@@ -1966,25 +1995,36 @@ export default function CreateTripFlowA({
         return ok;
       }
       case 'aboutYou': {
-        if (!state.hostDestFamiliarity)
-          fail('hostDestFamiliarity', 'Pick how well you know the destination');
-        if (!state.hostStayFamiliarity)
-          fail('hostStayFamiliarity', 'Pick how well you know the stay');
+        // Flow B only. An operator is not asked how well they know the place —
+        // Product Specs §2, built 23 Aug 2026. See renderAboutYouStep.
+        if (!isFixedFlow) {
+          if (!state.hostDestFamiliarity)
+            fail('hostDestFamiliarity', 'Pick how well you know the destination');
+          if (!state.hostStayFamiliarity)
+            fail('hostStayFamiliarity', 'Pick how well you know the stay');
+        }
         return ok;
       }
       case 'requirements': {
-        // The waiver is now on EVERY operator trip and is REQUIRED to join, so
-        // this is no longer a conditional check — it blocks every publish.
+        // The waiver is on EVERY operator trip (LOCKED_ON_KINDS), so this
+        // blocks every publish rather than only the ones that ticked it.
         //
         // It has to. `operator_trip_my_requirements` only counts an
         // acknowledgement whose operator_document_id matches the CURRENT waiver
         // document. With no document there is nothing to match, the waiver sits
-        // at 'not_started' forever, and since it is must_have that means NOBODY
-        // CAN EVER JOIN THE TRIP. Publishing without the PDF would ship a trip
-        // that silently accepts nobody.
+        // at 'not_started' forever, and when the operator has left it as
+        // must_have that means NOBODY CAN EVER JOIN THE TRIP. Publishing
+        // without the PDF would ship a trip that silently accepts nobody.
+        //
+        // ⚠️ Still blocks when the waiver is set to "they can skip". A
+        // skippable waiver is joinable without a PDF, so the trip is not
+        // broken — but the requirement is still unsatisfiable, so every
+        // traveler on it stays permanently outstanding and goes overdue on a
+        // step that has nothing behind it.
+        //
         // `waiverFile` null with a default stored means "use my default" — the
         // skip. Only an operator with NEITHER is blocked.
-        if (state.requirementKinds.includes('waiver') && !state.waiverFile && !defaultWaiver) {
+        if (!state.waiverFile && !defaultWaiver) {
           fail('waiverText', 'Upload your waiver PDF — travelers cannot join the trip until they can agree to it');
         }
         return ok;
@@ -2081,10 +2121,12 @@ export default function CreateTripFlowA({
       const accommodationCommitted = requiresSpecificStay || state.accommodationLocked === true;
 
       // Host credibility fields (B & C have the "About you" step; null for A).
+      // Familiarity is Flow B only — an operator is never asked (§2), so C
+      // writes nulls even if an older draft carried values.
       const leaderFields = hasAboutYou
         ? {
-            host_destination_familiarity: state.hostDestFamiliarity,
-            host_stay_familiarity: state.hostStayFamiliarity,
+            host_destination_familiarity: isFixedFlow ? null : state.hostDestFamiliarity,
+            host_stay_familiarity: isFixedFlow ? null : state.hostStayFamiliarity,
             host_lead_note: state.hostLeadNote.trim() || null,
           }
         : {
@@ -2364,12 +2406,20 @@ export default function CreateTripFlowA({
         // offered as toggles), but a duplicate kind in one insert batch is a
         // 23505 that silently drops every OTHER requirement in the same
         // batch — not worth trusting a single upstream filter to prevent.
-        const allKinds = Array.from(new Set([...payKinds, ...state.requirementKinds]));
+        // LOCKED_ON_KINDS is unioned in rather than trusted to be in
+        // `requirementKinds`: a draft written while the requirement set was
+        // fixed — or, in a much older one, while `['passport']` was the
+        // default — can be resumed with `waiver` absent, and the step renders
+        // it as on regardless (see `renderRequirementsStep`). Publishing what
+        // the card SHOWED is the only honest outcome.
+        const allKinds = Array.from(
+          new Set([...payKinds, ...state.requirementKinds, ...LOCKED_ON_KINDS]),
+        );
         if (isFixedFlow && allKinds.length > 0) {
           try {
             // The waiver DOCUMENT goes first. A waiver requirement whose
             // document does not exist can never be satisfied.
-            if (state.requirementKinds.includes('waiver')) {
+            if (allKinds.includes('waiver')) {
               // A file picked for THIS trip wins; otherwise the operator's
               // default template is copied in. Both end with an identical
               // document row — see publishWaiverFromDefault for why the default
@@ -2394,6 +2444,23 @@ export default function CreateTripFlowA({
               'Requirements not saved',
               "Your trip published, but the traveler requirements — including payment collection, if you turned it on — could not be saved. Open the trip and add them from Edit.",
             );
+          }
+        }
+
+        // The operator joins their own crew. The overview no longer carries an
+        // "About the operator" section (Product Specs §3), so the Crew section
+        // is the only place a traveler meets the person running the trip —
+        // and nothing else ever creates this row. Non-fatal on purpose: a
+        // published trip must not be lost over a crew card.
+        if (isFixedFlow) {
+          try {
+            await ensureOperatorOnCrew({
+              tripId: trip.id,
+              operatorId: hostId,
+              bio: state.hostLeadNote.trim() || null,
+            });
+          } catch (crewErr) {
+            console.warn('[CreateTripFlowA] ensureOperatorOnCrew failed:', crewErr);
           }
         }
 
@@ -2521,15 +2588,24 @@ export default function CreateTripFlowA({
   // -----------------------------------------------------------------------
   // STEP — REQUIREMENTS (Flow C only)
   //
-  // v1 offers exactly one requirement: the passport. The other five kinds the
-  // schema allows (waiver, medical, insurance, visa, flights) are deliberately
-  // NOT here — none of them has a traveler-side screen yet, and offering an
-  // operator something their travelers cannot act on is worse than offering
-  // nothing. Add each one here as its traveler flow lands.
+  // What this trip asks travelers for, and when each answer is due.
   //
-  // Written on publish as an `organized_trip_requirements` row, `must_have`
-  // (which the schema requires to have no deadline). Nothing is written if the
-  // host turns it off.
+  // ONBOARDING_REQUIREMENT_SPEC seeds the whole list ON and pre-split into
+  // required/optional, so an operator who reads this step and moves on
+  // publishes exactly what every operator trip has always asked for. What is
+  // theirs is which of those a PARTICULAR trip needs — a domestic trip has no
+  // visa, an operator who books the flights has no ticket to collect — and
+  // when the optional ones are due. Only the waiver has no switch
+  // (LOCKED_ON_KINDS).
+  //
+  // Nothing is written until publish, and only for the kinds still switched on
+  // (`createRequirements(trip.id, allKinds, state.requirementTiming)`). A kind
+  // turned off simply never becomes a row, which is why turning one off costs
+  // nothing here and is a real deletion in ManageRequirementsSheet.
+  //
+  // The two timings are what the schema allows and nothing else: `must_have`
+  // carries NO deadline, `skippable` MUST carry one —
+  // organized_trip_req_deadline_rule raises 23514 on any other pairing.
   // -----------------------------------------------------------------------
   const renderRequirementsStep = () => {
     const setTiming = (kind: RequirementKind, patch: Partial<RequirementTiming>) => {
@@ -2544,36 +2620,103 @@ export default function CreateTripFlowA({
     // Extracted rather than duplicated: "when is it due" must look and behave
     // identically for a passport and for a deposit, and two copies drift.
     const renderTimingControls = (kind: RequirementKind) => {
-      const timing = state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
+      // LOCKED_TIMING wins over anything in the draft — the write paths clamp
+      // it too, so showing the operator's stale value here would be the only
+      // screen in the app telling them something that is not going to happen.
+      const pinned = LOCKED_TIMING[kind];
+      const timing = pinned ?? state.requirementTiming[kind] ?? DEFAULT_TIMING[kind];
       return (
         <>
-          {/* Required-vs-optional is NOT a choice any more (Ohad, 10 Aug).
-              Every operator trip asks for the same seven things, split the
-              same way — see ONBOARDING_REQUIREMENT_SPEC. It is stated here
-              rather than hidden because the operator still needs to know
-              which items can stall, and because the required set is exactly
-              what decides when a traveler is actually on the trip.
-              The DEADLINE below is still theirs to set. */}
+          {/* When is it due? Two timings only: must-have during onboarding, or
+              skippable until a deadline counted back from departure.
+
+              ⚠️ "When they join" is not urgency, it is ACCESS. The must-have
+              set IS the wall between approved and actually on the trip — a
+              traveler holds no seat until every one of them is satisfied
+              (`activate_trip_membership`). ONBOARDING_REQUIREMENT_SPEC still
+              seeds this, so an operator who changes nothing gets the same
+              split every operator trip has had; it is a starting point again
+              rather than a rule (Ohad, 21 Aug), because both post-publish
+              editors already let them change it the minute the trip is live
+              and a wizard that refuses what the next screen allows just makes
+              them publish first and fix it after. */}
           <View style={localStyles.timingRow}>
-            <View style={[localStyles.timingPill, localStyles.timingPillOn]}>
-              <Text style={[localStyles.timingPillText, localStyles.timingPillTextOn]}>
-                {timing.skippable ? 'Optional — they can skip' : 'Required to join'}
-              </Text>
-            </View>
+            {pinned ? (
+              /* One flat pill, not two with one disabled. A greyed-out "They
+                 can skip" reads as an option the operator has not earned yet
+                 and invites them to hunt for the setting that unlocks it;
+                 there is no such setting. */
+              <View style={[localStyles.timingPill, localStyles.timingPillOn]}>
+                <Text style={[localStyles.timingPillText, localStyles.timingPillTextOn]}>
+                  {pinned.skippable ? 'They can skip' : 'When they join'}
+                </Text>
+              </View>
+            ) : (
+              <>
+              <Pressable
+                onPress={() => setTiming(kind, { skippable: false })}
+                style={[localStyles.timingPill, !timing.skippable && localStyles.timingPillOn]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: !timing.skippable }}
+              >
+                <Text
+                  style={[
+                    localStyles.timingPillText,
+                    !timing.skippable && localStyles.timingPillTextOn,
+                  ]}
+                >
+                  When they join
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setTiming(kind, { skippable: true })}
+                style={[localStyles.timingPill, timing.skippable && localStyles.timingPillOn]}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: timing.skippable }}
+              >
+                <Text
+                  style={[
+                    localStyles.timingPillText,
+                    timing.skippable && localStyles.timingPillTextOn,
+                  ]}
+                >
+                  They can skip
+                </Text>
+              </Pressable>
+              </>
+            )}
           </View>
 
+          {/* The DEADLINE_STEPS scale — 1/3/7/14/21/30/60/90/120/180/365 —
+              not a flat ±7. Operators think in named intervals, and the gap
+              that matters near departure (a day, three days) is not the gap
+              that matters months out. Same control the post-publish editors
+              give them; a wizard that moved in sevens and an editor that
+              snapped through notches were two different deadlines to learn. */}
           {timing.skippable ? (
             <View style={localStyles.daysRow}>
-              <Pressable
-                onPress={() => setTiming(kind, { daysBefore: Math.max(0, timing.daysBefore - 7) })}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  localStyles.stepBtn,
-                  pressed && localStyles.stepBtnPressed,
-                ]}
-              >
-                <Ionicons name="remove" size={16} color="#212121" />
-              </Pressable>
+              {(() => {
+                // Fewer days before = a LATER date, so this direction can never
+                // walk a deadline into the past. Only the end of the scale
+                // stops it.
+                const minusBlocked = isDeadlineAtEnd(timing.daysBefore, -1);
+                return (
+                  <Pressable
+                    onPress={() =>
+                      setTiming(kind, { daysBefore: stepDeadline(timing.daysBefore, -1) })
+                    }
+                    disabled={minusBlocked}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      localStyles.stepBtn,
+                      minusBlocked && localStyles.stepBtnOff,
+                      pressed && localStyles.stepBtnPressed,
+                    ]}
+                  >
+                    <Ionicons name="remove" size={16} color="#212121" />
+                  </Pressable>
+                );
+              })()}
               <View style={localStyles.daysLabel}>
                 <Text style={localStyles.daysValue}>
                   {timing.daysBefore === 1
@@ -2582,18 +2725,34 @@ export default function CreateTripFlowA({
                 </Text>
                 <Text style={localStyles.daysDate}>{deadlineDateLabel(timing.daysBefore)}</Text>
               </View>
-              <Pressable
-                onPress={() =>
-                  setTiming(kind, { daysBefore: Math.min(365, timing.daysBefore + 7) })
-                }
-                hitSlop={8}
-                style={({ pressed }) => [
-                  localStyles.stepBtn,
-                  pressed && localStyles.stepBtnPressed,
-                ]}
-              >
-                <Ionicons name="add" size={16} color="#212121" />
-              </Pressable>
+              {/* ⚠️ PLUS MEANS EARLIER. The scale is days BEFORE departure, so
+                  it runs backwards against the calendar and this is the only
+                  button that can walk a deadline off the back of today.
+                  Blocked when it would — an operator may not SET a deadline
+                  that has already gone, here or on the dashboard. It can
+                  genuinely happen in the wizard: a trip published nine days
+                  out cannot carry a 14-days-before deadline. */}
+              {(() => {
+                const plusBlocked =
+                  isDeadlineAtEnd(timing.daysBefore, 1) ||
+                  deadlineStepBlocked(timing.daysBefore, 1, state.startDateISO);
+                return (
+                  <Pressable
+                    onPress={() =>
+                      setTiming(kind, { daysBefore: stepDeadline(timing.daysBefore, 1) })
+                    }
+                    disabled={plusBlocked}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      localStyles.stepBtn,
+                      plusBlocked && localStyles.stepBtnOff,
+                      pressed && localStyles.stepBtnPressed,
+                    ]}
+                  >
+                    <Ionicons name="add" size={16} color="#212121" />
+                  </Pressable>
+                );
+              })()}
             </View>
           ) : (
             <Text style={localStyles.timingHint}>
@@ -2652,8 +2811,36 @@ export default function CreateTripFlowA({
       }
     };
 
-    // (There used to be a `toggle` here. The requirement set is fixed now —
-    // ONBOARDING_REQUIREMENT_SPEC — so there is nothing to turn on or off.)
+    /**
+     * Does this trip actually ask for this?
+     *
+     * ONBOARDING_REQUIREMENT_SPEC seeds every kind ON, so an operator who
+     * changes nothing publishes the same seven things every operator trip has
+     * asked for. Turning one off means the row is simply never written — a
+     * domestic trip has no visa to check, an operator who books the flights
+     * has no ticket to collect, and asking for it anyway leaves a step nobody
+     * can complete sitting in the traveler's onboarding forever.
+     *
+     * The waiver is the exception and has no toggle — see `LOCKED_ON_KINDS`.
+     */
+    const toggle = (kind: RequirementKind) => {
+      if (LOCKED_ON_KINDS.includes(kind)) return;
+      const on = state.requirementKinds.includes(kind);
+      update(
+        'requirementKinds',
+        on
+          ? state.requirementKinds.filter(k => k !== kind)
+          : [...state.requirementKinds, kind],
+      );
+      // A waiver PDF picked and then abandoned would otherwise be published on
+      // the next Save. Unreachable while `waiver` is locked on, but the moment
+      // it stops being locked this is the difference between a clean draft and
+      // an orphaned file in a bucket the purge job never sweeps.
+      if (on && kind === 'waiver') {
+        update('waiverFile', null);
+        setError('waiverText', null);
+      }
+    };
 
     return (
       <View style={localStyles.reqStack}>
@@ -2695,11 +2882,12 @@ export default function CreateTripFlowA({
 
         {DOCUMENT_REQUIREMENT_ORDER.map(kind => {
           const c = REQUIREMENT_CATALOG[kind];
-          // Always on. The set is fixed for every operator trip — see
-          // ONBOARDING_REQUIREMENT_SPEC. Kept as a const rather than deleting
-          // the styling branches so this reads as "the answer is always yes"
-          // instead of leaving half-applied "selected" styles behind.
-          const on = true;
+          // Seeded on by ONBOARDING_REQUIREMENT_SPEC; the operator decides
+          // whether this trip actually needs it. The waiver has no toggle, and
+          // reads as on even when a resumed draft does not list it — publish
+          // unions LOCKED_ON_KINDS back in, so the card is telling the truth.
+          const lockedOn = LOCKED_ON_KINDS.includes(kind);
+          const on = lockedOn || state.requirementKinds.includes(kind);
           return (
             // One card per requirement — header AND its settings live in the same
             // container. They used to be siblings separated by a left rail, which
@@ -2707,11 +2895,27 @@ export default function CreateTripFlowA({
             // cards. Containment is what stops the list feeling crowded: six
             // selections still means six blocks, never eighteen.
             <View key={kind} style={[localStyles.reqCard, on && localStyles.reqCardOn]}>
-              {/* A View, not a Pressable — same treatment the pay cards above
-                  get. Nothing here responds to a tap now that the set is fixed,
-                  and a pressable that does nothing invites the operator to keep
-                  trying it. */}
-              <View style={localStyles.reqHeader} accessibilityRole="text">
+              {/* `disabled` on a locked card, not a separate View branch: it
+                  drops the press tint and the checkbox role together, so the
+                  card stops answering taps instead of answering them with
+                  nothing — and the two shapes stay one piece of markup. */}
+              <Pressable
+                onPress={() => toggle(kind)}
+                disabled={lockedOn}
+                // Tint on press, not scale. The card border is drawn by the
+                // parent, so scaling this row would read as the content shrinking
+                // inside a fixed frame. The tint paints exactly the tappable
+                // region, which is the whole card when collapsed and just the
+                // header once it is open.
+                style={({ pressed }) => [
+                  localStyles.reqHeader,
+                  pressed &&
+                    !lockedOn &&
+                    (on ? localStyles.reqHeaderPressedOn : localStyles.reqHeaderPressed),
+                ]}
+                accessibilityRole={lockedOn ? 'text' : 'checkbox'}
+                accessibilityState={lockedOn ? undefined : { checked: on }}
+              >
                 <View style={localStyles.reqIconWrap}>
                   {kind === 'passport' ? (
                     <TripIcon name="passport" size={22} color="#212121" strokeWidth={1.5} />
@@ -2721,20 +2925,28 @@ export default function CreateTripFlowA({
                 </View>
                 <View style={localStyles.reqBody}>
                   <Text style={localStyles.reqTitle}>{c.operatorTitle}</Text>
-                  <Text style={localStyles.reqSub}>{c.operatorSub}</Text>
+                  <Text style={localStyles.reqSub}>
+                    {lockedOn ? LOCKED_ON_SUB[kind] ?? c.operatorSub : c.operatorSub}
+                  </Text>
                 </View>
-              </View>
+                {/* A locked card still shows the tick — it IS on, and an empty
+                    space there would read as "off but somehow expanded". It is
+                    just not a control. */}
+                <View style={[localStyles.reqCheck, on && localStyles.reqCheckOn]}>
+                  {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                </View>
+              </Pressable>
 
-              {/* Whether it is required is fixed; WHEN a skippable one is due
-                  is still the operator's call. Deadlines are stored RELATIVE to
-                  departure and shown as the real date — moving or duplicating a
-                  trip then keeps every deadline correct.
+              {/* The settings, revealed only once the trip actually asks for
+                  this. Deadlines are stored RELATIVE to departure and shown as
+                  the real date — moving or duplicating a trip then keeps every
+                  deadline correct.
 
-                  Always expanded now: there is no unselected state to collapse
-                  into, so the entrance fade that used to accompany selecting a
-                  requirement would just be a flash on mount. */}
+                  Short ease-out fade: switching a requirement on is occasional,
+                  so an entrance is worth it, but it stays under 200ms so the
+                  wizard never feels slow. */}
               {on ? (
-                <View style={localStyles.reqExpand}>
+                <FadeInView duration={180} translateY={4} style={localStyles.reqExpand}>
                   <View style={localStyles.reqDivider} />
 
                   {renderTimingControls(kind)}
@@ -2805,7 +3017,7 @@ export default function CreateTripFlowA({
                       )}
                     </View>
                   ) : null}
-                </View>
+                </FadeInView>
               ) : null}
             </View>
           );
@@ -3631,19 +3843,32 @@ export default function CreateTripFlowA({
                 ? 'Travelers must finish paying by this date.'
                 : "Shown in each traveler's plan: pay you the full amount by this date."}
             </Text>
+            {/* Same DEADLINE_STEPS scale as the Requirements step and both
+                post-publish editors — see `stepDeadline`. This one used to
+                move in flat sevens, which is how an operator could set a
+                payment deadline the dashboard's own stepper would refuse. */}
             <View style={localStyles.daysRow}>
-              <Pressable
-                onPress={() => setBalanceDays(Math.max(0, balanceTiming.daysBefore - 7))}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Move the payment deadline closer to the trip"
-                style={({ pressed }) => [
-                  localStyles.stepBtn,
-                  pressed && localStyles.stepBtnPressed,
-                ]}
-              >
-                <Ionicons name="remove" size={16} color="#212121" />
-              </Pressable>
+              {(() => {
+                const minusBlocked = isDeadlineAtEnd(balanceTiming.daysBefore, -1);
+                return (
+                  <Pressable
+                    onPress={() =>
+                      setBalanceDays(stepDeadline(balanceTiming.daysBefore, -1))
+                    }
+                    disabled={minusBlocked}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Move the payment deadline closer to the trip"
+                    style={({ pressed }) => [
+                      localStyles.stepBtn,
+                      minusBlocked && localStyles.stepBtnOff,
+                      pressed && localStyles.stepBtnPressed,
+                    ]}
+                  >
+                    <Ionicons name="remove" size={16} color="#212121" />
+                  </Pressable>
+                );
+              })()}
               <View style={localStyles.daysLabel}>
                 <Text style={localStyles.daysValue}>
                   {balanceTiming.daysBefore === 1
@@ -3654,18 +3879,34 @@ export default function CreateTripFlowA({
                   {deadlineDateLabel(balanceTiming.daysBefore)}
                 </Text>
               </View>
-              <Pressable
-                onPress={() => setBalanceDays(Math.min(365, balanceTiming.daysBefore + 7))}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Move the payment deadline earlier"
-                style={({ pressed }) => [
-                  localStyles.stepBtn,
-                  pressed && localStyles.stepBtnPressed,
-                ]}
-              >
-                <Ionicons name="add" size={16} color="#212121" />
-              </Pressable>
+              {/* ⚠️ PLUS MEANS EARLIER — days BEFORE departure runs backwards
+                  against the calendar, so this is the only direction that can
+                  land the deadline in the past. */}
+              {(() => {
+                const plusBlocked =
+                  isDeadlineAtEnd(balanceTiming.daysBefore, 1) ||
+                  deadlineStepBlocked(
+                    balanceTiming.daysBefore,
+                    1,
+                    state.datesMode === 'exact' ? state.startDateISO : null,
+                  );
+                return (
+                  <Pressable
+                    onPress={() => setBalanceDays(stepDeadline(balanceTiming.daysBefore, 1))}
+                    disabled={plusBlocked}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Move the payment deadline earlier"
+                    style={({ pressed }) => [
+                      localStyles.stepBtn,
+                      plusBlocked && localStyles.stepBtnOff,
+                      pressed && localStyles.stepBtnPressed,
+                    ]}
+                  >
+                    <Ionicons name="add" size={16} color="#212121" />
+                  </Pressable>
+                );
+              })()}
             </View>
           </>
         )}
@@ -3984,6 +4225,12 @@ export default function CreateTripFlowA({
           </View>
         </TouchableOpacity>
 
+        {/* Flow B only. "How many times have you been here / stayed here" is a
+            Captain's credibility, not an operator's — Product Specs §2, built
+            23 Aug 2026. The operator keeps the profile card above and the note
+            below; only these two rows go. */}
+        {!isFixedFlow && (
+        <>
         <Text style={[localStyles.fieldLabel, localStyles.aboutSectionGap]}>Trip expertise</Text>
         <Text style={localStyles.aboutSubtitle}>
           How well you know the destination and stay.
@@ -4015,6 +4262,8 @@ export default function CreateTripFlowA({
             error={errors.hostStayFamiliarity ?? undefined}
           />
         </View>
+        </>
+        )}
 
         <Text style={[localStyles.fieldLabel, localStyles.aboutSectionGap]}>
           {isFixedFlow ? 'Why surfers can trust your operation' : 'Why you’re the right Captain'}

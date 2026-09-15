@@ -34,6 +34,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import Reanimated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { TRIP_VIBE_OPTIONS } from '../../services/trips/groupTripsService';
 import {
   priceInclusionSections,
@@ -41,7 +48,7 @@ import {
   CATEGORY_TITLE,
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
-import { CrewSection } from './CrewSection';
+import { CrewCards } from './CrewSection';
 import { Images } from '../../assets/images';
 import { TripIcon, type TripIconName } from './tripIcons';
 import { getStorageThumbUrl } from '../../services/media/imageService';
@@ -258,6 +265,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   vm,
   participants = [],
   crew = [],
+  onViewAllCrew,
+  membersSlot,
+  onEditTrip,
+  heroCollapsed = false,
+  animateHeroCollapse = false,
   onParticipantPress,
   onSeeAllParticipants,
   onLeaderPress,
@@ -282,6 +294,39 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const [showBudgetInfo, setShowBudgetInfo] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [aboutHostExpanded, setAboutHostExpanded] = useState(false);
+
+  // ── Hero collapse (Dashboard / Plan) ──────────────────────────────────────
+  // Those tabs are work, not the sales page, so the cover + countdown slide up
+  // under the black header and the tabs sit right below it (Ohad, 14 Sep).
+  // `heroH` is the hero's natural height, measured on an inner view that is
+  // never clipped, so it stays right while the outer one shrinks.
+  const reduceMotion = useReducedMotion();
+  const heroH = useSharedValue(0);
+  const heroCollapse = useSharedValue(heroCollapsed ? 1 : 0);
+  useEffect(() => {
+    const to = heroCollapsed ? 1 : 0;
+    // Only a tap animates. The screen choosing a tab for you on open (or from a
+    // notification) should just land there, not play a hero leaving.
+    heroCollapse.value =
+      animateHeroCollapse && !reduceMotion
+        ? withTiming(to, { duration: 300, easing: Easing.bezier(0.77, 0, 0.175, 1) })
+        : to;
+  }, [heroCollapsed, animateHeroCollapse, reduceMotion, heroCollapse]);
+  const heroClipStyle = useAnimatedStyle(() => {
+    const c = heroCollapse.value;
+    if (heroH.value === 0) return c === 1 ? { height: 0, overflow: 'hidden' as const } : {};
+    return {
+      height: heroH.value * (1 - c),
+      // Visible at rest so the countdown card's shadow is not cut off.
+      overflow: c > 0 ? ('hidden' as const) : ('visible' as const),
+    };
+  });
+  // Moves with the clip edge, so the hero reads as sliding up, not as being
+  // cropped from the bottom.
+  const heroSlideStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -heroH.value * heroCollapse.value }],
+    opacity: 1 - heroCollapse.value * 0.6,
+  }));
 
   const dateRange = formatDateRange(vm);
   const countdownTarget = computeCountdownTarget(vm);
@@ -470,68 +515,123 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     });
   }
 
+  // Surf style moves below Member on operator trips (Figma 14980-66208), so it
+  // is built once and placed by trip type.
+  const surfStyleSection = surfStyles.length > 0 ? (
+    <View style={styles.section}>
+      <SectionTitle title="Surf style" />
+      <View style={styles.surfCard}>
+        <View style={styles.surfPills}>
+          {surfStyles.map(s => (
+            <View key={s} style={styles.surfPill}>
+              <Text style={[styles.surfPillText, { fontSize: surfPillFontSize }]}>
+                {BOARD_SHORT[s] ?? s}
+              </Text>
+            </View>
+          ))}
+        </View>
+        <View style={styles.boardsRow}>
+          {surfStyles.map(s => {
+            const board = BOARD_IMAGE_EVEN[s];
+            if (!board) return null;
+            // Boards share one height (BOARD_H); width follows each
+            // board's aspect ratio so the row reads as a uniform even set.
+            // Exception: the shortboard PNG renders bulky, so squish it
+            // to 90% width. 'stretch' (not 'contain') keeps the full
+            // height — contain would scale the whole board down instead.
+            const isShort = s === 'shortboard';
+            const boardW = Math.round(BOARD_H * board.aspect * (isShort ? 0.9 : 1));
+            return (
+              <Image
+                key={s}
+                source={board.src}
+                style={{ width: boardW, height: BOARD_H }}
+                resizeMode={isShort ? 'stretch' : 'contain'}
+              />
+            );
+          })}
+        </View>
+      </View>
+    </View>
+  ) : null;
+
   return (
     <View style={styles.root}>
       {/* White header zone — the hero, countdown card and the Overview/Plan
           toggle sit on white; everything below the toggle is the #FAFAFA body. */}
       <View style={styles.headerWhite}>
       {/* ---- Hero + overlapping card with countdown ---- */}
-      <View style={styles.heroWrap}>
-        {vm.heroImageUri ? (
-          <Thumb
-            uri={vm.heroImageUri}
-            widthPx={1280}
-            style={styles.hero}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={150}
-          />
-        ) : (
-          <View style={[styles.hero, styles.heroPlaceholder]}>
-            <Ionicons name="image-outline" size={40} color="#B0B0B0" />
-          </View>
-        )}
-        {onShare ? (
-          <TouchableOpacity
-            style={styles.shareFab}
-            onPress={onShare}
-            activeOpacity={0.8}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityRole="button"
-            accessibilityLabel="Share trip"
-          >
-            <Ionicons name="share-social-outline" size={22} color={C.ink} />
-          </TouchableOpacity>
-        ) : null}
-        {isHost ? (
-          <View style={styles.editCoverPill}>
-            <EditPill label="Edit cover" onPress={onEditCover} />
-          </View>
-        ) : null}
-        <View style={styles.heroCard}>
-          {/* Coloured trip-type tag, straddling the top edge of the card. */}
-          {typeTagWord ? (
-            <View style={styles.typeTagWrap} pointerEvents="none">
-              <LinearGradient
-                colors={typeTagGradient ?? [C.accent, C.accent, C.accent]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.typeTag}
-              >
-                <Text style={styles.typeTagText}>{typeTagWord}</Text>
-              </LinearGradient>
+      <Reanimated.View style={[styles.heroClip, heroClipStyle]}>
+        <Reanimated.View
+          style={[styles.heroWrap, heroSlideStyle]}
+          onLayout={e => {
+            heroH.value = e.nativeEvent.layout.height;
+          }}
+        >
+          {vm.heroImageUri ? (
+            <Thumb
+              uri={vm.heroImageUri}
+              widthPx={1280}
+              style={styles.hero}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+            />
+          ) : (
+            <View style={[styles.hero, styles.heroPlaceholder]}>
+              <Ionicons name="image-outline" size={40} color="#B0B0B0" />
+            </View>
+          )}
+          {onShare ? (
+            <TouchableOpacity
+              style={styles.shareFab}
+              onPress={onShare}
+              activeOpacity={0.8}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Share trip"
+            >
+              <Ionicons name="share-social-outline" size={22} color={C.ink} />
+            </TouchableOpacity>
+          ) : null}
+          {/* Operator trips edit the whole trip from here (Figma 14980-66208) —
+              the wizard owns the cover too. Peer hosts keep the cover sheet. */}
+          {isOperator ? (
+            onEditTrip ? (
+              <View style={styles.editCoverPill}>
+                <EditPill label="Edit trip" onPress={onEditTrip} />
+              </View>
+            ) : null
+          ) : isHost ? (
+            <View style={styles.editCoverPill}>
+              <EditPill label="Edit cover" onPress={onEditCover} />
             </View>
           ) : null}
-          <View style={styles.heroDateRow}>
-            <Text style={styles.heroDate}>{dateRange}</Text>
-            {canEditDates ? <EditPill label="Set dates" onPress={onEditDates} /> : null}
+          <View style={styles.heroCard}>
+            {/* Coloured trip-type tag, straddling the top edge of the card. */}
+            {typeTagWord ? (
+              <View style={styles.typeTagWrap} pointerEvents="none">
+                <LinearGradient
+                  colors={typeTagGradient ?? [C.accent, C.accent, C.accent]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.typeTag}
+                >
+                  <Text style={styles.typeTagText}>{typeTagWord}</Text>
+                </LinearGradient>
+              </View>
+            ) : null}
+            <View style={styles.heroDateRow}>
+              <Text style={styles.heroDate}>{dateRange}</Text>
+              {canEditDates ? <EditPill label="Set dates" onPress={onEditDates} /> : null}
+            </View>
+            <Text style={styles.heroTitle} numberOfLines={2}>
+              {vm.title || vm.destinationLabel || 'Your trip'}
+            </Text>
+            <CountdownBoxes target={countdownTarget} />
           </View>
-          <Text style={styles.heroTitle} numberOfLines={2}>
-            {vm.title || vm.destinationLabel || 'Your trip'}
-          </Text>
-          <CountdownBoxes target={countdownTarget} />
-        </View>
-      </View>
+        </Reanimated.View>
+      </Reanimated.View>
 
       {/* Shared chrome slot (Overview/Plan toggle) — sits between hero and body. */}
       {afterHeroSlot ?? null}
@@ -598,7 +698,20 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* ---- About <host> (organizer self-intro) — host_lead_note. Shown
                   when the host wrote one, or always to the host so they can add
                   one via "Edit Profile". ---- */}
+          {/* NOT ON OPERATOR TRIPS. Product Specs §3 ("no more 'about the
+              operator' section"), built 23 Aug 2026. A Captain is a peer
+              selling themselves as the person to travel with; an operator is a
+              business, and the doc puts the people who run the trip in the Crew
+              section right below instead.
+
+              ⚠️ The operator is NOT in that Crew list unless they add
+              themselves — nothing creates a staff row for the owner (the
+              staff/traveler triggers exempt the host, so it is allowed, just
+              never automatic). Until they do, an operator trip shows no face at
+              all on the overview, and `host_lead_note` is still collected in
+              the create flow with nowhere to appear. See the audit, item #1. */}
           {!isPlannedTogether &&
+          !isOperator &&
           aboutHost &&
           (aboutHost.bio || isHost || hasHostBadges || hostFamiliarity.length > 0) ? (
             <View style={styles.section}>
@@ -706,9 +819,17 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* Operator trips only, and only the people the operator chose to show
               (capability `profile.shown_to_travelers`, filtered server-side).
               Hidden for anyone with the Plan tab — same rule as Participants
-              below — because the crew moved to Plan for them; here it is part
-              of the sales page for people deciding whether to join. */}
-          {!hideParticipants && <CrewSection crew={crew} style={styles.section} />}
+              below — because the crew moved to Plan for them. Cards, not a
+              list: Figma 14980-66208, operator ringed in the accent colour. */}
+          {!hideParticipants && (
+            <CrewCards
+              crew={crew}
+              title="Staff"
+              variant="overview"
+              onViewAll={onViewAllCrew}
+              style={styles.section}
+            />
+          )}
 
           {/* ---- About this trip ---- */}
           {vm.description || isHost ? (
@@ -869,44 +990,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Surf style ---- */}
-          {surfStyles.length > 0 ? (
-            <View style={styles.section}>
-              <SectionTitle title="Surf style" />
-              <View style={styles.surfCard}>
-                <View style={styles.surfPills}>
-                  {surfStyles.map(s => (
-                    <View key={s} style={styles.surfPill}>
-                      <Text style={[styles.surfPillText, { fontSize: surfPillFontSize }]}>
-                        {BOARD_SHORT[s] ?? s}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                <View style={styles.boardsRow}>
-                  {surfStyles.map(s => {
-                    const board = BOARD_IMAGE_EVEN[s];
-                    if (!board) return null;
-                    // Boards share one height (BOARD_H); width follows each
-                    // board's aspect ratio so the row reads as a uniform even set.
-                    // Exception: the shortboard PNG renders bulky, so squish it
-                    // to 90% width. 'stretch' (not 'contain') keeps the full
-                    // height — contain would scale the whole board down instead.
-                    const isShort = s === 'shortboard';
-                    const boardW = Math.round(BOARD_H * board.aspect * (isShort ? 0.9 : 1));
-                    return (
-                      <Image
-                        key={s}
-                        source={board.src}
-                        style={{ width: boardW, height: BOARD_H }}
-                        resizeMode={isShort ? 'stretch' : 'contain'}
-                      />
-                    );
-                  })}
-                </View>
-              </View>
-            </View>
-          ) : null}
+          {!isOperator ? surfStyleSection : null}
 
           {/* ---- How this trip works ---- */}
           {structures.length > 0 ? (
@@ -929,10 +1013,17 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
+          {/* ---- Member (operator trips) — the screen's Member section, then
+              Surf style after it: that is the Figma order (14980-66208). ---- */}
+          {!hideParticipants && membersSlot ? (
+            <View style={styles.section}>{membersSlot}</View>
+          ) : null}
+          {isOperator ? surfStyleSection : null}
+
           {/* ---- Participants — tappable avatars, scroll right for more ----
               Hidden for members who have the Plan tab: they see the richer
               Members section there (Figma 13455-38686). */}
-          {!hideParticipants && (
+          {!hideParticipants && !membersSlot && (
           <View style={styles.section}>
             <View style={styles.sectionTitleRow}>
               <View style={styles.participantsTitle}>
@@ -1181,9 +1272,15 @@ const styles = StyleSheet.create({
   // Hero + floating card. White background so the area behind the overlapping
   // countdown card (which is pulled up over the hero) stays white, not the
   // page's #FAFAFA.
-  heroWrap: {
+  // The clip carries the full-bleed margin. On the inner view it would reach
+  // 16px past the clip's edges, and the collapse would crop both sides.
+  heroClip: {
     marginHorizontal: -16,
-    marginBottom: 8,
+  },
+  // paddingBottom, not marginBottom: a margin is not part of the measured
+  // height, so the collapse would leave an 8px sliver behind.
+  heroWrap: {
+    paddingBottom: 8,
     backgroundColor: '#FFFFFF',
   },
   hero: {

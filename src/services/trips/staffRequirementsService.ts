@@ -91,6 +91,34 @@ export interface MyStaffRequirement {
   assignedAt: string;
   /** Derived server-side from the evidence rows, never stored. */
   fulfilled: boolean;
+  /**
+   * The TRAVELERS' deadline for this same kind, in days before departure.
+   *
+   * Never stored on the staff row and never editable here — it is read through
+   * to the traveler requirement of the same kind, so it can only ever say what
+   * the travelers were told (20260904000200). Null when the travelers have no
+   * deadline for it, and always null for a `custom` staff-only ask.
+   *
+   * ⚠️ FLAGGED, NEVER GATED. Nothing in this file or its screens may use this
+   * to block a crew member. See the file header.
+   */
+  deadlineDaysBefore: number | null;
+  /** The same deadline against the trip's start date, or null when the trip
+   *  has no dates yet. `YYYY-MM-DD`. */
+  dueDate: string | null;
+}
+
+/**
+ * Is this ask past the travelers' deadline for the same thing?
+ *
+ * A flag for the operator and a nudge for the crew member. It gates nothing —
+ * calling it "late" is the entire consequence.
+ */
+export function isStaffRequirementLate(
+  r: Pick<MyStaffRequirement, 'fulfilled' | 'dueDate'>,
+  today: string = new Date().toISOString().slice(0, 10),
+): boolean {
+  return !r.fulfilled && !!r.dueDate && r.dueDate < today;
 }
 
 /**
@@ -276,6 +304,57 @@ export interface StaffEvidenceRow {
   state: 'missing' | 'submitted' | 'approved' | 'agreed' | 'filled';
   documentId: string | null;
   storagePath: string | null;
+  /** The TRAVELERS' deadline for the same kind — see MyStaffRequirement. Shown
+   *  to the operator so they can see who is behind without opening each
+   *  person; it gates nothing here either. */
+  deadlineDaysBefore: number | null;
+  dueDate: string | null;
+}
+
+/**
+ * The travelers' deadline for every kind on one trip, keyed by kind.
+ *
+ * The SQL side of this is a left join inside `staff_my_requirements`. The
+ * operator's side reads plain tables (see fetchStaffPaperworkEvidence), so it
+ * needs the same lookup in TypeScript — one small query, and the two must
+ * answer the same way. `custom` is excluded on both sides: two custom asks
+ * that happen to share a title are not the same requirement.
+ */
+export async function fetchTravelerDeadlinesByKind(
+  tripId: string,
+): Promise<Map<string, { daysBefore: number | null; dueDate: string | null }>> {
+  const [reqs, trip] = await Promise.all([
+    supabase
+      .from('organized_trip_requirements')
+      .select('kind, deadline_days_before')
+      .eq('trip_id', tripId)
+      .eq('audience', 'traveler')
+      .eq('is_active', true),
+    supabase.from('group_trips').select('start_date').eq('id', tripId).maybeSingle(),
+  ]);
+  if (reqs.error) throw reqs.error;
+
+  const start = (trip.data?.start_date as string | null) ?? null;
+  const out = new Map<string, { daysBefore: number | null; dueDate: string | null }>();
+  for (const r of reqs.data ?? []) {
+    const kind = r.kind as string;
+    if (kind === 'custom') continue;
+    const daysBefore = (r.deadline_days_before as number | null) ?? null;
+    out.set(kind, { daysBefore, dueDate: resolveDueDate(start, daysBefore) });
+  }
+  return out;
+}
+
+/** `start_date - daysBefore`, as `YYYY-MM-DD`. Built from the date parts so it
+ *  cannot drift a day across a timezone, the same trap `todayISO` warns about. */
+function resolveDueDate(startDate: string | null, daysBefore: number | null): string | null {
+  if (!startDate || daysBefore === null) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(startDate);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - daysBefore);
+  if (Number.isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /**
@@ -315,6 +394,8 @@ export async function fetchStaffPaperworkEvidence(params: {
     .order('sort_order', { ascending: true });
   if (reqErr) throw reqErr;
   if (!reqs?.length) return [];
+
+  const deadlines = await fetchTravelerDeadlinesByKind(tripId);
 
   const [docs, acks, medical] = await Promise.all([
     supabase
@@ -359,6 +440,8 @@ export async function fetchStaffPaperworkEvidence(params: {
       state,
       documentId: (doc?.id as string | undefined) ?? null,
       storagePath: (doc?.storage_path as string | undefined) ?? null,
+      deadlineDaysBefore: deadlines.get(kind)?.daysBefore ?? null,
+      dueDate: deadlines.get(kind)?.dueDate ?? null,
     };
   });
 }
@@ -374,6 +457,8 @@ export async function fetchMyStaffRequirements(tripId: string): Promise<MyStaffR
     helpText: (r.help_text as string | null) ?? null,
     assignedAt: r.assigned_at as string,
     fulfilled: !!r.fulfilled,
+    deadlineDaysBefore: (r.deadline_days_before as number | null) ?? null,
+    dueDate: (r.due_date as string | null) ?? null,
   }));
 }
 
@@ -448,6 +533,13 @@ export async function fetchStaffRequirementsAsMe(
         : r.req_type === 'acknowledge'
           ? agreed.has(r.id as string)
           : uploaded.has(r.id as string),
+    // The deadline is a read-through to the TRAVELERS' row of the same kind,
+    // which `staff_my_requirements` does in SQL. This shortcut skips the
+    // assignment join and would have to re-implement that lookup to fill these
+    // in; it is a dev aid for exercising the upload screens, not for checking
+    // dates, so it reports none rather than reporting a guess.
+    deadlineDaysBefore: null,
+    dueDate: null,
   }));
 }
 
@@ -484,7 +576,11 @@ export async function createStaffRequirement(params: {
       audience: 'staff',
       title: params.title.trim(),
       help_text: params.helpText?.trim() || null,
-      // Staff paperwork has no deadline and no skip — see the file header.
+      // No deadline column and no skip on the staff row itself. The date crew
+      // see is READ THROUGH to the travelers' requirement of the same kind
+      // (staff_my_requirements, 20260904000200), which is what makes "deadlines
+      // will be similar to rest of travelers" true without a second copy to
+      // keep in step. See the file header.
       skip_at_onboarding: 'must_have',
       sort_order: 100,
       is_active: true,

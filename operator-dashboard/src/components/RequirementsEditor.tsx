@@ -10,6 +10,9 @@ import {
 } from '../domain/requirements';
 import {
   DEFAULT_TIMING,
+  LOCKED_ON_KINDS,
+  LOCKED_ON_SUB,
+  LOCKED_TIMING,
   REQUIREMENT_CATALOG,
   REQUIREMENT_ORDER,
   isEditableKind,
@@ -77,7 +80,7 @@ export function RequirementsEditor(props: Props) {
   });
 
   if (rows.isError) {
-    return <ErrorBox error={rows.error} onRetry={() => void rows.refetch()} />;
+    return <ErrorBox what="The requirements" error={rows.error} onRetry={() => void rows.refetch()} />;
   }
   if (rows.isPending) return <p className="muted small">Loading what this trip asks for…</p>;
 
@@ -143,6 +146,9 @@ function Editor({
   };
 
   const toggle = (kind: EditableKind) => {
+    // Locked OFF only — see LOCKED_ON_KINDS. Switching one back ON is exactly
+    // what a trip that lost its waiver needs, so only the removal is refused.
+    if (on.includes(kind) && LOCKED_ON_KINDS.includes(kind)) return;
     setDirty(true);
     setOn(prev => (prev.includes(kind) ? prev.filter(k => k !== kind) : [...prev, kind]));
   };
@@ -229,7 +235,9 @@ function Editor({
             timing={timing[kind]}
             startDateISO={startDateISO}
             onChange={patch => setKindTiming(kind, patch)}
-            onRemove={() => toggle(kind)}
+            // No Remove on a locked kind. `onRemove` absent is the same signal
+            // a pay row sends — the row is re-timeable, not removable.
+            onRemove={LOCKED_ON_KINDS.includes(kind) ? undefined : () => toggle(kind)}
           />
         ))}
 
@@ -363,7 +371,7 @@ function Editor({
  *  and may only be re-timed here. */
 function TimingRow({
   kind,
-  timing,
+  timing: chosen,
   startDateISO,
   onChange,
   onRemove,
@@ -375,6 +383,10 @@ function TimingRow({
   onRemove?: () => void;
 }) {
   const c = REQUIREMENT_CATALOG[kind];
+  // LOCKED_TIMING wins over the stored row and the draft. The save path clamps
+  // it too, so showing anything else here would be a promise Save does not keep.
+  const pinned = LOCKED_TIMING[kind];
+  const timing = pinned ?? chosen;
   const dueISO = timing.skippable ? resolveDeadlineISO(startDateISO, timing.daysBefore) : null;
 
   // ⚠️ PLUS MEANS EARLIER. The scale is days BEFORE departure, so it runs
@@ -392,7 +404,9 @@ function TimingRow({
       <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
         <div>
           <strong className="small">{c.operatorTitle}</strong>
-          <p className="muted small">{c.operatorSub}</p>
+          <p className="muted small">
+            {(!onRemove && LOCKED_ON_SUB[kind]) || c.operatorSub}
+          </p>
         </div>
         {onRemove && (
           <button className="btn btn-sm btn-ghost" onClick={onRemove}>
@@ -401,22 +415,34 @@ function TimingRow({
         )}
       </div>
 
-      <div className="seg" role="group" aria-label={`${c.operatorTitle} timing`}>
-        <button
-          className="seg-btn"
-          aria-pressed={!timing.skippable}
-          onClick={() => onChange({ skippable: false })}
-        >
-          When they join
-        </button>
-        <button
-          className="seg-btn"
-          aria-pressed={timing.skippable}
-          onClick={() => onChange({ skippable: true })}
-        >
-          They can skip
-        </button>
-      </div>
+      {pinned ? (
+        /* One flat pill, not a segmented control with one half disabled. A
+           greyed "They can skip" reads as an option the operator has not
+           earned yet and sends them hunting for the setting that unlocks it;
+           there is none. */
+        <div className="seg" role="group" aria-label={`${c.operatorTitle} timing`}>
+          <button className="seg-btn" aria-pressed={true} disabled>
+            {pinned.skippable ? 'They can skip' : 'When they join'}
+          </button>
+        </div>
+      ) : (
+        <div className="seg" role="group" aria-label={`${c.operatorTitle} timing`}>
+          <button
+            className="seg-btn"
+            aria-pressed={!timing.skippable}
+            onClick={() => onChange({ skippable: false })}
+          >
+            When they join
+          </button>
+          <button
+            className="seg-btn"
+            aria-pressed={timing.skippable}
+            onClick={() => onChange({ skippable: true })}
+          >
+            They can skip
+          </button>
+        </div>
+      )}
 
       {timing.skippable ? (
         <div className="stepper">

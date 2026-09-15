@@ -14,9 +14,30 @@ A small, separate website. It is **not** part of the mobile app and does not sha
 - They pick a trip and see how it is going.
 - They can review documents and download files.
 - They can see the money, set the trip's price and deposit, and set one traveler's price.
-- They cannot otherwise edit the trip, message anyone, or remove travelers. That stays on mobile.
+- Since 5 September 2026 they can also run the trip: approve join requests, post admin updates,
+  manage the crew end to end, edit the trip's refund terms and waiver while it is empty, and
+  cancel it. See §2's fifth amendment.
 
-**Why it exists:** reviewing 60 documents and sending passports to a hotel is painful on a phone. Those two jobs earn a desktop screen. Everything else does not.
+**Why it exists:** reviewing 60 documents and sending passports to a hotel is painful on a phone. Those two jobs earned the desktop screen in the first place.
+
+**What changed on 5 September 2026.** The Product Specs say, in one line under the trip
+dashboard drawings: *"all functions and views should exist in both the mobile and desktop
+version."* That overturns the founding sentence below — "Desktop — Read/review only. All real
+management happens on mobile" — and with it three decisions recorded further down this document:
+that crew management, trip cancellation and messaging were app-only.
+
+The first two are here. **Messaging is not, and that is settled rather than pending.** A full
+client is a realtime socket, a conversation list, attachments, read state and typing — a second
+app inside this one.
+
+A narrow version WAS built on 5 September and removed the same day, by Ohad, after seeing it: one
+conversation, text only, live, no attachments and no unread count. Worth recording so nobody
+rebuilds it thinking it was never tried. The website is where an operator reviews documents and
+runs the money; the conversation stays in the app, on the phone the traveler is holding.
+
+**Admin updates are here and are not a substitute.** An update is a broadcast with a push behind
+it — "the boat leaves at six" — which is most of what an operator uses the group chat for from a
+desk. A chat message is a conversation, and conversations stayed on mobile.
 
 ### Where it comes from
 
@@ -57,6 +78,28 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
    - **Traveler documents stay behind their policies.** The site can read and approve what `docs.view` / `docs.approve` allow, and can upload only to `defaults/<user_id>/` — never into `<trip_id>/`, which is where every sensitive file lives.
 
    **Stripe is the exception and stays one.** Connect onboarding needs the secret key and lives behind an edge function the app calls. Step 1 of setup reports the state and points at the app. Do not build a second onboarding path here.
+
+   **Amended 2026-09-05: the trip's own waiver.** `replaceTripWaiver` uploads a PDF to
+   `<trip_id>/operator/`. The rule above says never to write into `<trip_id>/`, and that rule is
+   unchanged **for traveler documents** — passports, visas, insurance and flights stay
+   phone-only, and this site still uploads none of them.
+
+   The operator's own waiver is a different thing in a different prefix with a different policy:
+   `<trip_id>/operator/` gates on `is_trip_host(trip_id)`, so the browser was always permitted.
+   What stopped it was this sentence, not Postgres. Product Specs asks for "replace waiver (for
+   this trip specifically)" on both surfaces, and `guard_waiver_replacement` already narrows it
+   to a trip nobody has joined — so the risky part was never the upload, it was the swap, and
+   that is guarded in the database.
+
+   **Amended 2026-09-05: crew photos.** `AddCrewDialog` used to say a Listed credit "wants a
+   photo upload this project has no path for". There was a path all along — crew photos go
+   through the `image-upload-s3` edge function, which returns a presigned PUT. Two `fetch`
+   calls, no new policy, no new bucket, and the key is derived server-side from the caller's own
+   JWT so a client cannot write outside its own folder. See `services/images.ts`.
+
+   **Amended 2026-09-02: the Express Dashboard link.** Settings → Payments now has an "Update your details in Stripe" button, shown once `details_submitted` is true. It calls `stripe-connect-onboard` with `action: 'dashboard'`, which mints a single-use Stripe login link, and opens it in a new tab.
+
+   That is not a second onboarding path and the rule above is unchanged. Onboarding is a form *we* would have to render and keep in step with Stripe's six states; this is one call that hands back a URL to a page **Stripe** renders and owns, so there is nothing here to drift. It exists because an operator changing the bank account they get paid into had nowhere to do it but their phone, and the edge function keys off the caller's own `auth.uid()` — it can only ever open the signed-in person's own dashboard.
 
 2. **The database is the security boundary.** Row Level Security decides what an operator can see. The website cannot see a trip it does not host, even if the code asks for it.
 3. **No backend.** The browser talks to Supabase directly. Netlify serves static files only.
@@ -99,10 +142,23 @@ Decided by Ohad, 13 August: **a Manager sees everything on this site except `mon
 | Traveler pages, profiles, emergency contact | `travelers.view_profiles` | ✓ |
 | Money: totals, who paid, the ledger, refund history | `payments.view_status` | ✓ |
 | Set a trip or traveler price · issue a refund | `money.manage` **+ `host_id`** | ✗ |
-| Invite or edit crew | `staff.manage` | ✗ (not on this site at all) |
-| Cancel the trip | `trip.cancel` | ✗ (not on this site at all) |
+| Invite or edit crew | `staff.manage` | ✗ |
+| Cancel the trip | `trip.cancel` | ✗ |
+| Approve or decline a join request | RLS on `group_trip_join_requests` | ✓ |
+| Post an admin update | `updates.send` | ✓ |
+| Add or remove gear, edit packing suggestions | `trip.edit` | ✓ |
+| Edit the trip's refund terms or waiver | **`host_id`** | ✗ |
+| Edit your own crew title and bio | your own row | ✓ |
+| The payments ledger and its CSV | `payments.view_status` + `data.export` | ✓ |
 
-Two of those three do not exist here anyway — crew and cancellation are app-only — so in practice the single difference a Manager sees is the price and refund buttons. The Money page says so in a line, rather than showing every number with no buttons and letting it read as half-loaded.
+**Rewritten 2026-09-05.** This table used to end "two of those three do not exist here anyway —
+crew and cancellation are app-only". Both exist here now, so the exclusions are real ones a
+Manager will actually meet, and the last four rows are new.
+
+Refund terms join money on the `host_id` side of the fence, by decision D2 of 4 September: a
+Manager holds `trip.edit`, and the terms live on `group_trips`, so without
+`trg_guard_operator_trip_cancellation_policy` (20260904000100) a Manager could rewrite what
+everybody gets back. Terms decide what a refund IS.
 
 #### The two pages that are not about a trip
 
@@ -193,6 +249,66 @@ Moving the trip's own start date is untouched by all this — it still warns and
 6. **Travelers** — everyone on the trip, one row each, alphabetical: photo, name, `3/5 approved · $500 of $1,200 paid`, a `2 late` tag when they are past a deadline, and a `2 waiting` tag when they have documents to review. Late comes first: chasing somebody takes days, saying yes to a file takes five seconds. Opens their traveler page (§4.4).
    This is the only per-person way into the site — every other card is per-requirement, so before this a traveler who had submitted nothing could not be opened at all.
    The roster comes from the member list, never from the review read: a slow or failed review must not make the trip look empty.
+
+### 4.2c Everything added 2026-09-05
+
+Product Specs, one line under the trip dashboard drawings: *"all functions and views should exist
+in both the mobile and desktop version."* What that added to the trip snapshot, in the order it
+now renders:
+
+- **Trip summary tiles** (Frame 39433) — `Payments collected $16,800 of $28,000`, `Fully paid
+  2/9`, `Travelers 7/12`. Above the banners, because they are state and the banners are
+  exceptions.
+
+  The travelers tile is the one that fixes something. `participant_count` deliberately excludes
+  anyone still at `status = 'onboarding'` — approval on an operator trip takes no seat — so a
+  trip with eight people actively paying has read as "2 going" everywhere in this product. The
+  tile shows seats taken and names the onboarding group underneath (`+3 still joining`) instead
+  of swallowing it. `travelerCounts` and `tripSummary` in `domain/money.ts`, twinned with the
+  app's `dashboardWork.ts` and tested on both sides.
+
+- **Wants to come** — join requests, approve and decline. Two UPDATEs on
+  `group_trip_join_requests`; the trigger does everything else. The app's `approveJoinRequest`
+  also drops the person into the group chat, and that half is deliberately NOT copied: on an
+  operator trip approval opens onboarding and grants no seat, so the app skips it too.
+
+- **Gear** — the group list, the packing suggestions, and travelers' requests to add an item.
+  The suggestion list is ONE array write on `group_trips.personal_gear_host_suggestion`; a
+  trigger fans it into every traveler's checklist and preserves their ticks.
+
+- **Your paperwork** and **Your details** — whoever signs in here is running the trip and also on
+  it. Read-only for documents (uploading stays on the phone, §2), editable for your own crew
+  title and bio (20260904000300).
+
+- **Updates** — admin updates, read by anyone on the trip and posted behind `updates.send`. A
+  broadcast with a push behind it. This is the closest this site comes to messaging, and it is
+  deliberate — see §1.
+
+- **Cancellation policy**, with the waiver swap inside it — both editable only while nobody has
+  joined, and both refused by a database trigger rather than by this page.
+
+- **Export everything** — one zip, a folder per traveler. The phone exports one traveler or one
+  requirement and points here for the rest; JSZip builds the archive in memory, and sixty phone
+  photos is how a mobile app gets killed by the OS.
+
+- **Cancel the trip** — last on the page, behind a typed CANCEL, then a result screen naming
+  every refund that did not go out. `trip-cancel` re-asks Stripe what is left on each charge, so
+  the retry cannot double-refund.
+
+### 4.7 Payments page — added 2026-09-05
+
+`/trips/:tripId/payments`. Every transaction, newest first, grouped by nothing and totalled
+nowhere: `buildTripMoney` is the one place a figure is derived, and a second derivation here is
+how two screens come to disagree.
+
+Failed attempts and rows from the other Stripe mode are behind a toggle, off by default. They are
+excluded from every total on purpose — a failed charge moved no money — but "she says she paid
+and it did not work" is the commonest question this page answers, and the answer is a failed row
+with a timestamp.
+
+The CSV export always carries EVERYTHING, whatever the toggle says, with the raw ISO timestamp
+and the Stripe mode as columns. A filtered spreadsheet is one that quietly lies to whoever opens
+it next.
 
 ### 4.2b Crew page — added 2026-08-14
 
@@ -307,7 +423,7 @@ Everything below is already live. **This project invents no schema (Rule 1). Eve
 | Reject | `operator_reject_document(...)` |
 | Files | private bucket `group-trip-documents`, signed links |
 | Payments | `organized_trip_payment_events` |
-| Traveler prices | `group_trip_participants.price_total_usd`, `.deposit_usd` |
+| Traveler prices | `organized_trip_traveler_prices` view (falls back to `group_trip_participants` until migration `20260906000100` is applied) |
 | Trip default price | `group_trips.cost_per_person`, `.deposit_amount`, `.payment_mode` |
 | Payment steps | `organized_trip_requirements_resolved` where `req_type = 'pay'` |
 | Set a traveler's price | `operator_set_traveler_price(...)` |
@@ -345,10 +461,13 @@ Every amount here is US dollars, and the currency is baked into column names rat
 - Bulk price setting. One traveler at a time.
 - Invoices and receipts. Stripe already emails them.
 - Export logging or download history.
-- Staff accounts or roles.
+- ~~Staff accounts or roles.~~ **Moved out 2026-08-14** — see §4.2b.
 - A view across several trips at once.
 - Charts. Counts and lists only.
-- Editing trips beyond their price and deposit; messaging. (Removing a traveler moved out of this list on 2026-08-19 — see §4.4.)
+- ~~Editing trips beyond their price and deposit~~; **messaging**. The editing half moved out
+  2026-09-05 — refund terms, waiver, gear and admin updates are all here now (§4.2c). Messaging
+  did not, and it is not an oversight: a narrow group chat was built and removed on the same day
+  (§1). (Removing a traveler moved out of this list on 2026-08-19 — see §4.4.)
 - Changing `payment_mode`. Turning payment collection on or off reorders more than two columns (pay rows, freeze, revert on failure) and stays in the app's "Getting paid" sheet.
 
 ---
@@ -358,7 +477,7 @@ Every amount here is US dollars, and the currency is baked into column names rat
 1. **Custom requirements.** Operators can invent their own items, and the tiles are built around passport, visa, insurance and flights. For now they go in an "Other requirements" list with their own counts. How they should properly be counted and exported — **needs Eyal and Ohad**.
 2. ~~**Removing a traveler who already paid.**~~ **Answered 2026-08-19** — it is a desktop action now, and the money is decided before they leave the roster (§4.4). The old worry stands in one narrower form: the ledger is append-only, so their payment rows survive, but the per-traveler view of them disappears with their membership. The trip's Money page still lists every counted event, including from people who have left.
 
-3. **The price columns are world-readable.** `group_trip_participants` has a SELECT policy of `using(true)` for every logged-in user, and the payments work added `price_total_usd` and `deposit_usd` to that table. So any Swellyo user can read what any traveler paid for any trip. This site needs that read and did not create the hole, but it is real. Fixing it is a migration in the main project.
+3. **The price columns were world-readable — fixed in the main project, 6 Sep 2026.** `group_trip_participants` has a SELECT policy of `using(true)` for every logged-in user (the trip preview needs it), and the payments work added `price_total_usd` and `deposit_usd` to that table, so any Swellyo user could read what any traveler paid for any trip. Migration `20260906000100_traveler_prices_not_world_readable` withholds the four price columns from the table and serves them through the `organized_trip_traveler_prices` view to the traveler and to staff with `payments.view_status` — the ledger's audience. This site reads the view in `fetchMembers` and falls back to the table until the migration is applied. Rule 1 holds: the view is the app's migration, not ours.
 
 ---
 

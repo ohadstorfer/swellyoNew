@@ -54,6 +54,15 @@ export type RootStackParamList = {
      *  other way to walk this screen without a second account. */
     devMode?: boolean;
   };
+  /**
+   * Every payment on one operator trip — the ledger behind the Dashboard's
+   * "Payments collected" tile. Product Specs §"Trip operator view".
+   *
+   * A card, not a modal: it opens a share sheet for the CSV export, and an OS
+   * sheet fired from a Modal that is tearing down is the same hazard
+   * TravelerOnboarding's header warns about.
+   */
+  TripPayments: { tripId: string; tripTitle?: string | null };
   /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
   TripUpdates: { tripId: string };
   /** Full "Members" list — "View all" target of the Overview Participants row and

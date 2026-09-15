@@ -1,5 +1,5 @@
 /**
- * MedicalFormSheet — allergies, diet, injuries, medication.
+ * MedicalFormSheet — emergency contact, allergies, diet, injuries, medication.
  *
  * This is the one requirement that is NOT a file, and it must stay that way.
  * Medical data is a table row guarded by RLS: the traveler can read and write
@@ -10,6 +10,13 @@
  * Each field has a "none" toggle. That matters: an empty box is ambiguous
  * ("nothing to declare" or "did not fill it in?"), while an explicit
  * `allergies_none = true` is an answer the operator can rely on.
+ *
+ * The emergency contact is the one block with no "none" toggle, and it is
+ * FIRST. Everything below it is information the operator reads while planning;
+ * this is the only thing on the form that gets used in the ninety seconds after
+ * something goes wrong, and it should not be at the bottom of a scroll. Added
+ * 4 Sep 2026 — Product Specs §"Trip onboarding" listed it from the start and
+ * the table never had a column for it.
  *
  * Spec: docs/specs/operator-trips/waiver-medical.md
  */
@@ -33,11 +40,44 @@ import {
   fetchMyMedicalForm,
   saveMedicalForm,
   EMPTY_MEDICAL_FORM,
+  isMedicalFormComplete,
   type MedicalForm,
 } from '../../services/trips/tripDocumentsService';
 import { showErrorAlert } from '../../utils/friendlyError';
 
 type FieldKey = 'allergies' | 'dietary' | 'injuries' | 'medications';
+
+type ContactKey = 'emergencyName' | 'emergencyPhone' | 'emergencyRelation';
+
+/** The three lines of the emergency contact. `optional` is only true of the
+ *  relationship: a name and a number are what get dialled. */
+const CONTACT_FIELDS: {
+  key: ContactKey;
+  label: string;
+  placeholder: string;
+  optional?: boolean;
+  keyboardType?: 'default' | 'phone-pad';
+  autoComplete?: 'name' | 'tel' | 'off';
+  max: number;
+}[] = [
+  { key: 'emergencyName', label: 'Full name', placeholder: 'Who should we call?', autoComplete: 'name', max: 120 },
+  {
+    key: 'emergencyPhone',
+    label: 'Phone number',
+    placeholder: 'Include the country code',
+    keyboardType: 'phone-pad',
+    autoComplete: 'tel',
+    max: 40,
+  },
+  {
+    key: 'emergencyRelation',
+    label: 'Relationship',
+    placeholder: 'Mother, partner, friend…',
+    optional: true,
+    autoComplete: 'off',
+    max: 60,
+  },
+];
 
 const FIELDS: {
   key: FieldKey;
@@ -134,6 +174,9 @@ export const MedicalFormSheet: React.FC<{
   const setField = (key: FieldKey, value: string) =>
     setForm(prev => ({ ...prev, [key]: value }));
 
+  const setContact = (key: ContactKey, value: string) =>
+    setForm(prev => ({ ...prev, [key]: value }));
+
   const toggleNone = (noneKey: keyof MedicalForm, textKey: FieldKey) =>
     setForm(prev => {
       const next = !prev[noneKey];
@@ -143,10 +186,16 @@ export const MedicalFormSheet: React.FC<{
     });
 
   // Every field must be answered: either text, or an explicit "none".
-  const complete = FIELDS.every(f => {
+  const answersComplete = FIELDS.every(f => {
     const none = form[f.noneKey] as boolean;
     return none || (form[f.key] as string).trim().length > 0;
   });
+  // A name and a number. `isMedicalFormComplete` asks the same question of a
+  // SAVED form — same rule, one place, so the sheet cannot let through
+  // something the dashboard then reports as missing.
+  const contactComplete =
+    form.emergencyName.trim().length > 0 && form.emergencyPhone.trim().length > 0;
+  const complete = answersComplete && contactComplete;
 
   const handleSave = useCallback(async () => {
     if (saving || !complete) return;
@@ -187,6 +236,33 @@ export const MedicalFormSheet: React.FC<{
           ) : (
             <>
               <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
+                {/* ── Emergency contact ─────────────────────────────────────
+                    First, and visually set apart, because it is the only block
+                    here that exists to be used rather than read. */}
+                <View style={styles.contactBlock}>
+                  <Text style={styles.blockTitle}>Emergency contact</Text>
+                  <Text style={styles.blockSub}>
+                    One person we can reach if something happens to you on this trip.
+                  </Text>
+                  {CONTACT_FIELDS.map(c => (
+                    <View key={c.key} style={styles.field}>
+                      <Text style={styles.label}>
+                        {c.label}
+                        {c.optional ? <Text style={styles.optional}>  Optional</Text> : null}
+                      </Text>
+                      <TextInput
+                        value={form[c.key]}
+                        onChangeText={t => setContact(c.key, t.slice(0, c.max))}
+                        placeholder={c.placeholder}
+                        placeholderTextColor="#9A9A9A"
+                        keyboardType={c.keyboardType ?? 'default'}
+                        autoComplete={c.autoComplete}
+                        style={styles.input}
+                      />
+                    </View>
+                  ))}
+                </View>
+
                 {FIELDS.map(f => {
                   const none = form[f.noneKey] as boolean;
                   return (
@@ -233,7 +309,9 @@ export const MedicalFormSheet: React.FC<{
                 </Pressable>
                 {!complete ? (
                   <Text style={styles.hint}>
-                    Answer every question — write something, or tick the box.
+                    {!contactComplete
+                      ? 'Add an emergency contact — a name and a phone number.'
+                      : 'Answer every question — write something, or tick the box.'}
                   </Text>
                 ) : null}
               </View>
@@ -265,6 +343,31 @@ const styles = StyleSheet.create({
   center: { padding: 32, alignItems: 'center' },
   body: { borderTopWidth: 1, borderTopColor: '#EEEEEE' },
   bodyContent: { padding: 20, gap: 18 },
+  // The emergency contact reads as one object, not three loose inputs — a
+  // tinted card with its own heading, so it does not look like a fifth
+  // question in the list below it.
+  contactBlock: {
+    gap: 14,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: '#F5FBFC',
+    borderWidth: 1,
+    borderColor: '#DCEFF2',
+  },
+  blockTitle: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#212121',
+  },
+  blockSub: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#7B7B7B',
+    marginTop: -8,
+  },
+  optional: { fontFamily: ff('Inter', '400'), fontSize: 11, color: '#9A9A9A' },
   field: { gap: 8 },
   label: {
     fontFamily: ff('Inter', '600'),

@@ -187,6 +187,25 @@ async function createExpressAccount(
       email: userRow?.email ?? '',
       'capabilities[card_payments][requested]': 'true',
       'capabilities[transfers][requested]': 'true',
+      // ACH. The charge settles on the operator's account (`on_behalf_of` in
+      // payments-checkout), so the capability has to live THERE, not on the
+      // platform — a US bank payment against an account without it is
+      // declined at Checkout.
+      //
+      // ⚠️ NEW ACCOUNTS ONLY. Every operator who onboarded before 27 Aug 2026
+      // is missing this and needs a one-time `POST /v1/accounts/{id}` with the
+      // same key. That backfill is deliberately NOT automated here: it touches
+      // money-adjacent config on live connected accounts and should be run
+      // deliberately, by a human, against a known list.
+      //
+      // Verified against docs.stripe.com/connect/account-capabilities
+      // (27 Aug 2026), verbatim: "To enable connected accounts to accept a
+      // payment method for direct charges or charges with `on_behalf_of`, you
+      // must request that payment method's capability for those accounts."
+      // And for Express: "you must request payment method capabilities for
+      // them." ACH is generally available, all business types, no extra
+      // verification, US-located accounts only.
+      'capabilities[us_bank_account_ach_payments][requested]': 'true',
       // debit_negative_balances is deliberately NOT sent — it already
       // defaults to true for this configuration. See the header comment.
     },
@@ -315,6 +334,63 @@ serve(async req => {
         // people ask at this point.
         callerHasPayoutAccount: !!accountId,
       });
+    }
+
+    // ── dashboard: a one-time link into the operator's OWN Stripe Express
+    //    Dashboard, so they can change details AFTER onboarding is done.
+    //
+    // This is the only self-serve edit path we can offer. The React Native
+    // Stripe SDK (0.73.0) ships four embedded Connect components —
+    // ConnectAccountOnboarding, ConnectPayments, ConnectPayouts and
+    // ConnectPaymentDetails — and NONE of them is `account-management`, the
+    // one that draws the editable details form on the web. Checked against
+    // node_modules/@stripe/stripe-react-native/.../connect/Components.d.ts,
+    // 2026-09-02. So there is nothing to draw in-app, and the alternative —
+    // an account_link of `type: 'account_update'` — is a bare re-run of the
+    // onboarding form: it cannot change a bank account, and it does not show
+    // payouts, tax documents or the payout schedule. The Express Dashboard
+    // does all of that.
+    //
+    // ⚠️ Only accounts whose `controller.stripe_dashboard.type` is `express`
+    // can have login links, which is exactly what `createExpressAccount`
+    // makes (`type: 'express'`). If that decision is ever revisited, this
+    // action stops working and the card must fall back to `account_update`.
+    //
+    // ⚠️ NO IDEMPOTENCY KEY, on purpose. A login link is single-use and
+    // short-lived; replaying a cached one from a previous request would hand
+    // back a URL that has already been spent.
+    if (action === 'dashboard') {
+      // Never creates an account. Editing details you have not entered yet is
+      // onboarding, and that is a different action with a different UI — an
+      // operator here without an account is a client-side bug, not a user
+      // who should silently get a Stripe account minted for them.
+      if (!accountId) {
+        return json({ error: 'You have not connected Stripe yet.' }, 400);
+      }
+      try {
+        const link = await stripe(`accounts/${accountId}/login_links`, {});
+        return json({ accountId, dashboardUrl: link.url });
+      } catch (e) {
+        // The one predictable failure: Stripe refuses a login link for an
+        // account that has not finished onboarding. The client gates on
+        // `detailsSubmitted` to avoid it, but that value is a cache and can
+        // be a few seconds stale — so say the useful thing instead of
+        // "something went wrong".
+        const raw = e instanceof Error ? e.message : String(e);
+        console.error('[stripe-connect-onboard] login_link failed', raw);
+        if (/onboard|not completed|cannot create/i.test(raw)) {
+          return json(
+            {
+              error:
+                'Stripe will not open your dashboard until setup is finished. ' +
+                'Finish connecting Stripe first.',
+              code: 'onboarding_incomplete',
+            },
+            409,
+          );
+        }
+        return json({ error: 'Could not open your Stripe dashboard' }, 502);
+      }
     }
 
     // ── account_session: the native embedded onboarding component.

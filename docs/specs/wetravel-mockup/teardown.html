@@ -1,0 +1,609 @@
+<title>WeTravel Teardown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap">
+<style>
+:root{
+  --paper:#f7f7f5; --card:#ffffff; --sunk:#f0f0ec;
+  --line:#e3e3de; --line-2:#d4d4cd;
+  --ink:#1c1c1a; --ink-2:#3a3a36; --mute:#6b6b66;
+  --accent:#066b8c; --accent-2:#05bcd3; --tint:#e6f4f8;
+  --ok:#1f7a4d; --ok-bg:#e8f5ee;
+  --warn:#b8532b; --warn-bg:#fdf0e9;
+  --bad:#b3261e; --bad-bg:#fdecea;
+  --quote:#5b5bb0; --quote-bg:#eeeefb;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  --display:'Montserrat','Inter',sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#161614; --card:#1e1e1b; --sunk:#252520;
+    --line:#33332d; --line-2:#43433b;
+    --ink:#f2f1ec; --ink-2:#d6d5cd; --mute:#9c9b92;
+    --accent:#4ecfe4; --accent-2:#05bcd3; --tint:#0d2f3a;
+    --ok:#6fd39b; --ok-bg:#11291d;
+    --warn:#e39a72; --warn-bg:#2e1c12;
+    --bad:#ef8a80; --bad-bg:#2e1512;
+    --quote:#a8a8e8; --quote-bg:#1c1c2e;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#161614; --card:#1e1e1b; --sunk:#252520;
+  --line:#33332d; --line-2:#43433b;
+  --ink:#f2f1ec; --ink-2:#d6d5cd; --mute:#9c9b92;
+  --accent:#4ecfe4; --accent-2:#05bcd3; --tint:#0d2f3a;
+  --ok:#6fd39b; --ok-bg:#11291d;
+  --warn:#e39a72; --warn-bg:#2e1c12;
+  --bad:#ef8a80; --bad-bg:#2e1512;
+  --quote:#a8a8e8; --quote-bg:#1c1c2e;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--font); font-size:16px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px; margin:0 auto; padding:0 24px;
+  display:grid; grid-template-columns:210px minmax(0,1fr); gap:52px; align-items:start}
+@media (max-width:940px){ .wrap{grid-template-columns:1fr; gap:0} .toc{display:none} }
+
+header{border-bottom:1px solid var(--line); background:var(--card)}
+.head-in{max-width:1180px; margin:0 auto; padding:44px 24px 34px}
+.eyebrow{font-size:12px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; color:var(--accent)}
+h1{font-family:var(--display); font-size:clamp(30px,5vw,44px); font-weight:700;
+   letter-spacing:-.028em; line-height:1.08; margin:12px 0 0; text-wrap:balance}
+.sub{margin:14px 0 0; font-size:17px; color:var(--mute); max-width:66ch}
+.meta{margin-top:20px; display:flex; gap:9px; flex-wrap:wrap}
+.chip{font-size:12.5px; font-weight:600; padding:4px 11px; border-radius:999px;
+  background:var(--sunk); color:var(--ink-2); border:1px solid var(--line)}
+.chip.on{background:var(--tint); color:var(--accent); border-color:transparent}
+
+.toc{position:sticky; top:26px; padding:30px 0 0; font-size:13.5px}
+.toc b{display:block; font-size:11.5px; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--mute); margin-bottom:11px; font-weight:700}
+.toc a{display:block; padding:5px 0 5px 12px; color:var(--mute); text-decoration:none;
+  border-left:2px solid var(--line); transition:color .15s, border-color .15s}
+.toc a:hover{color:var(--accent); border-left-color:var(--accent)}
+
+main{padding:34px 0 90px; min-width:0}
+section{padding-top:34px; scroll-margin-top:22px}
+h2{font-family:var(--display); font-size:24px; font-weight:700; letter-spacing:-.02em;
+  margin:0 0 4px; text-wrap:balance}
+h2 .n{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:9px}
+h3{font-family:var(--display); font-size:17px; font-weight:600; margin:28px 0 8px; letter-spacing:-.01em}
+p{margin:0 0 15px; max-width:70ch}
+.lede{color:var(--mute); font-size:16.5px; margin-bottom:20px; max-width:68ch}
+ul,ol{max-width:70ch; padding-left:22px; margin:0 0 15px}
+li{margin-bottom:7px}
+strong{font-weight:650}
+a{color:var(--accent)}
+code{font-family:var(--mono); font-size:.87em; background:var(--sunk);
+  padding:2px 6px; border-radius:5px; border:1px solid var(--line)}
+hr{border:0; border-top:1px solid var(--line); margin:38px 0}
+
+.card{background:var(--card); border:1px solid var(--line); border-radius:13px; padding:20px 22px; margin:0 0 18px}
+.card h3{margin-top:0}
+
+blockquote{
+  margin:0 0 18px; padding:13px 18px; border-left:3px solid var(--quote);
+  background:var(--quote-bg); border-radius:0 9px 9px 0; color:var(--ink-2);
+  font-size:15px; max-width:70ch;
+}
+blockquote p{margin:0 0 8px} blockquote p:last-child{margin:0}
+blockquote cite{display:block; margin-top:8px; font-style:normal; font-size:12.5px; color:var(--mute)}
+
+.tw{overflow-x:auto; margin:0 0 18px; border:1px solid var(--line); border-radius:11px; background:var(--card)}
+table{width:100%; border-collapse:collapse; font-size:14px}
+th{text-align:left; padding:10px 14px; background:var(--sunk); color:var(--mute);
+  font-size:11.5px; font-weight:700; letter-spacing:.055em; text-transform:uppercase; white-space:nowrap;
+  border-bottom:1px solid var(--line)}
+td{padding:10px 14px; border-bottom:1px solid var(--line); vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+
+.flag{border-left:3px solid var(--warn); background:var(--warn-bg); color:var(--ink-2);
+  padding:13px 18px; border-radius:0 9px 9px 0; margin:0 0 18px; font-size:15px; max-width:70ch}
+.flag b{color:var(--warn)}
+.good{border-left-color:var(--ok); background:var(--ok-bg)}
+.good b{color:var(--ok)}
+.bad{border-left-color:var(--bad); background:var(--bad-bg)}
+.bad b{color:var(--bad)}
+
+.kv{display:grid; grid-template-columns:auto 1fr; gap:2px 20px; font-size:14.5px; margin-bottom:18px}
+.kv dt{font-weight:650; color:var(--mute); white-space:nowrap}
+.kv dd{margin:0 0 7px}
+
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+@media (max-width:760px){ .grid2{grid-template-columns:1fr} }
+
+.stat{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px}
+.stat .v{font-family:var(--display); font-size:27px; font-weight:700; letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums; line-height:1.15}
+.stat .l{font-size:12px; font-weight:650; letter-spacing:.05em; text-transform:uppercase; color:var(--mute); margin-top:5px}
+.stat .d{font-size:13.5px; color:var(--mute); margin-top:6px}
+
+.flow{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:16px}
+.flow h4{font-family:var(--display); font-size:15px; margin:0 0 4px; font-weight:600}
+.flow .path{font-family:var(--mono); font-size:12.5px; color:var(--mute); margin:10px 0;
+  white-space:pre-wrap; line-height:1.75}
+.flow .cost{font-size:14px; margin:0}
+
+.srcs{font-size:14px}
+.srcs a{display:block; padding:7px 0; border-bottom:1px solid var(--line); text-decoration:none; color:var(--ink)}
+.srcs a:last-child{border-bottom:0}
+.srcs a:hover{color:var(--accent)}
+.srcs a span{display:block; font-size:12.5px; color:var(--mute); font-family:var(--mono); word-break:break-all}
+
+footer{border-top:1px solid var(--line); background:var(--card); padding:26px 0}
+.foot-in{max-width:1180px; margin:0 auto; padding:0 24px; font-size:13.5px; color:var(--mute)}
+</style>
+
+<header>
+  <div class="head-in">
+    <div class="eyebrow">Design reference · Swellyo operator trips</div>
+    <h1>WeTravel Teardown</h1>
+    <p class="sub">A working mockup of the WeTravel product, and what five research lanes
+      turned up underneath it — including the four payment companies behind their checkout
+      and the two costs they never publish.</p>
+    <div class="meta">
+      <span class="chip on">25 August 2026</span>
+      <span class="chip">5 research lanes</span>
+      <span class="chip">~150 reviews · 15 video transcripts</span>
+      <span class="chip">4 live trip pages</span>
+      <span class="chip">20 screens built</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <nav class="toc">
+    <b>Contents</b>
+    <a href="#brief">The brief</a>
+    <a href="#built">What was built</a>
+    <a href="#product">Product findings</a>
+    <a href="#money">Who moves the money</a>
+    <a href="#numbers">The actual numbers</a>
+    <a href="#hidden">The two hidden costs</a>
+    <a href="#flows">Cross-border flows</a>
+    <a href="#holds">Holds and liability</a>
+    <a href="#takeaways">For Swellyo</a>
+    <a href="#corrections">Corrections log</a>
+    <a href="#open">Still open</a>
+    <a href="#sources">Sources</a>
+  </nav>
+
+  <main>
+
+<section id="brief">
+  <h2><span class="n">01</span>The brief</h2>
+  <p class="lede">Build a clickable mockup of WeTravel as a design reference for Swellyo's
+    operator trips — not a pitch, not a clone, a thinking tool. Settled through an interview
+    before any code was written.</p>
+  <div class="tw"><table>
+    <tr><th>Question</th><th>Decision</th></tr>
+    <tr><td>Purpose</td><td>Design reference for Swellyo</td></tr>
+    <tr><td>Surfaces</td><td>Organizer dashboard, traveller booking, payments, paperwork — plus reporting, marketing, CRM, team</td></tr>
+    <tr><td>Format</td><td>Clickable HTML artifact</td></tr>
+    <tr><td>Fidelity</td><td>WeTravel's structure, Swellyo's visual language</td></tr>
+    <tr><td>Research</td><td>Real research first — docs, videos, live pages, reviews</td></tr>
+    <tr><td>Scope</td><td>Broad map, medium depth</td></tr>
+    <tr><td>Annotation</td><td>None — pure product, no commentary badges</td></tr>
+    <tr><td>Demo data</td><td>Swellyo surf trips: Bali, Portugal, waivers, passports</td></tr>
+    <tr><td>Interactivity</td><td><strong>A working demo model</strong>, not static screens</td></tr>
+  </table></div>
+</section>
+
+<section id="built">
+  <h2><span class="n">02</span>What was built</h2>
+  <p class="lede">One self-contained file, ~3,200 lines. Twenty organizer screens plus a
+    traveller phone. Every figure on screen is derived from a live data model, never stored twice.</p>
+
+  <div class="grid2">
+    <div class="stat"><div class="v">20</div><div class="l">Organizer screens</div>
+      <div class="d">Trips, Manage Trip (7 tabs), the 7-step builder, CRM, Payments, Reports, Settings</div></div>
+    <div class="stat"><div class="v">3</div><div class="l">Traveller screens</div>
+      <div class="d">Trip page, five-step checkout, Manage Booking — in a phone frame</div></div>
+  </div>
+
+  <h3>The model actually runs</h3>
+  <ul>
+    <li><strong>Record a payment</strong> → trip header, portfolio roll-up, ledger, cash flow,
+      the chart and the traveller's own booking page all move together.</li>
+    <li><strong>Edit a payment plan</strong> → pick 1–24 installments, the schedule regenerates
+      and validates against the package price; the rounding remainder lands in the final payment.</li>
+    <li><strong>Switch who pays the fees</strong> → checkout and ledger both rewrite. Choosing bank
+      transfer drops the service fee from $20.50 to $6.00, because bank rails genuinely cost nothing.</li>
+    <li><strong>Book from the phone</strong> → writes a real booking and contact, consumes spots,
+      and appears in the organizer's Bookings tab. That closes the loop.</li>
+  </ul>
+
+  <div class="flag good"><b>Two behaviours worth keeping.</b> Installment status is
+    <em>derived from its own date</em>, so a row can never claim to be "due now" while its date sits
+    ten days in the past. And "auto-adjust for late bookings" is properly implemented — book against a
+    plan whose dates have passed and the missed amounts spread across what remains.</div>
+
+  <h3>Deliberate divergences from WeTravel</h3>
+  <ul>
+    <li><strong>Cyan is the primary action colour, not green.</strong> WeTravel uses green for every
+      commit action; Swellyo's accent is cyan, so green stays semantic (paid / ok).</li>
+    <li><strong>No booking-status field.</strong> WeTravel has no booking-status enum at all — it
+      models payment state only. The mockup matches that rather than inventing Confirmed/Pending.</li>
+    <li><strong>Light mode only</strong>, following the operator dashboard's own stated decision.</li>
+  </ul>
+</section>
+
+<section id="product">
+  <h2><span class="n">03</span>Product findings that changed the build</h2>
+
+  <div class="card">
+    <h3>They redesigned the navigation on 17 August 2026</h3>
+    <p>Top bar → left sidebar. Every video demo from 2016–2026 shows the old chrome; only the
+      help-centre screenshots show the current product. The mockup uses the current sidebar.</p>
+  </div>
+
+  <div class="card">
+    <h3>There is no booking-status enum anywhere</h3>
+    <p>Nothing models a booking as Pending / Confirmed / Cancelled. There is payment state only —
+      paid, past due, pending, failed — plus separate cancel and reinstate <em>actions</em>.
+      Status pills exist in exactly one place in the entire product: Business Payment Requests.</p>
+  </div>
+
+  <div class="card">
+    <h3>eSignature has no review workflow</h3>
+    <p>One PDF per trip, no field placement, signed or not signed. Nothing is ever
+      <em>pending review</em>, <em>approved</em> or <em>rejected</em> — which matters if what you
+      actually need to check is a passport rather than a signature. This is a real gap against
+      what Swellyo is building.</p>
+  </div>
+
+  <div class="card">
+    <h3>Only the buyer has a login</h3>
+    <p>Participants are data, not users. The buyer fills in forms for everyone they booked and
+      receives every reminder. This single fact shapes every screen WeTravel has.</p>
+  </div>
+
+  <div class="card">
+    <h3>Forms are a flat list</h3>
+    <p>No conditional logic, no per-package variants, and the question type is locked once saved —
+      you must delete and recreate. A beginner and a pro get the same eight questions.</p>
+  </div>
+
+  <p>From ~150 reviews across seven platforms, the ranking of what operators love is consistent:
+    <strong>human support</strong>, then <strong>payment plans with automatic reminders</strong>, then
+    <strong>being able to accept international cards at all</strong>. Nobody attacks the payment plans —
+    that is the moat. What they hate is almost entirely policy, not software: frozen funds, no phone
+    support, stacked fees, exchange rates.</p>
+</section>
+
+<section id="money">
+  <h2><span class="n">04</span>Who actually moves the money</h2>
+  <p class="lede">This began as a challenge to one unverified line and turned into the most
+    valuable part of the work.</p>
+
+  <p>WeTravel is a <strong>switchboard, not a payment company</strong>. It holds no payments licence
+    of its own. Their Terms say processing is <em>"among others"</em> provided by Stripe — two words
+    that every summary online drops, and they are load-bearing.</p>
+
+  <div class="tw"><table>
+    <tr><th>Company</th><th>What it does</th></tr>
+    <tr><td><strong>Stripe</strong><br><span style="color:var(--mute);font-size:13px">Inc. + Payments Europe Ltd.</span></td>
+        <td>Card payments in US / UK / Europe. Wires. Issues the US expense card.</td></tr>
+    <tr><td><strong>Airwallex</strong><br><span style="color:var(--mute);font-size:13px">US LLC + Netherlands B.V.</span></td>
+        <td>Card payments in Australia, Canada, Hong Kong, Singapore, Switzerland, Poland, Mexico. Issues the international card.</td></tr>
+    <tr><td><strong>Corpay</strong> (Fleetcor)<br><span style="color:var(--mute);font-size:13px">via Cambridge Mercantile</span></td>
+        <td>Cross-border transfers and currency exchange. Its own fees, "assessed directly by Corpay".</td></tr>
+    <tr><td><strong>Mangopay S.A.</strong></td>
+        <td>Listed as an EU processor — <strong>and named nowhere else</strong>. Function unconfirmed.</td></tr>
+    <tr><td>Celtic Bank</td><td>Issues the Visa card</td></tr>
+    <tr><td>Persona</td><td>Identity and business verification</td></tr>
+    <tr><td>Wells Fargo / JPMorgan</td><td>Where the money physically sits</td></tr>
+    <tr><td>Nuitée Travel Ltd</td><td>Hotel bookings — "your booking is made with Nuitée, <em>not</em> with WeTravel"</td></tr>
+  </table></div>
+
+  <h3>How this was proved</h3>
+  <p>Three independent ways, because the first source was second-hand:</p>
+  <ol>
+    <li><strong>Their own sub-processor page</strong> — a page they link but never advertise —
+      lists all six financial vendors in one table.</li>
+    <li><strong>A fingerprint test.</strong> <em>MB WAY</em> (Portugal) works only through Stripe.
+      <em>FPS</em> (Hong Kong) works only through Airwallex. WeTravel offers both, so both must be live.</li>
+    <li><strong>Bank statements.</strong> European and US payments show as <code>WeTravel BV</code> /
+      <code>WeTravel Inc.</code>; Australian, Hong Kong and UK direct-debit ones show as
+      <code>Airwallex</code>. The seam is visible to the traveller.</li>
+  </ol>
+
+  <h3>Why they need no licence</h3>
+  <p>The Terms use the <strong>agent-of-payee</strong> construction — the standard exemption from
+    US money-transmitter licensing:</p>
+  <blockquote>
+    <p>"Each Trip Organizer hereby appoints Wetravel as the Trip Organizer's <strong>limited payment
+      collection agent</strong>… Upon receipt of a Traveler's payment, <strong>the Traveler's payment
+      obligation is extinguished</strong>."</p>
+    <cite>WeTravel Terms of Service, last updated 1 December 2025</cite>
+  </blockquote>
+  <p>In plain terms: they are legally your errand boy, not a bank. The traveller has "paid you" the
+    moment they pay WeTravel, so WeTravel isn't transmitting money. Searching the full Terms and
+    Privacy Policy returns <strong>zero</strong> occurrences of <em>money transmitter</em>,
+    <em>escrow</em>, <em>custody</em> or <em>merchant of record</em>. The vendors hold every licence.</p>
+</section>
+
+<section id="numbers">
+  <h2><span class="n">05</span>The actual numbers</h2>
+
+  <h3>What it costs to take a payment</h3>
+  <div class="tw"><table>
+    <tr><th>How the traveller pays</th><th class="num">Cost</th></tr>
+    <tr><td><strong>Bank transfer</strong> — ACH, SEPA, BACS, BECS, PAD</td><td class="num"><strong>0%</strong></td></tr>
+    <tr><td>Card — euro or pound trip</td><td class="num"><strong>1.5%</strong></td></tr>
+    <tr><td>Card — Australian trip</td><td class="num">1.7%</td></tr>
+    <tr><td>Card — Norwegian trip</td><td class="num">2.4%</td></tr>
+    <tr><td>Card — Canadian / New Zealand trip</td><td class="num">2.7%</td></tr>
+    <tr><td>Card — US, Mexican, Swiss, UAE trip</td><td class="num"><strong>2.9%</strong></td></tr>
+    <tr><td>Card — Singapore trip</td><td class="num">3.3%</td></tr>
+    <tr><td>Card — Hong Kong, Japanese, Turkish trip</td><td class="num">3.4%</td></tr>
+    <tr><td>American Express</td><td class="num">2.9 – 3.9%</td></tr>
+    <tr><td><strong>A foreign card</strong> (issued outside the trip's country)</td><td class="num"><strong>3.25 – 3.9%</strong></td></tr>
+    <tr><td>Local apps — Swish, BLIK, FPS, PayNow, Bizum</td><td class="num">0.7 – 2.2%</td></tr>
+    <tr><td>Wire transfer in</td><td class="num">$25 / €25 flat</td></tr>
+  </table></div>
+
+  <h3>Getting your money out</h3>
+  <div class="tw"><table>
+    <tr><th>Route</th><th class="num">Cost</th><th class="num">Speed</th></tr>
+    <tr><td>To your own bank, same country</td><td class="num"><strong>Free</strong></td><td class="num">1–3 days</td></tr>
+    <tr><td>International wire</td><td class="num"><strong>$15</strong></td><td class="num">3–5 days</td></tr>
+    <tr><td>Instant, to a debit card</td><td class="num"><strong>1.5%</strong></td><td class="num">30 min</td></tr>
+    <tr><td>Currency conversion in-wallet</td><td class="num">"free"</td><td class="num">seconds</td></tr>
+    <tr><td>Paying a supplier also on WeTravel</td><td class="num">Free</td><td class="num">seconds</td></tr>
+  </table></div>
+  <p style="font-size:14px;color:var(--mute)">Instant payout is capped at $3,000/day, minimum $0.50,
+    US debit cards only. Subscription: Free · <strong>Pro $79/month per organization</strong> (no
+    per-seat fee) · Enterprise on request.</p>
+
+  <div class="flag"><b>Counter-intuitive.</b> A wire clears <em>faster</em> than ACH.
+    Cards are instant; bank transfers take 5–7 business days; wires take 1–5.</div>
+</section>
+
+<section id="hidden">
+  <h2><span class="n">06</span>The two costs they never publish</h2>
+
+  <h3>Their own booking fee</h3>
+  <p>Every rate above is the <em>card</em> fee. WeTravel charges its own fee on top, and
+    <strong>the percentage appears nowhere.</strong> The only official number is a
+    <strong>$1.50 minimum</strong>. On the very page whose job is listing fees, the calculator ends with
+    <code>+ WeTravel Booking Fee</code> and the "learn more" link goes to a
+    <strong>sales-call booking form</strong>.</p>
+  <p>Travellers quoting real surcharges land at 3.6% and "nearly 4%" all-in, implying roughly
+    <strong>0.7–1.3 percentage points</strong> on top. Those are reviews, not invoices. Treat the
+    number as unknown.</p>
+
+  <h3>Currency exchange — where the real money is</h3>
+  <p>Conversion is advertised as free, and the fee line genuinely reads <strong>$0.00</strong>.
+    That is true and beside the point: the margin lives inside the <em>rate</em>. Their Terms admit
+    the mechanism outright.</p>
+  <blockquote>
+    <p>"Wetravel updates the <strong>base exchange rate</strong> on a regular basis, but
+      <strong>not on a real-time basis</strong>… does not always change the base exchange rate
+      immediately when its costs of foreign exchange change… <strong>may not be identical to the
+      applicable market rate</strong>."</p>
+    <cite>WeTravel Terms of Service</cite>
+  </blockquote>
+  <div class="flag bad"><b>One operator measured it.</b> A transfer with a stated fee of
+    <strong>€41</strong> cost an extra <strong>€250</strong> against his own bank's rate —
+    six times the visible fee, entirely invisible.</div>
+</section>
+
+<section id="flows">
+  <h2><span class="n">07</span>Cross-border, in three journeys</h2>
+
+  <div class="flow">
+    <h4>🇺🇸 → 🇺🇸 &nbsp;Domestic</h4>
+    <div class="path">card ──▶ Stripe ──▶ WeTravel wallet ──▶ your bank</div>
+    <p class="cost">Available instantly, free transfer next day, no conversion.
+      <strong>2.9%</strong> plus the hidden booking fee.</p>
+  </div>
+
+  <div class="flow">
+    <h4>🇺🇸 → 🇮🇩 &nbsp;The hard one — US traveller, Bali operator</h4>
+    <div class="path">card ──▶ Stripe ──▶ WeTravel wallet (USD)
+      ──▶ Corpay / Cambridge Mercantile ──▶ SWIFT, 2–3 correspondent banks ──▶ Indonesian bank</div>
+    <p class="cost">Money arrives fine; getting it out is the problem. No local payout for Indonesia,
+      so the only exit is an international wire — <strong>$15, 3–5 days</strong>, and flagged as slower
+      for Indonesia specifically. Then a choice: send <strong>dollars</strong> and your bank converts at
+      its own retail rate (worst, invisible, and disclaimed as "beyond WeTravel's control"), or send
+      <strong>rupiah</strong> and WeTravel converts at a rate at least shown before you confirm.
+      You cannot pre-convert — rupiah is not a currency they hold.</p>
+  </div>
+
+  <div class="flow">
+    <h4>💶 &nbsp;The clever one — US-priced trip, traveller pays in euros</h4>
+    <div class="path">fee applied in USD first ──▶ converted to EUR ──▶ charged as a DOMESTIC
+      euro payment ──▶ converted back ──▶ operator receives exactly the USD they priced</div>
+    <p class="cost">Your fee drops from <strong>3.9% → 1.5%</strong> and the traveller avoids their
+      bank's own 2–3% foreign fee. WeTravel takes the margin on both conversions and genuinely carries
+      the currency risk — <em>"you have zero exchange rate risk, even for refunds."</em>
+      Everyone visibly wins; WeTravel is paid invisibly. This is a genuinely good product.</p>
+  </div>
+</section>
+
+<section id="holds">
+  <h2><span class="n">08</span>Holds and liability</h2>
+  <p class="lede">There is no escrow — money isn't locked until the trip runs. <em>If you're fully
+    approved.</em></p>
+  <p>WeTravel says <strong>"Partial Approval" is the most common outcome for new users</strong>, and it
+    blocks international wires, the card and supplier payments. The exit is to wait until
+    <strong>30 days after your first trip finishes</strong> and then <strong>email support</strong> —
+    it is not automatic. For a new operator abroad that is escrow in everything but name.</p>
+
+  <div class="flag bad"><b>The clause behind the "they froze €50,000" reviews is real.</b>
+    Read directly from the Terms:
+    <blockquote style="margin:10px 0 0;background:transparent;border-left-color:var(--bad)">
+      <p>"We may, <strong>in our discretion and without liability to you, with or without cause, with
+      or without prior notice</strong>… place a hold on your account <strong>equivalent to total
+      payments for upcoming and future trips</strong>… we may refund your Travelers in full…
+      <strong>irrespective of preexisting cancellation policies</strong>."</p>
+    </blockquote>
+  </div>
+
+  <ul>
+    <li>Chargebacks come <strong>entirely out of the operator's pocket</strong> — the full amount is
+      pulled immediately and held <strong>60–80 business days</strong> (three to four months).</li>
+    <li>If your balance goes negative, <strong>they can debit your bank account</strong>.</li>
+    <li>Refunding a card payment always costs you the processing fee — it is never recovered.</li>
+    <li>"The Service Fee is always non-refundable."</li>
+  </ul>
+</section>
+
+<section id="takeaways">
+  <h2><span class="n">09</span>What I'd take into Swellyo</h2>
+  <ol>
+    <li><strong>Copy the multi-currency trick.</strong> Letting a traveller pay in their own currency
+      cuts the card cost from 3.9% to 1.5% <em>and</em> saves them a foreign-transaction fee.
+      Real value on both sides of the transaction.</li>
+    <li><strong>Their hidden margin is exchange rates, not fees.</strong> "Free conversion" at a rate
+      you set is quietly very profitable — and the single most-hated thing in their reviews.
+      Showing the mid-market rate honestly would be a marketing asset, not a cost.</li>
+    <li><strong>Payout timing is the whole ballgame.</strong> Operators pay 6% cheerfully and rage
+      about a five-day hold, because held money means an unpaid hotel. A published, deterministic
+      payout policy is the largest available wedge.</li>
+    <li><strong>Front-load verification.</strong> Their worst reputational wound is people who spent
+      hours building trips and then got a no-reason rejection. That is free one-star inventory you can
+      simply decline to generate.</li>
+    <li><strong>Ship the organizer mobile app.</strong> Constantly requested, conceded by WeTravel,
+      attacked by every competitor. Swellyo is already React Native — this is structural advantage,
+      not a checkbox.</li>
+    <li><strong>Document review is an open gap.</strong> They have no approve/reject concept at all.</li>
+  </ol>
+</section>
+
+<section id="corrections">
+  <h2><span class="n">10</span>Corrections log</h2>
+  <p class="lede">Recorded because the process matters as much as the conclusion — three claims were
+    wrong or incomplete before being checked.</p>
+
+  <div class="card">
+    <h3>"WeTravel uses Stripe" — incomplete</h3>
+    <p>A subagent reported it and I passed it through unverified. Challenged, then checked: Stripe is
+      real, but the Terms say <em>"among others"</em>, and there are <strong>four</strong> processors.
+      The search summary I first relayed had dropped those two words.</p>
+  </div>
+
+  <div class="card">
+    <h3>"No departure-date escrow" — true only for verified accounts</h3>
+    <p>Under Partial Approval — which WeTravel calls the most common outcome for new users — funds
+      are locked until 30 days after the first trip completes, plus a manual review.</p>
+  </div>
+
+  <div class="card">
+    <h3>A new booking landed instantly "past due"</h3>
+    <p>Found by testing the mockup, not by reading it. The plan's dates had passed, which is exactly
+      what "auto-adjust for late bookings" exists to prevent — and I hadn't implemented it. Fixed,
+      with a test covering the on, off and all-dates-passed cases.</p>
+  </div>
+
+  <div class="flag"><b>Process note.</b> During one research lane, an agent reported navigating an
+    already-logged-in Chrome session to WeTravel's operator app, read-only, to check whether an
+    "In-Person QR Payments" screen exists. I did not anticipate an agent reaching into an
+    authenticated session and would not have authorised it.</div>
+</section>
+
+<section id="open">
+  <h2><span class="n">11</span>Still open</h2>
+  <ul>
+    <li><strong>The booking-fee percentage.</strong> Genuinely unpublished. I would rather say so than
+      hand over a number derived from reviews.</li>
+    <li><strong>Was it ever published?</strong> The Internet Archive rate-limited both me and the
+      research agents, so historic pricing pages remain unchecked. This is the highest-value
+      remaining lead.</li>
+    <li><strong>What Mangopay does.</strong> Named on the sub-processor list and nowhere else.</li>
+    <li><strong>"In-Person QR Payments."</strong> One pass saw it as a nav item; another found the
+      product page returns 404 and it is absent from the sitemap. Unreleased or flag-gated.</li>
+    <li><strong>Whether a Dutch entity exists.</strong> "WeTravel BV" appears as a bank-statement
+      descriptor but has no verifiable registration.</li>
+    <li><strong>The exact FX spread.</strong> No one has published a same-day comparison against
+      mid-market. That is a genuine gap in the public record, not a search failure.</li>
+  </ul>
+</section>
+
+<section id="sources">
+  <h2><span class="n">12</span>Sources</h2>
+  <p class="lede">Primary documents only. Note that <code>www.wetravel.com/*</code> returns 403 to any
+    automated fetcher but opens normally in a browser — which is precisely why incomplete versions of
+    their Terms circulate online.</p>
+
+  <h3>The two that matter most</h3>
+  <div class="card srcs">
+    <a href="https://product.wetravel.com/about-us/sub-processors">The sub-processor list — the complete vendor map
+      <span>product.wetravel.com/about-us/sub-processors</span></a>
+    <a href="https://product.wetravel.com/about-us/terms">Terms of Service — works, unlike the www version
+      <span>product.wetravel.com/about-us/terms</span></a>
+  </div>
+
+  <h3>Fees and mechanics</h3>
+  <div class="card srcs">
+    <a href="https://product.wetravel.com/payment-processing">Full fee table by currency, as text
+      <span>product.wetravel.com/payment-processing</span></a>
+    <a href="https://help.wetravel.com/en/articles/434422-pricing">Pricing — fee images, the $1.50 minimum, currency lists
+      <span>help.wetravel.com/en/articles/434422-pricing</span></a>
+    <a href="https://help.wetravel.com/en/articles/1217663">Who pays the fees — absorb vs pass on
+      <span>help.wetravel.com/en/articles/1217663</span></a>
+    <a href="https://help.wetravel.com/en/articles/8694062">Multi-currency checkout — the euro trick
+      <span>help.wetravel.com/en/articles/8694062</span></a>
+    <a href="https://help.wetravel.com/en/articles/11586015">Clearing times per method
+      <span>help.wetravel.com/en/articles/11586015</span></a>
+  </div>
+
+  <h3>Who processes what</h3>
+  <div class="card srcs">
+    <a href="https://help.wetravel.com/en/articles/414993">"Our trusted payment partners, Stripe and Airwallex"
+      <span>help.wetravel.com/en/articles/414993</span></a>
+    <a href="https://help.wetravel.com/en/articles/419857">Bank-statement descriptors — the visible seam
+      <span>help.wetravel.com/en/articles/419857</span></a>
+    <a href="https://help.wetravel.com/en/articles/415019">Where the money sits, and "Agent of the Payee"
+      <span>help.wetravel.com/en/articles/415019</span></a>
+    <a href="https://help.wetravel.com/en/articles/6460145">Partial Approval — the de-facto escrow
+      <span>help.wetravel.com/en/articles/6460145</span></a>
+    <a href="https://help.wetravel.com/en/articles/1687811">Chargebacks — 60–80 days, operator liable
+      <span>help.wetravel.com/en/articles/1687811</span></a>
+    <a href="https://help.wetravel.com/en/articles/6926526">International wires — Cambridge Mercantile
+      <span>help.wetravel.com/en/articles/6926526</span></a>
+    <a href="https://product.wetravel.com/wetravel-card">"Powered by Stripe and issued by Celtic Bank"
+      <span>product.wetravel.com/wetravel-card</span></a>
+    <a href="https://product.wetravel.com/stripe-standard">The bypass route — connect your own Stripe
+      <span>product.wetravel.com/stripe-standard</span></a>
+  </div>
+
+  <h3>Corporate and licensing</h3>
+  <div class="card srcs">
+    <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001655178&type=D">SEC — WeTravel Inc., CIK 0001655178. Form D, 24 Sep 2025: $52.2M raised
+      <span>sec.gov · CIK 0001655178</span></a>
+    <a href="https://stripe.com/spc/licenses">Stripe Payments Company licences — NMLS #1280479
+      <span>stripe.com/spc/licenses</span></a>
+    <a href="https://www.airwallex.com/us/state-licenses">Airwallex US licences — NMLS #1928093
+      <span>airwallex.com/us/state-licenses</span></a>
+    <a href="https://www.mangopay.com/legal-notice">Mangopay — CSSF Luxembourg e-money licence
+      <span>mangopay.com/legal-notice</span></a>
+  </div>
+
+  <h3>The FX evidence</h3>
+  <div class="card srcs">
+    <a href="https://www.trustpilot.com/reviews/67f8f0355bb79dc3e61dc3f6">The measured case — €41 stated, €250 hidden
+      <span>trustpilot.com/reviews/67f8f0355bb79dc3e61dc3f6</span></a>
+    <a href="https://www.trustpilot.com/reviews/69dfbf0db0c0a1c840e3b493">"3.6% payment surcharge"
+      <span>trustpilot.com/reviews/69dfbf0db0c0a1c840e3b493</span></a>
+    <a href="https://www.trustpilot.com/reviews/69fbd7f80b0445dac4662b9d">"nearly 4% markup"
+      <span>trustpilot.com/reviews/69fbd7f80b0445dac4662b9d</span></a>
+  </div>
+  <p style="font-size:14px;color:var(--mute)">The last three are reviewer quotes, not invoices —
+    which is why the booking fee is given as a range and still called unpublished.</p>
+</section>
+
+  </main>
+</div>
+
+<footer><div class="foot-in">
+  Working files live in <code>docs/specs/wetravel-mockup/</code> — the mockup itself, the spec, and
+  seven research files with full source notes and confidence levels on every claim.
+</div></footer>

@@ -30,6 +30,7 @@ import {
   fetchStaffRequirements,
   friendlyStaffRequirementError,
   isFulfilled,
+  isStaffRequirementLate,
   STAFF_KINDS,
   STAFF_KIND_COPY,
   unassignStaffRequirement,
@@ -37,6 +38,7 @@ import {
   type StaffRequirement,
 } from '../services/staffRequirements';
 import { friendlyError } from '../lib/errors';
+import { formatDate } from '../lib/format';
 
 /** Shared row. `right` is the status or the spinner — never both. */
 function CheckRow({
@@ -204,7 +206,8 @@ export function CrewPaperworkSection({
       </div>
       <p className="muted small" style={{ marginBottom: 8 }}>
         Tick what you need from them. Nobody else on the crew is affected, and nothing here blocks
-        them from the trip.
+        them from the trip. Deadlines follow the travelers' — change one there and this moves
+        with it.
       </p>
 
       <div className="card">
@@ -228,8 +231,23 @@ export function CrewPaperworkSection({
                 spinning ? (
                   <span className="spinner" />
                 ) : checked ? (
-                  <span className={`tag ${arrived ? 'tag-ok' : 'tag-idle'}`}>
-                    {arrived ? 'Sent' : 'Not sent'}
+                  <span className="row" style={{ gap: 6 }}>
+                    {/* The travelers' deadline for the same kind, read through
+                        (20260904000200). "Late" here is a flag and nothing
+                        more — a guide is never locked out of a trip over
+                        paperwork. */}
+                    {row?.dueDate && !arrived && (
+                      <span
+                        className={`tag ${isStaffRequirementLate(row.dueDate, arrived) ? 'tag-danger' : 'tag-idle'}`}
+                      >
+                        {isStaffRequirementLate(row.dueDate, arrived)
+                          ? 'Late'
+                          : `Due ${formatDate(row.dueDate)}`}
+                      </span>
+                    )}
+                    <span className={`tag ${arrived ? 'tag-ok' : 'tag-idle'}`}>
+                      {arrived ? 'Sent' : 'Not sent'}
+                    </span>
                   </span>
                 ) : null
               }

@@ -11,7 +11,13 @@ import { showErrorAlert } from '../../utils/friendlyError';
 // alongside it for web, where the family is one variable face.
 import { ff } from '../../theme/fonts';
 import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
-import { describeConnectState, type ConnectState } from '../../services/trips/connectStatus';
+import { openStripeDashboard } from '../../services/trips/tripPaymentsService';
+import {
+  canManageStripeAccount,
+  describeConnectState,
+  MANAGE_STRIPE_CTA,
+  type ConnectState,
+} from '../../services/trips/connectStatus';
 
 /**
  * The native Stripe SDK, loaded only where it can exist.
@@ -71,8 +77,30 @@ const nativeOnboarding = !!Onboarding && (stripeConnect?.hasStripePublishableKey
 export const ConnectStripeCard: React.FC = () => {
   const { state, status, loading, watchForChange } = useConnectStatus();
   const [onboarding, setOnboarding] = React.useState(false);
+  const [openingDashboard, setOpeningDashboard] = React.useState(false);
 
   const copy = describeConnectState(state, status);
+  // Editing details you already gave is a different job from finishing
+  // onboarding, and it stays available for the rest of the account's life —
+  // including on an account Stripe has switched off. See canManageStripeAccount.
+  const canManage = canManageStripeAccount(status);
+
+  const onManage = useCallback(async () => {
+    // No Expo Go check, unlike onConnect: this is a plain browser sheet, not
+    // the native Stripe SDK, so it works everywhere the app does.
+    setOpeningDashboard(true);
+    try {
+      await openStripeDashboard();
+      // They may have changed a bank account or cleared a requirement while
+      // they were in there. The sheet closing is the moment to re-ask — and
+      // then keep watching, because Stripe applies some of it a beat later.
+      watchForChange();
+    } catch (e) {
+      showErrorAlert('Stripe', e, 'Could not open your Stripe dashboard. Try again.');
+    } finally {
+      setOpeningDashboard(false);
+    }
+  }, [watchForChange]);
 
   const onConnect = useCallback(() => {
     if (!nativeOnboarding) {
@@ -151,22 +179,57 @@ export const ConnectStripeCard: React.FC = () => {
     </>
   );
 
+  // Deliberately a SIBLING of the card, never a child of it. The card is one
+  // big Pressable whenever it has a CTA, and a nested Pressable inside that
+  // would make one finger press two things — the whole card would dent while
+  // opening the dashboard, and on some states the wrong handler could win.
+  const manageLink = canManage ? (
+    <Pressable
+      onPress={onManage}
+      disabled={openingDashboard}
+      accessibilityRole="button"
+      accessibilityLabel={MANAGE_STRIPE_CTA}
+      style={({ pressed }) => [styles.manageRow, pressed && styles.pressed]}
+    >
+      {openingDashboard ? (
+        // Fetching a fresh login link is a real round trip. Without this the
+        // operator taps, nothing happens for a second, and they tap again.
+        <ActivityIndicator size="small" color={C.sub} style={styles.manageSpinner} />
+      ) : (
+        <Ionicons name="open-outline" size={14} color={C.sub} style={styles.manageSpinner} />
+      )}
+      <Text style={styles.manageText}>
+        {openingDashboard ? 'Opening Stripe…' : MANAGE_STRIPE_CTA}
+      </Text>
+    </Pressable>
+  ) : null;
+
   // No button to press → not a Pressable. A card that dents under your finger
   // and then does nothing is worse than one that plainly does not respond.
   if (!copy.cta) {
-    return <View style={[styles.card, tone.card]}>{body}</View>;
+    return (
+      <>
+        <View style={[styles.card, tone.card]}>{body}</View>
+        {manageLink}
+      </>
+    );
   }
 
   return (
-    <Pressable
-      onPress={onConnect}
-      accessibilityRole="button"
-      accessibilityLabel={copy.cta}
-      style={({ pressed }) => [styles.card, tone.card, pressed && styles.pressed]}
-    >
-      {body}
-      <Text style={[styles.cta, tone.ctaColor ? { color: tone.ctaColor } : null]}>{copy.cta}</Text>
-    </Pressable>
+    <>
+      <Pressable
+        onPress={onConnect}
+        accessibilityRole="button"
+        accessibilityLabel={copy.cta}
+        style={({ pressed }) => [styles.card, tone.card, pressed && styles.pressed]}
+      >
+        {body}
+        <Text style={[styles.cta, tone.ctaColor ? { color: tone.ctaColor } : null]}>
+          {copy.cta}
+        </Text>
+      </Pressable>
+      {manageLink}
+    </>
   );
 };
 
@@ -230,6 +293,26 @@ const styles = StyleSheet.create({
     color: C.ink,
   },
   sub: { fontFamily: ff('Inter', '400'), fontSize: 13, color: C.sub, marginTop: 4, lineHeight: 18 },
+  // A quiet row under the card, not a second card: it is always available and
+  // almost never the thing the operator came here to do.
+  manageRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginTop: 2,
+  },
+  // Same width as the card's icon slot so the glyph and the spinner — which
+  // measure differently — never shift the label sideways.
+  manageSpinner: { width: 18, marginRight: 6 },
+  manageText: {
+    fontFamily: ff('Inter', '500'),
+    ...(Platform.OS === 'web' ? { fontWeight: '500' as const } : null),
+    fontSize: 13,
+    color: C.sub,
+    textDecorationLine: 'underline',
+  },
   cta: {
     fontFamily: ff('Inter', '600'),
     ...(Platform.OS === 'web' ? { fontWeight: '600' as const } : null),

@@ -212,11 +212,19 @@ export async function updateCrewRole(staffId: string, roleKey: StaffRoleKey): Pr
  */
 export async function updateCrewMember(
   member: Pick<CrewMember, 'id' | 'userId'>,
-  patch: { title?: string; bio?: string; displayName?: string },
+  patch: { title?: string; bio?: string; displayName?: string; photoUrl?: string | null },
 ): Promise<void> {
   const update: Record<string, string | null> = {};
   if (patch.title !== undefined) update.title = patch.title.trim() || null;
   if (patch.bio !== undefined) update.bio = patch.bio.trim() || null;
+
+  // Same rule as `displayName`, one line down and for the same reason: someone
+  // with an account gets their face from `surfers`, and writing `photo_url` for
+  // them would be a second copy the read never even prefers.
+  if (patch.photoUrl !== undefined) {
+    if (member.userId) throw new Error('Their photo comes from their Swellyo profile.');
+    update.photo_url = patch.photoUrl;
+  }
 
   if (patch.displayName !== undefined) {
     if (member.userId) throw new Error('Their name comes from their Swellyo profile.');
@@ -324,4 +332,127 @@ export async function inviteStaffMember(params: {
     p_bio: params.bio?.trim() || null,
   });
   if (error) throw error;
+}
+
+/**
+ * Add somebody who is not in the app at all — a Listed credit.
+ *
+ * Product Specs §"Manage non-active (not in app) staff member": "Add new —
+ * name, image, role (eg photographer), description."
+ *
+ * ── Tier 1, always, and not a parameter ────────────────────────────────────
+ * A Listed row has no `user_id`, so any tier above 1 would be a permission
+ * granted to nobody. `canChangeTier` says the same thing from the other side.
+ * The operator picks a job title ("Photographer"); the TIER is decided here.
+ *
+ * ── operator_id is the trip's host, not the caller ─────────────────────────
+ * A co-operator adding crew is adding them to the OPERATOR's trip. Writing
+ * `auth.uid()` there would make the trip's crew answer to whoever happened to
+ * type it in — the same correction 20260901000000 made to the invite RPCs.
+ */
+export async function addListedCrew(params: {
+  tripId: string;
+  displayName: string;
+  title?: string;
+  bio?: string;
+  photoUrl?: string | null;
+}): Promise<string> {
+  const name = params.displayName.trim();
+  // `ots_listed_needs_name` refuses a row with neither an account nor a name.
+  // Caught here so it reads as a sentence rather than a database error.
+  if (!name) throw new Error('A listed crew member needs a name.');
+
+  const { data: trip, error: tripErr } = await supabase
+    .from('group_trips')
+    .select('host_id')
+    .eq('id', params.tripId)
+    .single();
+  if (tripErr) throw tripErr;
+
+  const { data, error } = await supabase
+    .from('organized_trip_staff')
+    .insert({
+      trip_id: params.tripId,
+      operator_id: trip.host_id,
+      user_id: null,
+      role_key: 'listed',
+      display_name: name,
+      title: params.title?.trim() || null,
+      bio: params.bio?.trim() || null,
+      photo_url: params.photoUrl ?? null,
+      // Nobody has to accept a credit for themselves — there is no account to
+      // accept with. Stamped so the crew list does not show them as pending
+      // forever. Same as the app's Listed path.
+      accepted_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id as string;
+}
+
+/**
+ * Mint a one-use invite link for a tier, to send over WhatsApp.
+ *
+ * The app shares it through the OS share sheet; a desktop copies it to the
+ * clipboard, which is what a desktop does with a link. Same RPC, same link.
+ *
+ * The paperwork rides on the invite and is applied when they accept — there is
+ * no staff row to assign it to before then (20260813160000).
+ */
+export async function createStaffInviteLink(params: {
+  tripId: string;
+  roleKey: Exclude<StaffRoleKey, 'operator'>;
+  title?: string;
+  bio?: string;
+  requirementIds?: string[];
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('create_staff_invite', {
+    p_trip_id: params.tripId,
+    p_role_key: params.roleKey,
+    p_title: params.title?.trim() || null,
+    p_requirement_ids: params.requirementIds ?? [],
+    p_bio: params.bio?.trim() || null,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+/**
+ * The signed-in person's own crew row on this trip, or null.
+ *
+ * Product Specs §"Manage self". `ots_select` has always allowed
+ * `user_id = auth.uid()`; what 20260904000300 added is the right to WRITE it —
+ * title and bio only, enforced by `trg_guard_ots_self_edit`.
+ */
+export async function fetchMyCrewRow(tripId: string): Promise<CrewMember | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from('organized_trip_staff')
+    .select(
+      'id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at, revoked_at',
+    )
+    .eq('trip_id', tripId)
+    .eq('user_id', user.id)
+    .is('revoked_at', null)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    id: data.id as string,
+    userId: data.user_id as string | null,
+    roleKey: data.role_key as StaffRoleKey,
+    name: (data.display_name as string | null) ?? '',
+    photoUrl: (data.photo_url as string | null) ?? null,
+    title: (data.title as string | null) ?? null,
+    bio: (data.bio as string | null) ?? null,
+    invitedAt: (data.invited_at as string | null) ?? '',
+    acceptedAt: (data.accepted_at as string | null) ?? null,
+    pending: !data.accepted_at,
+  };
 }

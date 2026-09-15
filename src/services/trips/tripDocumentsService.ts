@@ -166,15 +166,31 @@ export const REQUIREMENT_CATALOG: Record<
 };
 
 /** Wizard order. Passport first because it is the reason operators can book. */
+/**
+ * The order a traveler meets these in, and the `sort_order` written on the row.
+ *
+ * Product Specs §"Trip onboarding" lists them: payment, waiver, medical
+ * statement, insurance, passport, flight tickets, visa. Matched here on
+ * 4 Sep 2026 — `passport` used to sit third, ahead of the waiver, and `visa`
+ * ahead of `flights`.
+ *
+ * The order is not cosmetic. Money and the two things only the traveler can
+ * answer come first, then the four uploads, which are the skippable ones and
+ * the ones most likely to be waiting on a third party. Onboarding walks the
+ * non-skippable steps before the skippable ones regardless
+ * (TravelerOnboardingScreen splits `musts` from `laters`), so this decides the
+ * order WITHIN each of those two groups — and on every other screen that lists
+ * requirements, where it is the only order there is.
+ */
 export const REQUIREMENT_ORDER: RequirementKind[] = [
   'deposit',
   'balance',
-  'passport',
   'waiver',
   'medical',
   'insurance',
-  'visa',
+  'passport',
   'flights',
+  'visa',
 ];
 
 /** The reliable test for "is this a money row" — reads the catalog rather than
@@ -203,6 +219,15 @@ export type TripRequirement = {
   title: string;
   helpText: string | null;
   dueDate: string | null;
+  /**
+   * The deadline as the operator stored it — days before departure.
+   *
+   * `dueDate` is that same deadline resolved against the trip's start date,
+   * and is null on a months-only trip because there is no date to resolve
+   * against. This one survives that: it is the only way the traveler can be
+   * told when to pay on a trip that has no exact dates yet.
+   */
+  deadlineDaysBefore: number | null;
   /**
    * False = must_have, and on an operator trip that means it GATES THE TRIP:
    * membership is withheld until every must_have row is satisfied
@@ -251,6 +276,7 @@ export async function fetchMyRequirements(tripId: string): Promise<TripRequireme
     title: r.title,
     helpText: r.help_text ?? null,
     dueDate: r.due_date ?? null,
+    deadlineDaysBefore: r.deadline_days_before ?? null,
     // Anything that is not explicitly must_have is treated as skippable. An
     // unrecognised value must not silently become a wall the traveler cannot
     // pass — the failure mode of guessing wrong in the other direction is a
@@ -426,7 +452,7 @@ export async function createRequirements(
   if (kinds.length === 0) return;
   const rows = kinds.map(kind => {
     const c = REQUIREMENT_CATALOG[kind];
-    const t = timing[kind] ?? DEFAULT_TIMING[kind];
+    const t = resolveTiming(kind, timing[kind] ?? DEFAULT_TIMING[kind]);
     return {
       trip_id: tripId,
       kind,
@@ -579,7 +605,8 @@ export async function fetchTripRequirements(
 /** How the timing pair must be written. The `organized_trip_req_deadline_rule`
  *  CHECK requires exactly this pairing, so the two columns always move together
  *  — writing one without the other is a 23514. */
-function timingColumns(t: RequirementTiming) {
+function timingColumns(kind: string, chosen: RequirementTiming) {
+  const t = resolveTiming(kind, chosen);
   return {
     skip_at_onboarding: t.skippable ? 'skippable' : 'must_have',
     deadline_days_before: t.skippable ? Math.max(0, Math.round(t.daysBefore)) : null,
@@ -738,13 +765,18 @@ export async function saveRequirementChanges(
       // (see ManageRequirementsSheet), so without this an edit to ONE
       // document toggle would still fire an UPDATE for both `deposit` and
       // `balance` on every Save.
+      // Compared against the RESOLVED timing (LOCKED_TIMING may override what
+      // the caller asked for), or a draft carrying a skippable deposit would
+      // read as "changed" on every single save and fire the same no-op UPDATE
+      // forever.
+      const want = resolveTiming(kind, timing);
       const unchanged =
-        row.skippable === timing.skippable &&
-        (!timing.skippable || row.daysBefore === Math.max(0, Math.round(timing.daysBefore)));
+        row.skippable === want.skippable &&
+        (!want.skippable || row.daysBefore === Math.max(0, Math.round(want.daysBefore)));
       if (unchanged) continue;
       const { error } = await supabase
         .from('organized_trip_requirements')
-        .update(timingColumns(timing))
+        .update(timingColumns(kind, timing))
         .eq('id', row.id);
       if (error) throw error;
       continue;
@@ -759,7 +791,7 @@ export async function saveRequirementChanges(
         trip_id: tripId,
         kind,
         req_type: c.reqType,
-        ...timingColumns(timing),
+        ...timingColumns(kind, timing),
         title: c.title,
         help_text: c.helpText,
         sort_order: REQUIREMENT_ORDER.indexOf(kind),
@@ -769,14 +801,15 @@ export async function saveRequirementChanges(
     }
 
     if (timing && row) {
+      const want = resolveTiming(kind, timing);
       const unchanged =
         row.isActive &&
-        row.skippable === timing.skippable &&
-        (!timing.skippable || row.daysBefore === Math.max(0, Math.round(timing.daysBefore)));
+        row.skippable === want.skippable &&
+        (!want.skippable || row.daysBefore === Math.max(0, Math.round(want.daysBefore)));
       if (unchanged) continue;
       const { error } = await supabase
         .from('organized_trip_requirements')
-        .update({ ...timingColumns(timing), is_active: true })
+        .update({ ...timingColumns(kind, timing), is_active: true })
         .eq('id', row.id);
       if (error) throw error;
       continue;
@@ -938,6 +971,45 @@ export const ONBOARDING_REQUIREMENT_SPEC: ReadonlyArray<{
   { kind: 'flights', skippable: true, daysBefore: 14 },
   { kind: 'visa', skippable: true, daysBefore: 21 },
 ];
+
+/**
+ * Kinds whose TIMING is not the operator's to set, and what it is pinned to.
+ *
+ * `deposit` only. It is the WALL: a must_have with no deadline, paid inside
+ * onboarding, and nobody becomes a member without it
+ * (`activate_trip_membership`). Making it skippable does not just move a date
+ * — it removes the wall, and everything built on top of that assumption goes
+ * with it:
+ *
+ *  · `freeze_traveler_price` / `operator_trip_full_payment_due`
+ *    (20260817000000) exist ONLY because the balance is skippable and the
+ *    deposit is not. A skippable deposit means a traveler can walk out of
+ *    onboarding a full member having paid nothing, holding a seat, owing the
+ *    whole price — the exact hole that migration was written to close.
+ *  · `enforce_pay_requires_managed_trip` still lets the row exist, so nothing
+ *    in the database refuses this. The rule has to live here.
+ *
+ * `balance` is deliberately NOT here — it is the rest of the money, due long
+ * after joining, and its deadline is the operator's whole point.
+ *
+ * ⚠️ TWIN of `LOCKED_TIMING` in `operator-dashboard/src/domain/catalog.ts`.
+ * The dashboard shares no code with the app, so this is written twice.
+ */
+export const LOCKED_TIMING: Partial<Record<RequirementKind, RequirementTiming>> = {
+  deposit: { skippable: false, daysBefore: 0 },
+};
+
+/**
+ * What actually gets written for a kind: the pinned timing when there is one,
+ * otherwise whatever the operator chose.
+ *
+ * Called on every write path rather than trusted to the three UIs that hide
+ * the control — a resumed draft, a stale editor tab or a fourth screen written
+ * later would all otherwise slip a skippable deposit past.
+ */
+export function resolveTiming(kind: string, chosen: RequirementTiming): RequirementTiming {
+  return LOCKED_TIMING[kind as RequirementKind] ?? chosen;
+}
 
 /**
  * The document/acknowledgement kinds every operator trip gets, in wizard order.
@@ -1504,10 +1576,40 @@ export type MedicalForm = {
   injuriesNone: boolean;
   medications: string;
   medicationsNone: boolean;
+  /**
+   * Who to call about this traveler, and on what number.
+   *
+   * The one part of the form with no "none" escape. Allergies can honestly be
+   * "none"; nobody has no next of kin, and a blank here is a blank at the worst
+   * possible moment. `isMedicalFormComplete` is what enforces that — the
+   * columns themselves are nullable so every form written before 4 Sep 2026
+   * stays valid, and its owner is simply asked the next time they open it.
+   */
+  emergencyName: string;
+  emergencyPhone: string;
+  /** Mother, partner, flatmate. Optional — the name and number get dialled. */
+  emergencyRelation: string;
   completedAt: string | null;
 };
 
+/**
+ * Has this form been answered, as opposed to merely saved?
+ *
+ * `completed_at` alone cannot answer it any more. Every row written before the
+ * emergency contact existed carries a `completed_at` and no contact, so a
+ * screen that trusted the stamp would report those travelers as done and never
+ * ask. The stamp says "they pressed save"; this says "there is a person to
+ * call", and only the second one is what the operator needs on the beach.
+ */
+export function isMedicalFormComplete(form: MedicalForm | null | undefined): boolean {
+  if (!form?.completedAt) return false;
+  return form.emergencyName.trim().length > 0 && form.emergencyPhone.trim().length > 0;
+}
+
 export const EMPTY_MEDICAL_FORM: MedicalForm = {
+  emergencyName: '',
+  emergencyPhone: '',
+  emergencyRelation: '',
   allergies: '',
   allergiesNone: false,
   dietary: '',
@@ -1526,7 +1628,10 @@ export async function fetchMyMedicalForm(
   const { data, error } = await supabase
     .from('organized_trip_medical_forms')
     .select(
-      'id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, completed_at',
+      // One literal, deliberately long: supabase-js infers the row type from
+      // this string, and a concatenation defeats it and lands you in
+      // GenericStringError.
+      'id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, emergency_name, emergency_phone, emergency_relation, completed_at',
     )
     .eq('trip_id', tripId)
     .eq('user_id', userId)
@@ -1543,6 +1648,9 @@ export async function fetchMyMedicalForm(
     injuriesNone: !!data.injuries_none,
     medications: data.medications ?? '',
     medicationsNone: !!data.medications_none,
+    emergencyName: data.emergency_name ?? '',
+    emergencyPhone: data.emergency_phone ?? '',
+    emergencyRelation: data.emergency_relation ?? '',
     completedAt: data.completed_at ?? null,
   };
 }
@@ -1568,6 +1676,9 @@ export async function saveMedicalForm(
     injuries_none: form.injuriesNone,
     medications: form.medicationsNone ? null : form.medications.trim() || null,
     medications_none: form.medicationsNone,
+    emergency_name: form.emergencyName.trim() || null,
+    emergency_phone: form.emergencyPhone.trim() || null,
+    emergency_relation: form.emergencyRelation.trim() || null,
     completed_at: new Date().toISOString(),
   };
 
@@ -1637,6 +1748,8 @@ export type ReviewItem = {
   documentId: string | null;
   storagePath: string | null;
   submittedAt: string | null;
+  /** When the operator decided — approved or sent back. Uploads only. */
+  reviewedAt: string | null;
   note: string | null;
   /** Past the 30-day purge the row outlives the file. */
   fileDeleted: boolean;
@@ -1727,6 +1840,7 @@ export async function fetchTripReview(
           documentId: null,
           storagePath: null,
           submittedAt: null,
+          reviewedAt: null,
           note: null,
           fileDeleted: false,
         };
@@ -1749,6 +1863,7 @@ export async function fetchTripReview(
           documentId: null,
           storagePath: null,
           submittedAt: ack?.agreed_at ?? null,
+          reviewedAt: null,
           note: null,
           fileDeleted: false,
         };
@@ -1766,6 +1881,7 @@ export async function fetchTripReview(
           documentId: null,
           storagePath: null,
           submittedAt: m?.completed_at ?? null,
+          reviewedAt: null,
           note: null,
           fileDeleted: false,
         };
@@ -1790,6 +1906,7 @@ export async function fetchTripReview(
         documentId: d?.id ?? null,
         storagePath: d?.storage_path ?? null,
         submittedAt: d?.uploaded_at ?? null,
+        reviewedAt: d?.approved_at ?? d?.rejected_at ?? null,
         note: d?.approbation_note ?? null,
         /**
          * A REJECTED row has no file, whatever the column says.
@@ -1859,6 +1976,29 @@ export async function remindRequirement(
   const { data, error } = await supabase.rpc('operator_remind_requirement', {
     p_trip_id: tripId,
     p_requirement_id: requirementId,
+  });
+  if (error) throw error;
+  return (data as number) ?? 0;
+}
+
+/**
+ * Nudge ONE traveler about one requirement — the "Send reminder" pill on their
+ * row. Returns 1 when a notification went out, 0 when the server skipped it
+ * (already sent it, or already reminded about it in the last 24 hours — the
+ * cooldown is shared with `remindRequirement`).
+ *
+ * Needs migration 20260914000000_remind_one_traveler. Pay rows are refused, as
+ * above.
+ */
+export async function remindTravelerRequirement(
+  tripId: string,
+  requirementId: string,
+  userId: string,
+): Promise<number> {
+  const { data, error } = await supabase.rpc('operator_remind_traveler_requirement', {
+    p_trip_id: tripId,
+    p_requirement_id: requirementId,
+    p_user_id: userId,
   });
   if (error) throw error;
   return (data as number) ?? 0;

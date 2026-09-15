@@ -21,12 +21,12 @@
  * the page by accident. With it, the white simply starts a few pixels higher
  * and the card belongs to the page.
  *
- * ── Quiet, because it is permanent ──────────────────────────────────────────
- * The first version was a cyan card with a cyan border — alert styling. This
- * thing has no dismiss button and can sit there for days, and something that
- * shouts every single session gets tuned out. It is now the same neutral
- * surface the rest of the app uses for a settled row, with colour spent only
- * where it means something: the progress bar.
+ * ── Looks (Figma 14980-65807) ────────────────────────────────────────────────
+ * A white card lifted off the page by a soft shadow, a person-with-a-tick icon
+ * carrying a small red dot, and one continuous progress bar. It was a quiet grey
+ * row before; the redesign gives it the same weight as the page's other cards
+ * and spends its one alarm colour on the dot — "something is unfinished" — not
+ * on the whole surface. It still has no dismiss button (below).
  *
  * ── It disappears by being finished ─────────────────────────────────────────
  * No dismiss button. It is not an advert: while it is showing, the operator
@@ -36,19 +36,18 @@
  */
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { TripIcon } from './tripIcons';
 import { ff } from '../../theme/fonts';
 
 const C = {
-  ink: '#222B30',
-  muted: '#6C7378',
-  faint: '#9AA0A6',
+  ink: '#333333',
+  faint: '#A0A0A0',
   page: '#FFFFFF',
-  card: '#F6F8F9',
-  line: '#E9EDEF',
+  card: '#FFFFFF',
+  iconBg: '#F7F7F7',
   accent: '#05BCD3',
-  accentSoft: '#E3F7FA',
-  track: '#DFE4E7',
+  track: '#E4E4E4',
+  dot: '#FF5367',
 };
 
 export const OperatorSetupBanner: React.FC<{
@@ -66,97 +65,113 @@ export const OperatorSetupBanner: React.FC<{
       accessibilityRole="button"
       accessibilityLabel={`Finish your setup. ${done} of ${total} done. ${summary}`}
     >
-      <View style={styles.row}>
+      <View style={styles.iconWrap}>
         <View style={styles.icon}>
-          <Ionicons name="rocket-outline" size={17} color={C.accent} />
+          {/* 18-unit glyph drawn at 26: strokeWidth scaled to keep Figma's 1px. */}
+          <TripIcon name="user-check-01" size={26} color="#222B30" strokeWidth={0.7} />
         </View>
-
-        <View style={styles.text}>
-          <Text style={styles.title}>Finish your setup</Text>
-          {/* Names the next step rather than counting what is left — the bar
-              below already answers "how many". One line, clipped: the card is a
-              pointer to the checklist, not the checklist. */}
-          <Text style={styles.sub} numberOfLines={1}>
-            {summary}
-          </Text>
-        </View>
-
-        <Ionicons name="chevron-forward" size={17} color={C.faint} />
+        <View style={styles.dot} />
       </View>
 
-      {/* Segments, not a continuous bar. There are exactly four steps and they
-          are discrete — a smooth bar would imply a percentage of something
-          measurable, and four ticks let an operator see at a glance that this
-          is nearly over. */}
-      <View style={styles.progress}>
-        <View style={styles.track}>
-          {Array.from({ length: total }, (_, i) => (
-            <View key={i} style={[styles.seg, i < done && styles.segDone]} />
-          ))}
+      <View style={styles.text}>
+        <Text style={styles.title}>Finish your setup</Text>
+        {/* The Figma line (Ohad, 14 Sep). The next step is on the checklist
+            this opens; `summary` still feeds the accessibility label. */}
+        <Text style={styles.sub} numberOfLines={1}>
+          Complete your account details
+        </Text>
+        <View style={styles.progress}>
+          <View style={styles.track}>
+            <View
+              style={[
+                styles.fill,
+                { width: `${total > 0 ? Math.round((done / total) * 100) : 0}%` },
+              ]}
+            />
+          </View>
+          <Text style={styles.count}>{`${done} of ${total}`}</Text>
         </View>
-        <Text style={styles.count}>{`${done} of ${total}`}</Text>
       </View>
+
+      <TripIcon name="chevron-right" size={24} color={C.ink} strokeWidth={1.125} />
     </Pressable>
   </View>
 );
 
+// Figma 14980-65807, sizes read with get_variable_defs per node: title
+// Size/lg 16/24 and count Size/xxs 9/14 (the code export prints these as bare
+// 20 and 12 — wrong); sub Size/s 12/18; shadow "Box Shadow 01".
 const styles = StyleSheet.create({
   // The page colour, not the card's. See the header note — without this the
   // card sits on TripsScreen's dark root.
-  page: { backgroundColor: C.page, paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2 },
+  page: { backgroundColor: C.page, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 12 },
 
   card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.line,
     backgroundColor: C.card,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    gap: 10,
+    paddingLeft: 16,
+    paddingRight: 8,
+    paddingVertical: 12,
+    shadowColor: '#596E7C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 3,
   },
   // No scale: the card is nearly full-width, and shrinking something that wide
   // reads as the page flexing rather than a button answering. A tint change is
   // the honest feedback at this size.
-  pressed: { backgroundColor: '#EDF1F3' },
+  pressed: { backgroundColor: '#F7F7F7' },
 
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconWrap: { alignSelf: 'flex-start', paddingTop: 4 },
   icon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 38,
+    height: 38,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.accentSoft,
+    backgroundColor: C.iconBg,
   },
-  text: { flex: 1 },
+  dot: {
+    position: 'absolute',
+    left: 30,
+    top: 1,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: C.dot,
+  },
+  text: { flex: 1, gap: 3 },
   title: {
-    fontFamily: ff('Inter', '600'),
-    fontWeight: '600',
-    fontSize: 14.5,
-    lineHeight: 19,
+    fontFamily: ff('Inter', '700'),
+    fontWeight: '700',
+    fontSize: 16,
+    lineHeight: 24,
     color: C.ink,
   },
   sub: {
-    marginTop: 1,
+    marginTop: -3,
     fontFamily: ff('Inter', '400'),
     fontWeight: '400',
-    fontSize: 12.5,
-    lineHeight: 17,
-    color: C.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    color: C.faint,
   },
 
-  progress: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  track: { flex: 1, flexDirection: 'row', gap: 4 },
-  seg: { flex: 1, height: 3, borderRadius: 99, backgroundColor: C.track },
-  segDone: { backgroundColor: C.accent },
+  progress: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  track: { flex: 1, height: 6, borderRadius: 8, backgroundColor: C.track, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 8, backgroundColor: C.accent },
   count: {
-    fontFamily: ff('Inter', '500'),
-    fontWeight: '500',
-    fontSize: 11,
+    fontFamily: ff('Inter', '400'),
+    fontWeight: '400',
+    fontSize: 9,
     lineHeight: 14,
-    color: C.faint,
-    // Fixed width so the row does not shift as "0 of 4" becomes "3 of 4".
-    minWidth: 34,
+    color: C.ink,
+    // Fixed width so the bar does not shift as "0 of 4" becomes "3 of 4".
+    minWidth: 28,
     textAlign: 'right',
   },
 });

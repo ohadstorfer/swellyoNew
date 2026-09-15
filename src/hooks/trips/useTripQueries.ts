@@ -52,6 +52,9 @@ export const tripsKeys = {
   detailGearRequests: (id: string) => ['trips', 'detail-gear-requests', id] as const,
   /** Traveler document requirements (v1: passport). Operator trips only. */
   detailDocuments: (id: string) => ['trips', 'detail-documents', id] as const,
+  /** Travelers who left or were removed, with what their money did. Operator
+   *  trips only — a peer-trip departure still deletes the row. */
+  departed: (id: string) => ['trips', 'departed', id] as const,
   /** Host-side review of EVERY traveler's documents. `members` is the joined
    *  participant ids: a new member changes what this query returns, and nothing
    *  else would refetch it. */

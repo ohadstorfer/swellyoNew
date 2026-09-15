@@ -48,6 +48,12 @@ export type OperatorTrip = {
 export type TripMember = {
   userId: string;
   role: string;
+  /**
+   * 'onboarding' or 'active'. A traveler approved on an operator trip sits at
+   * 'onboarding' and holds NO seat, so `participant_count` cannot see them —
+   * which is why the summary tile counts these instead. See `travelerCounts`.
+   */
+  status: string | null;
   joinedAt: string | null;
   /** Frozen when they joined. Null means no price is set for this person. */
   priceTotalUsd: number | null;
@@ -192,20 +198,127 @@ export async function fetchTrip(tripId: string): Promise<OperatorTrip> {
  *
  * The price columns ride along here rather than in their own query: the money
  * screens need them per traveler, and this read already happens on every page.
+ *
+ * Read from `organized_trip_traveler_prices`, not the table. Since migration
+ * 20260906000100 the base table withholds the four price columns from every
+ * signed-in user (any account could read anyone's price), and the view serves
+ * them to the traveler and to staff with `payments.view_status` — the same
+ * people who may read the ledger. Same columns, same filters.
+ *
+ * ⚠️ NO FALLBACK TO THE TABLE, and that is the fix for a trap this file had on
+ * 6 Sep 2026. It used to retry against `group_trip_participants` when the view
+ * was missing — asking for the very columns the migration had just revoked. So
+ * the moment PostgREST's schema cache lagged behind the new view, every trip
+ * page died with "permission denied for table group_trip_participants", which
+ * `friendlyError` renders as "You do not have access to this trip." An operator
+ * looking at their own trip was told they were not allowed in.
+ *
+ * A missing view is now an honest error naming the migration. The alternative —
+ * reading the table without the price columns — is worse than an error: it
+ * returns nulls, every traveler reads as unpaid, and the money screens quietly
+ * say $0. That is the exact failure X-06 exists to prevent.
  */
 export async function fetchMembers(tripId: string): Promise<TripMember[]> {
+  const cols = 'user_id, role, status, joined_at, price_total_usd, deposit_usd';
   const { data, error } = await supabase
-    .from('group_trip_participants')
-    .select('user_id, role, joined_at, price_total_usd, deposit_usd')
+    .from('organized_trip_traveler_prices')
+    .select(cols)
     .eq('trip_id', tripId)
-    .eq('role', 'member');
+    .eq('role', 'member')
+    // PRESENT travelers only. Since 20260906000300 a departure keeps the row
+    // and marks it 'left' or 'removed', and this list feeds every count on the
+    // site — expected documents, collected of expected, the traveler tiles.
+    // Without this, somebody who left last month would go on being counted as
+    // owing a passport for ever. They are listed separately, by
+    // `fetchDepartedMembers`. `.in` rather than `.not('status','in',...)` so a
+    // future status nobody has taught this page about is excluded by default
+    // instead of quietly counted.
+    .in('status', PRESENT_STATUSES);
+
+  // 42P01 is Postgres's "relation does not exist"; PGRST205 is PostgREST's
+  // schema cache saying the same. The second one is the likely one and it is
+  // usually not a missing migration at all — it is PostgREST still holding the
+  // schema from before the view was created. `notify pgrst, 'reload schema'`
+  // clears it. Say so, because the generic error sends the reader hunting for
+  // a permissions problem that is not there.
+  if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
+    throw new Error(
+      'The organized_trip_traveler_prices view is missing. Apply migration ' +
+        '20260906000100, or run "notify pgrst, \'reload schema\'" if it is already applied.',
+    );
+  }
 
   if (error) throw error;
   return (data ?? []).map((r: any) => ({
     userId: r.user_id,
     role: r.role,
+    // Defaults to 'active' when the column is absent, so a client running
+    // against a pre-migration database behaves as it did.
+    status: (r.status as string | null) ?? 'active',
     joinedAt: r.joined_at ?? null,
     priceTotalUsd: toNumber(r.price_total_usd),
     depositUsd: toNumber(r.deposit_usd),
+  }));
+}
+
+/**
+ * The two statuses that mean "on this trip".
+ *
+ * 'onboarding' counts: an approved traveler part-way through their paperwork
+ * holds no seat but is very much on the trip, which is the whole point of the
+ * "+N still joining" line. 'left' and 'removed' do not. Mirrors the same
+ * predicate in the database (20260906000300).
+ */
+export const PRESENT_STATUSES = ['onboarding', 'active'] as const;
+
+export type DepartedMember = {
+  userId: string;
+  /** 'left' — they used Exit. 'removed' — the operator took them off. */
+  status: 'left' | 'removed';
+  leftAt: string | null;
+  /** Null on a self-exit; otherwise whoever removed them. */
+  leftBy: string | null;
+  leftReason: string | null;
+  joinedAt: string | null;
+  /** What they were on when they left. Kept so the money still adds up. */
+  priceTotalUsd: number | null;
+};
+
+/**
+ * Travelers who are no longer on the trip but kept their row.
+ *
+ * Empty until migration 20260906000300 is applied — nothing writes 'left' or
+ * 'removed' before it, and the `left_at` column it adds does not exist, so the
+ * select is caught and answered with an empty list rather than an error. That
+ * makes this site safe to deploy in either order.
+ *
+ * People removed BEFORE that migration have no row at all and can only be
+ * found through the ledger — see `fetchDepartedFromLedger`. The two sets are
+ * disjoint by construction.
+ */
+export async function fetchDepartedMembers(tripId: string): Promise<DepartedMember[]> {
+  const { data, error } = await supabase
+    .from('group_trip_participants')
+    .select('user_id, status, joined_at, left_at, left_by, left_reason')
+    .eq('trip_id', tripId)
+    .eq('role', 'member')
+    .in('status', ['left', 'removed'])
+    .order('left_at', { ascending: false });
+
+  // 42703 is "column does not exist" — the migration has not run here yet.
+  // 42P01 covers a database that somehow lacks the table entirely.
+  if (error) {
+    if (error.code === '42703' || error.code === '42P01' || error.code === 'PGRST204') return [];
+    throw error;
+  }
+
+  return (data ?? []).map((r: any) => ({
+    userId: r.user_id,
+    status: r.status === 'removed' ? 'removed' : 'left',
+    leftAt: r.left_at ?? null,
+    leftBy: r.left_by ?? null,
+    leftReason: r.left_reason ?? null,
+    joinedAt: r.joined_at ?? null,
+    priceTotalUsd: null,
   }));
 }

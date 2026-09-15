@@ -96,6 +96,9 @@ export function useTripCrew(tripId: string | null | undefined, enabled = true) {
           title: s.title,
           bio: s.bio,
           avatarUrl: s.photo_url,
+          roleKey: s.role_key,
+          countryFrom: s.country_from,
+          hasAccount: !!s.user_id,
         }));
     },
     staleTime: 5 * 60 * 1000,

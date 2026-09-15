@@ -25,6 +25,7 @@ import { useUserProfile } from '../context/UserProfileContext';
 import { CurrencySheet } from '../components/settings/CurrencySheet';
 import { CancellationPolicySheet } from '../components/settings/CancellationPolicySheet';
 import { ConnectStripeCard } from '../components/trips/ConnectStripeCard';
+import { PayoutScheduleCard } from '../components/trips/PayoutScheduleCard';
 import { isCurrencyCode, resolveViewerCurrency, type CurrencyCode } from '../utils/currency';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import {
@@ -348,6 +349,11 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               {showStripe && (
                 <View style={styles.operatorInset}>
                   <ConnectStripeCard />
+                  {/* Below Connect on purpose: a payout schedule is only
+                      meaningful once Stripe will actually pay out, and the card
+                      hides itself entirely when there is no account yet. */}
+                  <View style={{ height: 8 }} />
+                  <PayoutScheduleCard />
                 </View>
               )}
 

@@ -330,6 +330,27 @@ serve(async req => {
       );
     }
 
+    // ── ACH: full refunds only ───────────────────────────────────────
+    // The bank network refuses partial refunds outright (docs.stripe.com/
+    // payments/ach-direct-debit — Refunds: ✗ Partial, ✓ Full, 180-day window).
+    // Left alone, Stripe would reject the partial AFTER the 'pending' row
+    // below exists, surfacing as a generic "Could not issue the refund" plus
+    // a failed row. Answering here names the actual rule and what to do
+    // instead. Full refunds pass: on an ACH charge nothing partial can ever
+    // have been refunded, so "everything left" IS the whole charge.
+    const paidByBank = charge.payment_method_details?.type === 'us_bank_account';
+    if (paidByBank && requestedCents !== refundableCents) {
+      return json(
+        {
+          error:
+            `This was paid by bank transfer, and banks only accept refunds in full — ` +
+            `${formatMoney(refundableCents, chargeCurrency)}. To return part of it, refund ` +
+            `everything and have them pay the difference again, or settle it outside the app.`,
+        },
+        400,
+      );
+    }
+
     // Does this charge carry a transfer to the operator? Destination charges do;
     // the TEST-KEY platform path in payments-checkout does not. `reverse_transfer`
     // on a charge with no transfer is a Stripe error, and the balance guardrail
@@ -478,6 +499,11 @@ serve(async req => {
       refundId: refundRow.id,
       amountUsd: requestedCents / 100,
       remainingUsd: (refundableCents - requestedCents) / 100,
+      // ACH refunds are asynchronous: a separate ~3-business-day credit that
+      // shows up on the traveler's statement WITHOUT being labeled a refund.
+      // Stripe's own guidance is to tell the customer it is coming, and the
+      // operator issuing it is the one who can — the clients surface this.
+      bankRefund: paidByBank,
     });
   } catch (e) {
     const msg = safeMessage(e);

@@ -22,7 +22,7 @@
  * operator must read right here rather than in an alert that replaces the form.
  */
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { formatExactUsd } from './plan/PlanSections';
@@ -128,6 +128,17 @@ export const RefundSheet: React.FC<{
     if (result.ok) {
       onRefunded(result.amountUsd);
       onClose();
+      // An ACH refund is a separate ~3-business-day credit that is NOT labeled
+      // a refund on the traveler's bank statement. Stripe's guidance is to
+      // tell the customer it is coming, and the operator is the one who can —
+      // without this, "I refunded them" and "they see nothing for days" both
+      // being true reads as a support ticket.
+      if (result.bankRefund) {
+        Alert.alert(
+          'Refund on its way',
+          `Bank refunds take up to 3 business days to reach ${travelerName}'s account, and won't be labeled as a refund on their statement. Worth letting them know it's coming.`,
+        );
+      }
       return;
     }
     setError(result.error);

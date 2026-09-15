@@ -90,6 +90,12 @@ describe('tripInvitesService', () => {
     const eligiblePartialMatchId = 'eligible-partial-match';
     const eligibleZeroMatchId = 'eligible-zero-match';
 
+    // The `surfers` query gained `.eq('is_demo_user', false)` between the query
+    // and the limit. Held out here so the test can assert the filter is still
+    // applied — a mock that merely tolerates the extra call would go quiet the
+    // next time somebody drops it.
+    let surfersEq: jest.Mock;
+
     function mockSupabaseFrom() {
       (supabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'group_trip_participants') {
@@ -115,22 +121,21 @@ describe('tripInvitesService', () => {
           };
         }
         if (table === 'surfers') {
-          return {
-            select: jest.fn(() => ({
-              limit: jest.fn().mockResolvedValue({
-                data: [
-                  { user_id: participantUserId, name: 'Participant', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
-                  { user_id: pendingInvitedUserId, name: 'Pending Invitee', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
-                  { user_id: eligibleGoodMatchId, name: 'Good Match', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
-                  // Matches on country only — nonzero score, should still surface (just ranked lower).
-                  { user_id: eligiblePartialMatchId, name: 'Partial Match', profile_image_url: null, country_from: 'France', surfboard_type: 'longboard', surf_level_category: 'beginner', age: 50 },
-                  // Matches on nothing — score 0, must be excluded entirely (finding #3).
-                  { user_id: eligibleZeroMatchId, name: 'Zero Match', profile_image_url: null, country_from: 'Israel', surfboard_type: 'longboard', surf_level_category: 'beginner', age: 50 },
-                ],
-                error: null,
-              }),
-            })),
-          };
+          surfersEq = jest.fn(() => ({
+            limit: jest.fn().mockResolvedValue({
+              data: [
+                { user_id: participantUserId, name: 'Participant', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
+                { user_id: pendingInvitedUserId, name: 'Pending Invitee', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
+                { user_id: eligibleGoodMatchId, name: 'Good Match', profile_image_url: null, country_from: 'France', surfboard_type: 'shortboard', surf_level_category: 'advanced', age: 30 },
+                // Matches on country only — nonzero score, should still surface (just ranked lower).
+                { user_id: eligiblePartialMatchId, name: 'Partial Match', profile_image_url: null, country_from: 'France', surfboard_type: 'longboard', surf_level_category: 'beginner', age: 50 },
+                // Matches on nothing — score 0, must be excluded entirely (finding #3).
+                { user_id: eligibleZeroMatchId, name: 'Zero Match', profile_image_url: null, country_from: 'Israel', surfboard_type: 'longboard', surf_level_category: 'beginner', age: 50 },
+              ],
+              error: null,
+            }),
+          }));
+          return { select: jest.fn(() => ({ eq: surfersEq })) };
         }
         throw new Error(`unexpected table ${table}`);
       });
@@ -148,6 +153,11 @@ describe('tripInvitesService', () => {
       };
 
       const candidates = await listInviteCandidates('t1', criteria);
+
+      // Demo accounts outnumber real surfers, so they are filtered in the query
+      // rather than after it — dropping this would quietly spend the 200-row
+      // fetch budget on accounts nobody can invite.
+      expect(surfersEq).toHaveBeenCalledWith('is_demo_user', false);
 
       const candidateIds = candidates.map((c) => c.user_id);
       expect(candidateIds).not.toContain(participantUserId);

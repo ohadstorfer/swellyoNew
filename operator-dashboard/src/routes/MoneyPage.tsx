@@ -63,7 +63,7 @@ export function MoneyPage() {
     onError: e => setTripPriceError(friendlyError(e)),
   });
 
-  if (isError) return <ErrorBox error={error} onRetry={refetch} />;
+  if (isError) return <ErrorBox what="The money" error={error} onRetry={refetch} />;
   if (isPending || access.isPending || !money || !trip)
     return <Loading what="Loading the money" />;
 
@@ -289,6 +289,7 @@ export function MoneyPage() {
           }
         />
       )}
+
     </>
   );
 }
@@ -382,7 +383,9 @@ function PaymentList({
                         ? 'Chargeback'
                         : e.eventType === 'disputed'
                           ? 'Dispute opened'
-                          : 'Payment'}
+                          : e.eventType === 'processing'
+                            ? 'Bank payment on its way'
+                            : 'Payment'}
                   </td>
                   <td
                     style={{
@@ -390,10 +393,14 @@ function PaymentList({
                       color: e.amountUsd < 0 ? 'var(--danger)' : undefined,
                     }}
                   >
-                    {/* A 'disputed' row is a marker, pinned to $0 by the DB —
-                        the money has not finally moved. A dash reads as
-                        "no movement"; $0.00 would read as a broken payment. */}
-                    {e.eventType === 'disputed' ? '—' : formatUsd(e.amountUsd)}
+                    {/* 'disputed' and 'processing' rows are markers, pinned to
+                        $0 by the DB — the money has not finally moved. A dash
+                        reads as "no movement"; $0.00 would read as a broken
+                        payment. 'processing' is an ACH payment still clearing
+                        (~3 business days); its 'paid' row follows on its own. */}
+                    {e.eventType === 'disputed' || e.eventType === 'processing'
+                      ? '—'
+                      : formatUsd(e.amountUsd)}
                   </td>
                 </tr>
               ))}

@@ -11,6 +11,11 @@ import {
 } from './operatorSetup';
 import { DEFAULT_POLICY } from './cancellation';
 import { NO_PAYOUT, type OperatorSettings, type PayoutState } from '../services/settings';
+// The app's copies, as text. This project shares no code with the app on
+// purpose, so the twins are compared as files rather than imported.
+import appOperatorSetupSource from '../../../src/services/trips/operatorSetup.ts?raw';
+import appAgreementSource from '../../../src/services/terms/operatorAgreement.ts?raw';
+import dashboardAgreementSource from './operatorAgreement.ts?raw';
 
 const EMPTY: OperatorSettings = {
   defaultCurrency: null,
@@ -79,9 +84,20 @@ describe('operatorSetupSteps', () => {
   });
 
   it('the terms version matches the app, or agreeing on one site leaves the other unfinished', () => {
-    // Hand-kept in step with OPERATOR_TERMS_VERSION in the app's
-    // services/trips/operatorSetup.ts. Change both together.
-    expect(OPERATOR_TERMS_VERSION).toBe('placeholder-2026-08-11');
+    // Read straight out of the app's source rather than hand-pinned here. The
+    // hand-pinned version of this test passed for three weeks while the app
+    // had already moved on — both sides were stale together, which is the one
+    // failure a pin cannot see.
+    const m = appOperatorSetupSource.match(/export const OPERATOR_TERMS_VERSION = '([^']+)'/);
+    expect(m?.[1]).toBeDefined();
+    expect(OPERATOR_TERMS_VERSION).toBe(m![1]);
+  });
+
+  it('the agreement summary is the same document the app shows', () => {
+    // Everything below the header comment must match byte for byte. The header
+    // is allowed to differ — each file says which one is the copy.
+    const body = (src: string) => src.slice(src.indexOf('export const IS_DRAFT'));
+    expect(body(dashboardAgreementSource)).toBe(body(appAgreementSource));
   });
 
   it('terms are NOT done when an older version was accepted', () => {

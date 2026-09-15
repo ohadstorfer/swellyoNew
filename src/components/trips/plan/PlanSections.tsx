@@ -184,10 +184,12 @@ const SectionHeader: React.FC<{
   right?: React.ReactNode;
   /** Top-level section (20px) vs sub-section (18px). */
   large?: boolean;
-}> = ({ title, subtitle, right, large }) => (
-  <View style={styles.sectionHeader}>
+  titleStyle?: any;
+  style?: any;
+}> = ({ title, subtitle, right, large, titleStyle, style }) => (
+  <View style={[styles.sectionHeader, style]}>
     <View style={{ flex: 1 }}>
-      <Text style={[styles.sectionTitle, large && styles.sectionTitleLarge]}>{title}</Text>
+      <Text style={[styles.sectionTitle, large && styles.sectionTitleLarge, titleStyle]}>{title}</Text>
       {subtitle ? <Text style={styles.sectionSub}>{subtitle}</Text> : null}
     </View>
     {right}
@@ -323,21 +325,39 @@ export const TripMemberSection: React.FC<{
    *  traveler paid, so the answer is never in doubt and the bar would read 0/N
    *  forever. Defaults to on so every existing caller is unchanged. */
   showCommitment?: boolean;
-}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0, showCommitment = true }) => {
+  /**
+   * Operator trips: who wears the passport badge. When set it replaces the
+   * commitment rule — the badge means "every document this trip asks for is
+   * approved" (Figma 14980-65921). Omit where the viewer cannot see the review
+   * (a traveler): no set, no badges, rather than badges that lie.
+   */
+  passportIds?: ReadonlySet<string>;
+  /** 'overview' drops the Plan block's own gutter and hairline and uses the
+   *  Overview's 20px heading, so it sits inside that page's sections. */
+  variant?: 'plan' | 'overview';
+  /** Header text. Plan says "Members"; the operator frames say "Member". */
+  title?: string;
+}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0, showCommitment = true, passportIds, variant = 'plan', title = 'Members' }) => {
+  const isOverview = variant === 'overview';
   // "View all (N)" = the actual number of members to view. Previously this used
   // the trip cap (max_participants), which made a 2-member/13-cap trip read as
   // "View all (13)" — i.e. "13 members". Always show the real head-count.
-  const countLabel = `${participantCount}`;
+  // Operator frames read "View all (9/12)" — seats against the cap. The peer
+  // Plan keeps the plain head-count (see below for why it dropped the cap).
+  const countLabel =
+    passportIds && maxParticipants ? `${participantCount}/${maxParticipants}` : `${participantCount}`;
   // "Committed to trip" = how many of the CURRENT members have committed, so the
   // denominator is the actual head-count (not the trip cap — a 2-member trip read
   // "0/13" against a 13 cap, which is wrong).
   const denom = Math.max(participantCount, 1);
   const fillPct = Math.max(0, Math.min(1, committedCount / denom));
   return (
-    <View style={styles.memberSection}>
+    <View style={isOverview ? undefined : styles.memberSection}>
       <SectionHeader
-        title="Members"
+        title={title}
         large
+        titleStyle={isOverview ? styles.memberTitleOverview : undefined}
+        style={isOverview ? styles.memberHeaderOverview : undefined}
         right={
           pendingCount > 0 ? (
             // Host with pending join requests — the link turns into an amber
@@ -391,6 +411,12 @@ export const TripMemberSection: React.FC<{
                     <View style={styles.memberBadge}>
                       <AdminBadgeIcon size={26} />
                     </View>
+                  ) : passportIds ? (
+                    passportIds.has(m.id) ? (
+                      <View style={styles.memberBadge}>
+                        <CommittedPassportIcon size={26} />
+                      </View>
+                    ) : null
                   ) : showCommitment && m.committed ? (
                     <View style={styles.memberBadge}>
                       <CommittedPassportIcon size={26} />
@@ -781,6 +807,11 @@ export type DocumentRow = {
   /** Resolved deadline (YYYY-MM-DD) for skippable items, or null for must-have
    *  items and months-only trips. */
   dueDate?: string | null;
+  /** The same deadline unresolved — days before departure. Carried so the
+   *  Payment card below can still name a deadline on a months-only trip,
+   *  where `dueDate` cannot exist. The row itself does not render it: a task
+   *  row shows a real date or nothing. */
+  dueDaysBefore?: number | null;
   /** The operator's note. On a rejection, this is the reason. */
   note?: string | null;
   /** Pay rows only — what is still owed, in canonical USD. Null when the
@@ -804,6 +835,12 @@ export type DocumentRow = {
    *  will pay again — this exists precisely so that button is not there. It
    *  stays tappable, but the tap opens the explanation, not a new checkout. */
   pending?: boolean;
+  /** Pay rows only — a BANK payment was made and the money is in transit
+   *  (ACH, up to 4 business days; docs/specs/operator-trips/ach-bank-payments.md).
+   *  Server-side fact, not a local guess like `pending`: the ledger carries a
+   *  marker row for it. Same rule as `pending` — never a plain "Pay" from
+   *  here — but the copy is calm, because nothing is in doubt, just slow. */
+  bankClearing?: { amountUsd: number };
 };
 
 /** "12 Oct" — deadlines are always shown as a real date, never as
@@ -812,6 +849,24 @@ function formatDue(iso: string): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+/**
+ * The same deadline when there is no real date to show — "30 days before the
+ * trip".
+ *
+ * The rule above (always a real date) holds wherever one exists. On a
+ * months-only trip none does, and the choice is not between a date and this
+ * phrasing: it is between this phrasing and saying nothing about when the
+ * money is due. `OfflinePaymentNote` already made that call; the Payment card
+ * makes the same one.
+ *
+ * `compact` drops "the trip" for the single-line step rows, which truncate.
+ */
+function relativeDue(daysBefore?: number | null, compact = false): string | null {
+  if (daysBefore == null) return null;
+  const unit = daysBefore === 1 ? 'day' : 'days';
+  return compact ? `${daysBefore} ${unit} before` : `${daysBefore} ${unit} before the trip`;
 }
 
 /**
@@ -862,6 +917,9 @@ function statusFor(row: DocumentRow): { label: string; tone: 'accent' | 'muted' 
   // but offering to charge them again for something that may already have gone
   // through is the one outcome here worth engineering against.
   if (row.pending) return { label: 'Processing', tone: 'muted' };
+  // A bank transfer in transit. Quiet text, not a pill: there is nothing to
+  // act on for three days, and a pill would read as a button.
+  if (row.bankClearing) return { label: 'On its way', tone: 'muted' };
   const base = DOC_STATUS[row.state];
   if (row.state === 'approved') return base;
   if (row.kind === 'waiver') {
@@ -1211,7 +1269,13 @@ export const TripDocumentsCard: React.FC<{
           // next to a payment that may already be through is the wrong thing
           // to be reading. A due date the traveler has, in all likelihood,
           // just met.
-          const pendingHint = row.pending ? "We'll tick this off automatically" : null;
+          // The bank line names the wait so the row explains itself for three
+          // days without a tap: "on its way" alone invites "since when?".
+          const pendingHint = row.pending
+            ? "We'll tick this off automatically"
+            : row.bankClearing
+              ? 'Bank transfer · up to 4 business days'
+              : null;
           const showSecondLine = !!pendingHint || showNote || !!due;
           // Only these two states are quiet enough to be plain text. Anything
           // the traveler still has to act on gets a pill, so scanning the card
@@ -1437,7 +1501,10 @@ export const TripDocumentsCard: React.FC<{
 //     to a new checkout — same rule as the task row.
 //   • 'paid'       — nothing left; the button is gone, not disabled. A
 //     disabled "Pay now" under "All paid" reads as something being wrong.
-export type PaymentSectionState = 'ready' | 'confirming' | 'processing' | 'paid';
+//   • 'clearing'   — a bank transfer is in transit (up to 4 business days). Same
+//     routing as 'processing' — the tap opens the explanation — but the label
+//     is calm: this is a known state, not a doubt.
+export type PaymentSectionState = 'ready' | 'confirming' | 'processing' | 'clearing' | 'paid';
 
 /** One pay step of the trip — "Deposit $1,000", "Final payment $2,000". */
 export type PaymentStep = {
@@ -1452,6 +1519,13 @@ export type PaymentStep = {
    *  so this card can never name a date the task row above disagrees with.
    *  Null/absent = no deadline set (months-only trips have no resolved date). */
   dueDate?: string | null;
+  /** The same deadline UNRESOLVED — days before departure, straight off the
+   *  requirement row. It is what this card falls back to when `dueDate` is
+   *  null because the trip only has months: the operator did set a deadline,
+   *  and "30 days before the trip" is worth far more to a traveler than the
+   *  silence they used to get. Null/absent = no deadline set at all (a
+   *  deposit, which is due on joining). */
+  dueDaysBefore?: number | null;
   /** The task row's own overdue state, NOT recomputed here from dueDate —
    *  two clocks would eventually disagree on the same screen. */
   overdue?: boolean;
@@ -1539,11 +1613,17 @@ export const PaymentSection: React.FC<{
   // above already carries the red pill; this card only has to agree with it.
   const nextUnpaid = allPaid ? undefined : steps.find(s => s.paidUsd < s.totalUsd);
   const dueWhen = nextUnpaid?.dueDate ? formatDue(nextUnpaid.dueDate) : null;
+  // No resolved date — a months-only trip. `overdue` is not a case here: the
+  // server derives it from the same resolved date, so a step with no date is
+  // never late.
+  const dueRelative = dueWhen ? null : relativeDue(nextUnpaid?.dueDaysBefore);
   const dueLine = dueWhen
     ? nextUnpaid?.overdue
       ? `Was due ${dueWhen}`
       : `Due by ${dueWhen}`
-    : null;
+    : dueRelative
+      ? `Due ${dueRelative}`
+      : null;
 
   return (
     <View style={styles.ygBlock}>
@@ -1608,6 +1688,10 @@ export const PaymentSection: React.FC<{
               // trip" was exactly the sentence travelers were left with.
               // Nothing on a finished step: its date stopped mattering.
               const stepWhen = !done && s.dueDate ? formatDue(s.dueDate) : null;
+              // Months-only trip: no date to name, but the deadline exists.
+              // Compact wording — this row is one truncating line.
+              const stepRelative =
+                done || stepWhen ? null : relativeDue(s.dueDaysBefore, true);
               return (
                 <View key={s.key} style={styles.payStepRow}>
                   <Text style={styles.payStepName} numberOfLines={1}>
@@ -1616,6 +1700,8 @@ export const PaymentSection: React.FC<{
                       <Text style={s.overdue ? styles.payDueLate : undefined}>
                         {s.overdue ? ` · was due ${stepWhen}` : ` · by ${stepWhen}`}
                       </Text>
+                    ) : stepRelative ? (
+                      <Text>{` · ${stepRelative}`}</Text>
                     ) : null}
                   </Text>
                   <Text style={[styles.payStepAmount, done && styles.payStepAmountDone]}>
@@ -1645,7 +1731,11 @@ export const PaymentSection: React.FC<{
               </>
             ) : (
               <Text style={styles.payBtnText}>
-                {payState === 'processing' ? 'Processing…' : 'Pay now'}
+                {payState === 'processing'
+                  ? 'Processing…'
+                  : payState === 'clearing'
+                    ? 'On its way'
+                    : 'Pay now'}
               </Text>
             )}
           </PressableScale>
@@ -1813,6 +1903,9 @@ const styles = StyleSheet.create({
   },
   // Bleed edge-to-edge so avatars scroll to the screen edge.
   memberScroll: { marginHorizontal: -16, marginTop: 16 },
+  // Overview variant: that page's SectionTitle is 20/24 with 22 below it.
+  memberTitleOverview: { fontSize: 20, lineHeight: 24 },
+  memberHeaderOverview: { marginBottom: 6 },
   memberScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'flex-start' },
   memberItem: { width: 68, alignItems: 'center' },
   memberAvatar: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#9CB6C0' },

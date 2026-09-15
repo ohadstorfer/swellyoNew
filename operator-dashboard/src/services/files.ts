@@ -122,7 +122,9 @@ function uniqueName(name: string, used: Set<string>): string {
   return candidate;
 }
 
-function saveBlob(blob: Blob, fileName: string): void {
+/** Hand a blob to the browser as a download. Exported since the payments page
+ *  builds a CSV in memory rather than downloading files from storage. */
+export function saveBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

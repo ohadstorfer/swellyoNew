@@ -1,4 +1,4 @@
-import { renderPush } from '../render';
+import { renderPush, templateKey } from '../render';
 
 describe('renderPush', () => {
   it('approved join request is celebratory and names the trip', () => {
@@ -204,6 +204,149 @@ describe('renderPush', () => {
       );
       expect(r.title.toLowerCase()).toContain('won');
       expect(r.body).toContain('El Salvador 26');
+    });
+  });
+
+  describe('trip_cancelled — a managed cancel refunds everyone in full', () => {
+    it('names the refund so nobody has to ask where their money went', () => {
+      const r = renderPush('trip_cancelled', { refund_usd: 3000 }, 'El Salvador 26');
+      expect(r.body).toContain('$3000.00');
+      expect(r.body).toContain('El Salvador 26');
+      expect(r.body).toMatch(/5–10 business days/);
+    });
+
+    it('says nothing about money when none is coming back', () => {
+      // Peer trips, unpaid travelers, and every row written before
+      // 20260820000900 — `refund_usd` is omitted, never zeroed.
+      const r = renderPush('trip_cancelled', {}, 'Costa Rica Camp');
+      expect(r.body).toContain('Costa Rica Camp');
+      expect(r.body).not.toContain('$');
+      expect(r.body).not.toContain('refund');
+    });
+
+    it('never renders a zero refund', () => {
+      const r = renderPush('trip_cancelled', { refund_usd: 0 }, 'Costa Rica Camp');
+      expect(r.body).not.toContain('$0');
+    });
+  });
+
+  describe('operator_traveler_confirmed — the operator half of member_joined', () => {
+    it('names the traveler and says the place is confirmed', () => {
+      const r = renderPush(
+        'operator_traveler_confirmed',
+        { actor_name: 'sababa' },
+        'El Salvador 26',
+      );
+      expect(r.title).toContain('sababa');
+      expect(r.title).toContain('El Salvador 26');
+      expect(r.body).not.toContain('new trip update');
+    });
+  });
+
+  describe('join_request_decided — approval means different things by trip kind', () => {
+    it('a peer trip approval still says "you\'re in"', () => {
+      const r = renderPush('join_request_decided', { decision: 'approved' }, 'Costa Rica Camp');
+      expect(r.title).toContain("You're in");
+      expect(r.body).toContain('Costa Rica Camp');
+    });
+
+    it('an operator trip approval does NOT claim the spot is held', () => {
+      const r = renderPush(
+        'join_request_decided',
+        { decision: 'approved', needs_onboarding: true },
+        'El Salvador 26',
+      );
+      expect(r.title).toContain('El Salvador 26');
+      // The whole bug: approval on a type-C trip is the starting line.
+      expect(r.title).not.toContain("You're in");
+      expect(r.body).toMatch(/deposit/i);
+      expect(r.body).toMatch(/held/i);
+    });
+
+    it('a row written before the migration falls back to the peer copy', () => {
+      // No `needs_onboarding` key at all — every join_request_decided row
+      // created before 20260820000500.
+      const r = renderPush('join_request_decided', { decision: 'approved' }, 'El Salvador 26');
+      expect(r.title).toContain("You're in");
+    });
+
+    it('a decline is the same message on both kinds of trip', () => {
+      const peer = renderPush('join_request_decided', { decision: 'declined' }, 'X');
+      const op = renderPush('join_request_decided', { decision: 'declined', needs_onboarding: true }, 'X');
+      expect(op).toEqual(peer);
+    });
+
+    it('the two approvals cannot share a template row', () => {
+      expect(templateKey('join_request_decided', { decision: 'approved' }))
+        .toBe('join_request_decided:approved');
+      expect(templateKey('join_request_decided', { decision: 'approved', needs_onboarding: true }))
+        .toBe('join_request_decided:approved_onboarding');
+    });
+
+    it('a template row for the peer key does not leak onto operator trips', () => {
+      const templates = {
+        'join_request_decided:approved': {
+          push_title: 'PEER ROW',
+          push_body: 'You are a member of {trip}',
+        },
+      };
+      const peer = renderPush('join_request_decided', { decision: 'approved' }, 'X', templates);
+      expect(peer.title).toBe('PEER ROW');
+
+      const op = renderPush(
+        'join_request_decided',
+        { decision: 'approved', needs_onboarding: true },
+        'El Salvador 26',
+        templates,
+      );
+      expect(op.title).not.toBe('PEER ROW');
+      expect(op.body).toMatch(/deposit/i);
+    });
+  });
+
+  // The three types that fell to the default until 20 Aug and pushed
+  // "You have a new trip update". Each test asserts the absence of that string
+  // as well as the presence of the real copy — the bug was silent precisely
+  // because the generic text is a perfectly valid-looking push.
+  describe('the types that used to fall through to the generic default', () => {
+    it('a crew invite names the tier, because Crew and Manager are different jobs', () => {
+      const r = renderPush(
+        'operator_staff_invited',
+        { role_key: 'manager', role_label: 'Manager', actor_name: 'Ohad Storfer' },
+        'El Salvador 26',
+      );
+      expect(r.title).toContain('Manager');
+      expect(r.title).toContain('El Salvador 26');
+      expect(r.body).toContain('Ohad Storfer');
+      expect(r.body).not.toContain('new trip update');
+    });
+
+    it('a crew invite with no role label still reads as an invite', () => {
+      const r = renderPush('operator_staff_invited', { actor_name: 'Ohad Storfer' }, 'El Salvador 26');
+      expect(r.title.toLowerCase()).toContain('join');
+      expect(r.title).not.toContain('undefined');
+      expect(r.body).not.toContain('new trip update');
+    });
+
+    it('operator setup never names a trip — it fires before the first one exists', () => {
+      const r = renderPush('operator_setup_required', {}, '');
+      expect(r.title).toContain('Swellyo');
+      expect(r.body).not.toContain('new trip update');
+      // The "your trip" fallback is the specific bug this guards: with no
+      // trip_id, `trip` resolves to it and the push reads like a mistake.
+      expect(r.title).not.toContain('your trip');
+      expect(r.body).not.toContain('your trip');
+    });
+
+    it('a requirement added after publish says which one', () => {
+      const r = renderPush(
+        'operator_requirement_added',
+        { requirement_title: 'Travel insurance', item_name: 'Travel insurance' },
+        'El Salvador 26',
+      );
+      expect(r.body).toContain('Travel insurance');
+      expect(r.title).toContain('El Salvador 26');
+      expect(r.body).not.toContain('new trip update');
     });
   });
 });

@@ -5,6 +5,7 @@ import {
   REQUIREMENT_ORDER,
   isEditableKind,
   isPayKind,
+  resolveTiming,
   type EditableKind,
 } from '../domain/catalog';
 import type { RequirementTiming } from '../domain/requirements';
@@ -85,7 +86,10 @@ export async function fetchEditableRequirements(
  *  requires exactly this pairing — skippable MUST carry a deadline, must_have
  *  MUST NOT — so the two columns always move together. Writing one without the
  *  other is a 23514. */
-function timingColumns(t: RequirementTiming) {
+function timingColumns(kind: string, chosen: RequirementTiming) {
+  // LOCKED_TIMING is applied HERE, not only in the editor: a stale tab or a
+  // future caller must not be able to write a skippable deposit.
+  const t = resolveTiming(kind, chosen);
   return {
     skip_at_onboarding: t.skippable ? 'skippable' : 'must_have',
     deadline_days_before: t.skippable ? Math.max(0, Math.round(t.daysBefore)) : null,
@@ -215,13 +219,16 @@ export async function saveRequirementChanges(
       // Every save round-trips every visible kind's current timing, so without
       // this an edit to ONE document would still fire an UPDATE for both
       // `deposit` and `balance`.
+      // Compared against the RESOLVED timing, or a draft carrying a skippable
+      // deposit reads as "changed" on every save and re-fires the same no-op.
+      const want = resolveTiming(kind, timing);
       const unchanged =
-        row.skippable === timing.skippable &&
-        (!timing.skippable || row.daysBefore === Math.max(0, Math.round(timing.daysBefore)));
+        row.skippable === want.skippable &&
+        (!want.skippable || row.daysBefore === Math.max(0, Math.round(want.daysBefore)));
       if (unchanged) continue;
       const { error } = await supabase
         .from('organized_trip_requirements')
-        .update(timingColumns(timing))
+        .update(timingColumns(kind, timing))
         .eq('id', row.id);
       if (error) throw error;
       continue;
@@ -236,7 +243,7 @@ export async function saveRequirementChanges(
         trip_id: tripId,
         kind,
         req_type: c.reqType,
-        ...timingColumns(timing),
+        ...timingColumns(kind, timing),
         title: c.title,
         help_text: c.helpText,
         sort_order: REQUIREMENT_ORDER.indexOf(kind),
@@ -246,14 +253,15 @@ export async function saveRequirementChanges(
     }
 
     if (timing && row) {
+      const want = resolveTiming(kind, timing);
       const unchanged =
         row.isActive &&
-        row.skippable === timing.skippable &&
-        (!timing.skippable || row.daysBefore === Math.max(0, Math.round(timing.daysBefore)));
+        row.skippable === want.skippable &&
+        (!want.skippable || row.daysBefore === Math.max(0, Math.round(want.daysBefore)));
       if (unchanged) continue;
       const { error } = await supabase
         .from('organized_trip_requirements')
-        .update({ ...timingColumns(timing), is_active: true })
+        .update({ ...timingColumns(kind, timing), is_active: true })
         .eq('id', row.id);
       if (error) throw error;
       continue;

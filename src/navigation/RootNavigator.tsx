@@ -5,7 +5,7 @@ import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { StackActions, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator, NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 // Native uses the real @bottom-tabs bar. On web, metro.config.js redirects this
 // exact module specifier to src/navigation/bottomTabsWebShim.tsx (a JS bar),
 // because @bottom-tabs imports RN internals that can't bundle for web.
@@ -34,6 +34,7 @@ import CreateTripWizard from '../screens/trips/CreateTripWizard';
 import OperatorTripEditScreen from '../screens/operator/OperatorTripEditScreen';
 import TravelerOnboardingScreen from '../screens/trips/TravelerOnboardingScreen';
 import StaffPaperworkScreen from '../screens/trips/StaffPaperworkScreen';
+import TripPaymentsScreen from '../screens/trips/TripPaymentsScreen';
 import OperatorEditDestinationScreen from '../screens/operator/OperatorEditDestinationScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -44,6 +45,7 @@ import { useMainNav } from './MainNavContext';
 import { useOnboarding } from '../context/OnboardingContext';
 import { queryClient } from '../lib/queryClient';
 import { tripsKeys } from '../hooks/trips/useTripQueries';
+import { getTripParticipants } from '../services/trips/groupTripsService';
 import { approveJoinRequest, declineJoinRequest } from '../services/trips/groupTripsService';
 import type { MainTabsParamList, RootStackParamList } from './navigationRef';
 import { useMessageSearchOpen } from './searchOverlayState';
@@ -142,6 +144,14 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
           StackActions.push('StaffPaperwork', {
             tripId: paperworkTripId,
             tripTitle: paperworkTitle,
+          }),
+        )
+      }
+      onOpenPayments={(paymentsTripId: string, paymentsTitle: string | null) =>
+        navigation.dispatch(
+          StackActions.push('TripPayments', {
+            tripId: paymentsTripId,
+            tripTitle: paymentsTitle,
           }),
         )
       }
@@ -277,6 +287,40 @@ function TravelerOnboardingCardScreen({
  * finishing it changes no membership, no count and no permission. The trip
  * screen behind it is as correct after as it was before.
  */
+/**
+ * The payments ledger.
+ *
+ * Reads the trip's roster itself rather than taking it as a param: this screen
+ * is pushed from the Dashboard, which has the list, but a notification deep
+ * link or a `--resume` would arrive with nothing. One query, cached under the
+ * same key the trip screen uses, so arriving from the Dashboard costs nothing.
+ */
+function TripPaymentsCardScreen({
+  route,
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'TripPayments'>) {
+  const { tripId, tripTitle } = route.params;
+  const participants = useQuery({
+    queryKey: [...tripsKeys.detail(tripId), 'participants'] as const,
+    queryFn: () => getTripParticipants(tripId),
+  });
+
+  return (
+    <TripPaymentsScreen
+      tripId={tripId}
+      tripTitle={tripTitle ?? null}
+      onBack={() => navigation.goBack()}
+      travelers={(participants.data ?? [])
+        .filter(p => p.role !== 'host')
+        .map(p => ({
+          userId: p.user_id,
+          name: p.name,
+          avatarUrl: p.profile_image_url,
+        }))}
+    />
+  );
+}
+
 function StaffPaperworkCardScreen({
   route,
   navigation,
@@ -923,6 +967,7 @@ export default function RootNavigator() {
         component={StaffPaperworkCardScreen}
         options={{ presentation: 'card' }}
       />
+      <RootStack.Screen name="TripPayments" component={TripPaymentsCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripMembers" component={TripMembersCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="PackingAndGear" component={PackingAndGearCardScreen} options={{ presentation: 'card' }} />

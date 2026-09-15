@@ -20,7 +20,7 @@ export function TripsPage() {
       <PageHead title="Your trips" sub="Trips you run, and trips you're crew on" />
 
       {q.isPending && <Loading what="Loading your trips" />}
-      {q.isError && <ErrorBox error={q.error} onRetry={() => void q.refetch()} />}
+      {q.isError && <ErrorBox what="Your trips" error={q.error} onRetry={() => void q.refetch()} />}
 
       {q.data && q.data.length === 0 && (
         <Empty

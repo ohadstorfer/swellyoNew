@@ -17,6 +17,8 @@ import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScr
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 // TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
+import { NotificationPermissionModal } from './notifications/NotificationPermissionModal';
+import { useNotificationPermissionPrompt } from '../hooks/notifications/useNotificationPermissionPrompt';
 import { pushRootCard, navigationRef } from '../navigation/navigationRef';
 import type { RootStackParamList } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
@@ -1825,6 +1827,21 @@ export const AppContent: React.FC = () => {
     }
   }, [shouldShowConversations]);
 
+  // "Stay in the loop" — the pre-permission popup, a couple of seconds after the
+  // user lands on Explore. It is the ONLY thing in the app that asks the OS for
+  // notification permission now; the registration above just picks the token up
+  // once permission exists. Held back while anything covers the navigator, so it
+  // never lands on top of the "You're in!" overlay or a full-screen editor.
+  const mainAppIsClear =
+    shouldShowConversations &&
+    !showSwellyShaper &&
+    !showProfile &&
+    !showConversationLoading &&
+    !showProfileEditor &&
+    !staffInviteVisible &&
+    !activeJoinDecision;
+  const notificationPrompt = useNotificationPermissionPrompt(mainAppIsClear);
+
   // Resume a profile-video upload a previous session started but didn't finish
   // (e.g. the user killed the app mid-upload — exactly what they do when the
   // first session feels stuck). No-op when nothing is pending. Fire-and-forget.
@@ -1969,6 +1986,12 @@ export const AppContent: React.FC = () => {
   });
 
   useEffect(() => {
+    // Set to true to get the every-2s `🧠 HERMES` heartbeat back. Off by default:
+    // it printed a line (and ran the bench loop) on every healthy tick, which
+    // drowned out every other log in Metro. The stall report below still prints
+    // the same numbers when a tick is actually late — that is the part that
+    // matters, and it is unaffected by this flag.
+    const HERMES_TICK_LOGS = false;
     let last = Date.now();
     let leftActive = false;
     let lastReportAt = 0;
@@ -2045,7 +2068,7 @@ export const AppContent: React.FC = () => {
         console.log(`🔴 MEMORY WARNING #${memWarnings} @ [${c.branch}/step ${c.step}]`);
       }
     });
-    if (__DEV__) {
+    if (__DEV__ && HERMES_TICK_LOGS) {
       const probe = (global as any).HermesInternal?.getInstrumentedStats?.();
       console.log(
         probe
@@ -2083,7 +2106,7 @@ export const AppContent: React.FC = () => {
         // `bench` climb and read off WHICH step it climbs on — the bench is a
         // fixed workload, so a rising number is the JS thread losing CPU to
         // something that is not JavaScript.
-        if (__DEV__ && AppState.currentState === 'active') {
+        if (__DEV__ && HERMES_TICK_LOGS && AppState.currentState === 'active') {
           const c = stallContextRef.current;
           console.log(`🧠 HERMES [${c.branch}/step ${c.step}] bench ${runBench()}ms | ${gcTag}`);
         }
@@ -2487,6 +2510,11 @@ export const AppContent: React.FC = () => {
             onDismiss={handleJoinDecisionDismiss}
           />
         )}
+        <NotificationPermissionModal
+          visible={notificationPrompt.visible}
+          onTurnOn={notificationPrompt.onTurnOn}
+          onDismiss={notificationPrompt.onDismiss}
+        />
       </View>
       </MainNavProvider>
     );

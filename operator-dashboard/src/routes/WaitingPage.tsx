@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip } from '../services/trips';
-import { fetchTripReview, type ReviewItem } from '../services/review';
+import type { ReviewItem } from '../services/review';
+import { useTripReview } from '../services/useTripReview';
+import { DASHBOARD_CAPABILITY, useTripAccess } from '../services/access';
 import { fetchProfiles } from '../services/travelers';
 import { approveDocuments, rejectDocument } from '../services/actions';
 import { formatDate, plural } from '../lib/format';
 import { friendlyError } from '../lib/errors';
-import { Empty, ErrorBox, Loading, StateTag } from '../components/StateBits';
+import { Empty, ErrorBox, Loading, NoPaperworkAccess, StateTag } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { RejectDialog } from '../components/RejectDialog';
@@ -41,15 +43,15 @@ export function WaitingPage() {
   const [rejecting, setRejecting] = useState<Row | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  const access = useTripAccess(tripId);
   const trip = useQuery({ queryKey: ['trip', tripId], queryFn: () => fetchTrip(tripId) });
   const members = useQuery({ queryKey: ['members', tripId], queryFn: () => fetchMembers(tripId) });
   const userIds = useMemo(() => (members.data ?? []).map(m => m.userId), [members.data]);
 
-  const review = useQuery({
-    queryKey: ['review', tripId, userIds],
-    queryFn: () => fetchTripReview(tripId, userIds),
-    enabled: members.isSuccess,
-  });
+  // Through the hook, not a bare useQuery: it strips the medical form for
+  // anyone without medical.view, so no count on this page can show the false
+  // zero a Manager saw on 9 Sep 2026. See domain/visibleReview.
+  const review = useTripReview(tripId, userIds, members.isSuccess);
   const profiles = useQuery({
     queryKey: ['profiles', userIds],
     queryFn: () => fetchProfiles(userIds),
@@ -84,10 +86,23 @@ export function WaitingPage() {
     onError: e => setActionError(friendlyError(e)),
   });
 
-  if (trip.isError) return <ErrorBox error={trip.error} onRetry={() => void trip.refetch()} />;
-  if (review.isError) return <ErrorBox error={review.error} onRetry={() => void review.refetch()} />;
-  if (trip.isPending || members.isPending || review.isPending)
+  if (trip.isError) return <ErrorBox what="This trip" error={trip.error} onRetry={() => void trip.refetch()} />;
+  if (review.isError) return <ErrorBox what="The documents" error={review.error} onRetry={() => void review.refetch()} />;
+  if (trip.isPending || members.isPending || review.isPending || access.isPending)
     return <Loading what="Loading what needs you" />;
+
+  // The same sentence TripPage gives, for the same reason: a crew member below
+  // Manager reached this by URL. Without it a Guide read "not on this trip"
+  // about somebody who is — the roster is refused to them, so the page found
+  // nobody and said so as if it were a fact about the traveler.
+  if (access.ready && !access.can(DASHBOARD_CAPABILITY)) {
+    return (
+      <>
+        <PageHead back={`/trips/${tripId}`} backLabel={trip.data.title} title={trip.data.title} />
+        <NoPaperworkAccess />
+      </>
+    );
+  }
 
   // `submitted` AND a document id: the two together are what "the operator can
   // act on this" means. A waiver agreed to has neither, and a rejected item is

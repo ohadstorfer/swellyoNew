@@ -10,6 +10,7 @@
 // well-documented failure mode of currency auto-detection everywhere.
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { ff } from '../../theme/fonts';
@@ -57,6 +58,7 @@ export const CurrencySheet: React.FC<{
   subtitle = 'Changes how prices are shown. Payments are always made in US dollars.',
   autoLabel = 'Automatic',
 }) => {
+  const insets = useSafeAreaInsets();
   const autoCode = currencyForCountry(country);
 
   const choose = (next: CurrencyCode | null) => {
@@ -70,7 +72,7 @@ export const CurrencySheet: React.FC<{
           swipe, and paints NOTHING. Without this surface the rows render as
           bare text over whatever screen is behind, which is exactly how this
           looked before. Every other sheet in the app carries the same wrapper. */}
-      <View style={styles.surface}>
+      <View style={[styles.surface, { paddingBottom: Math.max(insets.bottom, 12) }]}>
         <View style={styles.header}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.sub}>{subtitle}</Text>
@@ -122,7 +124,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingBottom: 12,
+    // paddingBottom is applied INLINE from the safe-area inset: the last row sits
+    // under the Android nav bar / iOS home indicator otherwise.
   },
   header: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 12 },
   title: {

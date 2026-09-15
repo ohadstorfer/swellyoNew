@@ -1,405 +1,157 @@
 /**
- * TripDashboardTab — the operator's third tab, beside Overview and Plan.
+ * TripDashboardTab — the top of the operator's Dashboard tab.
  *
- * This is the mobile port of `operator-dashboard/` (the web site Eyal runs a
- * trip from). Same sections, same numbers, same order — read the web project's
- * `docs/SPEC.md` §4.2 before changing what appears here, because the two are
- * meant to agree.
+ * Figma 14980-65921. The Dashboard and the Plan tab were merged: whoever runs an
+ * operator trip now has Dashboard + Overview, and Plan's sections (members,
+ * admin updates, staff, gear) render under this component in TripDetailScreen,
+ * because they are driven by that screen's own state and sheets.
  *
- * WHO SEES IT: hosts of an operator (`hosting_style = 'C'`) trip, nobody else.
- * The tab is not rendered at all otherwise — the gate lives in TripDetailScreen
- * so a non-host never even gets the tab label.
+ * This component owns the part that needs the money query:
+ *   1. Warnings that stop a real mistake — test mode, a Stripe mode mismatch,
+ *      Stripe not live yet. Kept on purpose (Ohad, 14 Sep); everything else the
+ *      old tab carried (status line, Money card, Documents list, Travelers list,
+ *      medical + surf stats) was dropped to match the design.
+ *   2. Trip summary — Payments collected · Fully paid · Travelers.
+ *   3. Action — Join requests · Documents · Payments, each a count and a way in.
  *
- * WHAT MOVED: the host's Documents summary used to sit in Plan. It lives here
- * now. Plan is the traveler's view, for everyone, including the operator when
- * they want to see what their travelers see.
+ * WHO SEES IT: the gate lives in TripDetailScreen (`canSeeDashboard`). Each
+ * card below also gates on its own capability, because staff reach this tab
+ * with only some of them.
  *
- * NOTHING HERE WRITES TO THE DATABASE, and nothing here needed a migration:
- * every read is one the host was already allowed to make. See
- * operatorDashboardService.
+ * NOTHING HERE WRITES TO THE DATABASE. See operatorDashboardService.
  */
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
-import { Image } from 'expo-image';
-import Thumb from '../../Thumb';
 import { PressableScale } from '../PressableScale';
-import { Images } from '../../../assets/images';
+import { TripIcon, type TripIconName } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
-import {
-  fetchMedicalFlags,
-  fetchTripMoney,
-  fetchTravelerProfiles,
-  buildSurfStats,
-  type TripMoney,
-  type MedicalFlags,
-} from '../../../services/trips/operatorDashboardService';
+import { fetchTripMoney, type TripMoney } from '../../../services/trips/operatorDashboardService';
 import { STRIPE_LIVEMODE } from '../../../services/trips/tripPaymentsService';
 import { useConnectStatus } from '../../../hooks/trips/useConnectStatus';
 import { type TravelerReview } from '../../../services/trips/tripDocumentsService';
-import type { ReviewTraveler } from '../DocumentReviewScreen';
 import { D } from './dashboardTheme';
-import { formatUsd, plural, medicalFlagLine, outstandingUsd } from './dashboardFormat';
-import {
-  countLate,
-  isLate,
-  lateForTraveler,
-  sortTravelers,
-  tripPhase,
-  type SortMode,
-} from './dashboardWork';
+import { formatUsd, plural } from './dashboardFormat';
+import { tripSummary } from './dashboardWork';
 
 export type TripDashboardTabProps = {
   tripId: string;
-  /** `group_trips.start_date`. Null on a trip still being planned — the status
-   *  line then drops the countdown rather than inventing one. */
-  startDateISO?: string | null;
-  endDateISO?: string | null;
   /**
    * Per-card gates, from the viewer's capability set (useTripCapabilities).
-   * The host passes all-true; staff get what their tier's row says. These are
-   * UX only — every read below is enforced again by RLS, so a wrong `true`
-   * shows an empty card, never data. The queries are also disabled per flag,
-   * because a fetch RLS will empty out is a round trip for nothing.
+   * UX only — every read is enforced again by RLS, so a wrong `true` shows an
+   * empty card, never data. The money query is also disabled without it.
    */
   canViewMoney: boolean;
   canViewDocs: boolean;
-  canViewMedical: boolean;
-  canViewStats: boolean;
-  /** Everyone on the trip except hosts, with names and avatars. */
-  travelers: ReviewTraveler[];
   /** Per-traveler requirement state, from the screen's existing review query. */
   review: TravelerReview[];
   reviewLoading: boolean;
-  /** Open the review flow. With a userId, straight into that person. */
-  onOpenReview: (userId?: string) => void;
-  /** Open the review flow on one document type — every traveler's passport. */
-  onOpenRequirement: (requirementId: string) => void;
-  /** Open the review flow on everything that needs a decision. */
-  onOpenWaiting: () => void;
-  /** Edit what this trip asks travelers for. Absent = this viewer may not. */
-  onManageRequirements?: () => void;
+  /** Open the Documents list (Figma 14980-66552). */
+  onOpenReview: () => void;
+  /** How full the trip is, from `travelerCounts()` on the screen's own roster. */
+  counts: { going: number; onboarding: number; capacity: number | null };
+  /** Open the full payments ledger. Absent when this viewer may not see it. */
+  onOpenPayments?: () => void;
+  /** Pending join requests. */
+  pendingRequestCount: number;
+  /** Open the Members screen, where requests are decided. Absent = this viewer
+   *  may not decide them, and the card is not drawn. */
+  onOpenJoinRequests?: () => void;
 };
 
 export const TripDashboardTab: React.FC<TripDashboardTabProps> = ({
   tripId,
-  startDateISO,
-  endDateISO,
   canViewMoney,
   canViewDocs,
-  canViewMedical,
-  canViewStats,
-  travelers,
   review,
   reviewLoading,
   onOpenReview,
-  onOpenRequirement,
-  onOpenWaiting,
-  onManageRequirements,
+  counts,
+  onOpenPayments,
+  pendingRequestCount,
+  onOpenJoinRequests,
 }) => {
   const money = useQuery({
     queryKey: ['operatorDashboard', 'money', tripId],
     queryFn: () => fetchTripMoney(tripId),
     enabled: canViewMoney,
   });
-  const medical = useQuery({
-    queryKey: ['operatorDashboard', 'medical', tripId],
-    queryFn: () => fetchMedicalFlags(tripId),
-    enabled: canViewMedical,
-  });
 
-  const userIds = useMemo(() => travelers.map(t => t.userId).sort(), [travelers]);
-  const profiles = useQuery({
-    queryKey: ['operatorDashboard', 'profiles', userIds],
-    queryFn: () => fetchTravelerProfiles(userIds),
-    enabled: userIds.length > 0 && canViewStats,
-  });
-
-  const byUser = useMemo(() => {
-    const m = new Map<string, TravelerReview>();
-    review.forEach(r => m.set(r.userId, r));
-    return m;
-  }, [review]);
-
+  const summary = useMemo(() => (money.data ? tripSummary(money.data) : null), [money.data]);
   const totalToReview = review.reduce((n, r) => n + r.toReview, 0);
-  const totalLate = useMemo(() => countLate(review), [review]);
-
-  // Default: worst first. The A–Z case is real — finding one named person — but
-  // it is the exception, and it was the only order this list had.
-  const [sortMode, setSortMode] = useState<SortMode>('work');
-  const sorted = useMemo(
-    () => sortTravelers(travelers, byUser, sortMode),
-    [travelers, byUser, sortMode],
-  );
 
   return (
     <View style={styles.root}>
-      {/* ── Are you on track ───────────────────────────────────────────── */}
-      {/* Its whole content is the review's late count, so a viewer without
-          docs would get a status line built from a query that never ran —
-          "nothing late" as a permanent lie. */}
-      {canViewDocs && (
-        <TripStatusLine
-          startDateISO={startDateISO}
-          endDateISO={endDateISO}
-          late={totalLate}
-          loading={reviewLoading}
-        />
-      )}
-
       {canViewMoney && (
         <>
-          {/* ── Mode notices ───────────────────────────────────────────── */}
           <ModeNotices hiddenCount={money.data?.hiddenCount ?? 0} />
-
-          {/* ── Payments not live yet ──────────────────────────────────── */}
           <StripeBanner isOffline={money.data?.isOffline ?? true} loading={money.isPending} />
         </>
       )}
 
-      {/* ── Needs review ───────────────────────────────────────────────── */}
-      {canViewDocs && (
-        <ReviewBanner
-          loading={reviewLoading}
-          count={totalToReview}
-          // Straight to the documents it is counting — every one that needs a
-          // decision, whoever sent it. Same destination as the web banner.
-          onPress={onOpenWaiting}
-        />
-      )}
-
-      {/* ── Money ──────────────────────────────────────────────────────── */}
-      {canViewMoney && (
-        <MoneyCard
+      {/* ── Trip summary ───────────────────────────────────────────────── */}
+      <View style={styles.block}>
+        <Text style={styles.sectionTitle}>Trip summary</Text>
+        <SummaryTiles
           money={money.data ?? null}
-          loading={money.isPending}
-          failed={money.isError}
-          onRetry={() => void money.refetch()}
+          summary={summary}
+          moneyLoading={money.isPending}
+          canViewMoney={canViewMoney}
+          counts={counts}
+          onOpenPayments={onOpenPayments}
         />
-      )}
-
-      {/* ── Documents ──────────────────────────────────────────────────── */}
-      {canViewDocs && (
-        <DocumentsCard
-          review={review}
-          travelerCount={travelers.length}
-          loading={reviewLoading}
-          onOpenRequirement={onOpenRequirement}
-          onManage={onManageRequirements}
-        />
-      )}
-
-      {/* ── Travelers ──────────────────────────────────────────────────── */}
-      {/* Above "About this group" now. Medical counts and surf stats used to
-          sit here, and neither can be tapped or acted on — so on a phone the
-          operator scrolled past two dead ends to reach the one list they came
-          for. Reference material goes after the work.
-          Gated on docs: this list IS the review work-queue (every row opens
-          the review flow), so for a stats-only Guide it would be a list of
-          buttons that all error. */}
-      {canViewDocs && (
-      <Section
-        title="Travelers"
-        sub={
-          sortMode === 'work'
-            ? 'Whoever needs chasing first.'
-            : 'Tap someone to see everything about them.'
-        }
-        right={
-          <View style={styles.sortRow}>
-            <Text style={styles.count}>{travelers.length}</Text>
-            {travelers.length > 1 && (
-              // Labelled with what tapping GIVES you, not the current state —
-              // it is a link, and a link says where it goes.
-              <Pressable
-                onPress={() => setSortMode((m: SortMode) => (m === 'work' ? 'alpha' : 'work'))}
-                hitSlop={10}
-              >
-                <Text style={styles.link}>{sortMode === 'work' ? 'A–Z' : 'By urgency'}</Text>
-              </Pressable>
-            )}
-          </View>
-        }
-      >
-        {travelers.length === 0 ? (
-          <Text style={styles.muted}>Nobody has joined this trip yet.</Text>
-        ) : (
-          <View style={styles.list}>
-            {sorted.map((t, i, arr) => (
-              <TravelerRow
-                key={t.userId}
-                traveler={t}
-                docs={byUser.get(t.userId) ?? null}
-                money={money.data?.travelers.find(m => m.userId === t.userId) ?? null}
-                isOffline={money.data?.isOffline ?? false}
-                hasMoney={(money.data?.steps.length ?? 0) > 0}
-                last={i === arr.length - 1}
-                onPress={() => onOpenReview(t.userId)}
-              />
-            ))}
-          </View>
-        )}
-      </Section>
-      )}
-
-      {/* ── About this group ───────────────────────────────────────────── */}
-      {/* Two blocks that were two full sections. Both are read-only reference —
-          neither leads anywhere — so they are one section with sub-headings
-          rather than two headings competing with Money and Documents.
-          Medical first: it changes how the trip is run. Each block gates on
-          its own capability — medical is Manager-and-up, stats reach down to
-          Guide — so for a Guide this section IS their dashboard. */}
-      {(canViewMedical || canViewStats) && (
-      <Section title="About this group">
-        {canViewMedical && (
-          <>
-            <Text style={styles.aboutLabel}>Medical flags</Text>
-            <Text style={styles.aboutSub}>Counts only. No names on this screen.</Text>
-            {medical.isPending ? (
-              <Text style={styles.muted}>Loading…</Text>
-            ) : medical.isError ? (
-              <SectionError onRetry={() => void medical.refetch()} />
-            ) : medical.data && medical.data.formsCompleted > 0 ? (
-              <MedicalBody flags={medical.data} travelerCount={travelers.length} />
-            ) : (
-              <Text style={styles.muted}>Nobody has filled in the medical form yet.</Text>
-            )}
-          </>
-        )}
-
-        {canViewStats && (
-          <>
-            <Text style={[styles.aboutLabel, canViewMedical && styles.aboutLabelNext]}>
-              Surf
-            </Text>
-            {/* isError FIRST. Without it a failed fetch falls through to
-                SurfStatsBody with an empty list, which renders "No travelers yet."
-                on a trip with fifteen travelers — the screen stating something
-                false and offering no way to find out otherwise. */}
-            {profiles.isError ? (
-              <SectionError onRetry={() => void profiles.refetch()} />
-            ) : profiles.isPending && userIds.length > 0 ? (
-              <Text style={styles.muted}>Loading…</Text>
-            ) : (
-              <SurfStatsBody profiles={[...(profiles.data?.values() ?? [])]} />
-            )}
-          </>
-        )}
-      </Section>
-      )}
-    </View>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Are you on track
-// ---------------------------------------------------------------------------
-
-/**
- * The one line that answers the question the operator actually came with.
- *
- * Before this, the tab had no idea when the trip was. "7/15 in" read exactly
- * the same three months out and three days out, and nothing was ever marked
- * late — so the operator held the trip date in their head and did the maths
- * themselves, every single time they opened the screen.
- *
- * NOTHING IS RENDERED WHILE THE REVIEW IS LOADING. A line that says "nothing
- * late" and flips to "2 late" a second later is worse than a beat of nothing:
- * the operator reads the first one and relaxes. Same reasoning as
- * StripeBanner's silence on `not_started`.
- */
-const TripStatusLine: React.FC<{
-  startDateISO?: string | null;
-  endDateISO?: string | null;
-  late: number;
-  loading: boolean;
-}> = ({ startDateISO, endDateISO, late, loading }) => {
-  if (loading) return null;
-
-  const phase = tripPhase(startDateISO, endDateISO);
-  // Chasing is over once the trip has ended, so the late count stops being
-  // something to act on and starts being a reproach.
-  if (phase.kind === 'ended') {
-    return (
-      <View style={styles.statusLine}>
-        <Text style={styles.statusText}>Trip ended</Text>
       </View>
-    );
-  }
 
-  const when =
-    phase.kind === 'upcoming'
-      ? `${plural(phase.days, 'day')} to go`
-      : phase.kind === 'today'
-        ? 'Leaves today'
-        : phase.kind === 'under_way'
-          ? 'Under way'
-          : null; // no start date — a trip still being planned
-
-  return (
-    <View style={styles.statusLine}>
-      {when ? <Text style={styles.statusText}>{when}</Text> : null}
-      {when ? <Text style={styles.statusDot}>·</Text> : null}
-      <Text style={late > 0 ? styles.statusLate : styles.statusText}>
-        {late > 0 ? `${plural(late, 'document')} late` : 'nothing late'}
-      </Text>
+      {/* ── Action ─────────────────────────────────────────────────────── */}
+      {(onOpenJoinRequests || canViewDocs || canViewMoney) && (
+        <View style={[styles.block, styles.blockNext]}>
+          <Text style={styles.sectionTitle}>Action</Text>
+          <View style={styles.actionRow}>
+            {onOpenJoinRequests ? (
+              <ActionCard
+                icon="user-plus-01"
+                title="Join Request"
+                sub={pendingRequestCount > 0 ? `${pendingRequestCount} pending` : 'None pending'}
+                count={pendingRequestCount}
+                onPress={onOpenJoinRequests}
+              />
+            ) : (
+              <View style={styles.actionSlot} />
+            )}
+            {canViewDocs ? (
+              <ActionCard
+                icon="file-check-01"
+                title="Document"
+                sub={
+                  reviewLoading
+                    ? 'Loading…'
+                    : totalToReview > 0
+                      ? `${totalToReview} to review`
+                      : 'Nothing to review'
+                }
+                count={reviewLoading ? 0 : totalToReview}
+                // Always the Documents list; the badge says how much is waiting
+                // inside it (Figma 14980-66552).
+                onPress={onOpenReview}
+              />
+            ) : (
+              <View style={styles.actionSlot} />
+            )}
+            {canViewMoney ? (
+              <PaymentsActionCard
+                money={money.data ?? null}
+                loading={money.isPending}
+                stillOwe={summary ? summary.priced - summary.fullyPaid : 0}
+                onPress={onOpenPayments}
+              />
+            ) : (
+              <View style={styles.actionSlot} />
+            )}
+          </View>
+        </View>
+      )}
     </View>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Shared failure state
-// ---------------------------------------------------------------------------
-
-/**
- * One failure state for every section on this tab.
- *
- * There used to be three: Money offered a retry, Medical said "Could not load."
- * and left you there, and Surf stats said "No travelers yet." — which on a
- * fifteen-person trip was simply untrue, because a failed fetch falls through
- * to an empty list and an empty list means an empty trip.
- *
- * An operator cannot tell a network blip from an empty trip, so the screen has
- * to. Always say it did not load, and always offer the way out.
- */
-const SectionError: React.FC<{ onRetry: () => void }> = ({ onRetry }) => (
-  <>
-    <Text style={styles.muted}>That did not load.</Text>
-    <Pressable onPress={onRetry} hitSlop={8} style={styles.retry}>
-      <Text style={styles.link}>Try again</Text>
-    </Pressable>
-  </>
-);
-
-// ---------------------------------------------------------------------------
-// Medical
-// ---------------------------------------------------------------------------
-
-/**
- * Counts, with the denominator that makes them mean anything.
- *
- * "1 allergy" on its own is unusable: one of the two people who answered, or
- * one of fifteen? The first is a note to self, the second means the operator
- * still does not know what most of the group can eat. `formsCompleted` was
- * being fetched and used only as a `> 0` gate — the number was in hand and
- * never shown.
- *
- * Zeros are dropped rather than printed. "0 medications" is not information,
- * it is four words of noise sitting next to the counts that are.
- */
-const MedicalBody: React.FC<{ flags: MedicalFlags; travelerCount: number }> = ({
-  flags,
-  travelerCount,
-}) => {
-  const line = medicalFlagLine(flags);
-  return (
-    <>
-      <Text style={styles.body}>
-        {flags.formsCompleted} of {travelerCount} filled in the medical form
-      </Text>
-      <Text style={[styles.muted, styles.spaced]}>{line || 'Nothing flagged.'}</Text>
-    </>
   );
 };
 
@@ -444,22 +196,17 @@ const ModeNotices: React.FC<{ hiddenCount: number }> = ({ hiddenCount }) => (
 /**
  * The gap between "this trip collects payment" and "a traveler can pay today".
  *
- * That gap exists on purpose. Until 2026-08-05 an operator could not publish a
- * managed trip at all until Stripe had approved them, which meant the person
- * who had just filled in every form correctly was held at a button that said
- * "Connect Stripe" for as long as Stripe's review took. Now they publish, and
- * this banner is what keeps that honest: the trip is live, the money is not.
- *
- * Reads the SAME shared query as ConnectStripeCard (`useConnectStatus`), so an
- * approval that arrives while this screen is open updates both at once.
+ * An operator can publish before Stripe approves them, so the trip is live and
+ * the money is not. Reads the SAME shared query as ConnectStripeCard
+ * (`useConnectStatus`), so an approval that arrives while this screen is open
+ * updates both at once.
  */
 const StripeBanner: React.FC<{ isOffline: boolean; loading: boolean }> = ({
   isOffline,
   loading,
 }) => {
   // Offline trips are paid outside Swellyo and have no Stripe account to wait
-  // on. `enabled` also keeps every operator running an offline trip from
-  // making a Stripe round trip just by opening their dashboard.
+  // on. `enabled` also keeps them from making a Stripe round trip at all.
   const managed = !loading && !isOffline;
   const { state, isLive } = useConnectStatus({ enabled: managed });
 
@@ -469,9 +216,8 @@ const StripeBanner: React.FC<{ isOffline: boolean; loading: boolean }> = ({
   // and then disappears a second later is worse than a beat of nothing.
   if (state === 'not_started') return null;
 
-  // `wait` is this theme's "the operator's own backlog, not an error" colour,
-  // and that is exactly what a review in progress is. Reaching for the warning
-  // tint here would tell an operator something is wrong when nothing is.
+  // `wait` is this theme's "the operator's own backlog, not an error" colour —
+  // a review in progress is not something wrong.
   const tone =
     state === 'under_review'
       ? { bg: styles.bannerWait, fg: D.wait }
@@ -489,8 +235,6 @@ const StripeBanner: React.FC<{ isOffline: boolean; loading: boolean }> = ({
   return (
     <View style={[styles.banner, tone.bg]}>
       {state === 'under_review' ? (
-        // Motion says "elsewhere, something is happening" better than any
-        // static icon, and this is the one state where nothing is wrong.
         <ActivityIndicator size="small" color={tone.fg} />
       ) : (
         <Ionicons name="alert-circle-outline" size={16} color={tone.fg} />
@@ -501,405 +245,220 @@ const StripeBanner: React.FC<{ isOffline: boolean; loading: boolean }> = ({
 };
 
 // ---------------------------------------------------------------------------
-// Needs review
+// Trip summary
 // ---------------------------------------------------------------------------
 
-const ReviewBanner: React.FC<{
-  loading: boolean;
-  count: number;
-  onPress: () => void;
-}> = ({ loading, count, onPress }) => {
-  if (loading) return null;
-
-  // Nothing waiting is worth saying out loud — an operator checking in wants to
-  // know they are clear, not to find an absence of banner and have to infer it.
-  if (count === 0) {
-    return (
-      <View style={[styles.banner, styles.bannerOk]}>
-        <Ionicons name="checkmark-circle-outline" size={16} color={D.ok} />
-        <Text style={[styles.bannerText, { color: D.ok }]}>Nothing waiting for review</Text>
-      </View>
-    );
-  }
-
-  return (
-    // 0.97 is the app-wide press scale, sprung rather than snapped — see
-    // PressableScale. A static transform on a banner this wide reads as a
-    // rendering glitch, not as a button answering you.
-    <PressableScale
-      onPress={onPress}
-      style={[styles.banner, styles.bannerAccent]}
-      accessibilityLabel={`${plural(count, 'document')} waiting for you`}
-    >
-      <Ionicons name="time-outline" size={16} color="#FFFFFF" />
-      <Text style={[styles.bannerText, { color: '#FFFFFF', flex: 1 }]}>
-        {plural(count, 'document')} waiting for you
-      </Text>
-      <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
-    </PressableScale>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Money
-// ---------------------------------------------------------------------------
-
-const MoneyCard: React.FC<{
+/**
+ * Payments collected · Fully paid · Travelers.
+ *
+ * "Collected" gets the wide tile and the other two share a row: the money is
+ * one number the operator watches move, the other two are ratios they check.
+ *
+ * The travelers tile counts seats, and says the onboarding group out loud
+ * underneath rather than swallowing it — `participant_count` cannot see anyone
+ * still onboarding. See `travelerCounts`.
+ */
+const SummaryTiles: React.FC<{
   money: TripMoney | null;
-  loading: boolean;
-  failed: boolean;
-  onRetry: () => void;
-}> = ({ money, loading, failed, onRetry }) => {
-  if (loading) {
-    return (
-      <Section title="Money">
-        <ActivityIndicator />
-      </Section>
-    );
-  }
-  if (failed) {
-    return (
-      <Section title="Money">
-        <SectionError onRetry={onRetry} />
-      </Section>
-    );
-  }
-  // No pay steps and no price anywhere: this trip never charged for anything,
-  // and an empty Money section is worse than none.
-  if (!money || (money.steps.length === 0 && money.expectedUsd === 0)) return null;
-
-  // Not shown on an offline trip: Swellyo does not know what arrived there, so
-  // any "still owed" figure would be invented. The offline branch below never
-  // reads this.
-  const owedUsd = outstandingUsd(money.expectedUsd, money.collectedUsd);
+  summary: ReturnType<typeof tripSummary> | null;
+  moneyLoading: boolean;
+  canViewMoney: boolean;
+  counts: { going: number; onboarding: number; capacity: number | null };
+  onOpenPayments?: () => void;
+}> = ({ money, summary, moneyLoading, canViewMoney, counts, onOpenPayments }) => {
+  // An offline trip collects nothing through Swellyo, so a "collected" figure
+  // would be invented. It keeps the expected total and loses the bar.
+  const isOffline = money?.isOffline ?? false;
+  const pct =
+    summary && summary.expectedUsd > 0
+      ? Math.min(1, Math.max(0, summary.collectedUsd / summary.expectedUsd))
+      : 0;
+  const paidPct = summary && summary.priced > 0 ? summary.fullyPaid / summary.priced : 0;
+  const seatPct =
+    counts.capacity && counts.capacity > 0 ? Math.min(1, counts.going / counts.capacity) : 0;
 
   return (
-    <Section title="Money">
-      {money.isOffline ? (
-        <>
-          <Text style={styles.figure}>{formatUsd(money.expectedUsd)}</Text>
-          <Text style={styles.figureSub}>expected in total</Text>
-          <Text style={[styles.muted, styles.spaced]}>
-            Payments for this trip happen outside Swellyo. Swellyo does not know what has
-            arrived.
-          </Text>
-        </>
-      ) : (
-        <>
-          <Text style={styles.figure}>{formatUsd(money.collectedUsd)}</Text>
-          <Text style={styles.figureSub}>collected of {formatUsd(money.expectedUsd)}</Text>
-          {/* Nobody running a trip thinks in "collected". They think in who
-              still owes them, and until now the screen made them do the
-              subtraction to reach the number they actually came for.
-
-              Hidden at zero rather than shown as "$0 still owed": a collected
-              figure that equals the expected one already says everyone has
-              paid, and a zero here reads as a balance to chase. Clamped
-              because an over-refund would otherwise print a negative. */}
-          {owedUsd > 0 && <Text style={styles.owed}>{formatUsd(owedUsd)} still owed</Text>}
-          <Text style={[styles.muted, styles.spaced]}>
-            {money.steps
-              .map(
-                s =>
-                  `${money.paidCountByKind[s.kind]} of ${money.travelers.length} paid the ${
-                    s.kind === 'deposit' ? 'deposit' : 'balance'
-                  }`,
-              )
-              .join(' · ') || 'This trip has no payment steps.'}
-          </Text>
-        </>
-      )}
-      {money.noPriceCount > 0 && (
-        <Text style={[styles.muted, styles.spaced]}>
-          {plural(money.noPriceCount, 'traveler has', 'travelers have')} no price set.
-        </Text>
-      )}
-    </Section>
-  );
-};
-
-// ---------------------------------------------------------------------------
-// Documents
-// ---------------------------------------------------------------------------
-
-/**
- * One line per requirement, showing RECEIVED and APPROVED.
- *
- * Both numbers, always. The gap between them is the operator's own backlog, and
- * showing only "approved" would make it read as a traveler problem.
- *
- * A row opens THAT requirement across every traveler. It used to open the
- * generic review queue — the same destination whichever row you tapped, which
- * made the seven rows and their chevrons a lie (Ohad, 5 Aug).
- *
- * "Remind N people" used to live under each row and now lives on the screen a
- * row opens (Ohad, 6 Aug). It sends a real push to real phones, and hanging it
- * off a list where the only other gesture is "open" put it one stray thumb away
- * from notifying everybody. On the requirement screen it sits under the list of
- * the very people it will notify, which is also the list that says who still
- * owes the document — so the operator reads the names before they chase them.
- */
-const DocumentsCard: React.FC<{
-  review: TravelerReview[];
-  travelerCount: number;
-  loading: boolean;
-  onOpenRequirement: (requirementId: string) => void;
-  onManage?: () => void;
-}> = ({ review, travelerCount, loading, onOpenRequirement, onManage }) => {
-  // Counts are derived from the review data the screen already holds, so this
-  // costs no round trip. One pass, keyed by requirement.
-  const rows = useMemo(() => {
-    const out = new Map<
-      string,
-      {
-        id: string;
-        title: string;
-        kind: string;
-        reqType: string;
-        received: number;
-        approved: number;
-        late: number;
-      }
-    >();
-    for (const t of review) {
-      for (const item of t.items) {
-        const row =
-          out.get(item.requirementId) ??
-          {
-            id: item.requirementId,
-            title: item.title,
-            kind: item.kind,
-            reqType: item.reqType,
-            received: 0,
-            approved: 0,
-            late: 0,
-          };
-        // "Received" means the traveler has done their part — a submitted
-        // upload, an agreed waiver, a completed medical form. Approved is a
-        // subset of it, never the other way round.
-        if (item.state === 'submitted' || item.state === 'approved') row.received += 1;
-        if (item.state === 'approved') row.approved += 1;
-        // Late is NOT the complement of received: a rejected upload past its
-        // deadline counts here and in neither of the two above. See
-        // dashboardWork.isLate.
-        if (isLate(item)) row.late += 1;
-        out.set(item.requirementId, row);
-      }
-    }
-    return [...out.values()];
-  }, [review]);
-
-  const canManage = !!onManage;
-
-  if (rows.length === 0 && !canManage && !loading) return null;
-
-  return (
-    <Section
-      title="Documents"
-      sub="What travelers need to send you"
-      right={
-        canManage && rows.length > 0 ? (
-          <Pressable onPress={onManage} hitSlop={10}>
-            <Text style={styles.link}>Edit</Text>
-          </Pressable>
-        ) : undefined
-      }
-    >
-      {loading ? (
-        <Text style={styles.muted}>Loading…</Text>
-      ) : rows.length === 0 ? (
-        <PressableScale onPress={onManage} style={styles.emptyCta}>
-          <Ionicons name="add" size={18} color={D.accent} />
-          <Text style={styles.emptyCtaText}>Ask for documents</Text>
+    <View style={styles.tiles}>
+      {canViewMoney && (
+        <PressableScale
+          onPress={onOpenPayments}
+          disabled={!onOpenPayments}
+          style={styles.tile}
+          accessibilityLabel={onOpenPayments ? 'Open every payment on this trip' : undefined}
+        >
+          <TileHead icon="wallet-03" label={isOffline ? 'Expected in total' : 'Payments collected'} />
+          {moneyLoading ? (
+            <ActivityIndicator style={styles.tileSpinner} />
+          ) : (
+            <View style={styles.tileBody}>
+              <View style={styles.tileFigureRow}>
+                <Text style={styles.tileFigure} numberOfLines={1}>
+                  {formatUsd(isOffline ? summary?.expectedUsd : summary?.collectedUsd)}
+                </Text>
+                {!isOffline && summary ? (
+                  <Text style={styles.tileSub}>Of {formatUsd(summary.expectedUsd)}</Text>
+                ) : null}
+              </View>
+              {!isOffline ? <Meter pct={pct} /> : null}
+            </View>
+          )}
         </PressableScale>
-      ) : (
-        <View style={styles.list}>
-          {rows.map((r, i) => {
-            const last = i === rows.length - 1;
-            return (
-              <Pressable
-                key={r.id}
-                onPress={() => onOpenRequirement(r.id)}
-                style={({ pressed }) => [
-                  styles.row,
-                  last && styles.rowLast,
-                  pressed && styles.rowPressed,
-                ]}
-              >
-                <Text style={styles.rowTitle} numberOfLines={1}>
-                  {r.title}
-                </Text>
-                <Text style={styles.counts}>
-                  <Text style={styles.countsStrong}>
-                    {r.received}/{travelerCount} in
-                  </Text>
-                  <Text style={styles.muted}>
-                    {' '}
-                    · {r.approved}/{travelerCount} ok
-                  </Text>
-                  {r.late > 0 && <Text style={styles.countsLate}> · {r.late} late</Text>}
-                </Text>
-                <Ionicons name="chevron-forward" size={16} color="#C9C9C9" />
-              </Pressable>
-            );
-          })}
-        </View>
       )}
-    </Section>
-  );
-};
 
-// ---------------------------------------------------------------------------
-// Surf stats
-// ---------------------------------------------------------------------------
+      <View style={styles.tileRow}>
+        {canViewMoney && (
+          <View style={[styles.tile, styles.tileHalf]}>
+            <TileHead icon="wallet-03" label="Fully paid" />
+            {moneyLoading ? (
+              <ActivityIndicator style={styles.tileSpinner} />
+            ) : (
+              <View style={styles.tileBody}>
+                <View style={styles.tileFigureRow}>
+                  <Text style={styles.tileFigure} numberOfLines={1}>
+                    {summary ? `${summary.fullyPaid}/${summary.priced}` : '—'}
+                  </Text>
+                  <Text style={styles.tileSub} numberOfLines={1}>
+                    {summary && summary.fullyPaid > 0
+                      ? `${formatUsd(summary.fullyPaidUsd)} total`
+                      : 'Nobody yet'}
+                  </Text>
+                </View>
+                <Meter pct={paidPct} />
+              </View>
+            )}
+          </View>
+        )}
 
-const SurfStatsBody: React.FC<{
-  profiles: { surfLevel: string | null; boardType: string | null; age: number | null; countryFrom: string | null }[];
-}> = ({ profiles }) => {
-  if (profiles.length === 0) return <Text style={styles.muted}>No travelers yet.</Text>;
-
-  const s = buildSurfStats(profiles);
-  const pretty = (k: string) => k.replace(/_/g, ' ');
-  const list = (pairs: [string, number][]) =>
-    pairs.map(([k, n]) => `${n} ${pretty(k)}`).join(' · ');
-
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={styles.body}>{s.levels.length ? list(s.levels) : 'Surf level not set'}</Text>
-      <Text style={styles.muted}>{s.boards.length ? list(s.boards) : 'Board type not set'}</Text>
-      <Text style={styles.muted}>
-        {s.ageMin !== null && `Ages ${s.ageMin}–${s.ageMax}`}
-        {s.ageMin !== null && s.countryCount > 0 && ' · '}
-        {s.countryCount > 0 && plural(s.countryCount, 'country', 'countries')}
-      </Text>
+        <View style={[styles.tile, styles.tileHalf]}>
+          <TileHead icon="users-02" label="Travelers" />
+          <View style={styles.tileBody}>
+            <View style={styles.tileFigureRow}>
+              <Text style={styles.tileFigure} numberOfLines={1}>
+                {counts.capacity ? `${counts.going}/${counts.capacity}` : `${counts.going}`}
+              </Text>
+              <Text style={styles.tileSub} numberOfLines={1}>
+                {counts.onboarding > 0 ? `+${counts.onboarding} joining` : 'Travelers'}
+              </Text>
+            </View>
+            {counts.capacity ? <Meter pct={seatPct} /> : null}
+          </View>
+        </View>
+      </View>
     </View>
   );
 };
 
-// ---------------------------------------------------------------------------
-// Travelers
-// ---------------------------------------------------------------------------
-
-const TravelerRow: React.FC<{
-  traveler: ReviewTraveler;
-  docs: TravelerReview | null;
-  money: { totalUsd: number | null; paidUsd: number } | null;
-  isOffline: boolean;
-  hasMoney: boolean;
-  last: boolean;
-  onPress: () => void;
-}> = ({ traveler, docs, money, isOffline, hasMoney, last, onPress }) => {
-  const late = lateForTraveler(docs);
-  const detail =
-    [
-      docs ? `${docs.done}/${docs.total} approved` : null,
-      hasMoney && money ? moneyLine(money, isOffline) : null,
-    ]
-      .filter(Boolean)
-      .join(' · ') || 'No details yet';
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.row, last && styles.rowLast, pressed && styles.rowPressed]}
-    >
-      {/* Same pattern as the review screen: Thumb serves the small square
-          variant, and the default avatar stands in when there is no photo. */}
-      {traveler.avatarUrl ? (
-        <Thumb
-          uri={traveler.avatarUrl}
-          size={96}
-          style={styles.avatar}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-        />
-      ) : (
-        <Image source={Images.defaultAvatar} style={styles.avatar} contentFit="cover" />
-      )}
-      <View style={styles.rowText}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {traveler.name ?? 'Traveler'}
-        </Text>
-        <Text style={styles.rowSub} numberOfLines={1}>
-          {detail}
-        </Text>
-      </View>
-      {/* At most one tag — two pills plus a chevron crowds a 36px row. Late
-          wins: it is the worse fact, and "waiting" is already counted in the
-          banner at the top of the tab. */}
-      {late > 0 ? (
-        <View style={styles.tagLate}>
-          <Text style={styles.tagLateText}>{late} late</Text>
-        </View>
-      ) : docs && docs.toReview > 0 ? (
-        <View style={styles.tagWait}>
-          <Text style={styles.tagWaitText}>{docs.toReview} waiting</Text>
-        </View>
-      ) : null}
-      <Ionicons name="chevron-forward" size={16} color="#C9C9C9" />
-    </Pressable>
-  );
-};
-
-/**
- * One traveler's money, short enough for a list row.
- *
- * Both numbers, always — "paid in full" would need a threshold rule, and a list
- * row is not where money rules get invented. On an offline trip Swellyo has no
- * idea what arrived, so quoting a paid figure there would be a lie.
- */
-function moneyLine(m: { totalUsd: number | null; paidUsd: number }, isOffline: boolean): string {
-  if (m.totalUsd === null) return 'no price set';
-  if (isOffline) return `${formatUsd(m.totalUsd)} · paid outside Swellyo`;
-  return `${formatUsd(m.paidUsd)} of ${formatUsd(m.totalUsd)} paid`;
-}
-
-// ---------------------------------------------------------------------------
-// Section shell
-// ---------------------------------------------------------------------------
-
-export const Section: React.FC<{
-  title: string;
-  sub?: string;
-  right?: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, sub, right, children }) => (
-  <View style={styles.section}>
-    <View style={styles.sectionHead}>
-      <View style={styles.sectionHeadText}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        {sub ? <Text style={styles.sectionSub}>{sub}</Text> : null}
-      </View>
-      {right}
-    </View>
-    {children}
+const TileHead: React.FC<{ icon: TripIconName; label: string }> = ({ icon, label }) => (
+  <View style={styles.tileHead}>
+    <TripIcon name={icon} size={16} color={D.muted} />
+    <Text style={styles.tileLabel} numberOfLines={1}>
+      {label}
+    </Text>
   </View>
 );
 
-// This tab is a peer of Plan and Overview, not of DocumentReviewScreen, so it
-// is on the FIGMA type scale — 10 / 12 / 14 / 16 / 20 / 24 — and matches
-// PlanSections value for value. The operator-documents screens it opens into
-// run their own 12 / 13 / 14 / 15 / 17 scale; TravelerExtras renders inside one
-// of them and stays there. See §2 of
-// `docs/specs/operator-trips/dashboard-tab-design.md`.
-const styles = StyleSheet.create({
-  // 20, like `planSection`. Was 8, which started this tab a dozen pixels higher
-  // than every other section on the screen.
-  root: { paddingTop: 20, gap: 0 },
+/** The progress rule under a tile's figure. Never animated: this is a status
+ *  readout, and a bar that grows on every refetch reads as activity. */
+const Meter: React.FC<{ pct: number }> = ({ pct }) => (
+  <View style={styles.meter}>
+    <View style={[styles.meterFill, { width: `${Math.round(pct * 100)}%` }]} />
+  </View>
+);
 
-  // ── status line ──
-  // Deliberately NOT a banner. It is a caption on the whole tab, not another
-  // thing shouting at the operator from a coloured box — there are already up
-  // to four of those directly beneath it.
-  statusLine: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 14 },
-  statusText: { fontFamily: ff('Inter', '600'), fontSize: 14, lineHeight: 20, fontWeight: '600', color: D.muted },
-  statusDot: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, color: D.muted },
-  statusLate: { fontFamily: ff('Inter', '700'), fontSize: 14, lineHeight: 20, fontWeight: '700', color: D.danger },
+// ---------------------------------------------------------------------------
+// Action
+// ---------------------------------------------------------------------------
+
+/** One way into the work. The red count is what needs doing; zero hides it. */
+const ActionCard: React.FC<{
+  icon: TripIconName;
+  title: string;
+  sub: string;
+  count: number;
+  onPress?: () => void;
+}> = ({ icon, title, sub, count, onPress }) => (
+  // The column is the wrapper, not the card: PressableScale puts `style` on an
+  // inner view, so `flex: 1` there left each card only as wide as its text.
+  <View style={styles.actionSlot}>
+    <PressableScale
+      onPress={onPress}
+      disabled={!onPress}
+      style={styles.actionCard}
+      accessibilityLabel={`${title}, ${sub}`}
+    >
+      <View style={styles.actionTop}>
+        <View style={styles.actionIcon}>
+          <TripIcon name={icon} size={18} color="#222B30" />
+        </View>
+        {count > 0 ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{count > 99 ? '99+' : count}</Text>
+          </View>
+        ) : null}
+      </View>
+      <View>
+        <Text style={styles.actionTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+          {title}
+        </Text>
+        <Text style={styles.actionSub} numberOfLines={1}>
+          {sub}
+        </Text>
+      </View>
+    </PressableScale>
+  </View>
+);
+
+/**
+ * Payments — how many travelers still owe money (Ohad, 14 Sep). Same "fully
+ * paid" rule as the summary tile, so the two can never disagree.
+ *
+ * No count on an offline trip: Swellyo does not know what arrived there, so
+ * "3 still owe" would be invented.
+ */
+const PaymentsActionCard: React.FC<{
+  money: TripMoney | null;
+  loading: boolean;
+  stillOwe: number;
+  onPress?: () => void;
+}> = ({ money, loading, stillOwe, onPress }) => {
+  const isOffline = money?.isOffline ?? false;
+  const sub = loading
+    ? 'Loading…'
+    : isOffline
+      ? 'Paid outside Swellyo'
+      : !money || money.travelers.length === 0
+        ? 'No travelers yet'
+        : stillOwe > 0
+          ? `${stillOwe} still owe`
+          : 'All paid';
+  return (
+    <ActionCard
+      icon="wallet-03"
+      title="Payments"
+      sub={sub}
+      count={loading || isOffline ? 0 : stillOwe}
+      onPress={onPress}
+    />
+  );
+};
+
+// Figma 14980-65921, sizes read with get_variable_defs per node: section
+// titles and tile figures Size/lg 16/24; action card titles Size/s 12/18;
+// labels Size/s 12/18; captions Size/xs 10/17. The bold ones come out of the
+// code export 4px too big (20 / 16) — never size text from that export.
+const styles = StyleSheet.create({
+  root: { paddingTop: 20 },
+  block: { gap: 16 },
+  blockNext: { marginTop: 32 },
+  sectionTitle: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: '#333333',
+  },
 
   // ── banners ──
-  // Radius 16 and a 16 gutter: banners are SURFACES, and every surface in Plan
-  // is 16 (`ygCard`, `updatesCard`). Radius 12 is reserved for buttons there —
-  // the commit pill — which is why these used to look like a different family.
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -910,164 +469,83 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   bannerText: { fontFamily: ff('Inter', '600'), fontSize: 14, lineHeight: 20, fontWeight: '600' },
-  bannerAccent: { backgroundColor: D.accent },
-  bannerOk: { backgroundColor: D.okBg },
   bannerWarn: { backgroundColor: D.warnBg },
   bannerDanger: { backgroundColor: D.dangerBg },
   bannerWait: { backgroundColor: D.waitBg },
 
-  // ── section ──
-  section: { paddingTop: 20, paddingBottom: 20, borderTopWidth: 1, borderTopColor: D.hairline },
-  // 16, the header gap PlanSections uses in all three of its own headers
-  // (`sectionHeader`, `ygHeader`, and the screen's `planSectionHeading`).
-  sectionHead: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
-  sectionHeadText: { flex: 1, gap: 4, paddingRight: 12 },
-  sectionTitle: {
+  // ── Trip summary tiles ──
+  tiles: { gap: 8 },
+  tileRow: { flexDirection: 'row', gap: 8 },
+  tile: {
+    borderWidth: 1,
+    borderColor: D.cardBorder,
+    borderRadius: 16,
+    backgroundColor: D.surface,
+    padding: 16,
+    gap: 12,
+  },
+  tileHalf: { flex: 1 },
+  tileHead: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  tileLabel: {
+    flex: 1,
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    color: D.muted,
+  },
+  tileSpinner: { alignSelf: 'flex-start', marginVertical: 6 },
+  tileBody: { gap: 4 },
+  tileFigureRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  tileFigure: {
+    flex: 1,
     fontFamily: ff('Inter', '700'),
     fontSize: 16,
     lineHeight: 24,
     fontWeight: '700',
     color: '#333333',
   },
-  sectionSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: '#6a7282' },
-  count: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: D.muted },
+  tileSub: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 17, color: D.muted },
+  meter: { height: 6, borderRadius: 8, backgroundColor: '#E4E4E4', overflow: 'hidden' },
+  meterFill: { height: 6, borderRadius: 8, backgroundColor: '#05BCD3' },
 
-  // ── "About this group" sub-headings ──
-  // 14/700 is PlanSections' sub-section heading (`sectionTitle`, non-large),
-  // one step under this tab's own 16/700 section titles. Same relationship
-  // Group Gear and Your Gear have to Packing & Gear over there.
-  aboutLabel: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '700',
-    color: D.ink,
-    marginBottom: 6,
-  },
-  aboutSub: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12,
-    lineHeight: 18,
-    color: '#6a7282',
-    marginTop: -4,
-    marginBottom: 6,
-  },
-  // 20 between the two blocks — the same air a section gets, since these were
-  // sections until they moved in together.
-  aboutLabelNext: { marginTop: 20 },
-
-  // ── text ──
-  body: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 20, color: D.ink },
-  muted: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: D.muted },
-  spaced: { marginTop: 6 },
-  // 14, like `ygViewAll` — this is the same "Edit" / "View all" affordance.
-  link: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: D.accent },
-  retry: { marginTop: 8 },
-
-  // The one number the operator came here for. Big enough to read across a
-  // table, which is where they will be standing — but capped at 24, which is
-  // the trip title's size and the largest text anywhere in Trips. At 28 it was
-  // bigger than the name of the trip it belongs to.
-  figure: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '700',
-    color: D.ink,
-  },
-  figureSub: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 14,
-    lineHeight: 20,
-    color: D.muted,
-    marginTop: 2,
-  },
-  // The number the operator actually came for. Weighted above the muted
-  // caption above it, below the collected figure — it is the answer to a
-  // question, not the headline.
-  owed: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
-    color: D.ink,
-    marginTop: 6,
-  },
-
-  // ── rows ──
-  list: { borderWidth: 1, borderColor: D.cardBorder, borderRadius: 16, overflow: 'hidden' },
-  // 16 / 12 splits the difference between the two neighbours on purpose: the
-  // gutter matches Plan's `ygRow` (16), the gap matches DocumentReviewScreen's
-  // `row` (12), which is the screen a traveler row opens. The old 14 / 10
-  // matched neither.
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: D.cardBorder,
-    backgroundColor: '#FFFFFF',
-  },
-  rowLast: { borderBottomWidth: 0 },
-  rowPressed: { backgroundColor: '#F4F4F2' },
-  rowText: { flex: 1, gap: 2 },
-  rowTitle: {
-    flex: 1,
-    fontFamily: ff('Inter', '600'),
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
-    color: '#333333',
-  },
-  rowSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: D.muted },
-  counts: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: D.muted },
-  countsStrong: { fontFamily: ff('Inter', '600'), fontWeight: '600', color: '#333333' },
-  // 36, the size DocumentReviewScreen draws the same faces at. Two pixels is
-  // invisible on either screen alone and obvious one tap apart.
-  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#EFEFEF' },
-
-  countsLate: { fontFamily: ff('Inter', '600'), fontWeight: '600', color: D.danger },
-
-  // Sort toggle sits beside the count, both right-aligned in the header.
-  sortRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-
-  tagLate: { backgroundColor: D.dangerBg, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
-  tagLateText: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-    color: D.danger,
-  },
-  tagWait: { backgroundColor: D.waitBg, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
-  tagWaitText: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-    color: D.wait,
-  },
-
-  emptyCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 16,
+  // ── Action cards ──
+  actionRow: { flexDirection: 'row', gap: 8 },
+  // Keeps three columns when a card is gated off, so the rest do not stretch.
+  actionSlot: { flex: 1 },
+  actionCard: {
     borderWidth: 1,
     borderColor: D.cardBorder,
-    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    backgroundColor: D.surface,
+    padding: 8,
+    gap: 8,
   },
-  emptyCtaText: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
+  actionTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  actionIcon: { backgroundColor: '#F7F7F7', borderRadius: 8, padding: 10 },
+  badge: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
+    backgroundColor: '#FF5367',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 10,
+    lineHeight: 17,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  actionTitle: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
     color: '#333333',
   },
+  actionSub: { fontFamily: ff('Inter', '400'), fontSize: 10, lineHeight: 17, color: '#A0A0A0' },
 });
 
 export default TripDashboardTab;

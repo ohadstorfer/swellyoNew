@@ -10,6 +10,7 @@ import { RequirementPage } from './routes/RequirementPage';
 import { WaitingPage } from './routes/WaitingPage';
 import { TravelerPage } from './routes/TravelerPage';
 import { MoneyPage } from './routes/MoneyPage';
+import { PaymentsPage } from './routes/PaymentsPage';
 import { CrewPage } from './routes/CrewPage';
 import { SettingsPage } from './routes/SettingsPage';
 import { SetupPage } from './routes/SetupPage';
@@ -85,6 +86,10 @@ export function App() {
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/trips/:tripId" element={<TripPage />} />
         <Route path="/trips/:tripId/money" element={<MoneyPage />} />
+        {/* The ledger — every transaction, with an export. Not guarded here:
+            "may I see the money" is a question about one trip, and the page
+            asks it and answers in words. */}
+        <Route path="/trips/:tripId/payments" element={<PaymentsPage />} />
         {/* Not guarded here: "may I manage the crew" is a question about one
             trip, and the trip id only exists inside the page. CrewPage asks it
             and answers in words. */}

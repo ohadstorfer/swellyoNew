@@ -108,6 +108,21 @@ serve(async (req) => {
     agedByTrip.set(d.trip_id, list);
   }
   for (const [tripId, docs] of agedByTrip) {
+    // "No longer a participant" means NO ROW, not `status <> 'active'`, and
+    // that is deliberate rather than an oversight.
+    //
+    // Since 20260906000300 a departure from an OPERATOR trip keeps the row and
+    // marks it 'left' or 'removed', so those people no longer fall into case 2
+    // — their documents live until case 1 fires, 30 days after the trip ends.
+    // Ohad decided that on 6 Sep 2026: the operator may still need a passport
+    // copy for an insurance claim or a cancellation weeks after somebody drops
+    // out, and 30-days-after-the-trip is the retention the traveler disclosure
+    // already promises. Nothing outlives that promise either way.
+    //
+    // Peer trips still DELETE the row on leaving, so a peer-trip departure is
+    // purged 30 days after they left, exactly as before. Adding a status
+    // filter here would quietly move operator-trip travelers back onto the
+    // earlier clock — which is the change that was considered and refused.
     const { data: members } = await supabase
       .from("group_trip_participants").select("user_id").eq("trip_id", tripId);
     const active = new Set((members ?? []).map((m) => m.user_id));

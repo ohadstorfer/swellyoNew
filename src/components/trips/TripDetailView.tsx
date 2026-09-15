@@ -485,7 +485,24 @@ export interface TripDetailViewProps {
     /** The operator's line introducing them. */
     bio: string | null;
     avatarUrl: string | null;
+    roleKey?: string;
+    countryFrom?: string | null;
+    hasAccount?: boolean;
   }[];
+  /** Operator trips: "View all" on the Staff cards. Only passed to someone who
+   *  may manage the crew — there is no read-only crew screen to open. */
+  onViewAllCrew?: () => void;
+  /** Operator trips: replaces the Participants row with the screen's own Member
+   *  section (avatars + names + passport badges), in the Figma position. */
+  membersSlot?: React.ReactNode;
+  /** Operator trips: the cover pill reads "Edit trip" and opens the trip editor
+   *  instead of the cover sheet (Figma 14980-66208). Absent = no pill for them. */
+  onEditTrip?: () => void;
+  /** Slide the hero (cover + countdown card) away — the Dashboard and Plan tabs.
+   *  Only TripDetailViewRedesigned reads it. */
+  heroCollapsed?: boolean;
+  /** Animate that change. False when the screen picked the tab itself. */
+  animateHeroCollapse?: boolean;
   /** Open a participant's profile (tap on their avatar). */
   onParticipantPress?: (userId: string) => void;
   /** Optional handler for the Participants "See all" link. */

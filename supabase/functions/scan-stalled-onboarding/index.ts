@@ -52,6 +52,31 @@ interface Stalled {
   missing_titles: string[];
 }
 
+/**
+ * Everyone who runs this trip: the operator of record, plus any co-operator
+ * they appointed (20260901000000_co_operator_role.sql).
+ *
+ * A co-operator holds `money.manage` — they can issue the refund an alert is
+ * asking for — so an alert only the creator receives is a power granted to
+ * someone who is never told to use it.
+ *
+ * Falls back to host_id alone if the RPC fails. Being told once is a smaller
+ * problem than not being told at all, and this runs inside webhook and cron
+ * paths that must not throw over a fan-out.
+ */
+async function operatorRecipients(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  hostId: string | null,
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc("trip_operator_ids", { p_trip_id: tripId });
+  if (error || !Array.isArray(data) || data.length === 0) {
+    if (error) console.error("[operatorRecipients] falling back to host_id:", error.message);
+    return hostId ? [hostId] : [];
+  }
+  return (data as string[]).filter(Boolean);
+}
+
 serve(async (req) => {
   const reqId = crypto.randomUUID().substring(0, 8);
 
@@ -236,19 +261,28 @@ serve(async (req) => {
     }
     if (!claimedTrip || claimedTrip.length === 0) continue;
 
-    const { error: digestErr } = await supabase.from("notifications").insert({
-      recipient_id: trip.host_id,
-      trip_id: trip.id,
-      type: "operator_onboarding_stalled",
-      audience: "admin",
-      entity_type: "group_trip",
-      entity_id: trip.id,
-      data: {
-        trip_title: trip.title,
-        count: rows.length,
-        worst_days: Math.floor(worst / 24),
-      },
-    });
+    // The digest goes to the creator and to every co-operator: they hold
+    // trip.edit and money.manage, so a stalled traveler is theirs to chase too.
+    const operators = await operatorRecipients(supabase, trip.id, trip.host_id);
+    if (operators.length === 0) {
+      console.error(`[stalled ${reqId}] no operator to notify on trip ${trip.id}`);
+      continue;
+    }
+    const { error: digestErr } = await supabase.from("notifications").insert(
+      operators.map((rid) => ({
+        recipient_id: rid,
+        trip_id: trip.id,
+        type: "operator_onboarding_stalled",
+        audience: "admin",
+        entity_type: "group_trip",
+        entity_id: trip.id,
+        data: {
+          trip_title: trip.title,
+          count: rows.length,
+          worst_days: Math.floor(worst / 24),
+        },
+      })),
+    );
     if (digestErr) {
       console.error(`[stalled ${reqId}] operator notify failed`, digestErr.message);
       continue;

@@ -401,6 +401,15 @@ export const StaffPaperworkReceived: React.FC<{
                 ]}
               >
                 {copy.label}
+                {/* The travelers' deadline for the same kind, read through
+                    (20260904000200). "Late" here is a flag for the operator and
+                    nothing more — a guide is never locked out of a trip over
+                    paperwork. */}
+                {r.state === 'missing' && r.dueDate ? (
+                  <Text style={evidenceLate(r) ? styles.evidenceLate : styles.evidenceDue}>
+                    {evidenceLate(r) ? '  ·  Late' : `  ·  Due ${shortDate(r.dueDate)}`}
+                  </Text>
+                ) : null}
               </Text>
             </View>
             {openable && <Ionicons name="chevron-forward" size={16} color={MUTED} />}
@@ -411,7 +420,22 @@ export const StaffPaperworkReceived: React.FC<{
   );
 };
 
+/** Past the travelers' deadline and still nothing sent. */
+function evidenceLate(r: StaffEvidenceRow): boolean {
+  if (r.state !== 'missing' || !r.dueDate) return false;
+  return r.dueDate < new Date().toISOString().slice(0, 10);
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
 const styles = StyleSheet.create({
+  evidenceDue: { color: MUTED },
+  evidenceLate: { color: '#C4361E', fontFamily: ff('Inter', '600') },
   wrap: { marginTop: 22, paddingTop: 18, borderTopWidth: 1, borderTopColor: LINE },
   wrapPlain: { marginTop: 2 },
   label: {

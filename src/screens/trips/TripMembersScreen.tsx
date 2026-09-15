@@ -25,8 +25,16 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useTripCore, useTripRequests, useTripRequirements } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
-import { removeParticipant, promoteTripHost, demoteTripHost } from '../../services/trips/groupTripsService';
-import type { EnrichedParticipant } from '../../services/trips/groupTripsService';
+import {
+  removeParticipant,
+  promoteTripHost,
+  demoteTripHost,
+  getDepartedParticipants,
+} from '../../services/trips/groupTripsService';
+import type {
+  EnrichedParticipant,
+  DepartedParticipant,
+} from '../../services/trips/groupTripsService';
 import Thumb from '../../components/Thumb';
 import { CommittedPassportIcon, AdminBadgeIcon } from '../../components/trips/plan/PlanSections';
 import { TripMemberSheet } from '../../components/trips/TripMemberSheet';
@@ -38,6 +46,7 @@ import { useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
 import { InviteMembersSheet } from '../../components/trips/InviteMembersSheet';
 import { policyFromTrip } from '../../services/trips/cancellationPolicy';
 import { fetchTripMoney } from '../../services/trips/operatorDashboardService';
+import { formatUsd } from '../../components/trips/dashboard/dashboardFormat';
 import { useQuery } from '@tanstack/react-query';
 
 // `target_surf_styles` (SurfStyle: 'shortboard'|'midlength'|'longboard'|'softtop'|'all')
@@ -82,6 +91,20 @@ const timeAgo = (iso: string): string => {
   return new Date(iso).toLocaleDateString();
 };
 const formatJoined = (iso: string | null): string => (iso ? `Joined ${timeAgo(iso)}` : '');
+
+/**
+ * The one line under a departed traveler's name.
+ *
+ * "Left 2 weeks ago" or "Removed 2 weeks ago by Ohad". The date can be null on
+ * a row written before `left_at` existed, and inventing one would be worse
+ * than saying less — so the verb stands alone in that case.
+ */
+const departedLine = (d: DepartedParticipant): string => {
+  const verb = d.status === 'removed' ? 'Removed' : 'Left';
+  const when = d.left_at ? ` ${timeAgo(d.left_at)}` : '';
+  const by = d.status === 'removed' && d.left_by_name ? ` by ${d.left_by_name}` : '';
+  return `${verb}${when}${by}`;
+};
 
 /** Stable empty list for the price sheet's requirements prop. An inline
  *  `?? []` would be a new array identity on every render, defeating the
@@ -144,6 +167,24 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
   // screen is one tap from it ("View all"); leaving "0 committed" here would
   // just move the dead row rather than remove it.
   const canSeeCommitted = isInsider && trip?.hosting_style !== 'C';
+
+  /**
+   * Travelers who left or were removed, and what happened to their money.
+   *
+   * Operator trips only — a peer-trip departure deletes the row. Manager and
+   * up, the same tier that can open a traveler at all; a plain member has no
+   * business with a list of who left and what they paid.
+   *
+   * `getDepartedParticipants` answers [] rather than throwing while migration
+   * 20260906000300 is unapplied, so this ships in either order.
+   */
+  const canSeeDeparted = trip?.hosting_style === 'C' && (isHost || can('travelers.view_profiles'));
+  const departedQuery = useQuery({
+    queryKey: tripsKeys.departed(tripId),
+    queryFn: ({ signal }) => getDepartedParticipants(tripId, signal),
+    enabled: !!tripId && canSeeDeparted,
+  });
+  const departed = canSeeDeparted ? (departedQuery.data ?? []) : [];
 
   const participantCount = participants.length;
   const maxParticipants = trip?.max_participants ?? null;
@@ -473,6 +514,81 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
               })}
             </View>
           )}
+
+          {/* ── No longer on the trip ──────────────────────────────────────
+              Directly under the members, because it answers the question the
+              roster raises: "wasn't there someone else?"
+
+              Operator trips only, and Manager and up. A peer-trip departure
+              still deletes the row, so there is nothing to list — and nothing
+              worth listing, since there is no money and no paperwork.
+              See docs/specs/operator-trips/departed-members.md. */}
+          {departed.length > 0 ? (
+            <View style={styles.departedSection}>
+              <View style={styles.countRow}>
+                <Text style={styles.countText}>No longer on the trip</Text>
+                <Text style={styles.countText}>{departed.length}</Text>
+              </View>
+              <Text style={styles.departedNote}>
+                They are in no count above. Their payments are still on file and can still be
+                refunded.
+              </Text>
+              <View style={styles.card}>
+                {departed.map((d, i) => (
+                  <View
+                    key={d.user_id}
+                    style={[styles.row, i < departed.length - 1 && styles.rowDivider]}
+                  >
+                    <View style={styles.avatarWrap}>
+                      {d.profile_image_url ? (
+                        <Thumb
+                          uri={d.profile_image_url}
+                          size={96}
+                          // Dimmed rather than greyscale: they are a person who
+                          // left, not an error state.
+                          style={[styles.avatar, styles.departedAvatar]}
+                          contentFit="cover"
+                          cachePolicy="memory-disk"
+                        />
+                      ) : (
+                        <View style={[styles.avatar, styles.avatarEmpty, styles.departedAvatar]}>
+                          <Ionicons name="person" size={26} color="#FFFFFF" />
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={styles.rowText}>
+                      <Text style={styles.name} numberOfLines={1}>
+                        {d.name ?? '—'}
+                      </Text>
+                      <Text style={styles.joined} numberOfLines={1}>
+                        {departedLine(d)}
+                      </Text>
+                      {d.left_reason ? (
+                        <Text style={styles.joined} numberOfLines={2}>
+                          {d.left_reason}
+                        </Text>
+                      ) : null}
+                    </View>
+
+                    {/* Both figures whenever either is non-zero. "$1,000 paid"
+                        alone reads as money still owed to them; the second
+                        line is what closes the question. */}
+                    {d.net_paid_usd > 0 || d.refunded_usd > 0 ? (
+                      <View style={styles.departedMoney}>
+                        <Text style={styles.departedPaid}>{formatUsd(d.net_paid_usd)} paid</Text>
+                        <Text style={styles.joined}>
+                          {d.refunded_usd > 0
+                            ? `${formatUsd(d.refunded_usd)} refunded`
+                            : 'no refund'}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
         </ScrollView>
       </View>
 
@@ -609,4 +725,23 @@ const styles = StyleSheet.create({
   joined: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 16, color: T.count, marginTop: 2 },
 
   empty: { fontFamily: ff('Inter', '400'), fontSize: 14, color: T.count },
+
+  departedSection: { marginTop: 28 },
+  departedNote: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 16,
+    color: T.count,
+    marginBottom: 8,
+  },
+  /** Dimmed, not greyscale: a person who left, not an error state. */
+  departedAvatar: { opacity: 0.55 },
+  departedMoney: { alignItems: 'flex-end' },
+  departedPaid: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: '700',
+    color: T.title,
+  },
 });

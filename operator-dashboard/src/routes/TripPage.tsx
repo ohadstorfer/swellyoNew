@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { fetchMembers, fetchTrip, type OperatorTrip } from '../services/trips';
-import { fetchTripReview } from '../services/review';
+import { useTripReview } from '../services/useTripReview';
 import { fetchCounts, fetchMedicalFlags } from '../services/counts';
 import { fetchProfiles, type SurferProfile } from '../services/travelers';
 import { fetchCrew } from '../services/staff';
 import { fetchStalledOnboarders, STALLED_TODO_DAYS } from '../services/onboarding';
+import { fetchDeparted } from '../services/departed';
 import { connectStatusOf, fetchPayoutState } from '../services/settings';
 import { deriveConnectState, tripPaymentWarning } from '../domain/connect';
 import { countLate, countLateItems, isLate, tripPhase } from '../domain/late';
@@ -17,17 +18,30 @@ import { isUploadRequirement } from '../domain/requirements';
 import { useTripMoney } from '../services/useTripMoney';
 import type { TravelerMoney } from '../domain/money';
 import { formatDate, formatRange, formatUsd, plural } from '../lib/format';
-import { Avatar, ErrorBox, Loading, CountPair } from '../components/StateBits';
+import { Avatar, ErrorBox, Loading, CountPair, NoPaperworkAccess } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 import { RequirementsEditor } from '../components/RequirementsEditor';
 import { resolveDeadlineISO } from '../domain/requirements';
 import { ModeNotices } from './MoneyPage';
 import { DASHBOARD_CAPABILITY, useTripAccess } from '../services/access';
+import { SummaryTiles } from '../components/SummaryTiles';
+import { JoinRequestsCard } from '../components/JoinRequestsCard';
+import { AdminUpdatesCard } from '../components/AdminUpdatesCard';
+import { TripPolicyCard } from '../components/TripPolicyCard';
+import { ExportAllDocs } from '../components/ExportAllDocs';
+import { CancelTripDialog } from '../components/CancelTripDialog';
+import { MyCrewCard } from '../components/MyCrewCard';
+import { GearCard } from '../components/GearCard';
+import { MyPaperworkCard } from '../components/MyPaperworkCard';
 
 export function TripPage() {
   const { tripId = '' } = useParams();
   const access = useTripAccess(tripId);
   const queryClient = useQueryClient();
+  // The operator of record, for the refund-terms card. NOT `access.can(...)`:
+  // money authorises on `group_trips.host_id` in the database, and every
+  // promoted admin holds `trip.edit`.
+  const { user } = useAuth();
 
   // Read and edit are two renders of the same card, never one render with
   // controls wedged into it. That is not only tidiness: the requirement rows
@@ -36,9 +50,13 @@ export function TripPage() {
   // mode shows links, the other shows controls, and neither is inside the
   // other.
   const [editingReqs, setEditingReqs] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const trip = useQuery({ queryKey: ['trip', tripId], queryFn: () => fetchTrip(tripId) });
   const members = useQuery({ queryKey: ['members', tripId], queryFn: () => fetchMembers(tripId) });
+  // For the summary tiles. Every query behind it is one this page or its cards
+  // already run, so React Query serves the lot from cache.
+  const { money, isOffline } = useTripMoney(tripId);
 
   const userIds = useMemo(() => (members.data ?? []).map(m => m.userId), [members.data]);
 
@@ -50,13 +68,22 @@ export function TripPage() {
     queryFn: () => fetchStalledOnboarders(tripId),
   });
 
-  const review = useQuery({
-    queryKey: ['review', tripId, userIds],
-    queryFn: () => fetchTripReview(tripId, userIds),
-    enabled: members.isSuccess,
-  });
+  // Through the hook, not a bare useQuery: it strips the medical form for
+  // anyone without medical.view, so no count on this page can show the false
+  // zero a Manager saw on 9 Sep 2026. See domain/visibleReview.
+  const review = useTripReview(tripId, userIds, members.isSuccess);
   const counts = useQuery({ queryKey: ['counts', tripId], queryFn: () => fetchCounts(tripId) });
-  const flags = useQuery({ queryKey: ['flags', tripId], queryFn: () => fetchMedicalFlags(tripId) });
+  // Counts, but still medical: `organized_trip_medical_flags` is a
+  // security_invoker view over the answers, so a Manager gets zeroes rather
+  // than an error — a card reading "0 injuries · 0 allergies" on a trip that
+  // has both. Hide it on the same capability the app hides its copy of this
+  // block on. See the medical gate in TravelerPage.
+  const canViewMedical = access.can('medical.view');
+  const flags = useQuery({
+    queryKey: ['flags', tripId],
+    queryFn: () => fetchMedicalFlags(tripId),
+    enabled: canViewMedical,
+  });
   const profiles = useQuery({
     queryKey: ['profiles', userIds],
     queryFn: () => fetchProfiles(userIds),
@@ -83,9 +110,9 @@ export function TripPage() {
     return out;
   }, [review.data]);
 
-  if (trip.isError) return <ErrorBox error={trip.error} onRetry={() => void trip.refetch()} />;
+  if (trip.isError) return <ErrorBox what="This trip" error={trip.error} onRetry={() => void trip.refetch()} />;
   if (members.isError)
-    return <ErrorBox error={members.error} onRetry={() => void members.refetch()} />;
+    return <ErrorBox what="The travelers" error={members.error} onRetry={() => void members.refetch()} />;
   if (trip.isPending || members.isPending || access.isPending)
     return <Loading what="Loading the trip" />;
 
@@ -98,15 +125,7 @@ export function TripPage() {
     return (
       <>
         <PageHead back="/trips" backLabel="All trips" title={trip.data.title} />
-        <div className="card">
-          <div className="card-body">
-            <p>You're on this trip's crew, but not for the paperwork.</p>
-            <p className="muted small" style={{ marginTop: 8 }}>
-              Reviewing documents needs the Manager tier. Everything you can do on this trip is
-              in the Swellyo app — ask the operator if you think this is wrong.
-            </p>
-          </div>
-        </div>
+        <NoPaperworkAccess />
       </>
     );
   }
@@ -173,6 +192,25 @@ export function TripPage() {
       />
 
       <div className="stack">
+        {/* ── Trip summary ──────────────────────────────────────────────── */}
+        {/* Product Specs, Frame 39433. The three figures the page exists for,
+            so they lead — above the banners, which are exceptions, not state. */}
+        <SummaryTiles
+          tripId={tripId}
+          money={money}
+          members={members.data}
+          maxParticipants={trip.data.maxParticipants}
+          isOffline={isOffline}
+          canViewMoney={access.can('payments.view_status')}
+        />
+
+        {/* ── Wants to come ─────────────────────────────────────────────── */}
+        {/* Above everything else that is work: an unanswered request is
+            somebody waiting on a human, and it is the only thing on this page
+            with a person on the other end of it right now. Silent when the
+            list is empty. */}
+        <JoinRequestsCard tripId={tripId} />
+
         {/* ── Paid, then stopped ────────────────────────────────────────── */}
         {/* Above the document queue on purpose. An unreviewed passport is work
             the operator knows about; a traveler who paid a week ago and is not
@@ -244,7 +282,7 @@ export function TripPage() {
           </div>
           <div className="card-body">
             {review.isPending && <span className="muted small">Loading…</span>}
-            {review.isError && <ErrorBox error={review.error} onRetry={() => void review.refetch()} />}
+            {review.isError && <ErrorBox what="The documents" error={review.error} onRetry={() => void review.refetch()} />}
 
             {editingReqs && (
               <RequirementsEditor
@@ -367,6 +405,7 @@ export function TripPage() {
         )}
 
         {/* ── Medical flags ─────────────────────────────────────────────── */}
+        {canViewMedical && (
         <div className="card enter">
           <div className="card-head">
             <h2>Medical flags</h2>
@@ -392,6 +431,7 @@ export function TripPage() {
             </p>
           </div>
         </div>
+        )}
 
         {/* ── Surf stats ────────────────────────────────────────────────── */}
         <div className="card enter">
@@ -419,7 +459,89 @@ export function TripPage() {
           reviewPending={review.isPending}
           profiles={profiles.data}
         />
+
+        {/* ── No longer on the trip ─────────────────────────────────────── */}
+        {/* Directly under the travelers, because it answers the question the
+            roster raises: "wasn't there someone else?" Manager and up, the
+            same tier that can open a traveler page at all. */}
+        {access.can('travelers.view_profiles') && <DepartedCard tripId={tripId} />}
+
+        {/* ── Gear ──────────────────────────────────────────────────────── */}
+        {/* Read for anyone on the trip, edited on `trip.edit` — the same
+            capability `group_trip_gear_items` checks, so the controls and the
+            database can never disagree. */}
+        <GearCard tripId={tripId} canEdit={access.can('trip.edit')} />
+
+        {/* ── Your paperwork ────────────────────────────────────────────── */}
+        {/* Whoever signs in here is running the trip AND on it. Silent for
+            anyone with no crew row, which is most people. */}
+        <MyPaperworkCard tripId={tripId} />
+
+        {/* ── Your details ──────────────────────────────────────────────── */}
+        {/* Product Specs §"Manage self". On the TRIP page rather than the crew
+            page: /crew needs `staff.manage`, which is exactly who this is not
+            for. Renders nothing for anyone without a crew row of their own —
+            a traveler, or an operator on a trip published before
+            `ensureOperatorOnCrew` ran. */}
+        <MyCrewCard tripId={tripId} />
+
+        {/* ── Updates ───────────────────────────────────────────────────── */}
+        {/* Read for anyone on the trip, post behind `updates.send`. Below the
+            roster because it is the thing you do AFTER looking at who is
+            coming. See decision D5 — this is also the desktop's answer to
+            "chat", for now. */}
+        <AdminUpdatesCard tripId={tripId} canPost={access.can('updates.send')} />
+
+        {/* ── Cancellation policy ───────────────────────────────────────── */}
+        {/* Shown to everyone who can open the trip: an operator answering "what
+            happens if I pull out" needs to read the frozen terms, not just edit
+            them. Editing is the operator of record, and only while nobody has
+            joined — decision D2 and 20260904000100. */}
+        <TripPolicyCard
+          trip={trip.data}
+          canEdit={!!user && trip.data.hostId === user.id}
+          travelersJoined={userIds.length}
+        />
+
+        {/* ── Export ────────────────────────────────────────────────────── */}
+        {access.can('data.export') && (
+          <ExportAllDocs
+            tripTitle={trip.data.title}
+            review={review.data}
+            profiles={profiles.data}
+          />
+        )}
+
+        {/* ── Calling it off ────────────────────────────────────────────── */}
+        {/* Last on the page, and the only thing on this site that cannot be
+            undone. `trip.cancel` is the operator of record's alone — the same
+            capability the edge function checks, so the button and the server
+            can never disagree. */}
+        {access.can('trip.cancel') && trip.data.status !== 'cancelled' && (
+          <div className="card enter" style={{ borderColor: 'var(--line-strong)' }}>
+            <div className="card-body row-between" style={{ gap: 12 }}>
+              <span className="muted small">
+                Cancel this trip and refund everyone in full. This cannot be undone.
+              </span>
+              <button
+                className="btn btn-sm btn-danger"
+                style={{ flexShrink: 0 }}
+                onClick={() => setCancelling(true)}
+              >
+                Cancel the trip
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {cancelling && (
+        <CancelTripDialog
+          tripId={tripId}
+          tripTitle={trip.data.title}
+          onClose={() => setCancelling(false)}
+        />
+      )}
     </>
   );
 }
@@ -483,6 +605,104 @@ function CrewCard({ tripId }: { tripId: string }) {
  * and money are drawn from queries this page already ran, so the card costs
  * no extra round trip.
  */
+/**
+ * Travelers who are no longer on this trip.
+ *
+ * Two kinds of person, one list, because to the operator they are the same
+ * question — "where did they go, and what about their money?"
+ *
+ *   · a kept row marked 'left' or 'removed' (migration 20260906000300), which
+ *     carries when, who, and why;
+ *   · somebody deleted before rows survived departures, found only because
+ *     their payments are still on file. No date, and none can be invented.
+ *
+ * Renders nothing when both are empty, which is every trip nobody has left.
+ * Quiet styling on purpose: a person leaving is ordinary. What would be
+ * alarming — and what this fixes — is not being able to find them at all.
+ *
+ * The row links to their traveler page, which already carries the refund flow,
+ * the ledger and the frozen terms. A second, thinner copy of all three here
+ * would be one more place for them to disagree.
+ */
+function DepartedCard({ tripId }: { tripId: string }) {
+  const departed = useQuery({ queryKey: ['departed', tripId], queryFn: () => fetchDeparted(tripId) });
+  const ids = useMemo(() => (departed.data ?? []).map(d => d.userId), [departed.data]);
+  const profiles = useQuery({
+    queryKey: ['profiles', ids],
+    queryFn: () => fetchProfiles(ids),
+    enabled: ids.length > 0,
+  });
+  const names = useQuery({
+    queryKey: ['profiles', (departed.data ?? []).map(d => d.leftBy).filter(Boolean) as string[]],
+    queryFn: () =>
+      fetchProfiles((departed.data ?? []).map(d => d.leftBy).filter(Boolean) as string[]),
+    enabled: (departed.data ?? []).some(d => d.leftBy),
+  });
+
+  if (!departed.data || departed.data.length === 0) return null;
+
+  const nameOf = (userId: string) => profiles.data?.get(userId)?.name?.trim() || 'Someone';
+
+  const line = (d: (typeof departed.data)[number]) => {
+    const when = d.leftAt ? formatDate(d.leftAt) : null;
+    if (d.kind === 'ledger') return 'Removed before we kept a record';
+    const who = d.leftBy ? names.data?.get(d.leftBy)?.name?.trim() : null;
+    const verb = d.kind === 'removed' ? 'Removed' : 'Left';
+    const by = d.kind === 'removed' && who ? ` by ${who}` : '';
+    return `${verb}${when ? ` ${when}` : ''}${by}`;
+  };
+
+  return (
+    <div className="card enter">
+      <div className="card-head">
+        <h2>No longer on the trip</h2>
+        <span className="muted small">{departed.data.length}</span>
+      </div>
+      <div className="card-body">
+        <p className="muted small" style={{ marginTop: 0 }}>
+          They are in no count on this page. Their payments are still on file and can still be
+          refunded.
+        </p>
+        <div className="stack" style={{ gap: 12, marginTop: 12 }}>
+          {departed.data.map(d => (
+            <Link
+              key={d.userId}
+              to={`/trips/${tripId}/t/${d.userId}`}
+              className="row-between"
+              style={{ gap: 12, alignItems: 'flex-start', color: 'inherit' }}
+            >
+              <div>
+                <div className="small">
+                  <strong>{nameOf(d.userId)}</strong>
+                </div>
+                <div className="muted small" style={{ marginTop: 2 }}>
+                  {line(d)}
+                  {d.leftReason && ` · ${d.leftReason}`}
+                </div>
+              </div>
+              <div className="small" style={{ textAlign: 'right', flexShrink: 0 }}>
+                {/* Both figures, always, when either is non-zero. "Paid $1,000"
+                    with no second line reads as money still owed to them; the
+                    refunded line is what closes the question. */}
+                {d.netPaidUsd > 0 || d.refundedUsd > 0 ? (
+                  <>
+                    <div>{formatUsd(d.netPaidUsd)} paid</div>
+                    <div className="muted">
+                      {d.refundedUsd > 0 ? `${formatUsd(d.refundedUsd)} refunded` : 'no refund'}
+                    </div>
+                  </>
+                ) : (
+                  <span className="muted">paid nothing</span>
+                )}
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TravelersCard({
   tripId,
   userIds,

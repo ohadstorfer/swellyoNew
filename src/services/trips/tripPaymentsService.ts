@@ -132,17 +132,63 @@ export function commissionCents(totalCents: number, bps: number): number {
  */
 const returnUrl = () => Linking.createURL('pay/done');
 
+/** PostgREST's "relation does not exist": 42P01 from Postgres, PGRST205 from
+ *  its schema cache. Either means the view's migration is not applied yet. */
+export function isMissingRelation(err: { code?: string } | null | undefined): boolean {
+  return err?.code === '42P01' || err?.code === 'PGRST205';
+}
+
+/**
+ * Run one participant-price read against the gated view.
+ *
+ * ⚠️ NO FALLBACK TO THE BASE TABLE. This used to retry against
+ * `group_trip_participants` when the view was missing — asking for the very
+ * columns 20260906000100 had just revoked. The moment PostgREST's schema cache
+ * lagged behind the new view, that retry came back "permission denied for
+ * table group_trip_participants" and the screen told an operator looking at
+ * their own trip that they had no access. Caught on 6 Sep 2026, on the first
+ * page load after applying it.
+ *
+ * A missing view is an honest error naming the cause. Reading the table
+ * without the price columns would be worse: nulls everywhere, every traveler
+ * reading as unpaid, the money screens quietly saying $0.
+ *
+ * ⚠️ SHIPPING ORDER. An app build that predates this function reads the price
+ * columns off the table directly, so applying 20260906000100 breaks its
+ * payment card. The migration and the build that uses this view have to go out
+ * together — and if the migration is already live, an old build in someone's
+ * hands is already broken. That was safe on 6 Sep only because operator trips
+ * were not yet sold to anyone outside the team.
+ */
+export async function readTravelerPrices<T>(
+  build: (q: ReturnType<typeof supabase.from>) => PromiseLike<{ data: T; error: any }>,
+): Promise<{ data: T; error: any }> {
+  const res = await build(supabase.from('organized_trip_traveler_prices'));
+  if (res.error && isMissingRelation(res.error)) {
+    return {
+      data: null as T,
+      error: {
+        ...res.error,
+        message:
+          'Your trip prices could not be loaded. The organized_trip_traveler_prices view is missing — apply migration 20260906000100.',
+      },
+    };
+  }
+  return res;
+}
+
 export async function fetchTravelerPrices(
   tripId: string,
   userId: string,
 ): Promise<TravelerPrices> {
   const [participant, trip] = await Promise.all([
-    supabase
-      .from('group_trip_participants')
-      .select('price_total_usd, deposit_usd')
-      .eq('trip_id', tripId)
-      .eq('user_id', userId)
-      .maybeSingle(),
+    // The price columns are withheld from the base table since 20260906000100
+    // (any signed-in user could read anyone's price) and served by a gated
+    // view instead. Fall back to the table while that migration is not yet
+    // applied, so this JS may ship before it.
+    readTravelerPrices(q =>
+      q.select('price_total_usd, deposit_usd').eq('trip_id', tripId).eq('user_id', userId).maybeSingle(),
+    ),
     supabase
       .from('group_trips')
       .select('cost_per_person, deposit_amount')
@@ -191,7 +237,16 @@ export async function fetchPaidByRequirement(
     // 0, so this filter is belt-and-suspenders, not load-bearing — but the
     // file header promises an exact mirror of the SQL, so it stays explicit
     // rather than relying on that CHECK holding.
+    //
+    // 'processing' — a bank payment still in flight — is excluded on exactly
+    // the same grounds: pinned to 0 by the same CHECK, so it cannot move this
+    // sum either way. The SQL function is NOT being changed to match, and
+    // that is intentional: with the amount pinned, the two agree on every
+    // total regardless, and rewriting a live function whose definition has
+    // drifted from this repo before would risk a real regression to fix a
+    // cosmetic asymmetry. See docs/specs/operator-trips/ach-bank-payments.md.
     .neq('event_type', 'failed')
+    .neq('event_type', 'processing')
     // Same mirror, for the mode filter the SQL applies. Without it a Stripe
     // TEST-mode row — and the device test writes those straight into the
     // production database — reads as real money here while the server
@@ -206,6 +261,103 @@ export async function fetchPaidByRequirement(
     out[e.requirement_id] = (out[e.requirement_id] ?? 0) + Number(e.amount_usd);
   }
   return out;
+}
+
+/**
+ * A bank payment that has been made and has not arrived yet, per requirement.
+ *
+ * ACH (docs/specs/operator-trips/ach-bank-payments.md) completes Checkout with
+ * the money still in transit — about three business days. For that whole
+ * window the ledger shows nothing PAID (the 'processing' row is pinned to $0),
+ * which is exactly the state that used to hand the traveler a fresh "Pay"
+ * button after 30 minutes. This is the server-side signal that replaces the
+ * device-local guess: it survives an app kill, and the web sees it too.
+ */
+export type InFlightPayment = {
+  /** What was authorised — `amount_charged` on the marker row, NOT `amount_usd`
+   *  (which is $0 by design so it can never move a total). */
+  amountUsd: number;
+  /** When they paid, ISO. */
+  since: string;
+};
+
+/** The columns `resolveInFlight` reads. Everything else on the row is noise here. */
+export type InFlightLedgerRow = {
+  requirement_id: string | null;
+  event_type: string;
+  provider_object_id: string | null;
+  amount_charged: number | string | null;
+  created_at: string | null;
+};
+
+/**
+ * Past this an unresolved marker is treated as abandoned, not live. Mirrors
+ * `STALE_MARKER_MS` in `payments-checkout/inflight.ts` and MUST stay equal to
+ * it: if the client kept saying "on its way" after the server had started
+ * accepting payments again, the row would hide the button the server was
+ * offering, and a traveler with a genuinely lost payment could never pay.
+ */
+export const IN_FLIGHT_STALE_MS = 10 * 24 * 60 * 60 * 1000;
+
+/**
+ * Which requirements have a bank payment still clearing — pure, so it can be
+ * tested. Same resolution rule as the server guard: a 'processing' marker is
+ * live until a 'paid' or 'failed' row shares its PaymentIntent, or it ages
+ * past {@link IN_FLIGHT_STALE_MS}. A marker with no PaymentIntent can never be
+ * resolved and is ignored, for the same reason the server ignores it.
+ *
+ * Mode filtering is the CALLER's job — pass rows already filtered to the
+ * Stripe mode this build treats as real, exactly as `fetchPaidByRequirement`
+ * filters its own query.
+ */
+export function resolveInFlight(
+  rows: readonly InFlightLedgerRow[],
+  now: number = Date.now(),
+): Record<string, InFlightPayment> {
+  const resolved = new Set(
+    rows
+      .filter(r => (r.event_type === 'paid' || r.event_type === 'failed') && r.provider_object_id)
+      .map(r => r.provider_object_id),
+  );
+  const out: Record<string, InFlightPayment> = {};
+  for (const r of rows) {
+    if (r.event_type !== 'processing') continue;
+    if (!r.requirement_id || !r.provider_object_id) continue;
+    if (resolved.has(r.provider_object_id)) continue;
+    const at = r.created_at ? Date.parse(r.created_at) : NaN;
+    // Unparseable reads as recent, not stale — the server makes the same
+    // call, and disagreeing with it here is the one thing this must not do.
+    if (Number.isFinite(at) && now - at > IN_FLIGHT_STALE_MS) continue;
+    const amount = Number(r.amount_charged);
+    // Keep the newest per requirement — a retry after a bounce is a second
+    // marker, and the sheet should name the one that is actually in flight.
+    const prev = out[r.requirement_id];
+    if (!prev || (r.created_at ?? '') > prev.since) {
+      out[r.requirement_id] = {
+        amountUsd: Number.isFinite(amount) ? amount : 0,
+        since: r.created_at ?? new Date(now).toISOString(),
+      };
+    }
+  }
+  return out;
+}
+
+/** Bank payments still clearing for this traveler on this trip, keyed by requirement id. */
+export async function fetchInFlightByRequirement(
+  tripId: string,
+  userId: string,
+): Promise<Record<string, InFlightPayment>> {
+  const { data, error } = await supabase
+    .from('organized_trip_payment_events')
+    .select('requirement_id, event_type, provider_object_id, amount_charged, created_at')
+    .eq('trip_id', tripId)
+    .eq('user_id', userId)
+    // Same mode mirror as fetchPaidByRequirement, for the same reason.
+    .eq('is_livemode', STRIPE_LIVEMODE)
+    .in('event_type', ['processing', 'paid', 'failed']);
+
+  if (error) throw error;
+  return resolveInFlight((data ?? []) as InFlightLedgerRow[]);
 }
 
 /** What has come back to this traveler on this trip. */
@@ -413,6 +565,46 @@ export async function fetchConnectAccountSession(): Promise<string> {
   }
   if (!data?.clientSecret) throw new Error(data?.error ?? 'Could not open Stripe');
   return data.clientSecret as string;
+}
+
+/**
+ * Open this operator's own Stripe Express Dashboard, where they can change
+ * details they already gave: the bank account payouts land in, their payout
+ * schedule, their address, their tax documents.
+ *
+ * ── Why this leaves the app ─────────────────────────────────────────────────
+ * There is nothing to draw in-app. `@stripe/stripe-react-native` (0.73.0)
+ * ships four embedded Connect components — onboarding, payments, payouts,
+ * payment details — and NOT `account-management`, which is the one that draws
+ * an editable details form on the web. So this opens Stripe's own page in a
+ * browser sheet, which is Stripe's supported path for Express accounts.
+ *
+ * `openBrowserAsync`, NOT `openAuthSessionAsync`: nothing here redirects back
+ * to a swellyo:// url, so there is no redirect to wait for, and on iOS the
+ * auth-session variant would put up a "wants to use stripe.com to sign in"
+ * system consent alert for no reason. This resolves when the operator closes
+ * the sheet themselves.
+ *
+ * ⚠️ The link is SINGLE-USE and expires in minutes, so it is fetched on every
+ * tap and never cached. Do not lift it into react-query.
+ *
+ * ⚠️ Requires the deployment of `stripe-connect-onboard` that serves
+ * `action: 'dashboard'` (added 2026-09-02). An older one answers
+ * `Unknown action` with a 400, which surfaces here as its own message.
+ */
+export async function openStripeDashboard(): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
+    body: { action: 'dashboard' },
+  });
+  if (error) {
+    throw new Error(
+      await edgeFunctionErrorMessage(error, 'Could not open your Stripe dashboard'),
+    );
+  }
+  if (!data?.dashboardUrl) {
+    throw new Error(data?.error ?? 'Could not open your Stripe dashboard');
+  }
+  await WebBrowser.openBrowserAsync(data.dashboardUrl);
 }
 
 /**

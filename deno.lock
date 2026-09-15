@@ -164,6 +164,7 @@
         "npm:ffmpeg@^0.0.4",
         "npm:jest-expo@54.0",
         "npm:jest@^29.7.0",
+        "npm:jszip@^3.10.1",
         "npm:mrz@^5.0.2",
         "npm:next@^15.5.2",
         "npm:patch-package@^8.0.1",

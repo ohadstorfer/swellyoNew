@@ -24,6 +24,7 @@
  */
 
 import { supabase } from '../../config/supabase';
+import { readTravelerPrices } from './tripPaymentsService';
 import {
   amountDue,
   STRIPE_LIVEMODE,
@@ -229,6 +230,84 @@ export function buildTripMoney(input: TripMoneyInput): TripMoney {
 }
 
 /** Four parallel reads, then `buildTripMoney`. */
+/**
+ * Every payment event on the trip, for the ledger — Product Specs §"Trip
+ * operator view": "Payments page — view all transactions, amounts, profiles,
+ * times, export options."
+ *
+ * ── Why this is not `TripMoney.events` ─────────────────────────────────────
+ * That list is what the TOTALS are built from, so it drops two things on
+ * purpose: failed attempts (they moved no money) and the other Stripe mode
+ * (test rows must never be added to live ones). Both are exactly what an
+ * operator wants on a ledger — "she says she paid and it didn't work" is a
+ * failed row, and a trip whose mode was switched has history on both sides.
+ *
+ * So this returns everything, tagged, and the screen decides what to show. It
+ * never adds anything up: the summary tiles are the one place a total is
+ * computed, and a second one here is how two screens come to disagree.
+ */
+export type LedgerEvent = PaymentEvent & {
+  isLivemode: boolean;
+  /** Belongs to the Stripe mode this build counts as real money. */
+  counted: boolean;
+};
+
+export async function fetchPaymentLedger(tripId: string): Promise<LedgerEvent[]> {
+  const { data, error } = await supabase
+    .from('organized_trip_payment_events')
+    .select('id, user_id, requirement_id, event_type, amount_usd, is_livemode, created_at')
+    .eq('trip_id', tripId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((e: any) => ({
+    id: e.id as string,
+    userId: e.user_id as string,
+    requirementId: (e.requirement_id as string | null) ?? null,
+    eventType: (e.event_type as string) ?? 'paid',
+    amountUsd: Number(e.amount_usd) || 0,
+    createdAt: (e.created_at as string | null) ?? null,
+    isLivemode: !!e.is_livemode,
+    counted: !!e.is_livemode === STRIPE_LIVEMODE,
+  }));
+}
+
+/**
+ * The ledger as CSV, for the operator's accountant.
+ *
+ * Deliberately not "the table you see": the export carries the Stripe mode and
+ * the raw ISO timestamp, because a spreadsheet is read months later by somebody
+ * who was not looking at the screen. Amounts stay signed — a refund is negative
+ * — so the column sums to the trip's balance without anyone re-deriving signs.
+ */
+export function ledgerToCsv(
+  rows: LedgerEvent[],
+  names: Map<string, string>,
+  stepTitles: Map<string, string>,
+): string {
+  const head = ['Date (UTC)', 'Traveler', 'What', 'Type', 'Amount USD', 'Stripe mode', 'Event ID'];
+  const cell = (v: string | number) => {
+    const t = String(v);
+    // Quote whenever the value could break a column, and double any quote
+    // inside it — a traveler called O'Brien is fine, one called `A, B` is not.
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  const lines = [head.join(',')];
+  for (const r of rows) {
+    lines.push(
+      [
+        cell(r.createdAt ?? ''),
+        cell(names.get(r.userId) ?? r.userId),
+        cell(r.requirementId ? (stepTitles.get(r.requirementId) ?? 'Payment') : 'Payment'),
+        cell(r.eventType),
+        cell(r.amountUsd.toFixed(2)),
+        cell(r.isLivemode ? 'live' : 'test'),
+        cell(r.id),
+      ].join(','),
+    );
+  }
+  return lines.join('\n');
+}
+
 export async function fetchTripMoney(tripId: string): Promise<TripMoney> {
   const [tripRes, memberRes, reqRes, eventRes] = await Promise.all([
     supabase
@@ -236,13 +315,16 @@ export async function fetchTripMoney(tripId: string): Promise<TripMoney> {
       .select('cost_per_person, deposit_amount, payment_mode')
       .eq('id', tripId)
       .single(),
-    supabase
-      .from('group_trip_participants')
-      .select('user_id, price_total_usd, deposit_usd')
-      .eq('trip_id', tripId)
-      // Hosts are not travelers — nobody charges the operator to run their own
-      // trip, and counting them would put a permanent unpaid row on the list.
-      .eq('role', 'member'),
+    // Via the gated view, not the table: the price columns are withheld from
+    // the base table since 20260906000100. Falls back while that is unapplied.
+    readTravelerPrices(q =>
+      q
+        .select('user_id, price_total_usd, deposit_usd')
+        .eq('trip_id', tripId)
+        // Hosts are not travelers — nobody charges the operator to run their own
+        // trip, and counting them would put a permanent unpaid row on the list.
+        .eq('role', 'member'),
+    ),
     supabase
       .from('organized_trip_requirements')
       .select('id, kind, title, is_active')
@@ -345,10 +427,22 @@ export type TravelerProfile = {
   countryFrom: string | null;
   surfLevel: string | null;
   boardType: string | null;
+  /**
+   * How Swelly addresses this person — "bro" / "sis" / "name only".
+   *
+   * NOT a gender column, because `surfers` has none. It is the only signal the
+   * profile carries, and the operator needs a rough men/women split to assign
+   * rooms, so `genderOf()` reads it as a proxy and everything it cannot read
+   * lands in "not set" rather than being guessed at. See that function.
+   */
+  pronoun: string | null;
+  /** Free-text interest tags the traveler picked in onboarding ("yoga",
+   *  "hiking"). Empty array, never null, so callers can map without a guard. */
+  lifestyle: string[];
 };
 
 /** Surf-shaped facts about the roster. The trip screen holds names and avatars
- *  already; these four columns are the ones it does not. */
+ *  already; these columns are the ones it does not. */
 export async function fetchTravelerProfiles(
   userIds: string[],
 ): Promise<Map<string, TravelerProfile>> {
@@ -356,7 +450,9 @@ export async function fetchTravelerProfiles(
 
   const { data, error } = await supabase
     .from('surfers')
-    .select('user_id, age, country_from, surf_level_category, surfboard_type')
+    .select(
+      'user_id, age, country_from, surf_level_category, surfboard_type, pronoun, lifestyle_keywords',
+    )
     .in('user_id', userIds);
 
   if (error) throw error;
@@ -369,6 +465,8 @@ export async function fetchTravelerProfiles(
       countryFrom: r.country_from ?? null,
       surfLevel: r.surf_level_category ?? null,
       boardType: r.surfboard_type ?? null,
+      pronoun: r.pronoun ?? null,
+      lifestyle: Array.isArray(r.lifestyle_keywords) ? r.lifestyle_keywords : [],
     });
   }
   return map;
@@ -377,10 +475,47 @@ export async function fetchTravelerProfiles(
 export type SurfStats = {
   levels: [string, number][];
   boards: [string, number][];
+  /** `men` / `women` only, most common first. See `genderOf`. */
+  genders: [string, number][];
+  /** Everyone `genderOf` could not read. Reported rather than hidden, because a
+   *  "6 men · 3 women" split on a party of ten is a different fact from the
+   *  same split on a party of nine. */
+  genderUnknown: number;
+  /** Interests at least TWO travelers share, most common first — "lifestyles in
+   *  common". A tag one person picked is a fact about that person, not about
+   *  the group, and this section is only ever about the group. */
+  lifestyles: [string, number][];
   ageMin: number | null;
   ageMax: number | null;
   countryCount: number;
 };
+
+/**
+ * A rough men/women read of `surfers.pronoun`.
+ *
+ * There is NO gender column on `surfers`. `pronoun` is how Swelly addresses
+ * someone in chat — "bro" / "sis" / "name only" — and the operator needs some
+ * read on the split to assign rooms, so this is the proxy they get.
+ *
+ * It is deliberately narrow. Only the two values that actually carry a signal
+ * map to anything; "name only", "neither", "none" and null all return null and
+ * are counted as "not set". "name only" in particular means "don't call me
+ * bro/sis", which is not a statement about gender — folding it into either
+ * bucket would be inventing data. Roughly a quarter of profiles land here, so
+ * the unknown count is shown beside the split rather than dropped.
+ *
+ * Case-insensitive: both "bro" and "Bro" are in the table.
+ */
+export function genderOf(pronoun: string | null | undefined): 'men' | 'women' | null {
+  switch ((pronoun ?? '').trim().toLowerCase()) {
+    case 'bro':
+      return 'men';
+    case 'sis':
+      return 'women';
+    default:
+      return null;
+  }
+}
 
 /**
  * Who is on this trip, as a shape rather than a list.
@@ -394,15 +529,28 @@ export function buildSurfStats(
     boardType?: string | null;
     age?: number | null;
     countryFrom?: string | null;
+    pronoun?: string | null;
+    lifestyle?: string[] | null;
   }[],
 ): SurfStats {
   const ages = profiles
     .map(p => p.age)
     .filter((a): a is number => typeof a === 'number' && a > 0);
 
+  const genders = profiles.map(p => genderOf(p.pronoun));
+
+  // One vote per person per tag: a duplicate inside one traveler's own list
+  // would otherwise make a group of one look like a group of two.
+  const lifestyleVotes = profiles.flatMap(p => [
+    ...new Set((p.lifestyle ?? []).map(k => k.trim().toLowerCase()).filter(Boolean)),
+  ]);
+
   return {
     levels: tally(profiles.map(p => p.surfLevel ?? null)),
     boards: tally(profiles.map(p => p.boardType ?? null)),
+    genders: tally(genders),
+    genderUnknown: genders.filter(g => g === null).length,
+    lifestyles: tally(lifestyleVotes).filter(([, n]) => n >= 2),
     ageMin: ages.length ? Math.min(...ages) : null,
     ageMax: ages.length ? Math.max(...ages) : null,
     countryCount: new Set(profiles.map(p => p.countryFrom).filter(Boolean)).size,

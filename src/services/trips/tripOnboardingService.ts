@@ -26,18 +26,42 @@ import type { ParticipantStatus } from './groupTripsService';
  *    database, which re-derives every must-have requirement from the evidence
  *    tables. This module cannot grant membership by getting its own arithmetic
  *    wrong, and a tampered client cannot grant it at all.
- * 2. STEP ORDER IS NOT COSMETIC. Must-haves come first, and the deposit comes
- *    last among them (see ONBOARDING_KIND_ORDER). Money after the free steps
- *    means a traveler who balks at the waiver has not paid yet — no refund.
+ * 2. STEP ORDER IS NOT COSMETIC. Must-haves come first, and the waiver leads
+ *    them (see ONBOARDING_KIND_ORDER). Nobody is charged before they sign.
  */
 
 /**
  * The order the runner plays the steps in, within each half of the flow.
  *
- * Waiver and medical are free and take under a minute; the deposit is the
- * wall. Asking for money first and the waiver second means that anyone who
- * refuses the waiver has already been charged. So: consent, then information,
- * then money.
+ * AGREE, THEN PAY, THEN TELL US ABOUT YOU. Waiver → deposit → medical.
+ * Settled 23 Aug 2026 after two turns:
+ *
+ *   · It was waiver → medical → deposit (money last, so nobody who balks at
+ *     the waiver has been charged).
+ *   · The Product Specs doc (§4, "Travelers") lists payment first, and that
+ *     was taken; for a few hours this file read deposit → waiver → medical.
+ *   · Then: the waiver has to come first, or ride along with the payment the
+ *     way a terms-and-conditions tick does.
+ *
+ * It cannot ride along, and that is not a UI decision. The waiver is a PDF the
+ * traveler READS and signs by name (`WaiverStepInline`, written to
+ * `group_trip_acknowledgements` against that exact document). A release of the
+ * right to sue over injury is not a checkbox next to a Pay button — bundling
+ * it there is the fact pattern that gets consent argued away later. Any honest
+ * version of "together with the payment" puts the document on screen before
+ * the pay button works, which is this order with extra steps.
+ *
+ * So the waiver leads, and the deposit follows it immediately — as early as
+ * money can go while consent still comes first. That also keeps the doc's
+ * intent: the cancellation policy IS ticked inside the pay step
+ * (`useTripPolicyConsent`, before checkout opens), so "payment + agree to the
+ * terms" is exactly what step 2 is.
+ *
+ * The medical form moves last of the three. It is information, not consent and
+ * not money, and it is the only one with no third party in it. ⚠️ It does
+ * leave a small window the old order did not have: someone can pay and then
+ * stall on the medical form, which means paid and still not a member. The
+ * stalled-onboarding nudges already chase exactly that person.
  *
  * The skippable half is ordered by how likely a traveler is to have the thing
  * on them right now — insurance and passport are usually already bought, while
@@ -51,8 +75,8 @@ import type { ParticipantStatus } from './groupTripsService';
  */
 const ONBOARDING_KIND_ORDER: RequirementKind[] = [
   'waiver',
-  'medical',
   'deposit',
+  'medical',
   'insurance',
   'passport',
   'flights',

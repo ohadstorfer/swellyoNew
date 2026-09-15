@@ -389,6 +389,77 @@ export function connectStatusOf(p: PayoutState): ConnectStatus {
   };
 }
 
+/**
+ * Open this operator's own Stripe Express Dashboard in a new tab, where they
+ * can change details they already gave: the bank account payouts land in,
+ * their payout schedule, their address, their tax documents.
+ *
+ * ── This is NOT a second onboarding path ────────────────────────────────────
+ * §2 of the spec says Connect onboarding stays in the app and this site must
+ * not rebuild it. It still does not. Onboarding is a form WE would have to
+ * render and keep in step with Stripe's six states; this is one call that
+ * hands back a URL to a page Stripe renders and owns. There is nothing here
+ * to drift.
+ *
+ * `stripe-connect-onboard` mints the link because it needs the Stripe secret
+ * key, and it keys off the CALLER's own `auth.uid()` — so this can only ever
+ * open the signed-in person's own dashboard, never an operator's on behalf of
+ * a crew member. A crew member with no payout account gets a 400 saying they
+ * have not connected Stripe, which is true of them.
+ *
+ * ⚠️ The blank tab is opened FIRST, before any `await`. An async function body
+ * runs synchronously up to its first await, so this call is still inside the
+ * click's user-gesture task and survives the pop-up blocker. Opening it after
+ * the round trip would be blocked by every browser.
+ *
+ * ⚠️ The link is SINGLE-USE and expires in minutes. Fetched on every click,
+ * never cached.
+ *
+ * ⚠️ Requires the deployment of `stripe-connect-onboard` that serves
+ * `action: 'dashboard'` (added 2026-09-02). An older one answers
+ * `Unknown action` with a 400.
+ */
+export async function openStripeDashboard(): Promise<void> {
+  const tab = window.open('', '_blank', 'noopener,noreferrer');
+  if (!tab) {
+    throw new Error(
+      'Your browser blocked the new tab. Allow pop-ups for this site and try again.',
+    );
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('stripe-connect-onboard', {
+      body: { action: 'dashboard' },
+    });
+
+    // supabase-js calls any non-2xx an error and hides the JSON body on it.
+    // The body is where the useful sentence is — "Stripe will not open your
+    // dashboard until setup is finished" beats "non-2xx status code".
+    if (error) {
+      let payload: any = null;
+      try {
+        payload = await (error as any).context?.json?.();
+      } catch {
+        /* not JSON; fall through to the generic message */
+      }
+      throw new Error(payload?.error ?? 'Could not open your Stripe dashboard.');
+    }
+    if (!data?.dashboardUrl) {
+      throw new Error(data?.error ?? 'Could not open your Stripe dashboard.');
+    }
+
+    // `replace`, not `href`: the placeholder must not leave a blank entry in
+    // the new tab's history for the operator to hit Back into.
+    tab.location.replace(data.dashboardUrl as string);
+  } catch (e) {
+    // Never leave a blank tab sitting there after a failure — the operator
+    // would be looking at an empty page while the error appears on the one
+    // behind it.
+    tab.close();
+    throw e;
+  }
+}
+
 /** This operator's Connect state, in one call. */
 export async function fetchConnectState(userId: string): Promise<{
   payout: PayoutState;

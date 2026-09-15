@@ -51,6 +51,11 @@ type Gate = {
  *  every failure degrades to. */
 const OPEN: Gate = { policy: null, consented: true };
 
+/** Backstop for a dropped `onDismissed`. Comfortably past the shell's own
+ *  exit (220ms slide + its 120ms unmount fallback) plus UIKit's teardown, so
+ *  in practice the real callback always wins the race. */
+const DISMISS_FALLBACK_MS = 700;
+
 export function useTripPolicyConsent(
   tripId: string,
   userId: string | null,
@@ -75,6 +80,10 @@ export function useTripPolicyConsent(
   // starting a second one.
   const loadRef = useRef<Promise<Gate> | null>(null);
   const resolveRef = useRef<((agreed: boolean) => void) | null>(null);
+  // The answer, held from the tap until the sheet's Modal is FULLY gone —
+  // see `closeWith`. `null` means nothing is waiting to be handed back.
+  const pendingAnswerRef = useRef<boolean | null>(null);
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aliveRef = useRef(true);
 
   useEffect(() => {
@@ -83,7 +92,11 @@ export function useTripPolicyConsent(
       aliveRef.current = false;
       // A screen that unmounts mid-question is a "no". Leaving the promise
       // hanging would strand the caller's `await` forever, and with it the
-      // pay button it is holding.
+      // pay button it is holding. There is no Modal left to wait for here, so
+      // this one resolves straight away.
+      if (dismissTimerRef.current !== null) clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = null;
+      pendingAnswerRef.current = null;
       resolveRef.current?.(false);
       resolveRef.current = null;
     };
@@ -131,6 +144,49 @@ export function useTripPolicyConsent(
     void load();
   }, [enabled, tripId, userId, load]);
 
+  /** Hand the answer back to the waiting `ensureConsent()` and forget it. */
+  const settle = useCallback((agreed: boolean) => {
+    if (dismissTimerRef.current !== null) clearTimeout(dismissTimerRef.current);
+    dismissTimerRef.current = null;
+    pendingAnswerRef.current = null;
+    const resolve = resolveRef.current;
+    resolveRef.current = null;
+    resolve?.(agreed);
+  }, []);
+
+  /**
+   * Close the sheet, and hand the answer back only once its Modal is GONE.
+   *
+   * ⚠️ NOT on the tap. Every caller of `ensureConsent()` continues into
+   * something that presents natively — TripDetailScreen's "Pay now" opens
+   * PayAmountSheet (another RN Modal) on the very next line, the deposit paths
+   * open Stripe Checkout in a browser sheet. iOS refuses to present while
+   * another view controller is still dismissing, and RN neither retries nor
+   * logs it: the second sheet never appears and an invisible controller is
+   * left over the screen swallowing every touch. That is the "agreed, then the
+   * trip screen froze" report — nothing to scroll, nothing to tap.
+   *
+   * So the resolve waits for the shell's `onDismissed` (iOS: the Modal's real
+   * `onDismiss`, after UIKit has finished the teardown; elsewhere: unmount).
+   * The timer is only a backstop — a dropped callback must not strand the pay
+   * button behind an `await` that never settles, which is the worse failure.
+   */
+  const closeWith = useCallback(
+    (agreed: boolean) => {
+      pendingAnswerRef.current = agreed;
+      setVisible(false);
+      if (dismissTimerRef.current !== null) clearTimeout(dismissTimerRef.current);
+      dismissTimerRef.current = setTimeout(() => {
+        if (pendingAnswerRef.current !== null) settle(pendingAnswerRef.current);
+      }, DISMISS_FALLBACK_MS);
+    },
+    [settle],
+  );
+
+  const handleDismissed = useCallback(() => {
+    if (pendingAnswerRef.current !== null) settle(pendingAnswerRef.current);
+  }, [settle]);
+
   /**
    * Ask, if there is anything to ask. Resolves true to continue to Checkout,
    * false when the traveler dismissed the sheet without agreeing.
@@ -153,11 +209,13 @@ export function useTripPolicyConsent(
     setVisible(true);
     return new Promise<boolean>(resolve => {
       // One question at a time. A second caller would otherwise overwrite the
-      // first resolver and leave that await hanging.
-      resolveRef.current?.(false);
+      // first resolver and leave that await hanging. `settle` (not a bare
+      // resolve) so a pending answer still waiting on a dismiss is dropped
+      // with it, rather than firing later into the new caller's promise.
+      settle(false);
       resolveRef.current = resolve;
     });
-  }, [load]);
+  }, [load, settle]);
 
   const handleAgree = useCallback(async () => {
     const current = gateRef.current?.policy;
@@ -175,19 +233,15 @@ export function useTripPolicyConsent(
     }
     if (!aliveRef.current) return;
     setSaving(false);
-    setVisible(false);
-    resolveRef.current?.(true);
-    resolveRef.current = null;
-  }, [tripId]);
+    closeWith(true);
+  }, [tripId, closeWith]);
 
   const handleClose = useCallback(() => {
     // Never mid-write: dismissing while the record is in flight would resolve
     // the caller into Checkout and then close the sheet under a running RPC.
     if (saving) return;
-    setVisible(false);
-    resolveRef.current?.(false);
-    resolveRef.current = null;
-  }, [saving]);
+    closeWith(false);
+  }, [saving, closeWith]);
 
   return {
     ensureConsent,
@@ -198,6 +252,9 @@ export function useTripPolicyConsent(
       saving,
       onAgree: handleAgree,
       onClose: handleClose,
+      // Load-bearing, not telemetry: this is what releases the `await` in
+      // `ensureConsent()`. See `closeWith`.
+      onDismissed: handleDismissed,
     },
   };
 }

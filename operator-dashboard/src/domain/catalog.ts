@@ -171,3 +171,60 @@ export const isPayKind = (kind: string): boolean =>
 
 export const isEditableKind = (kind: string): kind is EditableKind =>
   kind in REQUIREMENT_CATALOG;
+
+/**
+ * The requirements an operator may not switch OFF.
+ *
+ * Only the waiver, and not for a technical reason — it is the one agreement
+ * the product has (there is no terms acceptance and no separate liability
+ * form), so a trip running without it has no record of what anyone agreed to.
+ *
+ * ⚠️ Locks OFF, never ON. A trip whose waiver is already inactive still shows
+ * under "Not asked for" with a working Add, so an operator can put it back.
+ * Forcing it on instead would make every Save on such a trip silently
+ * re-create a requirement they had deliberately removed.
+ *
+ * ⚠️ TWIN of `LOCKED_ON_KINDS` in the app's `CreateTripFlowA.tsx` and
+ * `ManageRequirementsSheet.tsx`. All three have to agree, or "always on" is
+ * only true on whichever screen the operator did not use.
+ */
+export const LOCKED_ON_KINDS: EditableKind[] = ['waiver'];
+
+/** Said on the row, in place of the missing Remove button, so the absence
+ *  explains itself where it is. */
+export const LOCKED_ON_SUB: Partial<Record<EditableKind, string>> = {
+  waiver: 'On every trip — it is the only record of what travelers agreed to.',
+};
+
+/**
+ * Kinds whose TIMING is not the operator's to set, and what it is pinned to.
+ *
+ * `deposit` only. It is the WALL: a must_have with no deadline, paid inside
+ * onboarding, and nobody becomes a member without it
+ * (`activate_trip_membership`). Making it skippable does not move a date, it
+ * removes the wall — and `freeze_traveler_price` / `operator_trip_full_payment_due`
+ * (migration 20260817000000) exist ONLY because the balance is skippable and
+ * the deposit is not. A skippable deposit lets a traveler leave onboarding a
+ * full member having paid nothing, holding a seat, owing the whole price.
+ *
+ * `balance` is deliberately NOT here — it is the rest of the money, due long
+ * after joining, and its deadline is the operator's whole point.
+ *
+ * ⚠️ TWIN of `LOCKED_TIMING` in the app's
+ * `src/services/trips/tripDocumentsService.ts`.
+ */
+export const LOCKED_TIMING: Partial<
+  Record<EditableKind, { skippable: boolean; daysBefore: number }>
+> = {
+  deposit: { skippable: false, daysBefore: 0 },
+};
+
+/** What actually gets written for a kind: the pinned timing when there is one,
+ *  otherwise what the operator chose. Applied on the write path as well as in
+ *  the UI, so a stale editor tab cannot slip a skippable deposit through. */
+export function resolveTiming<T extends { skippable: boolean; daysBefore: number }>(
+  kind: string,
+  chosen: T,
+): T | { skippable: boolean; daysBefore: number } {
+  return LOCKED_TIMING[kind as EditableKind] ?? chosen;
+}

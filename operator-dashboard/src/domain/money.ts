@@ -311,9 +311,10 @@ export type PriceChangeCheck =
  * the numbers go wrong first. Stripe refuses the same move for the same
  * reason: a credit note reduces what is owed "but not below zero".
  *
- * The server does NOT check this. operator_set_traveler_price accepts any
- * total of zero or more whatever has been paid, so a direct API call still
- * gets through. Logged in the design doc §6 for the next payments migration.
+ * The server checks this too, since 20260906000200: operator_set_traveler_price
+ * refuses a total below the traveler's net ledger sum with the same "refund
+ * first" message. This client check is so the operator finds out before
+ * submitting, not so the rule exists — a direct API call is refused as well.
  *
  * No confirmation when nothing has been paid, deliberately. Confirmations only
  * work while they stay rare — one on every price edit teaches the operator to
@@ -382,4 +383,105 @@ export function validateTripPrice(
     if (depositAmount > costPerPerson) return 'The deposit cannot be more than the price.';
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Trip summary — the three figures at the top of the trip page
+// ---------------------------------------------------------------------------
+
+/**
+ * Product Specs §"Trip dashboard space", Frame 39433: "Payments collected
+ * $16,800 of $28,000 · Fully paid 2/9 · Travelers 7/12".
+ *
+ * ⚠️ TWIN of `tripSummary` in the app's
+ * `src/components/trips/dashboard/dashboardWork.ts`. Same rule, written twice
+ * and tested twice — the two apps must not disagree about how many people have
+ * fully paid, and a shared package is not available across these two projects.
+ * Change both together.
+ */
+export type TripSummary = {
+  collectedUsd: number;
+  expectedUsd: number;
+  /** Travelers whose every pay step is settled. */
+  fullyPaid: number;
+  /** Travelers who have a price at all — the denominator for `fullyPaid`. */
+  priced: number;
+  /** What those fully-paid travelers are worth in total. */
+  fullyPaidUsd: number;
+};
+
+/**
+ * Fully paid means every step, not "paid something".
+ *
+ * A traveler with no price is excluded from BOTH halves of the fraction rather
+ * than counted as unpaid: they are the operator's own backlog (`noPriceCount`
+ * already says how many), and putting them in the denominator would make a trip
+ * where everyone has paid read as 7/9 forever.
+ *
+ * ⚠️ This is the ONE place where the denominator is not "every traveler". The
+ * `paidCountByKind` counts above deliberately do use everybody, because "3 of
+ * 12 paid the deposit" is a chase list and someone with no price still has not
+ * paid. "Fully paid 2/9" is a completeness figure, and a person you never
+ * priced cannot complete.
+ *
+ * A traveler on a trip with no pay steps at all — an offline trip — counts as
+ * fully paid if they have a price and have covered it. `every` over an empty
+ * list is true, which is why the price check comes first.
+ */
+export function tripSummary(money: {
+  travelers: Array<{ totalUsd: number | null; paidUsd: number; steps: Array<{ state: string }> }>;
+  collectedUsd: number;
+  expectedUsd: number;
+}): TripSummary {
+  let fullyPaid = 0;
+  let priced = 0;
+  let fullyPaidUsd = 0;
+
+  for (const t of money.travelers) {
+    if (t.totalUsd === null) continue;
+    priced += 1;
+    const settled =
+      t.steps.length > 0
+        ? t.steps.every(s => s.state === 'paid')
+        : t.paidUsd >= t.totalUsd && t.totalUsd > 0;
+    if (settled) {
+      fullyPaid += 1;
+      fullyPaidUsd += t.totalUsd;
+    }
+  }
+
+  return {
+    collectedUsd: money.collectedUsd,
+    expectedUsd: money.expectedUsd,
+    fullyPaid,
+    priced,
+    fullyPaidUsd,
+  };
+}
+
+/**
+ * How many travelers to show against the cap, and how many the cap cannot see.
+ *
+ * `group_trips.participant_count` deliberately excludes anyone still at
+ * `status = 'onboarding'` — approval on an operator trip takes no seat, which
+ * is right for capacity and wrong for every other use of the number. The trip
+ * then reads "2 of 12" while eight people are actively paying.
+ *
+ * So the tile shows the seat count, which is the honest answer to "how full is
+ * this trip", and names the onboarding group separately instead of hiding it.
+ *
+ * ⚠️ TWIN of `travelerCounts` in the app's `dashboardWork.ts`.
+ */
+export function travelerCounts(args: {
+  /** The trip's members, travelers only — hosts excluded by the caller. */
+  travelers: Array<{ status?: string | null }>;
+  maxParticipants?: number | null;
+}): { going: number; onboarding: number; capacity: number | null } {
+  let going = 0;
+  let onboarding = 0;
+  for (const t of args.travelers) {
+    if (t.status === 'onboarding') onboarding += 1;
+    else going += 1;
+  }
+  return { going, onboarding, capacity: args.maxParticipants ?? null };
 }

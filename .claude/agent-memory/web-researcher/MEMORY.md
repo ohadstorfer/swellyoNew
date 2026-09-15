@@ -48,6 +48,8 @@
 - [Stripe Connect Setup — Express/Custom/v2/IL](research_stripe_connect_setup.md) — Express v1 now; IL supported; dest charges for MoR
 - [Swellyo Compliance Brief](research_swellyo_compliance.md) — MTL safe, 1099-K $20k/200tx, W-8BEN+1042-S, privacy/ToS=BLOCKERS
 - [WeTravel Hidden Margins + PayFac Econ](research_wetravel_pricing.md) — card spread+float=$36-50M/yr; Pro $79/mo
+- [WeTravel Marketing/Growth Features](research_wetravel_marketing_growth.md) — discount codes UI, no referral/affiliate, widgets, white-label subdomain-only, no marketplace
+- [WeTravel Checkout+Refunds Deep Dive](research_wetravel_checkout_refunds.md) — plan/deposit/promo/autopay UX; refund fee split, 180-day wall, disputes
 - [Error Monitoring — Sentry vs PostHog vs custom](research_error_monitoring.md) — Sentry Team $26/mo Slack; PostHog no native crashes
 - [Supabase Error Alerting — Feasibility](research_supabase_error_alerting.md) — no single switch; Log Drains closest to catch-all
 - [Observability Full Stack — 2026](research_observability_monitoring.md) — Sentry free 5k/Team $26; Crashlytics free+EAS
@@ -88,6 +90,7 @@
 - [Jumbo Emoji Chat](research_jumbo_emoji_chat.md) — max 3 emoji triggers jumbo; unicode-segmenter (Hermes-safe), avoid \p{Emoji}
 - [RNKC Android Edge-to-Edge + Dismiss Issues](research_rnkc_android_edge_to_edge_interactive_dismiss.md) — nav-bar-gap fixed 1.21.5 (we're 1.18.5)
 - [Instagram Stories Share](research_instagram_stories_share.md) — pasteboard/intent mechanism unchanged, link sticker NOT scriptable
+- [Birding/Wildlife Operators — Market Size](research_birding_wildlife_operators_market.md) — Birdfair 354 exhibitors, Rockjumper 300 tours/yr, est. 1.5-4k global
 - [World Surfaris — Competitor Profile](research_world_surfaris_competitor.md) — AU agency, consultant-led, $2.5k-20k+/person, no instant booking
 - [Chat Scroll-to-Bottom on Notif Open](research_chat_scroll_to_bottom_notification.md) — Swellyo's isNearBottomRef default-true already correct
 - [Notification Cold-Start Nav](research_notification_coldstart_navigation.md) — pushRootCard silently drops if !isReady(); DM path never migrated
@@ -98,6 +101,7 @@
 - [Rich Push — WhatsApp Parity](research_rich_push_notifications_whatsapp_parity.md) — image=iOS NSE+EAS build; inline audio=biggest lift
 - [Free Fake Chat Video Generators — 2026](research_fake_chat_video_generators.md) — TypeMagic/Chat-Animator.net/TextingStory top 3
 - [WeTravel Integration Mechanics](research_wetravel_integration.md) — no multi-tenant partner API; deep-link=simplest v1
+- [WeTravel Integrations+Emails — Field-Exact](research_wetravel_integrations_emails.md) — Zapier triggers, API/webhook events, GA4/Meta Pixel, QuickBooks CSV, full automated email list, Messages compose UI
 - [Remotion Kinetic Typography](research_remotion_kinetic_typography.md) — Archivo/Montserrat Black, spring 12-15/150-200, 105-135f@30fps
 - [Alarm Capabilities — iOS AlarmKit+Android 2026](research_alarm_capabilities_ios_android.md) — AlarmKit iOS26+ entitlement; Notifee not expo-notifications
 - [Splitwise Third-Party Integration](research_splitwise_integration.md) — API open but ToS bans commercial use; build own (Spliit ref)
@@ -106,3 +110,6 @@
 - [Custom SF Symbol .symbolset Format](research_sfsymbol_symbolset_raw_format.md) — exact Contents.json, Regular-M-only min, no strokes
 - [Cancel Trip/Event + Refunds](research_cancel_trip_refund_flow.md) — Airbnb/Eventbrite/GYG force full refund; reverse_transfer+refund_app_fee
 - [Stripe Test-Mode Connected Balance Funding](research_stripe_test_mode_connected_balance.md) — 4000000000000077/tok_bypassPending, on_behalf_of ambiguity, fund-then-Transfer fallback, delay_days unavailable on Express
+- [WeTravel Traveler-Facing Flow](research_wetravel_traveler_flow.md) — checkout/questionnaire/eSignature, payment plans, Manage Booking portal, emails, no self-serve cancel
+- [Market: Fishing Trip Operators](research_market_fishing_trip_operators.md) — Nervous Waters 19 ops; Orvis/Frontiers/YellowDog block scrapers; no public prices
+- [Stripe Instant Bank Payments](research_stripe_instant_bank_payments.md) — 2.6%+30c, auto via Link, guarantees bank-returns not disputes, on_behalf_of unverified by name

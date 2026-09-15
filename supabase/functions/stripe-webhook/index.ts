@@ -278,7 +278,102 @@ async function notifyPaymentStuck(
     // entity_id = the requirement, so the queue's dedup_key collapses a
     // decline and a later expiry of the same attempt into one push.
     entity_id: requirementId,
-    data: { reason: expired ? 'checkout_abandoned' : 'card_declined' },
+    // 'bank_returned' is the ACH bounce (async_payment_failed): the bank said
+    // no three days after the traveler thought they were done. The client's
+    // bell copy names it — "your bank said no" — because a traveler who paid
+    // by bank account and reads "your card was declined" will not believe the
+    // message is about them.
+    data: {
+      reason:
+        event.type === 'checkout.session.async_payment_failed'
+          ? 'bank_returned'
+          : expired
+            ? 'checkout_abandoned'
+            : 'card_declined',
+    },
+  });
+  if (insErr) throw insErr;
+}
+
+/**
+ * ACH (docs/specs/operator-trips/ach-bank-payments.md): tell the traveler
+ * their bank payment ARRIVED. Called for `checkout.session.async_payment_succeeded`
+ * only — a card confirms while they are watching, so it has nothing to say.
+ *
+ * This is the one the traveler has been waiting three days for, and the row
+ * has said "on its way" the whole time. Stripe's own guidance for delayed
+ * payment methods is to tell the customer at this point; the bounce already
+ * does, and a flow that only ever speaks up for bad news teaches people to
+ * dread the notification.
+ *
+ * Same best-effort contract as notifyPaymentStuck: throws are the caller's,
+ * a lost notification costs a heads-up, never money. No cooldown — this fires
+ * once per ledger row, and the 23505 exit upstream already stops redelivery.
+ */
+async function notifyPaymentLanded(
+  supabase: ReturnType<typeof createClient>,
+  args: { tripId: string; userId: string; requirementId: string; amountUsd: number },
+): Promise<void> {
+  const { tripId, userId, requirementId, amountUsd } = args;
+
+  const { data: req, error: reqErr } = await supabase
+    .from('organized_trip_requirements')
+    .select('id, title, kind')
+    .eq('id', requirementId)
+    .maybeSingle();
+  if (reqErr) throw reqErr;
+  if (!req) return;
+
+  // A cancelled trip is refunding, not celebrating. A "your deposit arrived 🎉"
+  // there would be the wrong message — but SILENCE was worse: the trip was
+  // cancelled while this bank payment was still clearing, the money has now
+  // landed anyway, and nobody was told. So the cancelled branch aims the same
+  // notification type at the OPERATOR instead, flagged so both renderers
+  // switch the copy to "refund it". Their refund button is the whole fix.
+  const { data: trip, error: tripErr } = await supabase
+    .from('group_trips')
+    .select('status, host_id')
+    .eq('id', tripId)
+    .maybeSingle();
+  if (tripErr) throw tripErr;
+  if (!trip) return;
+  if (trip.status === 'cancelled') {
+    if (!trip.host_id) return;
+    const recipients = await operatorRecipients(supabase, tripId, trip.host_id);
+    if (recipients.length === 0) return;
+    const { error: opErr } = await supabase.from('notifications').insert(
+      recipients.map(rid => ({
+        recipient_id: rid,
+        trip_id: tripId,
+        type: 'operator_payment_landed',
+        // Same audience as the dispute notifications — this is operator-facing.
+        audience: 'admin',
+        entity_type: 'requirement',
+        entity_id: requirementId,
+        data: {
+          amount_usd: amountUsd,
+          item_name: req.title ?? (req.kind === 'deposit' ? 'Deposit' : 'Payment'),
+          on_cancelled_trip: true,
+        },
+      })),
+    );
+    if (opErr) throw opErr;
+    return;
+  }
+
+  const { error: insErr } = await supabase.from('notifications').insert({
+    recipient_id: userId,
+    trip_id: tripId,
+    type: 'operator_payment_landed',
+    audience: 'user',
+    entity_type: 'requirement',
+    entity_id: requirementId,
+    data: {
+      amount_usd: amountUsd,
+      // The requirement's own title ("Deposit", "Final payment"), so the copy
+      // can name the step rather than say "your payment".
+      item_name: req.title ?? (req.kind === 'deposit' ? 'Deposit' : 'Payment'),
+    },
   });
   if (insErr) throw insErr;
 }
@@ -328,6 +423,12 @@ async function notifyDisputeToOperator(
   // (a dispute closed 'won' writes no row). dispute_id is unique per case,
   // so one notification per (case, outcome) no matter how often Stripe
   // resends the event.
+  //
+  // Still keyed on host_id alone even though the insert below fans out: the
+  // whole batch is written in one statement, so the operator's row exists if
+  // and only if every co-operator's does. Checking one is checking all — and
+  // it stays correct when a co-operator is appointed between two redeliveries,
+  // where a count-based guard would resend to everybody.
   const { data: dup, error: dupErr } = await supabase
     .from('notifications')
     .select('id')
@@ -339,15 +440,20 @@ async function notifyDisputeToOperator(
   if (dupErr) throw dupErr;
   if (dup && dup.length > 0) return;
 
-  const { error: insErr } = await supabase.from('notifications').insert({
-    recipient_id: trip.host_id,
-    trip_id: tripId,
-    type,
-    audience: 'admin',
-    entity_type: 'requirement',
-    entity_id: requirementId,
-    data: { trip_title: trip.title, ...data },
-  });
+  const recipients = await operatorRecipients(supabase, tripId, trip.host_id);
+  if (recipients.length === 0) return;
+
+  const { error: insErr } = await supabase.from('notifications').insert(
+    recipients.map(rid => ({
+      recipient_id: rid,
+      trip_id: tripId,
+      type,
+      audience: 'admin',
+      entity_type: 'requirement',
+      entity_id: requirementId,
+      data: { trip_title: trip.title, ...data },
+    })),
+  );
   if (insErr) throw insErr;
 }
 
@@ -413,6 +519,31 @@ async function reverseTransferForLostDispute(dispute: {
   );
 }
 
+/**
+ * Everyone who runs this trip: the operator of record, plus any co-operator
+ * they appointed (20260901000000_co_operator_role.sql).
+ *
+ * A co-operator holds `money.manage` — they can issue the refund an alert is
+ * asking for — so an alert only the creator receives is a power granted to
+ * someone who is never told to use it.
+ *
+ * Falls back to host_id alone if the RPC fails. Being told once is a smaller
+ * problem than not being told at all, and this runs inside webhook and cron
+ * paths that must not throw over a fan-out.
+ */
+async function operatorRecipients(
+  supabase: ReturnType<typeof createClient>,
+  tripId: string,
+  hostId: string | null,
+): Promise<string[]> {
+  const { data, error } = await supabase.rpc('trip_operator_ids', { p_trip_id: tripId });
+  if (error || !Array.isArray(data) || data.length === 0) {
+    if (error) console.error('[operatorRecipients] falling back to host_id:', error.message);
+    return hostId ? [hostId] : [];
+  }
+  return (data as string[]).filter(Boolean);
+}
+
 serve(async req => {
   // The signature check fails OPEN if the secret is missing: `Deno.env.get(
   // ...)!` only asserts a type at compile time. At runtime a missing secret
@@ -460,10 +591,45 @@ serve(async req => {
     // Best-effort: a throw is logged, never retried (same contract as PAY-6).
     let afterInsert: (() => Promise<void>) | null = null;
 
-    if (event.type === 'checkout.session.completed') {
+    if (
+      event.type === 'checkout.session.completed' ||
+      event.type === 'checkout.session.async_payment_succeeded'
+    ) {
       const s = event.data.object;
-      // A session can complete without the money actually arriving.
-      if (s.payment_status !== 'paid') return new Response('ok');
+
+      // A session can complete without the money actually arriving, and for a
+      // BANK payment that is the normal case rather than an anomaly:
+      //
+      //   card  → completed(payment_status='paid')                 … done
+      //   ACH   → completed(payment_status='processing')           … day 0
+      //           async_payment_succeeded | async_payment_failed   … day ~3
+      //
+      // 'processing' therefore writes a zero-amount marker row instead of
+      // being dropped. That row is what payments-checkout reads to refuse a
+      // SECOND session while the first payment is still clearing — without it
+      // the traveler is invited to pay again 30 minutes into a 3-day wait.
+      // See docs/specs/operator-trips/ach-bank-payments.md.
+      //
+      // async_payment_succeeded carries no payment_status of its own worth
+      // gating on — the event's existence IS the confirmation — so only the
+      // 'completed' shape is filtered here.
+      const inFlight =
+        event.type === 'checkout.session.completed' && s.payment_status === 'processing';
+      if (event.type === 'checkout.session.completed' && !inFlight && s.payment_status !== 'paid') {
+        // Not silent any more. On 27 Aug 2026 a microdeposit-verified ACH
+        // attempt completed Checkout with a status that landed here, was
+        // dropped without a word, and failed 20 seconds later — the only
+        // evidence was three bare "booted" lines. payments-checkout now forces
+        // instant verification so this should not recur for bank payments;
+        // if it does, the status and event id are the whole diagnosis.
+        console.error(
+          '[stripe-webhook] completed session with no money to record, ignoring',
+          String(s.payment_status),
+          String(s.status),
+          event.id,
+        );
+        return new Response('ok');
+      }
 
       if (!s.payment_intent) {
         console.error('[stripe-webhook] paid session has no payment_intent', event.id);
@@ -510,22 +676,28 @@ serve(async req => {
       // 'platform' here would put a wrong seller on a row that a chargeback
       // response might one day quote.
       let settlementMerchant: 'platform' | 'operator' | null = null;
-      try {
-        // Redacted label: this catch logs on failure, and safeMessage(feeErr)
-        // would otherwise read back `Stripe payment_intents/pi_… failed` —
-        // exactly the identifier safeMessage exists to keep out of logs. If
-        // STRIPE_SECRET_KEY is pointing at the wrong mode/account (the
-        // current pre-deploy state), this fires on EVERY event, so it isn't
-        // a one-off.
-        const pi = await stripeGet(`payment_intents/${s.payment_intent}`, 'payment_intents/<redacted>');
-        applicationFeeUsd =
-          pi.application_fee_amount != null ? Number(pi.application_fee_amount) / 100 : null;
-        settlementMerchant = pi.on_behalf_of ? 'operator' : 'platform';
-      } catch (feeErr) {
-        console.error(
-          '[stripe-webhook] could not enrich application_fee_usd / settlement_merchant, recording the payment without them',
-          safeMessage(feeErr),
-        );
+      // Skipped for the in-flight marker. It carries no money, so there is no
+      // fee to reconcile and no seller to pin down — and the 'paid' row that
+      // lands on day 3 carries both, read from the same PaymentIntent once it
+      // has actually settled. Saves an API call on every bank checkout.
+      if (!inFlight) {
+        try {
+          // Redacted label: this catch logs on failure, and safeMessage(feeErr)
+          // would otherwise read back `Stripe payment_intents/pi_… failed` —
+          // exactly the identifier safeMessage exists to keep out of logs. If
+          // STRIPE_SECRET_KEY is pointing at the wrong mode/account (the
+          // current pre-deploy state), this fires on EVERY event, so it isn't
+          // a one-off.
+          const pi = await stripeGet(`payment_intents/${s.payment_intent}`, 'payment_intents/<redacted>');
+          applicationFeeUsd =
+            pi.application_fee_amount != null ? Number(pi.application_fee_amount) / 100 : null;
+          settlementMerchant = pi.on_behalf_of ? 'operator' : 'platform';
+        } catch (feeErr) {
+          console.error(
+            '[stripe-webhook] could not enrich application_fee_usd / settlement_merchant, recording the payment without them',
+            safeMessage(feeErr),
+          );
+        }
       }
 
       row = {
@@ -535,8 +707,14 @@ serve(async req => {
         provider: 'stripe',
         provider_event_id: event.id,
         provider_object_id: s.payment_intent,
-        event_type: 'paid',
-        amount_usd: Number(s.amount_total) / 100,
+        event_type: inFlight ? 'processing' : 'paid',
+        // ⚠️ The two amounts diverge on an in-flight row, and the split is the
+        // point. `amount_usd` is what every money total sums, so a payment
+        // that has not arrived must contribute exactly 0 — the migration's
+        // CHECK pins it there. `amount_charged` is a record of what was
+        // AUTHORISED, not a total, so it keeps the real figure and lets the
+        // UI say "your $6,250 bank payment is on its way" instead of "$0".
+        amount_usd: inFlight ? 0 : Number(s.amount_total) / 100,
         amount_charged: Number(s.amount_total) / 100,
         currency_charged: currency.toUpperCase(),
         application_fee_usd: applicationFeeUsd,
@@ -544,6 +722,21 @@ serve(async req => {
         // Stripe test-mode events must never be mistaken for real money.
         is_livemode: !!event.livemode,
       };
+
+      // Only the delayed path speaks up. A card confirms while the traveler
+      // is watching the screen; a bank payment lands three days after they
+      // stopped looking, and the row has said "on its way" the whole time.
+      // Runs only if the row is genuinely new (redelivery exits on 23505
+      // before afterInsert), so it fires once per payment.
+      if (event.type === 'checkout.session.async_payment_succeeded') {
+        const landed = {
+          tripId: String(m.trip_id ?? ''),
+          userId: String(m.user_id ?? ''),
+          requirementId: String(m.requirement_id ?? ''),
+          amountUsd: Number(s.amount_total) / 100,
+        };
+        afterInsert = () => notifyPaymentLanded(supabase, landed);
+      }
     } else if (event.type === 'charge.refunded') {
       const c = event.data.object;
 
@@ -635,6 +828,56 @@ serve(async req => {
         // partial refund the reversal is proportional, so the error is
         // bounded by the reversed portion, not the whole fee.
       };
+    } else if (event.type === 'checkout.session.async_payment_failed') {
+      // A bank payment that bounced, three days after the traveler thought
+      // they were done. Two things have to happen, in this order of
+      // importance:
+      //
+      //   1. RESOLVE THE MARKER. The 'processing' row written on day 0 is what
+      //      payments-checkout reads to refuse a second session while money is
+      //      in flight. A bounce that left it unresolved would block that
+      //      requirement FOREVER — the traveler could never pay again, which
+      //      is a far worse outcome than the bounce itself. The 'failed' row
+      //      shares the marker's provider_object_id (the PaymentIntent), and
+      //      that shared id is exactly what the guard matches on.
+      //   2. Tell them, through the same PAY-6 path a declined card takes.
+      //
+      // ⚠️ This is the ONLY place in the codebase that writes a 'failed' row.
+      // Card declines and expired sessions notify WITHOUT one (see the branch
+      // below), because no marker was ever written for them and an
+      // append-only ledger gains nothing from recording a non-event. Here the
+      // row is load-bearing: it is the resolution, not the record.
+      const s = event.data.object;
+      const m = s.metadata ?? {};
+
+      if (!s.payment_intent) {
+        // Without the PaymentIntent there is no way to tie this back to the
+        // marker, so the guard would stay stuck. Loud, and permanent —
+        // retrying cannot conjure the id.
+        console.error('[stripe-webhook] async payment failure has no payment_intent', event.id);
+        return new Response('ok');
+      }
+
+      row = {
+        trip_id: m.trip_id,
+        user_id: m.user_id,
+        requirement_id: m.requirement_id,
+        provider: 'stripe',
+        provider_event_id: event.id,
+        provider_object_id: s.payment_intent,
+        event_type: 'failed',
+        // Pinned to 0 by otpe_amount_sign_matches_type. amount_charged keeps
+        // what was attempted, for the same reason the marker row does: it is
+        // a record, not a total.
+        amount_usd: 0,
+        amount_charged: s.amount_total != null ? Number(s.amount_total) / 100 : null,
+        currency_charged: String(s.currency ?? '').toUpperCase() || null,
+        is_livemode: !!event.livemode,
+      };
+
+      // Only if the row is genuinely new — a Stripe redelivery takes the
+      // 23505 exit before this runs, so the traveler is told once.
+      afterInsert = () => notifyPaymentStuck(supabase, event);
     } else if (
       event.type === 'payment_intent.payment_failed' ||
       event.type === 'checkout.session.expired'

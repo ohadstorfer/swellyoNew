@@ -126,6 +126,54 @@ export function deriveConnectState(s: ConnectStatus): ConnectState {
 }
 
 /**
+ * How long to keep watching after the operator closes the Stripe sheet.
+ *
+ * Stripe usually settles a test account in seconds and a real one in minutes.
+ * This window only covers the "they are still standing there looking at it"
+ * case, so that the card flips to "Stripe connected" in front of them instead
+ * of on their next visit. Everything past it is the row trigger's job
+ * (`trg_notify_connect_status`), which pushes them a notification — so there
+ * is no reason to poll for minutes and every reason not to.
+ */
+export const WATCH_WINDOW_MS = 60_000;
+export const WATCH_INTERVAL_MS = 4_000;
+
+/**
+ * The states that mean Stripe has DECIDED. Anything else is still moving, and
+ * is worth re-reading for as long as the watch window is open.
+ *
+ * `incomplete` is deliberately not here, even though it reads as "the
+ * operator's move". Stripe clears `currently_due` a beat AFTER the form is
+ * submitted, so the first read once the sheet closes is very often
+ * `incomplete` on an account that is seconds away from `ready`. Treating that
+ * as final stopped the watch on its very first tick and left the card saying
+ * "Finish connecting Stripe" until the screen was closed and reopened —
+ * observed 2026-09-06 on an account Stripe had already approved.
+ */
+const SETTLED_STATES = new Set<ConnectState>(['ready', 'action_needed', 'blocked']);
+
+/**
+ * How long until the next poll, or `false` to stop.
+ *
+ * Lives here rather than inline in `useConnectStatus`'s query options for the
+ * reason at the top of this file: it is a rule, and inline in the hook it was
+ * unreachable from a test — which is how the one-line 2026-09-06 mistake
+ * survived. Importing the hook into a test pulls in supabase and AsyncStorage;
+ * importing this file pulls in nothing.
+ */
+export function watchInterval(
+  data: ConnectStatus | undefined,
+  watchUntil: number,
+  now: number = Date.now(),
+): number | false {
+  // Outside the window there is nothing to watch, whatever the state.
+  if (now >= watchUntil) return false;
+  // Stop only once Stripe has actually decided. See SETTLED_STATES.
+  if (data && SETTLED_STATES.has(deriveConnectState(data))) return false;
+  return WATCH_INTERVAL_MS;
+}
+
+/**
  * May this operator choose "Collect payment in Swellyo" at all?
  *
  * TRUE while Stripe is still reviewing. That is a deliberate change, made by
@@ -153,6 +201,38 @@ export function canCollectPayments(state: ConnectState): boolean {
 export function paymentsAreLive(s: ConnectStatus): boolean {
   return s.chargesEnabled;
 }
+
+/**
+ * May this operator open their Stripe dashboard and CHANGE things?
+ *
+ * A different question from {@link canCollectPayments}: this one is about
+ * editing details the operator has already given — the bank account money
+ * lands in, the payout schedule, their address, their tax documents — long
+ * after onboarding is finished. Stripe's Express Dashboard is where all of
+ * that lives, and `stripe-connect-onboard` mints a one-time link into it.
+ *
+ * Gated on `detailsSubmitted` because Stripe REFUSES to create a login link
+ * for an account that has not finished onboarding. Before that point the
+ * right button is "Finish setup", which is the onboarding flow, not this.
+ *
+ * Deliberately takes the status, not the state: `blocked` accounts qualify
+ * too. An account Stripe turned off still holds a real bank account and real
+ * tax documents, and the operator has every right to look at them — we just
+ * cannot promise that editing anything will bring the account back.
+ */
+export function canManageStripeAccount(s: ConnectStatus): boolean {
+  return !!s.accountId && s.detailsSubmitted;
+}
+
+/**
+ * The label on that link. One string, in this file, for the same reason all
+ * the other copy is here: three surfaces render this card.
+ *
+ * Says "in Stripe" on purpose. The link leaves the app for Stripe's own
+ * dashboard, and an operator who taps something that looks like a Swellyo
+ * screen and lands on stripe.com has been surprised by us.
+ */
+export const MANAGE_STRIPE_CTA = 'Update your details in Stripe';
 
 /** What the operator is shown. Kept here so every surface says the same thing. */
 export interface ConnectCopy {

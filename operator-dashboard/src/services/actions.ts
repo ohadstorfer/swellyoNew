@@ -113,6 +113,125 @@ export async function setTravelerPrice(args: {
  * with a raw "not your trip". Callers must hide the button from anyone who is
  * not the operator of record.
  */
+/**
+ * Rewrite ONE trip's frozen refund terms.
+ *
+ * Product Specs §"Manage trip", "Only before any traveler joined". This is the
+ * one crack in the freeze-at-publish rule, and the database is what decides
+ * whether it opens: `trg_guard_operator_trip_cancellation_policy`
+ * (20260904000100) refuses unless the caller is `group_trips.host_id`, nobody
+ * else has joined, and — the test no client can make — nobody has agreed to
+ * these terms yet.
+ *
+ * ⚠️ `rules` is written EMPTY for a preset, matching what the app's create flow
+ * writes. PRESET_RULES is the source of truth for the two ready-made policies,
+ * and storing a copy beside the preset name is how a trip ends up with terms
+ * that disagree with what they are called.
+ *
+ * Rule 1: no new table, no new function. `group_trips` UPDATE is `trip.edit`,
+ * and the trigger narrows it from there.
+ */
+export async function setTripCancellationPolicy(
+  tripId: string,
+  policy: { preset: string; rules: unknown[]; notes: string | null },
+): Promise<void> {
+  const { error } = await supabase
+    .from('group_trips')
+    .update({
+      cancellation_preset: policy.preset,
+      cancellation_rules: policy.preset === 'custom' ? policy.rules : [],
+      cancellation_notes: policy.notes?.trim() || null,
+    })
+    .eq('id', tripId);
+  if (error) throw error;
+}
+
+/**
+ * Swap the waiver PDF on a trip nobody has joined yet.
+ *
+ * Product Specs §"Manage trip", "Only before any traveler joined: Replace
+ * waiver (for this trip specifically)". Mirrors the app's `replaceWaiverPdf`
+ * exactly, and the order of the three writes is load-bearing:
+ *
+ *   1. UPLOAD the new object.
+ *   2. UPDATE the row to point at it — this is where the database can refuse.
+ *   3. REMOVE the old object, best-effort.
+ *
+ * An UPDATE of the row that is already there, not a new version: the unique
+ * index allows exactly one waiver row per trip, and updating in place means
+ * there is never a moment where the trip has a waiver requirement and no
+ * document behind it. The row keeps its id and its version, which is safe
+ * precisely BECAUSE `guard_waiver_replacement` refuses this unless there are
+ * zero signatures — with nothing pointing at the old document there is no stale
+ * reference to leave behind. `document_hash` moves, and that is the real record
+ * of which bytes were shown.
+ *
+ * ⚠️ SPEC.md §2 USED TO FORBID THIS. The rule read "upload only to
+ * `defaults/<user_id>/` — never into `<trip_id>/`, which is where every
+ * sensitive file lives". That was a project convention, not the boundary: the
+ * storage policy on `<trip_id>/operator/` gates on `is_trip_host(trip_id)`, so
+ * the browser was always allowed and the operator's own waiver is not a
+ * traveler's document. Amended in SPEC.md alongside this function; the rule
+ * about TRAVELER documents is unchanged and still absolute.
+ *
+ * Throws if the trip is no longer empty. Somebody joining between the button
+ * appearing and the file being picked is exactly the race the trigger exists
+ * for, and it must be the server that notices.
+ */
+export async function replaceTripWaiver(tripId: string, file: File): Promise<void> {
+  if (file.type !== 'application/pdf') {
+    throw new Error('The waiver has to be a PDF.');
+  }
+
+  const { data: current, error: readErr } = await supabase
+    .from('organized_trip_operator_documents')
+    .select('id, storage_path')
+    .eq('trip_id', tripId)
+    .eq('kind', 'waiver')
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!current) {
+    // Nothing to replace. Publishing a FIRST waiver also writes a requirement
+    // row and a version, which is the wizard's job — this site does not
+    // reimplement it.
+    throw new Error('This trip has no waiver yet. Publish one from the app first.');
+  }
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const documentHash = Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  const storagePath = `${tripId}/operator/${crypto.randomUUID()}.pdf`;
+
+  const { error: upErr } = await supabase.storage
+    .from(DOCUMENTS_BUCKET)
+    .upload(storagePath, file, { contentType: 'application/pdf', upsert: false });
+  if (upErr) throw upErr;
+
+  const { error: updErr } = await supabase
+    .from('organized_trip_operator_documents')
+    .update({ storage_path: storagePath, document_hash: documentHash })
+    .eq('id', current.id);
+
+  if (updErr) {
+    // Refused (trip no longer empty) or failed. Either way the new object is
+    // unreferenced — take it back out.
+    await supabase.storage.from(DOCUMENTS_BUCKET).remove([storagePath]);
+    throw updErr;
+  }
+
+  // The old PDF is referenced by nothing now. Best-effort: the swap is already
+  // committed and must not be reported as failed over a leftover file.
+  if (current.storage_path) {
+    const { error: rmErr } = await supabase.storage
+      .from(DOCUMENTS_BUCKET)
+      .remove([current.storage_path as string]);
+    if (rmErr) console.warn('[actions] old waiver file not removed:', rmErr.message);
+  }
+}
+
 export async function updateTripPrice(args: {
   tripId: string;
   costPerPerson: number;

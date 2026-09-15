@@ -1,0 +1,869 @@
+<title>WeTravel Money Flows</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+
+<style>
+/* ── tokens: light is the base, both dark paths redefine only these ─────── */
+:root{
+  --ground:#FBFBFC;
+  --surface:#FFFFFF;
+  --surface-2:#F2F4F7;
+  --ink:#14181D;
+  --ink-2:#3C4653;
+  --muted:#657181;
+  --line:#E1E5EB;
+  --line-strong:#C8D0DA;
+  --accent:#1F4E79;
+  --accent-soft:#E8EFF6;
+  --ok:#0F7B5F;      --ok-bg:#E4F2EC;
+  --warn:#B26A00;    --warn-bg:#FAF0DF;
+  --risk:#9A3B3B;    --risk-bg:#F8E9E9;
+  --shadow:0 1px 2px rgba(20,24,29,.05), 0 1px 12px rgba(20,24,29,.04);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E1116;
+    --surface:#151A21;
+    --surface-2:#1C232C;
+    --ink:#E8ECF1;
+    --ink-2:#BFC8D4;
+    --muted:#8C97A6;
+    --line:#252D37;
+    --line-strong:#39434F;
+    --accent:#7FB3E0;
+    --accent-soft:#16222E;
+    --ok:#5CC79E;      --ok-bg:#12271F;
+    --warn:#E0A94A;    --warn-bg:#2A2114;
+    --risk:#E08585;    --risk-bg:#2B1818;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 1px 14px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1116;
+  --surface:#151A21;
+  --surface-2:#1C232C;
+  --ink:#E8ECF1;
+  --ink-2:#BFC8D4;
+  --muted:#8C97A6;
+  --line:#252D37;
+  --line-strong:#39434F;
+  --accent:#7FB3E0;
+  --accent-soft:#16222E;
+  --ok:#5CC79E;      --ok-bg:#12271F;
+  --warn:#E0A94A;    --warn-bg:#2A2114;
+  --risk:#E08585;    --risk-bg:#2B1818;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 1px 14px rgba(0,0,0,.25);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}
+
+/* ── masthead ───────────────────────────────────────────────────────────── */
+.mast{padding:64px 0 40px;border-bottom:1px solid var(--line)}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:500;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--muted); margin:0 0 18px;
+}
+h1{
+  font-family:"IBM Plex Serif",Georgia,serif; font-weight:600;
+  font-size:clamp(34px,5vw,52px); line-height:1.08; letter-spacing:-.015em;
+  margin:0 0 18px; text-wrap:balance;
+}
+.standfirst{font-size:19px;line-height:1.6;color:var(--ink-2);max-width:64ch;margin:0 0 28px}
+.mast-meta{
+  display:flex;flex-wrap:wrap;gap:8px 28px;
+  font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+}
+.mast-meta b{color:var(--ink-2);font-weight:500}
+
+/* ── confidence chips ───────────────────────────────────────────────────── */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:500;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:2px 8px 2px 7px;border-radius:3px;white-space:nowrap;vertical-align:1px;
+}
+.chip::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.c-pub {color:var(--ok);  background:var(--ok-bg)}
+.c-meas{color:var(--accent);background:var(--accent-soft)}
+.c-inf {color:var(--warn);background:var(--warn-bg)}
+.c-unk {color:var(--risk);background:var(--risk-bg)}
+
+.legend{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;
+  margin:34px 0 0;
+}
+.legend > div{background:var(--surface);padding:14px 16px}
+.legend p{margin:8px 0 0;font-size:13.5px;line-height:1.5;color:var(--muted)}
+
+/* ── layout with contents rail ──────────────────────────────────────────── */
+.cols{display:block}
+@media(min-width:1040px){
+  .cols{display:grid;grid-template-columns:212px minmax(0,1fr);gap:56px;align-items:start}
+  .rail{position:sticky;top:32px;padding-top:56px}
+}
+.rail{display:none}
+@media(min-width:1040px){.rail{display:block}}
+.rail h2{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;
+}
+.rail ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
+.rail a{
+  display:grid;grid-template-columns:22px 1fr;gap:6px;align-items:baseline;
+  color:var(--ink-2);text-decoration:none;font-size:13.5px;line-height:1.35;
+  border-left:2px solid transparent;padding-left:0;transition:color .12s;
+}
+.rail a span{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+.rail a:hover{color:var(--accent)}
+.rail a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:2px}
+
+/* ── sections ───────────────────────────────────────────────────────────── */
+section{padding-top:56px;scroll-margin-top:24px}
+section > h2{
+  font-family:"IBM Plex Serif",Georgia,serif;font-weight:600;
+  font-size:27px;line-height:1.2;letter-spacing:-.012em;margin:0 0 6px;text-wrap:balance;
+}
+.sec-num{
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);display:block;margin-bottom:10px;
+}
+.dek{color:var(--muted);font-size:15px;margin:0 0 26px;max-width:68ch}
+p{max-width:68ch}
+h3{
+  font-family:"IBM Plex Sans",sans-serif;font-size:15px;font-weight:600;
+  letter-spacing:-.005em;margin:32px 0 10px;
+}
+h4{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--ink-2)}
+strong{font-weight:600}
+a{color:var(--accent)}
+code,.num{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:.92em;font-weight:500;
+}
+
+/* ── the flow spine ─────────────────────────────────────────────────────── */
+.flow{display:flex;flex-direction:column;gap:0;margin:8px 0 0}
+.stop{display:grid;grid-template-columns:44px minmax(0,1fr);gap:0}
+.stop-rail{position:relative;display:flex;justify-content:center}
+.stop-rail::before{
+  content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--line-strong);
+}
+.stop:first-child .stop-rail::before{top:18px}
+.stop:last-child .stop-rail::before{bottom:auto;height:18px}
+.dot{
+  position:relative;z-index:1;margin-top:8px;width:26px;height:26px;border-radius:50%;
+  background:var(--surface);border:2px solid var(--accent);color:var(--accent);
+  display:flex;align-items:center;justify-content:center;flex:none;
+  font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;
+}
+.stop-body{padding:0 0 26px 20px}
+.stop-title{font-family:"IBM Plex Sans";font-size:17px;font-weight:600;margin:8px 0 2px;letter-spacing:-.008em}
+.stop-who{
+  font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);
+  letter-spacing:.02em;margin:0 0 12px;
+}
+.stop-body p{margin:0 0 12px;font-size:14.5px;color:var(--ink-2)}
+.take{
+  background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:12px 14px;box-shadow:var(--shadow);
+}
+.take h4{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 8px;
+}
+.take ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
+.take li{
+  font-size:14px;line-height:1.45;display:grid;grid-template-columns:1fr auto;
+  gap:12px;align-items:baseline;
+}
+.take li > span:last-child{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-weight:500;white-space:nowrap;
+}
+.zero{color:var(--ok)}
+
+/* ── tables ─────────────────────────────────────────────────────────────── */
+.scroller{overflow-x:auto;margin:16px 0 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:14px}
+th,td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+thead th{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  background:var(--surface-2);border-bottom:1px solid var(--line-strong);white-space:nowrap;
+}
+tbody tr:last-child td{border-bottom:0}
+td.n,th.n{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+td.cur{font-weight:600;white-space:nowrap}
+tbody tr:hover{background:var(--surface-2)}
+
+/* ── worked example ledger ──────────────────────────────────────────────── */
+.journey{
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  box-shadow:var(--shadow);overflow:hidden;margin:0 0 22px;
+}
+.journey > header{padding:16px 18px 14px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.journey h3{margin:0 0 4px;font-size:16px}
+.journey header p{margin:0;font-size:13.5px;color:var(--muted);max-width:none}
+.ledger{margin:0;padding:6px 18px 14px;list-style:none;display:flex;flex-direction:column}
+.ledger li{
+  display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:12px;align-items:baseline;
+  padding:9px 0;border-bottom:1px dashed var(--line);font-size:14.5px;
+}
+.ledger li:last-child{border-bottom:0}
+.ledger .step{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+.ledger .amt{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-weight:500;white-space:nowrap;
+}
+.ledger .amt.neg{color:var(--risk)}
+.ledger .amt.pos{color:var(--ok)}
+.ledger li.total{
+  border-top:2px solid var(--line-strong);border-bottom:0;margin-top:4px;
+  padding-top:12px;font-weight:600;
+}
+.ledger small{display:block;color:var(--muted);font-size:12.5px;line-height:1.45;margin-top:2px}
+
+/* ── callouts ───────────────────────────────────────────────────────────── */
+.note{
+  border-left:3px solid var(--line-strong);padding:2px 0 2px 16px;margin:20px 0;
+  font-size:14.5px;color:var(--ink-2);
+}
+.note.flag{border-left-color:var(--risk)}
+.note.flag h4{color:var(--risk)}
+.note.hedge{border-left-color:var(--warn)}
+.note.hedge h4{color:var(--warn)}
+.note p{margin:0;max-width:66ch}
+.note p + p{margin-top:8px}
+blockquote{
+  margin:16px 0;padding:12px 0 12px 18px;border-left:3px solid var(--accent);
+  font-family:"IBM Plex Serif",Georgia,serif;font-size:15.5px;line-height:1.55;color:var(--ink-2);
+}
+blockquote p{margin:0;max-width:62ch}
+blockquote cite{
+  display:block;margin-top:8px;font-family:"IBM Plex Mono",monospace;font-style:normal;
+  font-size:11.5px;color:var(--muted);
+}
+
+/* ── source list ────────────────────────────────────────────────────────── */
+.sources{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0}
+.sources li{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:baseline;
+  padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;
+}
+.sources li:last-child{border-bottom:0}
+.sources code{font-size:12.5px;color:var(--ink-2);word-break:break-all}
+.sources span{font-size:13px;color:var(--muted);text-align:right}
+
+footer{
+  margin-top:72px;padding-top:24px;border-top:1px solid var(--line);
+  font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);
+}
+footer p{max-width:70ch;margin:0 0 8px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Payments teardown · Swellyo</p>
+  <h1>Where the money stops on its way to a WeTravel operator</h1>
+  <p class="standfirst">A traveller's payment passes through five holders before it reaches the operator's own bank account. Something is taken at four of them. This page lists every stop, every figure, and how firmly each figure is known.</p>
+  <div class="mast-meta">
+    <div>Researched <b>25 Aug 2026</b></div>
+    <div>Terms of Service dated <b>1 Dec 2025</b></div>
+    <div>Fee tables read from <b>wetravel.com</b> + <b>help.wetravel.com</b></div>
+  </div>
+
+  <div class="legend">
+    <div>
+      <span class="chip c-pub">Published</span>
+      <p>WeTravel states this number itself, on a pricing page, a help article or the Terms.</p>
+    </div>
+    <div>
+      <span class="chip c-meas">Measured</span>
+      <p>Read off a real checkout or account screen. Not published, but observed directly.</p>
+    </div>
+    <div>
+      <span class="chip c-inf">Inferred</span>
+      <p>A conclusion drawn from evidence, not stated anywhere. Could be wrong.</p>
+    </div>
+    <div>
+      <span class="chip c-unk">Not knowable</span>
+      <p>Genuinely undisclosed. Where you see this, assume a real cost with no published size.</p>
+    </div>
+  </div>
+</header>
+
+<div class="cols">
+
+<nav class="rail" aria-label="Contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#shape"><span>01</span>The shape of it</a></li>
+    <li><a href="#stops"><span>02</span>The five stops</a></li>
+    <li><a href="#in"><span>03</span>Money in, by method</a></li>
+    <li><a href="#fee"><span>04</span>The WeTravel fee</a></li>
+    <li><a href="#out"><span>05</span>Money out</a></li>
+    <li><a href="#journeys"><span>06</span>Three real journeys</a></li>
+    <li><a href="#invisible"><span>07</span>Costs on no table</a></li>
+    <li><a href="#frozen"><span>08</span>When it stops moving</a></li>
+    <li><a href="#back"><span>09</span>Money going backwards</a></li>
+    <li><a href="#ledger"><span>10</span>Confidence ledger</a></li>
+    <li><a href="#sources"><span>11</span>Sources</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ═══ 1 ═══════════════════════════════════════════════════════════════ -->
+<section id="shape">
+  <span class="sec-num">01</span>
+  <h2>The shape of it</h2>
+  <p class="dek">One sentence, then the detail.</p>
+
+  <p><strong>The traveller's money never lands in the operator's bank account. It lands in a wallet the operator holds inside WeTravel, and the operator has to pull it out.</strong></p>
+
+  <p>That single fact explains most of the rest of this page. It is why WeTravel can offer free instant supplier payments, why it can freeze an account, why the exchange rate is theirs to set, and why the operator's bank is the last stop rather than the first.</p>
+
+  <p>Two things follow that are easy to miss:</p>
+
+  <div class="note">
+    <h4>WeTravel holds no payments licence of its own.</h4>
+    <p>Searching the full Terms and Privacy Policy returns zero occurrences of "money transmitter", "merchant of record", "escrow" or "custody". Instead the Terms appoint WeTravel as the organizer's <em>"limited payment collection agent"</em> and state that on receipt <em>"the Traveler's payment obligation is extinguished."</em> That is the standard agent-of-payee exemption. It operates under its vendors' licences — Stripe, Airwallex, Corpay, Mangopay — not its own. <span class="chip c-pub">Published</span></p>
+  </div>
+
+  <div class="note">
+    <h4>There are four processors, not one.</h4>
+    <p>The Terms clause everyone quotes says payment services are <em>"<strong>among others</strong> provided by Stripe"</em>. Those two words are dropped by every second-hand summary. Airwallex and Corpay each get their own binding clause; Mangopay appears on the sub-processor list and nowhere else. <span class="chip c-pub">Published</span></p>
+  </div>
+</section>
+
+<!-- ═══ 2 ═══════════════════════════════════════════════════════════════ -->
+<section id="stops">
+  <span class="sec-num">02</span>
+  <h2>The five stops</h2>
+  <p class="dek">Follow one payment from a traveller's card to an operator's bank. Each stop is a different company holding the money.</p>
+
+  <div class="flow">
+
+    <div class="stop">
+      <div class="stop-rail"><div class="dot">1</div></div>
+      <div class="stop-body">
+        <p class="stop-title">The traveller's bank or card</p>
+        <p class="stop-who">Their own bank · Visa / Mastercard / Amex / a local rail</p>
+        <p>The traveller picks a currency at checkout — WeTravel prices trips in about 36 currencies and accepts payment in 19 to 21. Their default is guessed from their location.</p>
+        <div class="take">
+          <h4>Taken here</h4>
+          <ul>
+            <li><span>Foreign-transaction fee, if the charge currency isn't theirs</span><span>2–3% <span class="chip c-unk">Not knowable</span></span></li>
+          </ul>
+        </div>
+        <p style="margin-top:12px;font-size:13.5px">This one goes to their bank, not to WeTravel, and appears on no WeTravel screen. It is charged for real and the range is a common industry band, not a number anyone publishes per-traveller.</p>
+      </div>
+    </div>
+
+    <div class="stop">
+      <div class="stop-rail"><div class="dot">2</div></div>
+      <div class="stop-body">
+        <p class="stop-title">The processor</p>
+        <p class="stop-who">Stripe · Airwallex · Corpay (Cambridge Mercantile) for cross-border</p>
+        <p>Which one depends on the currency, and the seam is visible on the traveller's own bank statement: USD, EUR and GBP show a <code>WT*</code> prefix and settle on Stripe; AUD, CAD, HKD, SGD, MXN, PLN and a dozen more show no prefix and settle on Airwallex. Outbound international wires show as <code>Cambridge Mercantile Corp.</code></p>
+        <div class="take">
+          <h4>Taken here — the processing fee, passed through at WeTravel's published rates</h4>
+          <ul>
+            <li><span>Local bank rail (ACH, SEPA, iDEAL, BACS, BECS, PAD, SPEI)</span><span class="zero">0%</span></li>
+            <li><span>Visa / Mastercard, card issued locally</span><span>1.5% – 3.4%</span></li>
+            <li><span>Visa / Mastercard, card issued abroad</span><span>3.25% – 3.9%</span></li>
+            <li><span>American Express</span><span>2.9% – 3.9%</span></li>
+            <li><span>Incoming wire transfer</span><span>$25 / €25</span></li>
+          </ul>
+        </div>
+        <p style="margin-top:12px;font-size:13.5px">Full breakdown in <a href="#in">§03</a>. <span class="chip c-pub">Published</span></p>
+      </div>
+    </div>
+
+    <div class="stop">
+      <div class="stop-rail"><div class="dot">3</div></div>
+      <div class="stop-body">
+        <p class="stop-title">WeTravel's holding accounts</p>
+        <p class="stop-who">Wells Fargo · JPMorgan Chase, in WeTravel's name</p>
+        <p>The money is now pooled with every other operator's money in bank accounts WeTravel controls. The operator's balance is a line in WeTravel's ledger, not a segregated account.</p>
+        <div class="take">
+          <h4>Taken here</h4>
+          <ul>
+            <li><span>WeTravel booking fee, per transaction</span><span>rate + $0.30, min $1.50</span></li>
+            <li><span>Currency conversion, if any leg changes currency</span><span>stated $0.00 <span class="chip c-unk">Not knowable</span></span></li>
+          </ul>
+        </div>
+        <p style="margin-top:12px;font-size:13.5px">The Terms describe the position exactly: <em>"The Trip Organizer controls the funds… however… the Trip Organizer is not entitled to any of the Trip Cost without WeTravel's consent."</em> Nominal control, actual custody. <span class="chip c-pub">Published</span></p>
+      </div>
+    </div>
+
+    <div class="stop">
+      <div class="stop-rail"><div class="dot">4</div></div>
+      <div class="stop-body">
+        <p class="stop-title">The operator's WeTravel wallet</p>
+        <p class="stop-who">A balance inside WeTravel · one per currency, 23 currencies possible</p>
+        <p>Money sits here until the operator moves it. There is no automatic payout schedule — every payout is initiated by hand. From this wallet the operator can pay themselves, pay a supplier instantly and free, spend on a virtual Visa card, or convert between their own currencies.</p>
+        <div class="take">
+          <h4>Taken here</h4>
+          <ul>
+            <li><span>Holding the balance</span><span class="zero">nothing</span></li>
+            <li><span>Transfer to another verified WeTravel account (a supplier)</span><span class="zero">free, seconds</span></li>
+            <li><span>Convert between your own currency wallets</span><span>stated $0.00 <span class="chip c-unk">Not knowable</span></span></li>
+          </ul>
+        </div>
+        <p style="margin-top:12px;font-size:13.5px">This wallet is the actual product. Free instant supplier payment is only possible because WeTravel is holding both sides' money already — no bank rail is crossed. An operator who has moved their whole supply chain in here cannot leave without rebuilding it.</p>
+      </div>
+    </div>
+
+    <div class="stop">
+      <div class="stop-rail"><div class="dot">5</div></div>
+      <div class="stop-body">
+        <p class="stop-title">The operator's own bank</p>
+        <p class="stop-who">Local bank account · US debit card · international wire</p>
+        <p>The last stop, and the first point at which the money is unambiguously the operator's. Getting here requires full verification (<a href="#frozen">§08</a>) — most new accounts cannot do it at all for the first month.</p>
+        <div class="take">
+          <h4>Taken here</h4>
+          <ul>
+            <li><span>Local bank payout, USD — 1 business day</span><span class="zero">free</span></li>
+            <li><span>Local bank payout, EUR / CAD — 2–3 business days</span><span class="zero">free</span></li>
+            <li><span>Instant payout to linked US debit card — cap $3,000/day</span><span>1.5%, min $0.50</span></li>
+            <li><span>International wire — 3–5 business days</span><span>$15</span></li>
+            <li><span>Intermediary and beneficiary bank fees on that wire</span><span><span class="chip c-unk">Not knowable</span></span></li>
+          </ul>
+        </div>
+        <p style="margin-top:12px;font-size:13.5px">22 currencies have a free local rail. Everything else falls back to the $15 wire, and 48 currencies — including BRL, ARS and COP — cannot be wired at all. <span class="chip c-pub">Published</span></p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══ 3 ═══════════════════════════════════════════════════════════════ -->
+<section id="in">
+  <span class="sec-num">03</span>
+  <h2>Money in, by method</h2>
+  <p class="dek">Stop 2 in full. Every figure below is printed on WeTravel's own payment-processing page. <span class="chip c-pub">Published</span></p>
+
+  <div class="scroller">
+  <table>
+    <thead>
+      <tr>
+        <th>Trip currency</th>
+        <th>Local bank / instant rails</th>
+        <th class="n">Visa / MC</th>
+        <th class="n">Amex</th>
+        <th class="n">Wallets</th>
+        <th class="n">Card from abroad</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td class="cur">USD</td><td>ACH <span class="zero">0%</span> · wire $25</td><td class="n">2.9%</td><td class="n">3.9%</td><td class="n">3.3%</td><td class="n">3.9%</td></tr>
+      <tr><td class="cur">EUR</td><td>SEPA, iDEAL, Bancontact <span class="zero">0%</span> · Bizum, EPS, MB WAY 1% · P24 2% · wire €25</td><td class="n">1.5%</td><td class="n">2.9%</td><td class="n">2.0%</td><td class="n">3.25%</td></tr>
+      <tr><td class="cur">GBP</td><td>BACS <span class="zero">0%</span></td><td class="n">1.5%</td><td class="n">2.9%</td><td class="n">2.0%</td><td class="n">3.25%</td></tr>
+      <tr><td class="cur">AUD</td><td>BECS, PayTo <span class="zero">0%</span></td><td class="n">1.7%</td><td class="n">2.9%</td><td class="n">1.7%</td><td class="n">3.5%</td></tr>
+      <tr><td class="cur">CAD</td><td>PAD <span class="zero">0%</span></td><td class="n">2.7%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.7%</td></tr>
+      <tr><td class="cur">MXN</td><td>SPEI <span class="zero">0%</span></td><td class="n">2.9%</td><td class="n">3.4%</td><td class="n">2.9%</td><td class="n">3.9%</td></tr>
+      <tr><td class="cur">PLN</td><td>BLIK 1% · P24 2%</td><td class="n">1.5%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.25%</td></tr>
+      <tr><td class="cur">SEK</td><td>Swish 0.7%</td><td class="n">1.5%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.25%</td></tr>
+      <tr><td class="cur">CHF</td><td>TWINT 2.2%</td><td class="n">2.9%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.25%</td></tr>
+      <tr><td class="cur">SGD</td><td>PayNow 1%</td><td class="n">3.3%</td><td class="n">3.8%</td><td class="n">—</td><td class="n">3.8%</td></tr>
+      <tr><td class="cur">HKD</td><td>FPS 1%</td><td class="n">3.4%</td><td class="n">3.9%</td><td class="n">—</td><td class="n">3.9%</td></tr>
+      <tr><td class="cur">AED</td><td><em>coming soon</em></td><td class="n">2.9%</td><td class="n">3.8%</td><td class="n">—</td><td class="n">3.8%</td></tr>
+      <tr><td class="cur">NOK</td><td><em>coming soon</em></td><td class="n">2.4%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.25%</td></tr>
+      <tr><td class="cur">NZD</td><td><em>coming soon</em></td><td class="n">2.7%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.7%</td></tr>
+      <tr><td class="cur">JPY · TRY</td><td><em>coming soon</em></td><td class="n">3.4%</td><td class="n">3.9%</td><td class="n">—</td><td class="n">3.9%</td></tr>
+      <tr><td class="cur">CZK · DKK · HUF</td><td><em>coming soon</em></td><td class="n">1.5%</td><td class="n">2.9%</td><td class="n">—</td><td class="n">3.25%</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The two numbers that matter most</h3>
+  <p><strong>Local bank rails cost nothing.</strong> ACH, SEPA, iDEAL, BACS, BECS, PAD and SPEI are all 0%. On a $2,000 booking that is the difference between $0 and $58.</p>
+  <p><strong>A card issued in the wrong country costs roughly double.</strong> A European card paying a EUR trip is 1.5%. The same card paying a USD trip is 3.9% — and the traveller's own bank adds its foreign-transaction fee on top.</p>
+
+  <h3>How long each takes to clear</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Method</th><th class="n">Clears in</th></tr></thead>
+    <tbody>
+      <tr><td>All cards, Apple Pay, Google Pay</td><td class="n">instant</td></tr>
+      <tr><td>iDEAL, Bancontact, EPS, P24, MB WAY, Bizum, PayTo, TWINT, Swish, BLIK, FPS, SPEI, PayNow</td><td class="n">instant</td></tr>
+      <tr><td>Wire transfer</td><td class="n">1–5 business days</td></tr>
+      <tr><td>BECS direct debit (AUD)</td><td class="n">3–5 business days</td></tr>
+      <tr><td>ACH, SEPA, BACS, PAD direct debit</td><td class="n">5–7 business days</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="font-size:14px;color:var(--muted)">Counter-intuitive but correct: a wire clears faster than ACH.</p>
+
+  <div class="note hedge">
+    <h4>Not offered at all</h4>
+    <p>PayPal, Klarna, Affirm, Afterpay — there is no buy-now-pay-later anywhere in the product. Also absent: Pix, Boleto, OXXO, Multibanco, MobilePay, Alipay, WeChat Pay, Cash App Pay. <span class="chip c-pub">Published</span></p>
+  </div>
+</section>
+
+<!-- ═══ 4 ═══════════════════════════════════════════════════════════════ -->
+<section id="fee">
+  <span class="sec-num">04</span>
+  <h2>The WeTravel fee</h2>
+  <p class="dek">The one number WeTravel does not print. Here is what is known, and exactly how firmly.</p>
+
+  <p>Their pricing page lists every card rate in a neat table and then writes <strong>"+ WeTravel Booking Fee"</strong> with a <em>Learn more</em> link and no figure. The link goes to a sales-call form. Two facts are stated publicly and no more:</p>
+
+  <div class="take" style="max-width:520px;margin:16px 0">
+    <h4>Everything WeTravel publishes about its own fee</h4>
+    <ul>
+      <li><span>Charged per transaction, not per booking</span><span><span class="chip c-pub">Published</span></span></li>
+      <li><span>Minimum</span><span>$1.50 USD <span class="chip c-pub">Published</span></span></li>
+    </ul>
+  </div>
+
+  <h3>What the shape is, from three real observations</h3>
+  <p>Three live checkouts — one on a third-party operator's public page, two on a demo account — resolve the formula, if not the rate:</p>
+
+  <div class="scroller">
+  <table>
+    <thead>
+      <tr><th>Charge observed</th><th class="n">Fee shown</th><th class="n">1% + $0.30</th><th class="n">2% + $0.30</th><th class="n">min $1.50</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>$1,000 deposit, third-party live trip</td><td class="n">$20.30</td><td class="n">$10.30</td><td class="n"><strong>$20.30 ✓</strong></td><td class="n">—</td></tr>
+      <tr><td>$150, demo account</td><td class="n">$1.80</td><td class="n"><strong>$1.80 ✓</strong></td><td class="n">$3.30</td><td class="n">—</td></tr>
+      <tr><td>$100, demo account</td><td class="n">$1.50</td><td class="n">$1.30 → floored</td><td class="n">$2.30</td><td class="n"><strong>$1.50 ✓</strong></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Three for three. The fee is <code>max($1.50, rate × amount + $0.30)</code>, charged on every transaction. <span class="chip c-meas">Measured</span></p>
+
+  <div class="note hedge">
+    <h4>The rate itself is account-dependent, and the mapping is a guess.</h4>
+    <p>1% on the demo account, 2% on the third-party account. Public secondary sources describe it as "as low as 1% + $0.30", which points at <strong>1% for Pro, 2% for Basic</strong> — but nobody states that, and it could just as easily be negotiated per account or scaled by volume. <span class="chip c-inf">Inferred</span></p>
+    <p>Treat any total that includes this rate as a range: the same trip costs twice as much on one account as the other.</p>
+  </div>
+
+  <h3>Payment plans split the fee, they don't avoid it</h3>
+  <p>On the $4,900 trip observed above, the $1,000 deposit carried $20.30 and the $3,900 balance carries $78.30 on the same formula — <strong>$98.60 total</strong>. A four-installment plan pays the $0.30 four times instead of once. Whether the $1.50 minimum bites depends on the rate: at 2% it never does above $60, but on a 1% account a plan of ten $80 payments is floored to $1.50 each &mdash; <strong>$15.00</strong> &mdash; where the same $800 paid in one go costs <strong>$8.30</strong>. Splitting a small trip into many installments can nearly double the fee.</p>
+
+  <h3>Who pays it is a per-trip switch</h3>
+  <p>Trip Builder ▸ Settings has two independent radio pairs: <em>payment fees paid by organizer / participant</em>, and <em>WeTravel fee paid by organizer / participant</em>. Either or both can be passed to the traveller. To the traveller the WeTravel fee is labelled <strong>Service Fee</strong>; the processing fee only appears once they pick a card or wire — local bank rails add nothing, so nothing is shown. <span class="chip c-pub">Published</span></p>
+
+  <p>No WeTravel fee is charged on incoming wires, on cash or external payments, or on the act of setting up a payment plan.</p>
+
+  <h3>Plans</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Plan</th><th class="n">Price</th><th>What it gates</th></tr></thead>
+    <tbody>
+      <tr><td class="cur">Basic</td><td class="n">$0</td><td>Accepting payments, multi-currency checkout, payment plans, auto-billing, refunds, discount codes, waitlists</td></tr>
+      <tr><td class="cur">Pro</td><td class="n">$79 / mo</td><td>Payments dashboard, Cash Flow report, Upcoming Payments, tax lines, contribution pages, QuickBooks export. Per organization, unlimited seats, 60-day trial</td></tr>
+      <tr><td class="cur">Enterprise</td><td class="n">custom</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ═══ 5 ═══════════════════════════════════════════════════════════════ -->
+<section id="out">
+  <span class="sec-num">05</span>
+  <h2>Money out</h2>
+  <p class="dek">Stops 4 and 5 in full — four ways out of the wallet, with very different economics.</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Route</th><th>Goes to</th><th class="n">Fee</th><th class="n">Speed</th></tr></thead>
+    <tbody>
+      <tr><td>Standard payout, local bank</td><td>Your own bank, USD</td><td class="n zero">free</td><td class="n">1 business day</td></tr>
+      <tr><td>Standard payout, local bank</td><td>Your own bank, EUR / CAD</td><td class="n zero">free</td><td class="n">2–3 business days</td></tr>
+      <tr><td>Instant payout</td><td>Linked US debit card</td><td class="n">1.5%, min $0.50</td><td class="n">seconds – 30 min</td></tr>
+      <tr><td>International wire</td><td>Any bank, 10 saved beneficiaries max</td><td class="n">$15 + bank fees</td><td class="n">3–5 business days</td></tr>
+      <tr><td>Supplier transfer</td><td>Another WeTravel account</td><td class="n zero">free</td><td class="n">seconds</td></tr>
+      <tr><td>WeTravel Visa card</td><td>Anywhere Visa is accepted</td><td class="n">no annual or issuance fee</td><td class="n">immediate</td></tr>
+      <tr><td>Convert between wallets</td><td>Your own other currency</td><td class="n">stated $0.00</td><td class="n">immediate</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>The constraints that bite</h3>
+  <ul style="max-width:68ch;font-size:15px;line-height:1.65">
+    <li><strong>Instant payout is unavailable on a first-time payout account</strong>, needs a real US debit card linked to an active local bank, and rejects prepaid cards. Capped at $3,000 a day.</li>
+    <li><strong>A local USD payout needs an SSN or EIN.</strong> Without either, wire is the only route out. Stripe is legally required to identity-check the operator once cumulative payouts pass "a few thousand dollars", which can stall a first large payout by days.</li>
+    <li><strong>Wires are irreversible</strong> — <em>"once you submit the wire transfer, you will not be able to cancel it"</em> — must go to an account in the operator's own business name, and are capped at $500,000 a day.</li>
+    <li><strong>Supplier transfers need both sides independently verified.</strong> Free and instant, but only inside the network.</li>
+    <li><strong>Conversion has floors and a ceiling:</strong> roughly 20 units minimum for majors, 2,000 for JPY and HUF, and 300,000 USD-equivalent per day.</li>
+  </ul>
+
+  <div class="note">
+    <h4>Connecting your own Stripe account turns four products off</h4>
+    <p>WeTravel offers a mode where funds go straight to the operator's own Stripe account and <em>"WeTravel has no visibility or access."</em> Choosing it disables international wire, the WeTravel Card, supplier transfers and multi-currency checkout — which proves those four run on WeTravel's own aggregated merchant accounts rather than passing through. <span class="chip c-pub">Published</span></p>
+  </div>
+</section>
+
+<!-- ═══ 6 ═══════════════════════════════════════════════════════════════ -->
+<section id="journeys">
+  <span class="sec-num">06</span>
+  <h2>Three real journeys</h2>
+  <p class="dek">The same figures, applied end to end. Booking fee shown at 2% + $0.30 — the higher observed rate; halve it for a 1% account. The numbers down the left of each ledger are the stops from §02, so a missing number means nothing was taken there.</p>
+
+  <div class="journey">
+    <header>
+      <h3>The cheap one — everything local</h3>
+      <p>$2,000 Bali trip priced in USD · US traveller pays by ACH · US operator, local USD payout · deposit + 3 installments</p>
+    </header>
+    <ol class="ledger">
+      <li><span class="step">1</span><span>Traveller pays $500 × 4 by ACH<small>Own currency, own country — no foreign-transaction fee.</small></span><span class="amt">$2,000.00</span></li>
+      <li><span class="step">2</span><span>Processing fee — ACH is free<small>Local bank rail, 0%.</small></span><span class="amt zero">−$0.00</span></li>
+      <li><span class="step">3</span><span>WeTravel fee, 4 × (2% of $500 + $0.30)<small>$10.30 each. Charged per transaction, so the plan pays $0.30 four times.</small></span><span class="amt neg">−$41.20</span></li>
+      <li><span class="step">5</span><span>Local USD payout<small>Free, next business day.</small></span><span class="amt zero">−$0.00</span></li>
+      <li class="total"><span></span><span>Operator receives<small>Total cost 2.06% of the trip. On a 1% account it would be $21.20, or 1.06%.</small></span><span class="amt">$1,958.80</span></li>
+    </ol>
+  </div>
+
+  <div class="journey">
+    <header>
+      <h3>The one the multi-currency trick fixes</h3>
+      <p>€1,800 Portugal trip · Portuguese traveller · paid in full · operator has a local EUR payout account</p>
+    </header>
+    <ol class="ledger">
+      <li><span class="step">1</span><span>Traveller pays by MB WAY, in euros<small>Instant. Their own currency, so their bank adds nothing.</small></span><span class="amt">€1,800.00</span></li>
+      <li><span class="step">2</span><span>MB WAY processing, 1%<small>A Stripe-only method — this leg is on the Stripe book.</small></span><span class="amt neg">−€18.00</span></li>
+      <li><span class="step">3</span><span>WeTravel fee, 2% + €0.30<small>Charged once, because the trip was paid once.</small></span><span class="amt neg">−€36.30</span></li>
+      <li><span class="step">5</span><span>Local EUR payout<small>Free, 2–3 business days.</small></span><span class="amt zero">−€0.00</span></li>
+      <li class="total"><span></span><span>Operator receives<small>Total cost 3.02%.</small></span><span class="amt">€1,745.70</span></li>
+    </ol>
+    <div style="padding:0 18px 18px">
+      <div class="note" style="margin:0">
+        <h4>The same traveller on a USD-priced trip</h4>
+        <p>Their euro card paying a dollar trip is a "card from abroad" — <strong>3.9%</strong> rather than 1.5%, on roughly $1,950. That is about <strong>$76</strong> of processing instead of €27, plus their own bank's foreign-transaction fee of <strong>2–3%</strong> — another <strong>$40–60</strong> that never appears on the checkout page and lands on their statement weeks later. Pricing the trip in euros is worth roughly <strong>$85–105</strong> on a single booking. <span class="chip c-pub">Published</span> <span class="chip c-unk">bank fee not knowable</span></p>
+      </div>
+    </div>
+  </div>
+
+  <div class="journey">
+    <header>
+      <h3>The expensive one — money has to cross a border</h3>
+      <p>$2,000 trip priced in USD · US traveller pays by Visa · Indonesian operator, no local IDR rail, wires out</p>
+    </header>
+    <ol class="ledger">
+      <li><span class="step">1</span><span>Traveller pays in full by Visa<small>Instant.</small></span><span class="amt">$2,000.00</span></li>
+      <li><span class="step">2</span><span>Visa / Mastercard on a USD trip, 2.9%<small>Domestic card, domestic currency — the cheaper of the two card rates.</small></span><span class="amt neg">−$58.00</span></li>
+      <li><span class="step">3</span><span>WeTravel fee, 2% + $0.30</span><span class="amt neg">−$40.30</span></li>
+      <li><span class="step">5</span><span>International wire out<small>3–5 business days, irreversible.</small></span><span class="amt neg">−$15.00</span></li>
+      <li><span class="step">5</span><span>Intermediary and beneficiary bank fees<small>Charged by the correspondent banks, not WeTravel. Real, and no published size.</small></span><span class="amt neg">−?</span></li>
+      <li><span class="step">5</span><span>USD → IDR at WeTravel's own rate<small>Shown as a $0.00 fee. The margin lives inside the exchange rate. See §07.</small></span><span class="amt neg">−?</span></li>
+      <li class="total"><span></span><span>Operator receives, before the two unknowns<small>Stated cost $113.30, or 5.67%. The true figure is higher and cannot be calculated from published numbers.</small></span><span class="amt">$1,886.70</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ═══ 7 ═══════════════════════════════════════════════════════════════ -->
+<section id="invisible">
+  <span class="sec-num">07</span>
+  <h2>The costs that appear on no table</h2>
+  <p class="dek">Two of them, and between them they can exceed every published fee combined.</p>
+
+  <h3>The exchange-rate spread</h3>
+  <p>Currency conversion is advertised as free, and the Transaction Report literally logs the fee as <code>0</code>. The margin is not in a fee line — it is in the rate. The Terms describe the mechanism plainly:</p>
+
+  <blockquote>
+    <p>WeTravel updates the base exchange rate on a regular basis, but not on a real-time basis. In particular, WeTravel does not always change the base exchange rate immediately when its costs of foreign exchange change. Accordingly, the base exchange rate may not be identical to the applicable market rate in effect at the specific time a foreign currency conversion is processed.</p>
+    <cite>WeTravel Terms of Service, 1 Dec 2025</cite>
+  </blockquote>
+
+  <p>WeTravel sets its own rate, refreshes it when it chooses, and keeps the gap. There is no percentage anywhere in the Terms — a full-text search of all 83,000 characters returns zero <code>%</code> figures. <span class="chip c-pub">Published mechanism</span> <span class="chip c-unk">Size not knowable</span></p>
+
+  <p>Conversion is triggered in four situations, per the Terms: the display currency differs from the listing currency; the booking currency differs from the listing currency; <strong>the payout currency differs from the listing currency</strong>; or a booking that already involved a conversion is modified or cancelled.</p>
+
+  <div class="note flag">
+    <h4>One measured data point, and it is not small</h4>
+    <p>An operator on Trustpilot (Apr 2025) measured <strong>€250 of hidden cost on a transfer whose stated fee was €41</strong> — the undisclosed part being six times the disclosed part. This is one review, self-reported, with no invoice attached. It is the only quantified figure that exists publicly, and it should be treated as an anecdote that establishes an order of magnitude, not as a rate. <span class="chip c-unk">Single unverified report</span></p>
+  </div>
+
+  <h3>Corpay's own charges</h3>
+  <p>The Terms hand the cross-border leg to Corpay and then say its costs are billed separately:</p>
+
+  <blockquote>
+    <p>Cross-border transactions processed by Corpay may involve compliance with international payment regulations, foreign exchange adjustments, and banking network fees that vary by jurisdiction. Such charges are assessed directly by Corpay (Fleetcor) and its partners.</p>
+    <cite>WeTravel Terms of Service, 1 Dec 2025</cite>
+  </blockquote>
+
+  <p>This is how banking-network costs reach the operator without ever appearing on WeTravel's published fee table. <strong>The published percentages do not describe the full cost of a cross-border payment.</strong> <span class="chip c-pub">Published mechanism</span> <span class="chip c-unk">Size not knowable</span></p>
+</section>
+
+<!-- ═══ 8 ═══════════════════════════════════════════════════════════════ -->
+<section id="frozen">
+  <span class="sec-num">08</span>
+  <h2>When the money stops moving</h2>
+  <p class="dek">Three separate mechanisms hold funds, and only one of them requires a reason.</p>
+
+  <h3>Verification — the gate most new operators hit first</h3>
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Level</th><th>Documents</th><th>Unlocks</th></tr></thead>
+    <tbody>
+      <tr><td class="cur">1 — Supplier</td><td>Government ID + selfie</td><td>Receive transfers only</td></tr>
+      <tr><td class="cur">2 — Trusted Partner</td><td>+ proof of address, business registration, website or socials</td><td>Listed in the Partner Hub, eligible for the WeTravel Card</td></tr>
+      <tr><td class="cur">3 — Trip Organizer</td><td>+ travel registration details</td><td>Collect money from travellers</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Submission takes 5–15 minutes, review up to 3 business days, and each level is a separate process. <strong>WeTravel describes "partial approval" as the most common outcome for new users</strong> — and partial approval blocks international wire, the Card and supplier transfers outright. The exit is to wait until 30 days after the first trip has completed and then email support. It is not automated.</p>
+  <div class="note hedge">
+    <p>For a brand-new operator that is functionally escrow past the departure date. WeTravel never calls it that, and it is not written as a policy — it is the practical effect of the verification flow. <span class="chip c-inf">Inferred from their own help text</span></p>
+  </div>
+
+  <h3>Risk holds — up to 30 days, sometimes 180</h3>
+  <blockquote>
+    <p>Risk-based holds generally remain in place for up to 30 days from the date the payment was received… The hold may last longer than 30 days if the payment is deemed fraudulent and/or results in a disputed transaction or chargeback. In this case, we'll hold the payment until the matter is resolved (but no longer than 180 days).</p>
+    <cite>WeTravel Terms of Service</cite>
+  </blockquote>
+  <p>Held funds stay in the balance and can still be used to issue refunds — they just cannot be paid out. The stated inputs are fraud warnings, <strong>account tenure</strong>, transaction activity, <strong>business type</strong>, past disputes and customer satisfaction. <span class="chip c-pub">Published</span></p>
+
+  <h3>The suspension clause — no cause, no notice, no explanation</h3>
+  <blockquote>
+    <p>We may, in our discretion and without liability to you, <strong>with or without cause, with or without prior notice and at any time</strong>, decide to limit, suspend, deactivate or delete your WeTravel Account… <strong>(c) we may temporarily place a hold on your account equivalent to total payments for upcoming and future trips</strong>, expected amount of refunds, or potential chargeback amounts… (e) we may refund your Travelers in full for any and all confirmed reservations, <strong>irrespective of preexisting cancellation policies</strong>… (g) you will not be entitled to any compensation for reservations or bookings (even if confirmed) that were cancelled.</p>
+    <cite>WeTravel Terms of Service, "Suspension, Termination and Account Deletion"</cite>
+  </blockquote>
+  <p>This is not a standing rolling reserve. It is a discretionary hold triggered by suspension, and its ceiling is every payment collected for every upcoming trip. It is the contractual mechanism behind the "they froze our money with no explanation" reviews, and it reads exactly as it operates. <span class="chip c-pub">Published, verbatim</span></p>
+</section>
+
+<!-- ═══ 9 ═══════════════════════════════════════════════════════════════ -->
+<section id="back">
+  <span class="sec-num">09</span>
+  <h2>Money going backwards</h2>
+  <p class="dek">Refunds and chargebacks are where the operator, not WeTravel, absorbs the loss.</p>
+
+  <h3>Refunds</h3>
+  <ul style="max-width:68ch;font-size:15px;line-height:1.65">
+    <li>The traveller always receives the full amount they paid.</li>
+    <li>The <strong>card processing fee is not recovered</strong> — it comes out of the operator's balance and is gone. On a $2,000 card booking that is $58 lost on a refunded trip.</li>
+    <li>Refunds land in 5–10 business days and cannot be reversed.</li>
+    <li>Bank rails hard-stop at <strong>180 days</strong> after payment; 90 days for PIX, PayNow and BECS. After that a refund cannot be issued through the original rail at all.</li>
+  </ul>
+
+  <div class="note flag">
+    <h4>An unresolved contradiction about the booking fee</h4>
+    <p>The help centre says WeTravel refunds its own fee on a refund. The Terms of Service say <em>"The Service Fee is always non-refundable."</em> Both statements are WeTravel's own, and they cannot both be true as written.</p>
+    <p>The most likely reading is that the help centre describes current practice and the Terms reserve the right to change it — but that is a guess. On a $2,000 refunded booking the difference is about $40. <span class="chip c-unk">Unresolved</span></p>
+  </div>
+
+  <h3>Chargebacks — the operator carries all of it</h3>
+  <blockquote>
+    <p>When a Traveler files a dispute or chargeback with their bank, the Trip Organizer agrees that the full amount of the Trip Cost… will be automatically deducted from the WeTravel account… It typically takes up to 60 to 80 business days for the bank to come to a resolution… During this time, the funds are also temporarily returned to the Traveler.</p>
+    <cite>WeTravel Terms of Service</cite>
+  </blockquote>
+  <p><strong>60–80 <em>business</em> days is three to four months.</strong> The Terms also state the organizer is <em>"fully liable to WeTravel for the full amount of all disputes or chargebacks… including any relevant costs and fines"</em>, and:</p>
+  <blockquote>
+    <p>We reserve the right to debit your connected bank account in the event that your WeTravel account balance becomes negative. This happens when disputes are more than the balance in your account.</p>
+    <cite>WeTravel Terms of Service</cite>
+  </blockquote>
+  <p>So the exposure is not capped by the wallet. <span class="chip c-pub">Published</span></p>
+
+  <div class="note hedge">
+    <h4>Why the operator carries it — inferred, not stated</h4>
+    <p>WeTravel's verification article refers to connecting <em>"a Stripe Standard account"</em> and the Terms bind the operator to the <em>Stripe Connected Account Agreement</em>. In Stripe's model a Standard connected account is itself the merchant of record and carries dispute liability. That reading matches the dispute policy exactly — but WeTravel never uses the phrase "merchant of record" anywhere, so the mechanism is inferred from two adjacent facts. <span class="chip c-inf">Inferred</span></p>
+  </div>
+
+  <h3>There are no cancellation policy tiers</h3>
+  <p>WeTravel has no structured cancellation policy feature. The policy is freeform text in the trip description, and the platform default when nothing is written is: <em>"All payments paid through WeTravel are non-refundable."</em> There is also no late fee anywhere in the product, and no automatic retry on a failed installment — a missed payment is simply added to the next one. <span class="chip c-pub">Published</span></p>
+</section>
+
+<!-- ═══ 10 ═══════════════════════════════════════════════════════════════ -->
+<section id="ledger">
+  <span class="sec-num">10</span>
+  <h2>Confidence ledger</h2>
+  <p class="dek">Every claim on this page, sorted by how firmly it is known. Read the bottom two rows before quoting any total.</p>
+
+  <div class="scroller">
+  <table>
+    <thead><tr><th>Claim</th><th>Basis</th><th class="n">Confidence</th></tr></thead>
+    <tbody>
+      <tr><td>All processing percentages by currency and method</td><td>Printed on WeTravel's payment-processing page</td><td class="n"><span class="chip c-pub">Published</span></td></tr>
+      <tr><td>All payout fees, speeds, caps and currency lists</td><td>help.wetravel.com articles, cited in §11</td><td class="n"><span class="chip c-pub">Published</span></td></tr>
+      <tr><td>Pro at $79/mo; booking fee min $1.50, per transaction</td><td>Pricing page</td><td class="n"><span class="chip c-pub">Published</span></td></tr>
+      <tr><td>Four processors: Stripe, Airwallex, Corpay, Mangopay</td><td>Terms of Service + the sub-processor list</td><td class="n"><span class="chip c-pub">Published</span></td></tr>
+      <tr><td>Every quoted clause on holds, disputes and suspension</td><td>Read verbatim in a browser from the Terms</td><td class="n"><span class="chip c-pub">Published</span></td></tr>
+      <tr><td>WeTravel holds no payments licence; operates as agent of payee</td><td>Its own drafting, plus registry checks in NMLS, FCA, DNB, CBI</td><td class="n"><span class="chip c-pub">Published</span></td></tr>
+      <tr><td>The booking fee is <code>rate × amount + $0.30</code>, floored at $1.50</td><td>Three live checkouts, three matches</td><td class="n"><span class="chip c-meas">Measured</span></td></tr>
+      <tr><td>Which processor handles which currency</td><td>Bank-statement descriptors, plus method exclusivity — MB WAY is Stripe-only, FPS is Airwallex-only</td><td class="n"><span class="chip c-meas">Measured</span></td></tr>
+      <tr><td>1% = Pro, 2% = Basic</td><td>Two observed rates plus a secondary source saying "as low as 1%"</td><td class="n"><span class="chip c-inf">Inferred</span></td></tr>
+      <tr><td>The operator is merchant of record</td><td>"Stripe Standard account" + Connected Account Agreement</td><td class="n"><span class="chip c-inf">Inferred</span></td></tr>
+      <tr><td>Partial approval functions as departure-date escrow</td><td>The effect of the documented flow, never stated as policy</td><td class="n"><span class="chip c-inf">Inferred</span></td></tr>
+      <tr><td>The size of the FX spread</td><td>Nothing. One anecdotal €250-on-€41 report</td><td class="n"><span class="chip c-unk">Not knowable</span></td></tr>
+      <tr><td>Corpay's own cross-border charges</td><td>Terms confirm they exist and are billed separately. No figure anywhere</td><td class="n"><span class="chip c-unk">Not knowable</span></td></tr>
+      <tr><td>Intermediary bank fees on an outbound wire</td><td>Set by correspondent banks, not by WeTravel</td><td class="n"><span class="chip c-unk">Not knowable</span></td></tr>
+      <tr><td>The traveller's own foreign-transaction fee</td><td>Set by their bank. 2–3% is the common band, not a WeTravel figure</td><td class="n"><span class="chip c-unk">Not knowable</span></td></tr>
+      <tr><td>Whether WeTravel refunds its own fee</td><td>Help centre and Terms directly contradict each other</td><td class="n"><span class="chip c-unk">Unresolved</span></td></tr>
+      <tr><td>What Mangopay does</td><td>On the sub-processor list, named nowhere else</td><td class="n"><span class="chip c-unk">Unresolved</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note flag">
+    <h4>The honest summary</h4>
+    <p>Every published percentage on this page is solid. The three costs that decide whether a cross-border booking is cheap or expensive — the FX spread, Corpay's charges and the correspondent bank fees — are all undisclosed. That is not an oversight in the research; it is the design of the pricing.</p>
+  </div>
+</section>
+
+<!-- ═══ 11 ═══════════════════════════════════════════════════════════════ -->
+<section id="sources">
+  <span class="sec-num">11</span>
+  <h2>Sources</h2>
+  <p class="dek">Read 25 Aug 2026. One access note first, because it explains why most public summaries of WeTravel's terms are wrong.</p>
+
+  <div class="note">
+    <p><code>www.wetravel.com/*</code> returns <strong>HTTP 403</strong> to every automated fetcher but loads normally in a browser. The same legal documents are served at <code>product.wetravel.com/about-us/*</code> with <strong>HTTP 200</strong>. Summaries built by crawlers therefore miss the Terms entirely — which is how the words "among others" got dropped from the Stripe clause everywhere it is quoted.</p>
+  </div>
+
+  <ul class="sources">
+    <li><code>wetravel.com/terms</code><span>Terms of Service, 1 Dec 2025 — read in browser</span></li>
+    <li><code>product.wetravel.com/about-us/sub-processors</code><span>The full vendor list</span></li>
+    <li><code>product.wetravel.com/about-us/terms</code><span>Same Terms, fetchable</span></li>
+    <li><code>product.wetravel.com/wetravel-card</code><span>Card, Stripe + Celtic Bank</span></li>
+    <li><code>help.wetravel.com/en/articles/434422</code><span>Pricing and fee tables</span></li>
+    <li><code>help.wetravel.com/en/articles/414993</code><span>"Stripe and Airwallex"</span></li>
+    <li><code>help.wetravel.com/en/articles/419857</code><span>Bank statement descriptors</span></li>
+    <li><code>help.wetravel.com/en/articles/1619345</code><span>Verification levels, Persona</span></li>
+    <li><code>help.wetravel.com/en/articles/415019</code><span>Wells Fargo / JPMorgan custody</span></li>
+    <li><code>help.wetravel.com/en/articles/773162</code><span>USD payout accounts</span></li>
+    <li><code>help.wetravel.com/en/articles/1788593</code><span>EUR payout accounts</span></li>
+    <li><code>help.wetravel.com/en/articles/2390174</code><span>CAD payout accounts</span></li>
+    <li><code>help.wetravel.com/en/articles/6049882</code><span>Instant USD payouts</span></li>
+    <li><code>help.wetravel.com/en/articles/6926526</code><span>Initiating a wire transfer</span></li>
+    <li><code>help.wetravel.com/en/articles/419852</code><span>Adding a wire beneficiary</span></li>
+    <li><code>help.wetravel.com/en/articles/3456081</code><span>Supplier transfers</span></li>
+    <li><code>help.wetravel.com/en/articles/9039078</code><span>Converting currencies</span></li>
+    <li><code>help.wetravel.com/en/articles/3347411</code><span>WeTravel Card FAQ</span></li>
+    <li><code>help.wetravel.com/en/articles/14594381</code><span>Business Payment Request</span></li>
+    <li><code>help.wetravel.com/en/articles/12691807</code><span>Wire is processed by Stripe</span></li>
+    <li><code>academy.wetravel.com/wetravel-vendor-transfers</code><span>The vendor transfer pitch</span></li>
+    <li><code>wetravel.com/checkout_embed?uuid=5025737802</code><span>Third-party live checkout — the $20.30 observation</span></li>
+  </ul>
+
+  <p style="margin-top:22px;font-size:14px;color:var(--muted)">Licences held by the vendors, not by WeTravel: Stripe Payments Company NMLS #1280479 · Airwallex US NMLS #1928093 · Airwallex Netherlands DNB EMI R179622 · Mangopay CSSF EMI · Corpay FCA FRN 900702 · Celtic Bank FDIC cert 57056. WeTravel, Inc. is a Delaware company, SEC CIK 0001655178; a Form D filed 24 Sep 2025 records $52,204,843 raised and fully sold.</p>
+</section>
+
+<footer>
+  <p>Built from primary-source research conducted 25 Aug 2026 for the Swellyo operator-payments work. Figures are as published on that date and WeTravel changes them without notice.</p>
+  <p>Where this page says a number is not knowable, that means it was looked for and is not published — not that it was skipped.</p>
+</footer>
+
+</main>
+</div>
+</div>

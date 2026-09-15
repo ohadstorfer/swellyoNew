@@ -48,6 +48,7 @@ import {
   type SetupStepKey,
 } from '../domain/operatorSetup';
 import { PRESET_LABEL, summarise } from '../domain/cancellation';
+import { IS_DRAFT, LAST_REVIEWED, SECTIONS } from '../domain/operatorAgreement';
 
 export function SetupPage() {
   const { user } = useAuth();
@@ -150,7 +151,7 @@ export function SetupPage() {
     );
 
   if (loading) return <Loading />;
-  if (error) return <ErrorBox error={error} onRetry={load} />;
+  if (error) return <ErrorBox what="Your setup" error={error} onRetry={load} />;
 
   return (
     <>
@@ -328,10 +329,13 @@ export function SetupPage() {
 
       {/* ── 6. Terms ──────────────────────────────────────────────────── */}
       <StepCard n={6} step={byKey.terms}>
-        {/* ⚠️ NO TERMS DOCUMENT EXISTS YET, and nothing is invented to fill the
-            space. Placeholder legal text is the one kind of placeholder that
-            gets mistaken for the real thing. The panel says so plainly, and the
-            checkbox says what it actually records. */}
+        {/* The same summary the app shows, from the same document
+            (domain/operatorAgreement.ts). It is a description of the deal the
+            code already implements, not a contract, and it says so first —
+            see the header of that file for why a described deal beats both an
+            empty panel and invented clauses. The two surfaces must show the
+            same words and record the same version, or agreeing here leaves the
+            step unfinished on the phone. */}
         <div
           style={{
             border: '1px solid var(--line)',
@@ -339,19 +343,43 @@ export function SetupPage() {
             background: 'var(--panel)',
             padding: 14,
             marginBottom: 12,
+            maxHeight: 360,
+            overflowY: 'auto',
           }}
         >
-          <strong style={{ display: 'block', marginBottom: 6 }}>
-            The terms are not published yet
-          </strong>
-          <p className="muted small" style={{ marginBottom: 8 }}>
-            Swellyo is still writing the operator terms. This panel is where they
-            will appear.
-          </p>
-          <p className="muted small">
-            Agreeing now records that you accept the terms once they are
-            published. You will be asked again when they are, so you can read
-            them before anything is binding.
+          {IS_DRAFT && (
+            <div
+              style={{
+                border: '1px solid var(--warn-line, var(--line))',
+                borderRadius: 'var(--r)',
+                background: 'var(--warn-bg, transparent)',
+                padding: '10px 12px',
+                marginBottom: 14,
+              }}
+            >
+              <strong style={{ display: 'block', marginBottom: 4 }}>
+                This is a summary, not the final contract
+              </strong>
+              <p className="muted small" style={{ margin: 0 }}>
+                It describes how Swellyo works today, in plain language, so you can
+                see the arrangement before the formal agreement is written. The full
+                legal document is being drafted — you will be asked to read and
+                accept it when it is ready.
+              </p>
+            </div>
+          )}
+          {SECTIONS.map(section => (
+            <section key={section.heading} style={{ marginBottom: 14 }}>
+              <strong style={{ display: 'block', marginBottom: 4 }}>{section.heading}</strong>
+              {section.paragraphs.map(p => (
+                <p key={p} className="small" style={{ margin: '0 0 6px' }}>
+                  {p}
+                </p>
+              ))}
+            </section>
+          ))}
+          <p className="muted small" style={{ margin: 0 }}>
+            Last reviewed {LAST_REVIEWED}
           </p>
         </div>
 
@@ -374,8 +402,9 @@ export function SetupPage() {
                 style={{ marginTop: 3 }}
               />
               <span className="small">
-                I agree to Swellyo's operator terms, and to review them when they
-                are published.
+                {IS_DRAFT
+                  ? 'I agree to Swellyo’s operator terms as summarised here, and to review the full agreement when it is published.'
+                  : 'I agree to Swellyo’s operator terms.'}
               </span>
             </label>
             <button

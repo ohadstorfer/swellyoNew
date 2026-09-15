@@ -1,0 +1,1347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eighteen Gaps to Close</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --ground:      #F3F6F6;
+    --panel:       #FFFFFF;
+    --sunk:        #F8FBFB;
+    --ink:         #16232A;
+    --ink-soft:    #4B5D64;
+    --ink-faint:   #7B8E94;
+    --rule:        #DCE4E4;
+    --rule-soft:   #EAF0F0;
+    --accent:      #0C6E7A;
+    --accent-soft: #E1EEEF;
+    --mark:        #05BCD3;
+    --go:          #2C6E4B;
+    --go-soft:     #E2EFE7;
+    --decide:      #8A5A12;
+    --decide-soft: #F6EDDC;
+    --stop:        #A03A28;
+    --stop-soft:   #F7E6E2;
+
+    --f-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --f-body:    "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --f-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0C1416;
+      --panel:       #131E21;
+      --sunk:        #0F1A1D;
+      --ink:         #E4EDEC;
+      --ink-soft:    #A0B2B4;
+      --ink-faint:   #718587;
+      --rule:        #233236;
+      --rule-soft:   #1B282B;
+      --accent:      #4FBAC4;
+      --accent-soft: #0F2E31;
+      --mark:        #05BCD3;
+      --go:          #79BE8D;
+      --go-soft:     #15271A;
+      --decide:      #D6A85A;
+      --decide-soft: #2A2213;
+      --stop:        #E28A75;
+      --stop-soft:   #311812;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0C1416;
+    --panel:       #131E21;
+    --sunk:        #0F1A1D;
+    --ink:         #E4EDEC;
+    --ink-soft:    #A0B2B4;
+    --ink-faint:   #718587;
+    --rule:        #233236;
+    --rule-soft:   #1B282B;
+    --accent:      #4FBAC4;
+    --accent-soft: #0F2E31;
+    --mark:        #05BCD3;
+    --go:          #79BE8D;
+    --go-soft:     #15271A;
+    --decide:      #D6A85A;
+    --decide-soft: #2A2213;
+    --stop:        #E28A75;
+    --stop-soft:   #311812;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 24px 140px;
+  }
+
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--mark); outline-offset: 3px; }
+
+  code, .mono {
+    font-family: var(--f-mono);
+    font-size: 0.855em;
+  }
+  code {
+    background: var(--sunk);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: 0.08em 0.32em;
+    color: var(--ink-soft);
+    word-break: break-word;
+  }
+
+  /* ── Masthead ────────────────────────────────────────────────── */
+  .masthead {
+    padding: 72px 0 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    border-bottom: 3px solid var(--ink);
+  }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 800;
+    font-size: clamp(40px, 7vw, 68px);
+    line-height: 0.98;
+    letter-spacing: -0.03em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 19px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 60ch;
+    margin: 0;
+  }
+  .method {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--ink-faint);
+    border-left: 3px solid var(--mark);
+    padding-left: 14px;
+    max-width: 68ch;
+    margin: 6px 0 0;
+  }
+
+  /* ── Tally strip ─────────────────────────────────────────────── */
+  .tally {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    border-bottom: 1px solid var(--rule);
+  }
+  .tally div {
+    padding: 22px 20px 24px;
+    border-right: 1px solid var(--rule);
+  }
+  .tally div:last-child { border-right: 0; }
+  .tally .n {
+    font-family: var(--f-display);
+    font-weight: 800;
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    display: block;
+  }
+  .tally .k {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    display: block;
+    margin-top: 9px;
+  }
+
+  /* ── Section heads ───────────────────────────────────────────── */
+  .part {
+    margin: 74px 0 0;
+    padding-top: 20px;
+    border-top: 1px solid var(--rule);
+  }
+  .part-label {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: clamp(27px, 3.6vw, 37px);
+    line-height: 1.08;
+    letter-spacing: -0.022em;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .part p.lede {
+    color: var(--ink-soft);
+    max-width: 66ch;
+    margin: 0 0 4px;
+    font-size: 17px;
+  }
+
+  /* ── Decisions ledger ────────────────────────────────────────── */
+  .decision {
+    display: grid;
+    grid-template-columns: 74px 1fr;
+    gap: 0 22px;
+    padding: 24px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    align-items: start;
+  }
+  .decision:first-of-type { border-top: 1px solid var(--rule); }
+  .d-id {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--decide);
+    background: var(--decide-soft);
+    border-radius: 3px;
+    padding: 4px 0;
+    text-align: center;
+    letter-spacing: 0.04em;
+  }
+  .d-body h3 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 20px;
+    line-height: 1.25;
+    margin: 0 0 8px;
+    letter-spacing: -0.012em;
+  }
+  .d-body p { margin: 0 0 9px; color: var(--ink-soft); max-width: 68ch; }
+  .d-body p:last-child { margin-bottom: 0; }
+  .rec {
+    color: var(--ink);
+    border-left: 3px solid var(--accent);
+    padding-left: 13px;
+  }
+  .rec b {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 600;
+  }
+
+  /* ── Work items ──────────────────────────────────────────────── */
+  .item {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    margin-top: 20px;
+    overflow: hidden;
+  }
+  .item-head {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 0 18px;
+    align-items: baseline;
+    padding: 22px 24px 14px;
+  }
+  .item-id {
+    font-family: var(--f-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mark);
+    letter-spacing: 0.04em;
+  }
+  .item-head h3 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 23px;
+    line-height: 1.18;
+    letter-spacing: -0.018em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    padding: 0 24px 18px 104px;
+  }
+  .chip {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 3px;
+    background: var(--sunk);
+    border: 1px solid var(--rule-soft);
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+  .chip.db     { background: var(--stop-soft);   border-color: transparent; color: var(--stop); }
+  .chip.nodb   { background: var(--go-soft);     border-color: transparent; color: var(--go); }
+  .chip.gate   { background: var(--decide-soft); border-color: transparent; color: var(--decide); }
+  .chip.where  { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+
+  .rows { border-top: 1px solid var(--rule-soft); }
+  .row {
+    display: grid;
+    grid-template-columns: 104px 1fr;
+    gap: 0 0;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row > .lab {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-top: 4px;
+  }
+  .row > .val { min-width: 0; }
+  .row > .val > :first-child { margin-top: 0; }
+  .row > .val > :last-child { margin-bottom: 0; }
+  .row p { margin: 0 0 8px; color: var(--ink-soft); max-width: 70ch; }
+  .row.spec .val p { color: var(--ink); font-style: italic; }
+  .row ol, .row ul { margin: 0; padding-left: 19px; color: var(--ink-soft); max-width: 70ch; }
+  .row li { margin-bottom: 7px; }
+  .row li:last-child { margin-bottom: 0; }
+  .row li b, .row p b { color: var(--ink); font-weight: 600; }
+  .row.done { background: var(--sunk); }
+  .row.done .val p { color: var(--ink); }
+
+  pre {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.62;
+    background: var(--sunk);
+    border: 1px solid var(--rule-soft);
+    border-left: 3px solid var(--mark);
+    border-radius: 3px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 10px 0;
+    color: var(--ink-soft);
+  }
+
+  /* ── Wave table ──────────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; margin: 22px 0 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    min-width: 660px;
+  }
+  th {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: left;
+    padding: 0 14px 9px 0;
+    border-bottom: 2px solid var(--ink);
+    vertical-align: bottom;
+  }
+  td {
+    padding: 12px 14px 12px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--ink-soft);
+    vertical-align: top;
+  }
+  td:first-child {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--mark);
+    white-space: nowrap;
+  }
+  td.t { color: var(--ink); font-weight: 500; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ── Order of work ───────────────────────────────────────────── */
+  .wave {
+    border-left: 3px solid var(--mark);
+    padding: 2px 0 2px 20px;
+    margin: 26px 0 0;
+  }
+  .wave h4 {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 19px;
+    margin: 0 0 4px;
+    letter-spacing: -0.012em;
+  }
+  .wave .when {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 9px;
+  }
+  .wave p { margin: 0 0 8px; color: var(--ink-soft); max-width: 68ch; }
+  .wave p:last-child { margin-bottom: 0; }
+
+  .closing {
+    margin-top: 70px;
+    padding-top: 22px;
+    border-top: 3px solid var(--ink);
+  }
+  .closing p { color: var(--ink-soft); max-width: 68ch; }
+
+  @media (max-width: 720px) {
+    .item-head { grid-template-columns: 1fr; gap: 6px; }
+    .meta { padding-left: 24px; }
+    .row { grid-template-columns: 1fr; gap: 6px; }
+    .decision { grid-template-columns: 1fr; gap: 10px; }
+    .d-id { justify-self: start; padding: 4px 10px; }
+    h1 { font-size: clamp(34px, 10vw, 48px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Operator trips · spec vs. code · 4 September 2026</p>
+    <h1>Eighteen Gaps to Close</h1>
+    <p class="standfirst">
+      Everywhere the operator-trips product still disagrees with the product spec, and
+      what it takes to make each one agree.
+    </p>
+    <p class="method">
+      Method: every "today" line below was read in the repo, not assumed, and carries the
+      file or migration it came from. Where the code deliberately contradicts the spec, that
+      is called a decision and not a bug — five of them are listed first, because three
+      work items cannot start until they are settled. Nothing here re-argues the known
+      blockers (Stripe live mode, the operator agreement, chargeback go-live).
+    </p>
+  </header>
+
+  <div class="tally">
+    <div><span class="n">8</span><span class="k">Missing outright</span></div>
+    <div><span class="n">10</span><span class="k">On one surface only</span></div>
+    <div><span class="n">5</span><span class="k">Need a decision</span></div>
+    <div><span class="n">4</span><span class="k">Need a migration</span></div>
+  </div>
+
+  <div class="tally" style="border-bottom:1px solid var(--rule);">
+    <div style="grid-column:1/-1;border-right:0;">
+      <span class="k" style="margin-top:0;">Shipped 5 September 2026 · migrations applied</span>
+      <p style="margin:10px 0 0;color:var(--ink-soft);max-width:78ch;">
+        Seventeen of the eighteen are implemented on both surfaces, and the four migrations are
+        <b>applied to production</b> and verified: <code>20260904000000</code> (emergency
+        contact), <code>20260904000100</code> (cancellation-policy guard),
+        <code>20260904000200</code> (crew deadlines), <code>20260904000300</code> (self-edit
+        policy + column guard). No new advisories.
+      </p>
+      <p style="margin:10px 0 0;color:var(--ink-soft);max-width:78ch;">
+        <b>D5 stands, the long way round.</b> Desktop chat was built on 5 September and removed
+        the same day, by Ohad, after seeing it — so the decision below is now settled rather than
+        pending, and admin updates remain the answer. <b>D4 also stands</b> — whole-trip document
+        export is desktop-only, and the app says so.
+      </p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <section class="part">
+    <p class="part-label">Before anything is built</p>
+    <h2>Five decisions</h2>
+    <p class="lede">
+      Each of these is a place where a past decision, written down and reasoned about at the
+      time, says the opposite of the spec. Someone has to choose. A recommendation is given
+      for each, but the recommendation is not the decision.
+    </p>
+
+    <div class="decision">
+      <div class="d-id">D1</div>
+      <div class="d-body">
+        <h3>Is an emergency contact medical data, or profile data?</h3>
+        <p>
+          On 24 August the medical card was narrowed to the operator of record alone, and the
+          migration says why in as many words: <em>"allergies, medication, injuries and an
+          emergency contact are a medical record; the person who owns the trip is the only
+          one who needs it."</em> But two live strings promise the opposite — the app labels
+          <code>travelers.view_profiles</code> as "Traveler profiles + emergency contact"
+          (<code>TripStaffSheet.tsx:79</code>), and the site's own spec gives a Manager that
+          row with a tick. Both cannot be true, and the field does not exist yet, so nothing
+          has broken — it is about to.
+        </p>
+        <p>
+          The counter-argument is worth stating: the person who calls a traveler's family is
+          the guide standing on the beach, not the owner who may be in another country.
+        </p>
+        <p class="rec"><b>Recommended</b>
+          Ship it under <code>medical.view</code>, matching the August ruling — it needs no new
+          policy and no new capability — and fix the two stale strings so nobody is promised a
+          field they cannot read. If the beach argument wins later, it becomes a narrow
+          <code>emergency.view</code> capability, which is one row in
+          <code>organized_trip_staff_roles</code> and no client release.
+        </p>
+      </div>
+    </div>
+
+    <div class="decision">
+      <div class="d-id">D2</div>
+      <div class="d-body">
+        <h3>May a Manager change the trip's refund terms?</h3>
+        <p>
+          The spec lets a Manager "edit anything besides dates &amp; destinations", and the
+          cancellation policy sits on <code>group_trips</code>, whose UPDATE policy is
+          <code>trip.edit</code> — which a Manager holds. So on today's rules, a Manager could
+          rewrite what everyone gets back.
+        </p>
+        <p>
+          Money is already fenced off from Managers everywhere else: prices authorise on
+          <code>group_trips.host_id</code>, refunds need <code>money.manage</code>. Refund terms
+          are money.
+        </p>
+        <p class="rec"><b>Recommended</b>
+          Owner only, guarded in the database the same way dates are — a trigger, because RLS
+          cannot exclude two columns from a row. Same shape as
+          <code>trg_guard_operator_trip_dates</code>.
+        </p>
+      </div>
+    </div>
+
+    <div class="decision">
+      <div class="d-id">D3</div>
+      <div class="d-body">
+        <h3>Who owns a crew member's description?</h3>
+        <p>
+          The spec says "Manage self — edit your own description". The code says the opposite,
+          on purpose: <em>"an account-holding guide's job and blurb belong to the OPERATOR,
+          not to them. They are how this trip introduces its crew"</em>
+          (<code>tripStaffService.ts:311</code>). RLS agrees — every write to
+          <code>organized_trip_staff</code> needs <code>staff.manage</code>.
+        </p>
+        <p class="rec"><b>Recommended</b>
+          Both, and they do not conflict: the operator keeps the right to edit anyone, and a
+          crew member may edit their own <code>title</code> and <code>bio</code> and nothing
+          else. It needs a column guard as well as a policy — an RLS policy scoped to
+          <code>user_id = auth.uid()</code> would also let a guide promote themselves to
+          co-operator.
+        </p>
+      </div>
+    </div>
+
+    <div class="decision">
+      <div class="d-id">D4</div>
+      <div class="d-body">
+        <h3>Does whole-trip document export ship on the phone?</h3>
+        <p>
+          "Export all docs" means every traveler's every file — on a busy trip, sixty private
+          PDFs and photos. The site already builds that zip in the browser. The app has no zip
+          at all: it shares one file at a time through the OS sheet.
+        </p>
+        <p>
+          Building it on mobile means holding the whole archive in JavaScript memory before
+          writing it, on a device that will kill the app for less.
+        </p>
+        <p class="rec"><b>Recommended</b>
+          Per-traveler and per-requirement export ship on both. Whole-trip export stays on the
+          desktop, and the app says so in a line rather than staying silent. This is the one
+          place the "both surfaces" rule should bend, and it should bend out loud.
+        </p>
+      </div>
+    </div>
+
+    <div class="decision">
+      <div class="d-id">D5</div>
+      <div class="d-body">
+        <h3>Does chat come to the desktop?</h3>
+        <p>
+          The spec lists "chat" in every dashboard column. On the site it is the single
+          largest item here by a wide margin: a realtime socket, the conversation list,
+          attachments, read state, typing — a second messaging client, not a page.
+        </p>
+        <p class="rec"><b>Recommended</b>
+          Not in this pass. Ship admin updates on the site first (one table, no realtime, and
+          it is the broadcast half of what an operator actually uses chat for), then decide
+          whether the 1:1 half earns a desktop build on its own evidence.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <section class="part">
+    <p class="part-label">Part one</p>
+    <h2>The eight that exist nowhere</h2>
+    <p class="lede">
+      Spec'd, and not built on either surface. Four need a migration; four are presentation
+      over reads that already run.
+    </p>
+
+    <!-- G1 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G1</div>
+        <h3>Emergency contact on the medical form</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip db">Migration</span>
+        <span class="chip gate">Blocked by D1</span>
+        <span class="chip">Small</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Complete medical statement — injuries, allergies and dietary
+            preferences, prescribed medicine, emergency contact.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>Four of the five.
+            <code>organized_trip_medical_forms</code> holds allergies, dietary, injuries and
+            medications and nothing else
+            (<code>20260724000200_operator_evidence_tables.sql:158</code>);
+            <code>MedicalFormSheet.tsx:40</code> renders the same four.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>Migration.</b> Three nullable columns on the medical form, plus their own
+                length CHECK — the existing <code>medical_text_len</code> stays untouched rather
+                than being dropped and rebuilt.
+                <pre>alter table public.organized_trip_medical_forms
+  add column if not exists emergency_name     text,
+  add column if not exists emergency_phone    text,
+  add column if not exists emergency_relation text;
+
+alter table public.organized_trip_medical_forms
+  add constraint medical_emergency_len check (
+    coalesce(length(emergency_name), 0)     &lt;= 120 and
+    coalesce(length(emergency_phone), 0)    &lt;= 40  and
+    coalesce(length(emergency_relation), 0) &lt;= 60
+  );</pre>
+                No RLS change under D1's recommendation: the row is already
+                <code>medical.view</code>, and these ride on it.</li>
+              <li><b>App.</b> A fifth block in <code>MedicalFormSheet</code> — name, phone,
+                relationship. It is the one part of the form with no "none" escape, so the
+                sheet's completeness rule has to learn that a contact is required where the
+                other four accept "no allergies".</li>
+              <li><b>Both dashboards.</b> Show it beside the medical answers —
+                <code>TravelerExtras</code>'s Medical block and the site's
+                <code>TravelerPage</code> medical card. A phone number that cannot be tapped to
+                call is a phone number nobody uses: make it a <code>tel:</code> link on both.</li>
+              <li><b>Copy fix.</b> Correct <code>CAPABILITY_LABELS['travelers.view_profiles']</code>
+                and the Manager row in the site's <code>SPEC.md</code>, which both promise this
+                field to people D1 does not give it to.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>A traveler cannot finish onboarding without naming someone to
+            call, and the operator can reach that person in two taps from the traveler's
+            page — on either surface.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G2 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G2</div>
+        <h3>The payments page</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip">Medium</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Payments page — view all transactions, amounts, profiles, times,
+            export options.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>Neither surface has a ledger. The site's Money page is
+            per-traveler pricing and step state; the app's Money card is one collected-of-expected
+            figure. Per-traveler history exists inside <code>TravelerExtras</code> and nowhere
+            above it.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <p>The data is already in hand on both surfaces and costs no extra round trip:
+              <code>TripMoney.events</code> carries every counted event for the whole trip,
+              newest first, in both <code>operatorDashboardService.ts</code> and the site's
+              <code>domain/money.ts</code>. This is a page, not a feature.</p>
+            <ol>
+              <li><b>One row per event</b> — date and time, traveler with their photo, which
+                step it paid, amount, and the Stripe mode it belongs to. Refunds are stored
+                negative, so they read as refunds without a second query.</li>
+              <li><b>Show failed attempts, behind a toggle, off by default.</b> They are
+                filtered out of every existing total on purpose, and they are exactly what an
+                operator wants when a traveler says "I paid and it didn't work".</li>
+              <li><b>Keep the live/test line.</b> Both apps already count only events matching
+                the current mode and know how many they hid — say so on this page rather than
+                silently dropping rows.</li>
+              <li><b>Export.</b> CSV, not a zip. The site reuses <code>saveBlob</code>; the app
+                writes the file to cache and hands it to the share sheet, the same path
+                <code>DocumentViewer</code> already uses.</li>
+              <li><b>Where it lives.</b> Site: <code>/trips/:tripId/payments</code>, linked
+                from the Money card. App: pushed from the Dashboard's Money section. Both
+                gated on <code>payments.view_status</code>.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>An operator can answer "when did Maya pay, and how much" without
+            opening Stripe, and hand their accountant a CSV.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G3 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G3</div>
+        <h3>The trip summary tiles</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip">Small</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Trip summary — Payments collected $16,800 of $28,000 · Fully paid
+            2/9, $7,000 total · Travelers 7/12. (Frame 39433.)</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>No "fully paid" count anywhere, and no travelers-against-capacity:
+            <code>max_participants</code> is never read in <code>TripDashboardTab.tsx</code>, and
+            the Travelers heading shows a bare count.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>Derive, don't fetch.</b> All three come from <code>TripMoney</code> and the
+                trip row. Fully paid = travelers whose every step is paid, over travelers who
+                have a price at all; the dollar figure beside it is their sum.</li>
+              <li><b>Put the arithmetic in the domain files, with tests.</b>
+                <code>dashboard/dashboardWork.ts</code> in the app and
+                <code>domain/money.ts</code> on the site, mirrored — that is how
+                <code>late.ts</code> and <code>money.ts</code> are already kept honest.</li>
+              <li><b>Tell the truth about the third tile.</b> <code>participant_count</code>
+                deliberately excludes travelers still in onboarding, so a trip that is selling
+                well reads as empty. The tile shows <code>going / max_participants</code> with a
+                second line — "+3 in onboarding" — whenever that number is above zero. This is
+                the one place in the product where the gap is visible to the person it confuses,
+                and it costs a line of copy to close.</li>
+              <li><b>Placement.</b> Top of the app's Dashboard tab and top of the site's trip
+                page, above the travelers list. These are the numbers the page exists for, so
+                they lead.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>Both surfaces open on the same three figures, and a trip with
+            eight people mid-onboarding no longer looks like a trip with two.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G4 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G4</div>
+        <h3>Editing the trip's cancellation policy while it is still empty</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip db">Migration</span>
+        <span class="chip gate">Blocked by D2</span>
+        <span class="chip">Medium</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Only before any traveler joined: replace waiver (for this trip
+            specifically), edit cancellation policy (for this trip specifically).</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>The waiver half is built —
+            <code>ManageRequirementsSheet.tsx:404</code> calls <code>replaceWaiverPdf</code>,
+            and <code>guard_waiver_replacement</code> narrows it to an empty trip. The policy
+            half is not: <code>cancellation_preset</code> is written in exactly one place,
+            <code>CreateTripFlowA.tsx:2368</code>, at publish. After that it is unreachable on
+            both surfaces.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <p>Copy the waiver's own machinery rather than inventing a second kind of freeze.
+              The waiver guard is the right shape and the right precedent — policy for
+              <em>who</em>, trigger for <em>when</em>.</p>
+            <ol>
+              <li><b>Migration — <code>guard_trip_cancellation_policy()</code>.</b> A BEFORE
+                UPDATE trigger on <code>group_trips</code> that fires only when a
+                <code>cancellation_*</code> column actually changes, and then refuses unless all
+                three hold: the caller is <code>host_id</code> (D2); there are no participants
+                besides the host; and there are no rows in
+                <code>organized_trip_policy_consents</code> for this trip. That third test is
+                the load-bearing one, for the same reason it is in the waiver guard — someone
+                may have already ticked terms that are about to change under them.</li>
+              <li><b>Reuse the sheets.</b> <code>CancellationPolicySheet</code> exists and is
+                already shared between operator setup and settings. Point it at the trip's
+                columns instead of <code>operator_settings</code>; the site has the same
+                component on its settings page.</li>
+              <li><b>Entry points.</b> App: a row in <code>OperatorTripEditScreen</code>, next
+                to the waiver. Site: the trip page, beside the requirements editor. Both hide
+                the row rather than disable it once the trip is not empty — a disabled control
+                invites the question, and the answer is a paragraph.</li>
+              <li><b>Say what happened when it is refused.</b> The waiver guard's message names
+                the count ("2 travelers on this trip"). Match it.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>An operator who published with the wrong refund terms can fix them
+            until the first person joins, and cannot after — enforced in Postgres, not in a
+            screen.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G5 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G5</div>
+        <h3>Deadlines on crew paperwork</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip db">Migration</span>
+        <span class="chip">Medium</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Set required docs — deadlines will be similar to rest of
+            travelers. Changing deadlines will effect the crew members deadlines
+            accordingly.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>Crew paperwork has no deadline at all, deliberately.
+            <code>ensureStaffRequirements</code> pins every staff row to
+            <code>skip_at_onboarding: 'must_have'</code>, which the table's CHECK then forces to
+            carry a null deadline, and <code>staff_my_requirements()</code>
+            "deliberately returns no deadline and no skip state". The reasoning holds and should
+            survive: <em>locking a guide out of the trip two days before departure is worse than
+            the missing certificate.</em></p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <p>Both halves of the spec are satisfied by <b>deriving</b> the crew deadline rather
+              than copying it. A staff requirement is already a separate row of the same kind on
+              the same trip — <code>uq_organized_trip_req_kind_per_trip</code> is unique per
+              (trip, kind, audience) since 14 August — so the traveler row of that kind is right
+              there to read. Nothing to sync, and no second clock to drift.</p>
+            <ol>
+              <li><b>Migration.</b> Widen <code>staff_my_requirements()</code> to return
+                <code>deadline_days_before</code> and a resolved <code>due_date</code>, left-joined
+                from the sibling <code>audience = 'traveler'</code> row of the same kind on the
+                same trip. A staff-only kind with no traveler sibling — a first-aid certificate,
+                say — returns null, exactly as now.</li>
+              <li><b>Flagged, never gated.</b> The date is shown and can read as overdue.
+                Nothing about it blocks a guide, and no reminder job is wired to it in this pass.
+                Say that in the migration comment so the next person does not "fix" it.</li>
+              <li><b>Surfaces.</b> A due date and a Late pill in
+                <code>StaffPaperworkSection</code> and the app's staff sheet; the same in the
+                site's <code>CrewPaperwork</code> and on the crew list, so a Manager can see who
+                is behind without opening each person.</li>
+              <li><b>Free consequence.</b> Editing a traveler deadline in either requirements
+                editor moves the crew's with it, because there was never a second copy. That is
+                the spec's second sentence, and it needs no code.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>A photographer sees the same passport deadline the travelers see,
+            moving the travelers' deadline moves theirs, and neither one is ever locked out of
+            the trip over it.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G6 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G6</div>
+        <h3>Managing yourself</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip db">Migration</span>
+        <span class="chip gate">Blocked by D3</span>
+        <span class="chip">Medium</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Manage self — edit your own description.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>Nobody can. <code>ots_write</code> covers all four verbs with
+            <code>staff.manage</code> (<code>20260901000000_co_operator_role.sql:250</code>).
+            And the operator has no staff row to edit in the first place — nothing creates one
+            for the trip's owner, which is also why an operator trip shows no face on its
+            overview at all unless they add themselves by hand.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>Migration, two parts.</b> A second UPDATE policy scoped to
+                <code>user_id = auth.uid() and revoked_at is null</code>, and — because RLS
+                cannot exclude columns from a row — a BEFORE UPDATE trigger that refuses any
+                change to <code>role_key</code>, <code>user_id</code>, <code>revoked_at</code> or
+                <code>listed</code> when the caller does not hold <code>staff.manage</code>.
+                Without the trigger, the policy hands every guide the ability to make themselves
+                a co-operator. Same split as the waiver and dates guards.</li>
+              <li><b>App.</b> "Your details" in the trip menu for anyone with a staff row —
+                title and bio, nothing else. It sits beside "Your paperwork", which is already
+                gated the same way.</li>
+              <li><b>Site.</b> The same two fields on the crew page, on your own row.</li>
+              <li><b>Add the operator to their own crew.</b> One tap in the crew sheet that
+                creates the owner's <code>operator</code>-tier row, pre-filled from their
+                profile. This is what makes "manage self" mean anything for the operator, and it
+                closes the separate hole where a trip with a paid-for crew section shows nobody
+                running it.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>A guide can fix their own bio, cannot touch their tier, and the
+            operator appears on their own trip.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G7 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G7</div>
+        <h3>Export every document on the trip</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip gate">Blocked by D4</span>
+        <span class="chip">Small</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>Manage trip, always: … export all docs.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>The site exports one requirement across everyone
+            (<code>RequirementPage.tsx:104</code>) or one traveler's whole set
+            (<code>TravelerPage.tsx:116</code>). There is no "everything". The app exports one
+            file at a time (<code>DocumentViewer.tsx:280</code>).</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>One button on the site's trip page.</b> <code>downloadAll</code> already
+                takes a list and a zip name, downloads sequentially on purpose, and reports
+                progress. Feed it every traveler × every requirement.</li>
+              <li><b>Folder per traveler inside the zip.</b> A flat sixty-file archive is not an
+                export, it is a pile. <code>uniqueName</code> already handles two travelers with
+                the same name; folders make it unnecessary as well as safe.</li>
+              <li><b>Confirm before starting.</b> Name the count and say it will take a while.
+                Sixty signed URLs fetched in series is a minute, and a button that appears to do
+                nothing for a minute gets pressed again.</li>
+              <li><b>Gate on <code>data.export</code></b>, as the two existing exports are.</li>
+              <li><b>App.</b> Per-traveler and per-requirement export only, and a line on the
+                trip-wide entry point pointing at the desktop — see D4.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>An operator hands a hotel one zip, sorted by guest, in one
+            click.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- G8 -->
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">G8</div>
+        <h3>Opening a traveler's real profile</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">App + Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip">Small</span>
+      </div>
+      <div class="rows">
+        <div class="row spec">
+          <div class="lab">Spec</div>
+          <div class="val"><p>View traveler's personal profiles. Change: clicking members opens
+            the personal full profile, not the surf-travel one.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>The app has no profile view from the dashboard at all — tapping a
+            traveler opens the document review flow and stops there. The site shows age ·
+            country · surf level · board (<code>TravelerPage.tsx:154</code>), which is precisely
+            the surf-travel card the spec says to replace.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>App.</b> The wiring already exists — <code>onViewUserProfile(userId,
+                fromTripId)</code> is threaded through every trip screen in
+                <code>RootNavigator</code>. Add a tappable identity header at the traveler level
+                of <code>DocumentReviewScreen</code> that calls it. This is the cheapest item in
+                the plan.</li>
+              <li><b>Site.</b> Widen <code>fetchProfiles</code> to the fields the app's profile
+                screen shows — photo, name, age, where they are from, their bio — and render
+                them as a profile, not a stat line. Gate on
+                <code>travelers.view_profiles</code>.</li>
+              <li><b>Keep the surf-travel numbers.</b> They are useful to a guide planning
+                sessions; they stop being the whole profile. Group stats already live in "About
+                this group" on both surfaces — the per-person card should read as a person.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>From either dashboard, one tap on a traveler's name shows the
+            person, not their board type.</p></div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <section class="part">
+    <p class="part-label">Part two</p>
+    <h2>Ten that exist on one surface</h2>
+    <p class="lede">
+      The spec's rule is one line — <em>all functions and views should exist in both the mobile
+      and desktop version</em> — and it overturns a decision the site was built on. Its own
+      spec still reads "desktop is read/review only", amended four times since; crew management
+      and cancellation are recorded there as app-only, decided by Ohad on 13 August. That
+      section needs rewriting as part of this work, not quietly contradicted by the code.
+    </p>
+    <p class="lede">
+      The good news is that almost none of it needs the database. The site's Rule 1 was rewritten
+      on 19 August to say what it always meant: <b>the boundary is RLS, not this project's
+      restraint.</b> Every item below writes through a table or an RPC the app already uses.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>What is missing</th><th>Where</th><th>How it is already done</th><th>Size</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>P1</td><td class="t">Join requests — approve and reject</td><td>Site</td>
+            <td>A plain UPDATE on <code>group_trip_join_requests</code>; the trigger does the rest, and on an operator trip the chat step is skipped by design</td><td class="num">S</td></tr>
+          <tr><td>P2</td><td class="t">Cancel the trip and refund everyone</td><td>Site</td>
+            <td>The <code>trip-cancel</code> edge function, without a <code>userId</code> — the site already calls it <em>with</em> one for single refunds</td><td class="num">S</td></tr>
+          <tr><td>P3</td><td class="t">Admin updates — read and post</td><td>Site</td>
+            <td><code>group_trip_admin_updates</code>, gated on <code>updates.send</code></td><td class="num">S</td></tr>
+          <tr><td>P4</td><td class="t">Add a crew member who is not in the app, with a photo</td><td>Site</td>
+            <td>The image-upload edge function's signed-URL flow — a POST for a URL, then a PUT. No native code in it</td><td class="num">M</td></tr>
+          <tr><td>P5</td><td class="t">Crew invite links</td><td>Site</td>
+            <td><code>create_staff_invite</code>, a plain RPC</td><td class="num">S</td></tr>
+          <tr><td>P6</td><td class="t">Replace this trip's waiver PDF</td><td>Site</td>
+            <td>Supabase Storage upload to <code>&lt;trip_id&gt;/operator/</code>, then the same UPDATE the app makes</td><td class="num">S</td></tr>
+          <tr><td>P7</td><td class="t">Gear — personal, group, and admin suggestions</td><td>Site</td>
+            <td>Existing gear tables and services; a real page, but a plain one</td><td class="num">M</td></tr>
+          <tr><td>P8</td><td class="t">Your own wallet and open tasks</td><td>Site</td>
+            <td>The same requirement reads the app's Plan tab makes, for a crew member signed in to the site</td><td class="num">M</td></tr>
+          <tr><td>P9</td><td class="t">Chat</td><td>Site</td>
+            <td>Nothing reusable — a second messaging client. See D5</td><td class="num">L</td></tr>
+          <tr><td>P10</td><td class="t">Bulk document export</td><td>App</td>
+            <td>Per-traveler and per-requirement, zipped in cache and handed to the share sheet. See D4</td><td class="num">M</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">P1–P3</div>
+        <h3>The three that make the site usable on its own</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip">Small, together</span>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <div class="lab">Why first</div>
+          <div class="val"><p>Today an operator sitting at a desktop cannot let anybody onto
+            their trip, cannot tell anybody anything, and cannot call it off. Those are not
+            advanced features — they are the three verbs a season needs, and each is a day's
+            work at most because the app has already built the hard part.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>Join requests.</b> A card on the trip page, and a count in the trips list
+                so it is visible before you open anything. Approve and decline are one UPDATE
+                each with <code>status</code>, <code>reviewed_at</code>, <code>reviewed_by</code>.
+                Do not port the app's chat side-effect: on an operator trip approval grants
+                onboarding, not a seat, and the app already skips it for exactly that
+                reason.</li>
+              <li><b>Cancel.</b> A destructive-styled action behind a typed confirmation, then
+                the same result screen the app shows — every refund listed, blocked ones named
+                with the reason, and a retry. <code>trip-cancel</code> is safe to call twice by
+                design, which is what makes the retry honest. Gate on
+                <code>trip.cancel</code>.</li>
+              <li><b>Admin updates.</b> Read for everyone who can see the trip, post behind
+                <code>updates.send</code>. This is also the answer to chat for now — see
+                D5.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>An operator can run a full season from the desktop without
+            reaching for their phone.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">P4–P6</div>
+        <h3>The three the site chose not to build</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip">Small to medium</span>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <div class="lab">Today</div>
+          <div class="val"><p>Each is a written decision, not an oversight.
+            <code>AddCrewDialog.tsx:15</code>: <em>"a Listed credit wants a photo upload this
+            project has no path for."</em> <code>CrewMemberDialog.tsx:135</code>: <em>"Their
+            photo can be changed in the app."</em> The site's spec records the same for the
+            waiver, under a rule that files never go into <code>&lt;trip_id&gt;/</code> from the
+            browser.</p></div>
+        </div>
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>Photos (P4).</b> There is a path, and it is not a storage policy problem:
+                crew photos go through the image-upload edge function, which hands back a signed
+                S3 URL. Both steps are <code>fetch</code>. Port
+                <code>uploadImageToS3</code>'s browser branch, drop the compression step for a
+                canvas resize, and the Listed-crew form works — name, photo, role,
+                description.</li>
+              <li><b>Invite links (P5).</b> <code>create_staff_invite</code> returns the link.
+                The app shares it over WhatsApp; the site copies it to the clipboard, which is
+                what a desktop does with a link.</li>
+              <li><b>Waiver (P6).</b> The storage policy on
+                <code>&lt;trip_id&gt;/operator/</code> gates on <code>is_trip_host</code>, so the
+                browser is allowed. What blocks it is a line in the site's own spec, and that
+                line needs an amendment — the fifth, in the format the previous four already
+                use. Note in it that this is the one prefix the browser may write to, and why:
+                the waiver is an operator document, not a traveler's.</li>
+            </ol>
+          </div>
+        </div>
+        <div class="row done">
+          <div class="lab">Done when</div>
+          <div class="val"><p>Crew is managed end to end from the site, and the site's spec says
+            so instead of saying the opposite.</p></div>
+        </div>
+      </div>
+    </article>
+
+    <article class="item">
+      <div class="item-head">
+        <div class="item-id">P7–P8</div>
+        <h3>Gear, and the crew member's own view</h3>
+      </div>
+      <div class="meta">
+        <span class="chip where">Site</span>
+        <span class="chip nodb">No database work</span>
+        <span class="chip">Medium each</span>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <div class="lab">Plan</div>
+          <div class="val">
+            <ol>
+              <li><b>Gear (P7).</b> Group gear, personal gear for yourself, and the operator's
+                suggestion queue — the same three the app's Plan tab and
+                <code>ManageSuggestedGearScreen</code> cover, against the same tables.</li>
+              <li><b>Your wallet and tasks (P8).</b> The site currently assumes whoever signs in
+                is running the trip. A crew member is also <em>on</em> it, with their own
+                paperwork to hand in and their own approved documents to keep. The reads are the
+                app's; the page is new.</li>
+              <li><b>Do these after P1–P6.</b> They complete parity; they do not unblock a
+                season.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <section class="part">
+    <p class="part-label">Part three</p>
+    <h2>What order, and what runs beside what</h2>
+    <p class="lede">
+      Four migrations, and they touch four different tables — they can be written and applied in
+      any order. The client work splits cleanly by surface, so the app and the site can be built
+      in parallel throughout.
+    </p>
+
+    <div class="wave">
+      <h4>Now, needing nobody</h4>
+      <p class="when">No decision · no migration</p>
+      <p><b>G8</b> (profile from the dashboard) and <b>G3</b> (summary tiles) on the app;
+        <b>P1</b>, <b>P2</b>, <b>P3</b> on the site. Five items, none of which touch the same
+        file as another, and together they are the difference between a desktop that reviews
+        documents and one that runs a trip.</p>
+    </div>
+
+    <div class="wave">
+      <h4>Once D1, D2 and D3 are answered</h4>
+      <p class="when">Three migrations, one per decision</p>
+      <p><b>G1</b> (emergency contact), <b>G4</b> (trip cancellation policy), <b>G6</b> (manage
+        self). Each is a migration plus two small screens, and each is independent of the other
+        two. <b>G5</b> (crew deadlines) has no decision blocking it and can start alongside
+        them — it is the fourth migration and the only one that changes an existing
+        function.</p>
+    </div>
+
+    <div class="wave">
+      <h4>Then</h4>
+      <p class="when">No database work</p>
+      <p><b>G2</b> (payments page) on both surfaces — the largest of the eight, and the one that
+        wants a real design pass rather than a port. <b>G7</b> and <b>P10</b> together, since
+        both are export and D4 answers both at once. <b>P4</b>, <b>P5</b>, <b>P6</b> on the
+        site.</p>
+    </div>
+
+    <div class="wave">
+      <h4>Last, or not at all</h4>
+      <p class="when">Behind their own evidence</p>
+      <p><b>P7</b> and <b>P8</b> complete parity. <b>P9</b> — chat on the desktop — should be
+        looked at again only after P3 has been in an operator's hands for a while. It may turn
+        out that admin updates were the whole ask.</p>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════ -->
+  <section class="part">
+    <p class="part-label">Boundaries</p>
+    <h2>What this plan does not touch</h2>
+    <p class="lede">
+      Three things in the spec drawings are already built and were checked, and are listed here
+      so nobody re-opens them: no "about the operator" section on operator trips; no
+      destination-and-stay familiarity in the operator create flow; the commit feature off on
+      operator trips. All three carry the spec reference in the code comment that made them.
+    </p>
+    <p class="lede">
+      Two more deviations were found and are deliberately left alone. A Manager cannot edit the
+      trip price, though the spec's "anything besides dates &amp; destinations" would allow it —
+      the database authorises money on <code>host_id</code> and would refuse them anyway. And
+      the group's surf and travel stats reach crew through a Dashboard tab rather than through
+      Plan; the content is the spec's, the shelf is not. Both are worth a sentence in a review,
+      neither is worth a migration.
+    </p>
+    <p class="lede">
+      Onboarding step order is the one small thing left unfixed: the code walks passport before
+      the waiver, and visa before flights. The spec's order is the better one for a traveler —
+      pay, sign, then the uploads — and it is a one-line change to
+      <code>REQUIREMENT_ORDER</code>. It is not listed above because it is smaller than the
+      sentence describing it.
+    </p>
+  </section>
+
+  <footer class="closing">
+    <p>
+      Eighteen items. Four migrations, five decisions, and one honest exception to the
+      both-surfaces rule. The largest single build in it is a page that reads data both apps
+      already hold.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -13,7 +13,7 @@
  * of truth: they rename themselves once, and every trip they crew follows. What
  * the operator owns is how this trip INTRODUCES them.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   canChangeTier,
@@ -24,6 +24,8 @@ import {
   type StaffRole,
   type StaffRoleKey,
 } from '../services/staff';
+import { uploadCrewPhoto } from '../services/images';
+import { useAuth } from '../lib/auth';
 import { friendlyError } from '../lib/errors';
 import { Avatar } from './StateBits';
 import { CrewPaperworkSection } from './CrewPaperwork';
@@ -55,23 +57,49 @@ export function CrewMemberDialog({
   const editable =
     canChangeTier(member) && (isOwner || member.roleKey !== 'co_operator');
 
+  const { user } = useAuth();
   const [name, setName] = useState(member.name);
   const [title, setTitle] = useState(member.title ?? '');
   const [bio, setBio] = useState(member.bio ?? '');
   const [roleKey, setRoleKey] = useState<StaffRoleKey>(member.roleKey);
   const [error, setError] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  // The object URL is the browser's handle on the file, and it leaks until it
+  // is revoked.
+  useEffect(() => {
+    if (!photoFile) {
+      setPhotoPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(photoFile);
+    setPhotoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photoFile]);
 
   const roleLabel = roles.find(r => r.roleKey === member.roleKey)?.label ?? member.roleKey;
 
   const save = useMutation({
     mutationFn: async () => {
+      // Upload FIRST, then write the row — the same order the app's cover-photo
+      // editor uses. A file uploaded before a failed row update is orphaned in
+      // storage, which is harmless; a row pointing at a file that never
+      // uploaded is a broken image on the trip page.
+      let photoUrl: string | undefined;
+      if (photoFile && !editable && user) {
+        photoUrl = await uploadCrewPhoto(photoFile, user.id);
+      }
+
       await updateCrewMember(member, {
         title,
         bio,
-        // Offered for a Listed credit only — the service refuses it for anyone
-        // with an account, which is the same rule stated twice on purpose.
+        // Offered for a Listed credit only — the service refuses both for
+        // anyone with an account, which is the same rule stated twice on
+        // purpose.
         ...(editable ? {} : { displayName: name }),
+        ...(photoUrl !== undefined ? { photoUrl } : {}),
       });
       if (editable && roleKey !== member.roleKey) {
         await updateCrewRole(member.id, roleKey);
@@ -79,6 +107,7 @@ export function CrewMemberDialog({
     },
     onMutate: () => setError(null),
     onSuccess: () => {
+      setPhotoFile(null);
       void qc.invalidateQueries({ queryKey: ['crew', tripId] });
       // Their own capabilities changed if the tier did. Cheap to drop, and the
       // alternative is a demoted manager keeping the buttons for five minutes.
@@ -132,8 +161,30 @@ export function CrewMemberDialog({
             <>
               <p className="muted small" style={{ marginBottom: 12 }}>
                 Listed only — they have no Swellyo account, so there is nothing to give them
-                access to. Their photo can be changed in the app.
+                access to.
               </p>
+
+              {/* The photo. This used to say "can be changed in the app", which
+                  was never a limit of the platform — crew photos go through the
+                  image-upload edge function, and a browser can call it. See
+                  services/images.ts. */}
+              <div className="row" style={{ gap: 14, alignItems: 'center', marginBottom: 14 }}>
+                <Avatar url={photoPreview ?? member.photoUrl} name={name || '?'} size={56} />
+                <label className="btn btn-sm" style={{ cursor: 'pointer' }}>
+                  {member.photoUrl || photoFile ? 'Change photo' : 'Add a photo'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    hidden
+                    disabled={busy}
+                    onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {photoFile && (
+                  <span className="muted small">Saved when you press Save.</span>
+                )}
+              </div>
+
               <label className="small muted" htmlFor="crew-name" style={{ display: 'block' }}>
                 Name
               </label>

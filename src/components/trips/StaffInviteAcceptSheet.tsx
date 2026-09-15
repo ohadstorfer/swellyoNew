@@ -4,8 +4,8 @@
 // Spec: docs/specs/operator-trips/staff-and-permissions.md
 //
 // ── Why this is a sheet and not an Alert ───────────────────────────────────
-// Accepting grants real access — a Guide reads every traveler's profile and
-// emergency contact, a Manager reads passports. The person tapping Accept
+// Accepting grants real access — a Guide reads every traveler's profile, a
+// Manager reads passports. The person tapping Accept
 // should be able to see what they are being handed before they take it, and an
 // Alert has no room for that list. The capability list here is the same data
 // the operator saw when they picked the tier.
@@ -26,12 +26,15 @@ import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
 const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'profile.shown_to_travelers': 'Be shown to travelers',
   'roster.view': 'See the roster',
-  'travelers.view_profiles': 'See traveler profiles and emergency contacts',
+  // Profiles only. The emergency contact is part of the medical record and is
+  // `medical.view`, which no tier below the operator holds — see decision D1
+  // and the note in the app's CAPABILITY_LABELS.
+  'travelers.view_profiles': 'See traveler profiles',
   'travelers.view_stats': 'See surf and travel stats',
   'chat.participate': 'Join the group chat and message travelers',
   'payments.view_status': 'See who has paid',
   'docs.view': 'See documents, flights and passports',
-  'medical.view': 'See medical status',
+  'medical.view': 'See medical answers and emergency contacts',
   'trip.edit': 'Edit the trip, gear and required documents',
   'updates.send': 'Post admin updates',
   'docs.approve': 'Approve documents',

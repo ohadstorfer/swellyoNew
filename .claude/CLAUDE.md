@@ -29,12 +29,13 @@ There are two GitHub repos with the same code: `swellyoNew` (primary) and `Swell
 
 The `love` remote is already configured: `https://github.com/ohadstorfer/SwellyoLove.git`. The `--force` is needed because the repos have different git histories. Netlify will auto-deploy on push.
 
-## Figma — always read text sizes with `get_variable_defs`
+## Figma — always read text sizes with `get_variable_defs`, on EVERY text node
 
-When reading font sizes / line heights from a Figma file, **always use `mcp__figma__get_variable_defs`** — never trust the px values flattened by `get_design_context`.
+When reading font sizes / line heights from a Figma file, **use `mcp__figma__get_variable_defs` on each text node** — never size text from `get_design_context`, including its bare `text-[Npx]` values.
 
-- **Why:** sizes are bound to mode-dependent variables (e.g. `Size/md`, `Size/xl`). `get_design_context` flattens them in the wrong typography mode (a larger breakpoint), so every size comes out inflated. `get_variable_defs` resolves them in the mode actually applied to the node (e.g. `Auto (Mobile - 800)`), matching the Figma Inspect panel.
-- **How:** `get_metadata` → find text node IDs → `get_variable_defs` on them → map tokens to px. A literal value (not a token) is mode-independent — either tool is fine.
+- **Why:** sizes are bound to mode-dependent variables (e.g. `Size/md`, `Size/xl`). `get_design_context` flattens them in the wrong typography mode (a larger breakpoint), so sizes come out inflated. Worse, when a text layer overrides the weight (bold) on a variable-bound style, the export drops the variable and prints the inflated size as a **bare number that looks literal**: bold `20px` is really `Size/lg 16`, `18px` is `Size/md 14`, bold `16px` is `Size/s 12`. Tell-tale: a `text-[0px]` wrapper around a `<p>` with `font-['Inter:Bold']`. A bare px is NOT safe to copy.
+- **How:** `get_metadata` → find text node IDs → `get_variable_defs` on each (for an instance child `I…;…`, query the parent instance and match by line height) → map tokens to px. If the size you are about to use is not in that node's variable list, it is wrong. A size is a true literal only when `get_variable_defs` returns no size variable for the node.
+
 
 ## Commands
 

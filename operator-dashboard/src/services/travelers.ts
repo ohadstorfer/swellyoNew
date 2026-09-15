@@ -9,10 +9,32 @@ export type SurferProfile = {
   surfLevel: string | null;
   boardType: string | null;
   travelExperience: string | null;
+  /**
+   * The person, not the surfer. Product Specs §"Trip dashboard space":
+   * "clicking members opens the personal full profile, not the surf-travel
+   * one". The four fields above are the surf-travel card; these are what make
+   * a traveler page read as a person.
+   *
+   * Every one of these is a column that EXISTS on `surfers` — checked against
+   * the live schema, not the repo. PostgREST answers a select naming a missing
+   * column with a 400, which would take out every page that reads a profile.
+   */
+  bio: string | null;
+  pronoun: string | null;
+  /** Where they surf at home. The closest thing this product has to "where are
+   *  you from" beyond a country code. */
+  homeBreak: string | null;
+  lifestyle: string[] | null;
 };
 
 export type MedicalForm = {
   userId: string;
+  /** Who to call about this traveler. Part of the medical record, so it is read
+   *  under `medical.view` like everything else on this row — the operator of
+   *  record alone (20260824000000, decision D1). */
+  emergencyName: string | null;
+  emergencyPhone: string | null;
+  emergencyRelation: string | null;
   allergies: string | null;
   allergiesNone: boolean;
   dietary: string | null;
@@ -34,7 +56,7 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Surf
   const { data, error } = await supabase
     .from('surfers')
     .select(
-      'user_id, name, profile_image_url, age, country_from, surf_level_category, surfboard_type, travel_experience',
+      'user_id, name, profile_image_url, age, country_from, surf_level_category, surfboard_type, travel_experience, bio, pronoun, home_break_short, lifestyle_keywords',
     )
     .in('user_id', userIds);
 
@@ -50,6 +72,10 @@ export async function fetchProfiles(userIds: string[]): Promise<Map<string, Surf
       countryFrom: r.country_from ?? null,
       surfLevel: r.surf_level_category ?? null,
       boardType: r.surfboard_type ?? null,
+      bio: (r.bio as string | null) ?? null,
+      pronoun: (r.pronoun as string | null) ?? null,
+      homeBreak: (r.home_break_short as string | null) ?? null,
+      lifestyle: Array.isArray(r.lifestyle_keywords) ? (r.lifestyle_keywords as string[]) : null,
       travelExperience: r.travel_experience ?? null,
     });
   }
@@ -70,7 +96,7 @@ export async function fetchMedicalForm(
   const { data, error } = await supabase
     .from('organized_trip_medical_forms')
     .select(
-      'user_id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, completed_at',
+      'user_id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, emergency_name, emergency_phone, emergency_relation, completed_at',
     )
     .eq('trip_id', tripId)
     .eq('user_id', userId)
@@ -81,6 +107,9 @@ export async function fetchMedicalForm(
 
   return {
     userId: data.user_id,
+    emergencyName: (data.emergency_name as string | null) ?? null,
+    emergencyPhone: (data.emergency_phone as string | null) ?? null,
+    emergencyRelation: (data.emergency_relation as string | null) ?? null,
     allergies: data.allergies ?? null,
     allergiesNone: !!data.allergies_none,
     dietary: data.dietary ?? null,
@@ -98,13 +127,16 @@ export async function fetchMedicalForms(tripId: string): Promise<MedicalForm[]> 
   const { data, error } = await supabase
     .from('organized_trip_medical_forms')
     .select(
-      'user_id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, completed_at',
+      'user_id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, emergency_name, emergency_phone, emergency_relation, completed_at',
     )
     .eq('trip_id', tripId);
 
   if (error) throw error;
   return (data ?? []).map((d: any) => ({
     userId: d.user_id,
+    emergencyName: (d.emergency_name as string | null) ?? null,
+    emergencyPhone: (d.emergency_phone as string | null) ?? null,
+    emergencyRelation: (d.emergency_relation as string | null) ?? null,
     allergies: d.allergies ?? null,
     allergiesNone: !!d.allergies_none,
     dietary: d.dietary ?? null,

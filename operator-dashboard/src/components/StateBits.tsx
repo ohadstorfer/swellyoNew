@@ -15,11 +15,28 @@ export function Loading({ what = 'Loading' }: { what?: string }) {
   );
 }
 
-export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+/**
+ * A read failed.
+ *
+ * `what` names the thing that failed — "This trip", "The money". Test W-10
+ * asks that the page say WHAT failed, and "That did not load" over a generic
+ * "Something went wrong" told the operator nothing about which of the five
+ * reads on the page had broken. Optional so nothing that has not been updated
+ * reads worse than before.
+ */
+export function ErrorBox({
+  error,
+  onRetry,
+  what,
+}: {
+  error: unknown;
+  onRetry?: () => void;
+  what?: string;
+}) {
   return (
     <div className="card enter" style={{ borderColor: 'var(--danger)' }}>
       <div className="card-body">
-        <h3 style={{ marginBottom: 6 }}>That did not load</h3>
+        <h3 style={{ marginBottom: 6 }}>{what ? `${what} did not load` : 'That did not load'}</h3>
         <p className="muted small" style={{ marginBottom: onRetry ? 12 : 0 }}>
           {friendlyError(error)}
         </p>
@@ -28,6 +45,30 @@ export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => v
             Try again
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Somebody on the crew, below Manager, reached a paperwork page.
+ *
+ * One component because four pages need the same sentence. It started inline
+ * on TripPage only, so a Guide who typed a traveler's URL got "That person is
+ * not on this trip" instead — about a traveler who IS on it. The roster read is
+ * refused to them, the page found nobody, and reported that as a fact about the
+ * traveler. Found 9 Sep 2026. Not a security boundary: every read behind these
+ * pages is already refused by the database. This just says so in words.
+ */
+export function NoPaperworkAccess() {
+  return (
+    <div className="card">
+      <div className="card-body">
+        <p>You're on this trip's crew, but not for the paperwork.</p>
+        <p className="muted small" style={{ marginTop: 8 }}>
+          Reviewing documents needs the Manager tier. Everything you can do on this trip is in
+          the Swellyo app — ask the operator if you think this is wrong.
+        </p>
       </div>
     </div>
   );
