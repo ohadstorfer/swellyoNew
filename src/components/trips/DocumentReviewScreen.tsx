@@ -13,8 +13,10 @@
  *   3. One traveler's file — preview, facts, Approve / Request Resubmission.
  *   4. The file full screen (DocumentViewer), read-only, from the expand button.
  *
- * The traveler shape and the waiting queue below are still reachable through
- * `initialUserId` / `initialWaiting`; nothing on the Dashboard opens them today.
+ * The traveler shape and the waiting queue are reachable through
+ * `initialUserId` / `initialWaiting`. The Dashboard's Members strip uses the
+ * first: tapping a member opens that person, which is the web dashboard's
+ * traveler page (Ohad, 16 Sep).
  *
  * Level 3 is the same screen whichever list opened it, so approving from one
  * door behaves exactly like the other.
@@ -256,7 +258,7 @@ export const DocumentReviewScreen: React.FC<{
   /**
    * Open straight into one person instead of the queue.
    *
-   * The Dashboard's Travelers list needs "show me Maya", not "show me the
+   * The Dashboard's Members strip needs "show me Maya", not "show me the
    * queue and let me find Maya". Read on each open, so tapping a different
    * traveler re-targets it.
    */
@@ -286,14 +288,28 @@ export const DocumentReviewScreen: React.FC<{
    */
   initialWaiting?: boolean;
   /**
-   * Extra blocks under one traveler's documents — money, medical, and the
-   * actions the operator can take on that person.
+   * The WHOLE traveler page, when the caller has one — profile, money, medical
+   * and the actions the operator can take on that person.
    *
    * A render prop rather than more props on this component: those blocks are
    * operator-business, this screen is about documents, and the Dashboard tab
    * already holds the money it would otherwise have to fetch a second time.
+   *
+   * It receives this traveler's document rows and is expected to place them,
+   * because it owns the running order. Callers that do not supply it get the
+   * documents alone, in their own card — which is what keeps this screen usable
+   * on its own.
    */
-  renderTravelerExtras?: (userId: string) => React.ReactNode;
+  renderTravelerExtras?: (
+    userId: string,
+    documents: {
+      /** The rows, unwrapped. Whatever renders them draws the card. */
+      node: React.ReactNode;
+      done: number;
+      total: number;
+      toReview: number;
+    },
+  ) => React.ReactNode;
   /**
    * Anything the CALLER needs to present ON TOP of this screen — rendered as
    * the last child inside this Modal.
@@ -728,6 +744,18 @@ export const DocumentReviewScreen: React.FC<{
           ? openTraveler.name ?? 'Traveler'
           : 'Documents';
 
+  /** "2/5 done · 1 document waiting for you" — only on the traveler level, and
+   *  only at its top: on level 3 the header names the file's owner, and a
+   *  progress line there would describe the person rather than the decision in
+   *  front of you. Same sentence as the web dashboard's traveler page. */
+  const headerSub =
+    !detailRow && openReview
+      ? `${openReview.done}/${openReview.total} done · ${plural(
+          openReview.toReview,
+          'document',
+        )} waiting for you`
+      : null;
+
   /** Everything this document type has on file, for the header's Export all. */
   const requirementExport =
     !detailRow && openRequirement && requirementRows && CAN_EXPORT && canApprove
@@ -763,6 +791,7 @@ export const DocumentReviewScreen: React.FC<{
           <StatusBar barStyle="light-content" />
           <DarkHeader
             title={headerTitle}
+            sub={headerSub}
             topInset={0}
             onBack={goBack}
             right={
@@ -872,8 +901,14 @@ export const DocumentReviewScreen: React.FC<{
                 />
               ) : /* ── Level 2: one traveler's items ────────────────────── */
               openReview ? (
-                <>
-                <View style={styles.card}>
+                (() => {
+                // The rows, bare. Who draws the card around them depends on who
+                // is rendering this level: on its own, this screen does (below);
+                // inside the Dashboard's traveler page, the collapsible
+                // "Documents" block does, and a second border would read as a
+                // card inside a card.
+                const rows = (
+                  <>
                   {openReview.items.map((item, i) => {
                     const reviewable = item.state === 'submitted' && !!item.documentId;
                     const viewable =
@@ -919,40 +954,66 @@ export const DocumentReviewScreen: React.FC<{
                       </Pressable>
                     );
                   })}
-                </View>
-                {/* This person's whole file, as one archive. */}
-                {CAN_EXPORT && canApprove
-                  ? (() => {
-                      const files = exportableOf(
-                        openReview.items.map(item => ({ item, name: null })),
-                      );
-                      if (files.length === 0) return null;
-                      const key = `trav:${openReview.userId}`;
-                      const busy = exportingZip?.startsWith(key);
-                      const who = openTraveler?.name ?? 'Traveler';
-                      return (
-                        <PressableScale
-                          onPress={() => runExport(files, `${who} (${files.length})`, key)}
-                          disabled={!!exportingZip}
-                          style={styles.exportBtn}
-                          accessibilityLabel={`Export ${who}'s documents`}
-                        >
-                          <Ionicons name="download-outline" size={15} color="#5A5A5A" />
-                          <Text style={styles.exportText}>
-                            {busy
-                              ? `Packaging ${exportingZip?.split(':')[2] ?? ''}…`
-                              : `Export their documents (${files.length})`}
-                          </Text>
-                        </PressableScale>
-                      );
-                    })()
-                  : null}
+                  </>
+                );
 
-                {/* Money, medical and the per-person actions. Supplied by the
-                    Dashboard tab; absent everywhere else, which is what keeps
-                    this screen usable on its own. */}
-                {renderTravelerExtras?.(openReview.userId)}
-                </>
+                /* This person's whole file, as one archive. */
+                const exportBtn =
+                  CAN_EXPORT && canApprove
+                    ? (() => {
+                        const files = exportableOf(
+                          openReview.items.map(item => ({ item, name: null })),
+                        );
+                        if (files.length === 0) return null;
+                        const key = `trav:${openReview.userId}`;
+                        const busy = exportingZip?.startsWith(key);
+                        const who = openTraveler?.name ?? 'Traveler';
+                        return (
+                          <PressableScale
+                            onPress={() => runExport(files, `${who} (${files.length})`, key)}
+                            disabled={!!exportingZip}
+                            style={styles.exportBtn}
+                            accessibilityLabel={`Export ${who}'s documents`}
+                          >
+                            <Ionicons name="download-outline" size={15} color="#5A5A5A" />
+                            <Text style={styles.exportText}>
+                              {busy
+                                ? `Packaging ${exportingZip?.split(':')[2] ?? ''}…`
+                                : `Export their documents (${files.length})`}
+                            </Text>
+                          </PressableScale>
+                        );
+                      })()
+                    : null;
+
+                // Handed to the caller rather than rendered here, because the
+                // ORDER of this page is the caller's decision: on the Dashboard
+                // the operator wants who this is and what they owe before eight
+                // document rows, which is the opposite of what a screen about
+                // documents would choose (Ohad, 16 Sep).
+                if (renderTravelerExtras) {
+                  return renderTravelerExtras(openReview.userId, {
+                    // The block supplies the card and its 14px gutter; the rows
+                    // already carry their own, so only the export needs padding.
+                    node: (
+                      <>
+                        {rows}
+                        {exportBtn ? <View style={styles.docsFoot}>{exportBtn}</View> : null}
+                      </>
+                    ),
+                    done: openReview.done,
+                    total: openReview.total,
+                    toReview: openReview.toReview,
+                  });
+                }
+
+                return (
+                  <>
+                    <View style={styles.card}>{rows}</View>
+                    {exportBtn}
+                  </>
+                );
+                })()
               ) : (
                 /* ── Level 1: every document ───────────────────────────── */
                 <DocumentsList
@@ -1140,13 +1201,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    minHeight: 64,
+    // 60, not 64: two lines of 18 + 16 with a 2px gap and 12 of padding each
+    // side come to exactly 60, so the row is sized by what is in it. The old 4
+    // points of slack were invisible on one row and 32 across eight of them.
+    minHeight: 60,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0EE',
   },
   rowLast: { borderBottomWidth: 0 },
+  // The export button when the rows sit inside the traveler page's Documents
+  // block: that block bleeds its body to the card edge for the rows' sake, so
+  // the one thing under them has to put the gutter back.
+  docsFoot: { paddingHorizontal: 14, paddingBottom: 14 },
   rowPressed: { backgroundColor: '#F4F4F2' },
   rowText: { flex: 1, gap: 2 },
   rowTitle: {

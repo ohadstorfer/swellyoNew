@@ -96,15 +96,29 @@ export const DarkHeader: React.FC<{
   topInset: number;
   onBack: () => void;
   right?: React.ReactNode;
-}> = ({ title, topInset, onBack, right }) => (
+  /** One line under the title — "2/5 done · 1 document waiting for you". The
+   *  web dashboard's traveler page carries it, and it is the only place the
+   *  operator learns how far through one person they are without counting the
+   *  rows themselves. */
+  sub?: string | null;
+}> = ({ title, topInset, onBack, right, sub }) => (
   <View style={[styles.header, { paddingTop: topInset }]}>
     <View style={styles.headerRow}>
       <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
         <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
       </Pressable>
-      <Text style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </Text>
+      {/* The flex lives on the column, not the title, so the subtitle shares
+          the same width and the right slot keeps its place. */}
+      <View style={styles.headerText}>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {sub ? (
+          <Text style={styles.headerSub} numberOfLines={1}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
       {right}
     </View>
   </View>
@@ -520,13 +534,21 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 16,
   },
+  headerText: { flex: 1 },
   headerTitle: {
-    flex: 1,
     fontFamily: ff('Montserrat', '700'),
     fontSize: 18,
     lineHeight: 24,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  // Quiet against the black, like the web's grey sub-line under the name.
+  headerSub: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.65)',
+    marginTop: 1,
   },
   headerPill: {
     flexDirection: 'row',

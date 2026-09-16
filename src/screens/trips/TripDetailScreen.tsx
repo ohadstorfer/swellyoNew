@@ -824,7 +824,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     [reviewData],
   );
   const [reviewOpen, setReviewOpen] = useState(false);
-  /** Set when the Dashboard's Travelers list opens review on ONE person; null
+  /** Set when the Dashboard's Members strip opens review on ONE person; null
    *  opens the whole queue, which is every other entry point. */
   const [reviewFocusUserId, setReviewFocusUserId] = useState<string | null>(null);
   /** Set when the Dashboard's Documents list opens review on ONE document type.
@@ -1292,7 +1292,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Sticky Overview/Plan toggle: track scroll position and the toggle's resting
   // Y so a clone can clip under the black header once the real one scrolls past.
   const scrollY = useRef(new Animated.Value(0)).current;
-  const toggleYRef = useRef(0);
+  // null until measured. 0 is a real value: with the hero collapsed (Dashboard,
+  // Plan) the toggle sits at the very top of the scroll content.
+  const toggleYRef = useRef<number | null>(null);
   const [toggleY, setToggleY] = useState(0);
   const toggleYTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
@@ -1330,7 +1332,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // Y (not every frame) — the clone's opacity itself is driven natively below.
   useEffect(() => {
     const id = scrollY.addListener(({ value }) => {
-      const next = toggleYRef.current > 0 && value >= toggleYRef.current;
+      // Same threshold as the clone's opacity below (`max(toggleY, 1)`), so it
+      // takes touches exactly when it is visible.
+      const next = toggleYRef.current !== null && value >= Math.max(toggleYRef.current, 1);
       setToggleStuck(prev => (prev !== next ? next : prev));
     });
     return () => scrollY.removeListener(id);
@@ -3315,12 +3319,37 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             passportIds={
               showDashboard && (isHost || can('docs.view')) ? docsApprovedIds : undefined
             }
+            memberPressLabel={
+              showDashboard && (isHost || can('docs.view')) ? 'manage' : 'profile'
+            }
             onMemberPress={
-              onViewUserProfile
+              // On the Dashboard a member is someone you are RUNNING the trip
+              // for, so tapping them opens what the web dashboard's traveler
+              // page opens: their documents, money, medical and the actions —
+              // not their Swellyo profile, which is a tap further in from the
+              // identity row at the top of that screen (Ohad, 16 Sep).
+              //
+              // Only for people the review actually covers. The host and any
+              // staff are not travelers, so `reviewData` has no row for them
+              // and a focused review screen would come up empty — they keep
+              // the profile, which is the only thing there is to show.
+              showDashboard && (isHost || can('docs.view'))
                 ? userId => {
-                    if (userId !== currentUserId) onViewUserProfile(userId);
+                    if (userId === currentUserId) return;
+                    if (reviewData.some(r => r.userId === userId)) {
+                      setReviewFocusUserId(userId);
+                      setReviewFocusRequirementId(null);
+                      setReviewWaiting(false);
+                      setReviewOpen(true);
+                      return;
+                    }
+                    onViewUserProfile?.(userId);
                   }
-                : undefined
+                : onViewUserProfile
+                  ? userId => {
+                      if (userId !== currentUserId) onViewUserProfile(userId);
+                    }
+                  : undefined
             }
           />
         </View>
@@ -3771,14 +3800,19 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           initialUserId={reviewFocusUserId}
           initialRequirementId={reviewFocusRequirementId}
           initialWaiting={reviewWaiting}
-          renderTravelerExtras={userId => {
+          renderTravelerExtras={(userId, documents) => {
             const t = reviewTravelers.find(x => x.userId === userId);
             const name = t?.name ?? 'Traveler';
             return (
               <TravelerExtras
+                // Remounts per traveler, so "are their documents open?" is
+                // decided fresh for each one instead of inherited from whoever
+                // the operator looked at last.
+                key={userId}
                 tripId={tripId}
                 userId={userId}
                 name={name}
+                documents={documents}
                 money={
                   dashboardMoney.data?.travelers.find(m => m.userId === userId) ?? null
                 }

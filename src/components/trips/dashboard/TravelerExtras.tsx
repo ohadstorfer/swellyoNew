@@ -12,17 +12,30 @@
  * an operator feeding fifteen people has every business reading them once they
  * have deliberately opened that person.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import Reanimated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { ff } from '../../../theme/fonts';
 import Thumb from '../../Thumb';
 import { Images } from '../../../assets/images';
 import { PressableScale } from '../PressableScale';
-import { fetchMyMedicalForm } from '../../../services/trips/tripDocumentsService';
-import type { TravelerMoney } from '../../../services/trips/operatorDashboardService';
+import { fetchMyMedicalForm, type MedicalForm } from '../../../services/trips/tripDocumentsService';
+import {
+  fetchTravelerProfiles,
+  type TravelerMoney,
+} from '../../../services/trips/operatorDashboardService';
 import type { TripRefund } from '../../../services/trips/refundsService';
 import { D } from './dashboardTheme';
 import { formatUsd } from './dashboardFormat';
@@ -89,6 +102,20 @@ export const TravelerExtras: React.FC<{
   /** Their photo, for the identity row. Comes from the same review row the
    *  screen already holds — never fetched again here. */
   avatarUrl?: string | null;
+  /**
+   * This traveler's document rows, handed over by DocumentReviewScreen so they
+   * can be placed in the running order rather than above it.
+   *
+   * They arrive unwrapped — the Documents block draws the card — and collapsed
+   * behind a header, because eight rows of "nothing sent yet" between the
+   * person and their money is the thing this page got wrong.
+   */
+  documents?: {
+    node: React.ReactNode;
+    done: number;
+    total: number;
+    toReview: number;
+  };
 }> = ({
   tripId,
   userId,
@@ -104,39 +131,70 @@ export const TravelerExtras: React.FC<{
   onRemove,
   onOpenProfile,
   avatarUrl,
+  documents,
 }) => {
+  /**
+   * Open when there is something to decide, shut when there is not.
+   *
+   * Not a remembered preference: the operator opens a person to answer a
+   * question, and "is anything waiting for me?" is the question the Dashboard
+   * sent them here with. When the answer is no, the eight rows underneath are
+   * a list of things that have not happened yet, and they can ask for it.
+   *
+   * Read once per traveler — the caller keys this component on `userId`, so
+   * opening the next person re-runs it.
+   */
+  const [docsOpen, setDocsOpen] = useState(() => (documents?.toReview ?? 0) > 0);
   const medical = useQuery({
     queryKey: ['operatorDashboard', 'medicalForm', tripId, userId],
     queryFn: () => fetchMyMedicalForm(tripId, userId),
   });
 
+  // "25 · Argentina · beginner · shortboard" — the web dashboard's Profile card,
+  // which is the one thing this screen was missing next to it. Fetched here
+  // rather than on the trip screen: it is four columns about ONE person, wanted
+  // only once the operator has deliberately opened them, and react-query keeps
+  // it for the next open.
+  const profile = useQuery({
+    queryKey: ['operatorDashboard', 'travelerProfile', userId],
+    queryFn: async () => (await fetchTravelerProfiles([userId])).get(userId) ?? null,
+  });
+
   const form = medical.data ?? null;
+  // Board types are stored with underscores ('mid_length', 'soft_top').
+  const facts = [
+    profile.data?.age != null ? String(profile.data.age) : null,
+    profile.data?.countryFrom,
+    profile.data?.surfLevel,
+    profile.data?.boardType,
+  ]
+    .filter((v): v is string => !!v && v.trim().length > 0)
+    .map(v => v.replace(/_/g, ' '))
+    .join(' · ');
 
   return (
     <View style={styles.root}>
       {/* ── Who this is ────────────────────────────────────────────────── */}
-      {/* A person, before the money and the medical answers about them. Reads
-          as a header for everything below rather than as another block. */}
-      {onOpenProfile && (
-        <PressableScale
-          onPress={onOpenProfile}
-          style={styles.identity}
-          accessibilityLabel={`Open ${name}'s profile`}
-        >
-          {avatarUrl ? (
-            <Thumb uri={avatarUrl} size={96} style={styles.identityAvatar} contentFit="cover" />
-          ) : (
-            <Image source={Images.defaultAvatar} style={styles.identityAvatar} contentFit="cover" />
-          )}
-          <View style={styles.identityText}>
-            <Text style={styles.identityName} numberOfLines={1}>
-              {name}
+      {/* Reads as a header for everything below rather than as another block,
+          so it carries no border and no press of its own — opening the profile
+          is an action, and it lives with the other actions at the bottom. */}
+      <View style={styles.identity}>
+        {avatarUrl ? (
+          <Thumb uri={avatarUrl} size={96} style={styles.identityAvatar} contentFit="cover" />
+        ) : (
+          <Image source={Images.defaultAvatar} style={styles.identityAvatar} contentFit="cover" />
+        )}
+        <View style={styles.identityText}>
+          <Text style={styles.identityName} numberOfLines={1}>
+            {name}
+          </Text>
+          {facts ? (
+            <Text style={styles.identityFacts} numberOfLines={2}>
+              {facts}
             </Text>
-            <Text style={styles.identityLink}>View full profile</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={D.muted} />
-        </PressableScale>
-      )}
+          ) : null}
+        </View>
+      </View>
 
       {/* ── Money ──────────────────────────────────────────────────────── */}
       <Block
@@ -286,15 +344,91 @@ export const TravelerExtras: React.FC<{
         )}
       </Block>
 
+      {/* ── Documents ──────────────────────────────────────────────────── */}
+      {/* Under the money, not over it: the operator already read "0/8 done" in
+          the header on the way in, so the rows are the detail behind a number
+          they have — while the money is a number they do not. */}
+      {documents ? (
+        <Block
+          title="Documents"
+          bleed
+          sub={`${documents.done}/${documents.total} done`}
+          open={docsOpen}
+          onToggle={() => setDocsOpen(o => !o)}
+        >
+          {documents.node}
+        </Block>
+      ) : null}
+
       {/* ── Medical ────────────────────────────────────────────────────── */}
-      <Block title="Medical">
-        {medical.isPending ? (
-          <ActivityIndicator />
-        ) : medical.isError ? (
+      {/* Absent until there is something to read (Ohad, 16 Sep). A "Medical"
+          card saying "not filled in yet" is a row of furniture on every
+          traveler who has not got to it — and the header above already counts
+          the medical form among the things that are not done.
+          An ERROR still shows, because "we could not load it" and "there is
+          nothing" are different facts and this is the one block where guessing
+          wrong means missing an allergy. So does a form the operator may not
+          read: RLS refuses the row rather than returning an empty one, so a
+          Manager without `medical.view` lands in the same branch as a traveler
+          who never filled it in, and hiding is the only answer that does not
+          assert something false. */}
+      {medical.isError ? (
+        <Block title="Medical" appear>
           <Text style={styles.muted}>Could not load.</Text>
-        ) : !form?.completedAt ? (
-          <Text style={styles.muted}>Not filled in yet.</Text>
-        ) : (
+        </Block>
+      ) : form?.completedAt ? (
+        <Block title="Medical" appear>
+          <MedicalAnswers form={form} />
+        </Block>
+      ) : null}
+
+      {/* ── Actions ────────────────────────────────────────────────────── */}
+      <PressableScale
+        onPress={onMessage}
+        style={styles.action}
+        accessibilityLabel={`Message ${name}`}
+      >
+        <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
+        <Text style={styles.actionText}>Message {firstName(name)}</Text>
+      </PressableScale>
+
+      {/* The profile used to hang off the identity row at the top. It is an
+          action, not an identity, and up there it was the one tappable thing on
+          a page whose job is to be read — so it collected taps meant for the
+          name. Down here it sits with the other things you can do. */}
+      {onOpenProfile && (
+        <PressableScale
+          onPress={onOpenProfile}
+          style={styles.actionQuiet}
+          accessibilityLabel={`Open ${name}'s profile`}
+        >
+          <Ionicons name="person-outline" size={18} color={D.ink} />
+          <Text style={styles.actionQuietText}>View full profile</Text>
+        </PressableScale>
+      )}
+
+      {/* Removing lives at the very bottom, under Message and visually quieter
+          than it: this screen exists to review someone, and the destructive
+          action should be the one you have to travel to, not the one your
+          thumb lands on. Same reasoning as the refund link sitting inside the
+          money block rather than up here. */}
+      {onRemove && (
+        <PressableScale
+          onPress={onRemove}
+          style={styles.actionDanger}
+          accessibilityLabel={`Remove ${name} from the trip`}
+        >
+          <Ionicons name="person-remove-outline" size={18} color={D.danger} />
+          <Text style={styles.actionDangerText}>Remove from trip</Text>
+        </PressableScale>
+      )}
+    </View>
+  );
+};
+
+/** What one traveler said about their body. Split out so the block above can be
+ *  absent entirely — inside a ternary, `form` would not narrow. */
+const MedicalAnswers: React.FC<{ form: MedicalForm }> = ({ form }) => (
           <View style={{ gap: 6 }}>
             {/* The emergency contact leads, and is TAPPABLE. Everything else in
                 this block is read while planning; this is the line somebody
@@ -344,51 +478,109 @@ export const TravelerExtras: React.FC<{
               Collected to run this trip. Never used for matching or anything else.
             </Text>
           </View>
-        )}
-      </Block>
+);
 
-      {/* ── Actions ────────────────────────────────────────────────────── */}
-      <PressableScale
-        onPress={onMessage}
-        style={styles.action}
-        accessibilityLabel={`Message ${name}`}
-      >
-        <Ionicons name="chatbubble-ellipses-outline" size={18} color="#FFFFFF" />
-        <Text style={styles.actionText}>Message {firstName(name)}</Text>
-      </PressableScale>
-
-      {/* Removing lives at the very bottom, under Message and visually quieter
-          than it: this screen exists to review someone, and the destructive
-          action should be the one you have to travel to, not the one your
-          thumb lands on. Same reasoning as the refund link sitting inside the
-          money block rather than up here. */}
-      {onRemove && (
-        <PressableScale
-          onPress={onRemove}
-          style={styles.actionDanger}
-          accessibilityLabel={`Remove ${name} from the trip`}
-        >
-          <Ionicons name="person-remove-outline" size={18} color={D.danger} />
-          <Text style={styles.actionDangerText}>Remove from trip</Text>
-        </PressableScale>
-      )}
+const Block: React.FC<{
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+  /** A quiet count next to the title — "3/8 done". Only on a collapsible block,
+   *  where it is what you read INSTEAD of opening it. */
+  sub?: string;
+  /** Present = collapsible. The header becomes the toggle. */
+  open?: boolean;
+  onToggle?: () => void;
+  /** Body runs to the card edge (rows bring their own gutter). */
+  bleed?: boolean;
+  /**
+   * Fade in on mount instead of appearing.
+   *
+   * For a block whose existence depends on a query — Medical decides whether it
+   * is on the page at all once the form has loaded, and popping in under the
+   * money would read as a glitch rather than as an answer arriving.
+   */
+  appear?: boolean;
+}> = ({ title, right, children, sub, open, onToggle, bleed, appear }) => {
+  // Reduced motion means gentler, not none: the fade stays because it explains
+  // that the rows are the same rows, only the height and the chevron go.
+  const reduced = useReducedMotion();
+  const bodyShowing = !onToggle || !!open;
+  const head = (
+    <View
+      style={[
+        styles.blockHead,
+        bleed && styles.blockHeadBleed,
+        // Only when something follows it — a collapsed card ending in 12px of
+        // nothing reads as a card that failed to load.
+        bodyShowing && styles.blockHeadGap,
+      ]}
+    >
+      <Text style={styles.blockTitle}>{title}</Text>
+      {sub ? <Text style={styles.blockSub}>{sub}</Text> : null}
+      <View style={{ flex: 1 }} />
+      {right}
+      {onToggle ? <Chevron open={!!open} reduced={reduced} /> : null}
     </View>
+  );
+
+  return (
+    <Reanimated.View
+      style={[
+        styles.block,
+        bleed && styles.blockBleed,
+        // The rows end flush with the card edge; the gutter only comes back
+        // when they are hidden and the header is all there is.
+        bleed && bodyShowing && styles.blockBleedOpen,
+      ]}
+      // The card's own height, so the blocks below slide rather than jump.
+      layout={reduced ? undefined : LinearTransition.duration(200)}
+      entering={appear && !reduced ? FadeIn.duration(180) : undefined}
+    >
+      {onToggle ? (
+        <Pressable
+          onPress={onToggle}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: !!open }}
+          accessibilityLabel={`${title}${sub ? `, ${sub}` : ''}`}
+          style={({ pressed }) => pressed && { opacity: 0.6 }}
+        >
+          {head}
+        </Pressable>
+      ) : (
+        head
+      )}
+      {onToggle && !open ? null : (
+        <Reanimated.View
+          // Exit faster than enter — closing is the system responding, opening
+          // is content arriving.
+          entering={reduced ? undefined : FadeIn.duration(180)}
+          exiting={reduced ? undefined : FadeOut.duration(120)}
+        >
+          {children}
+        </Reanimated.View>
+      )}
+    </Reanimated.View>
   );
 };
 
-const Block: React.FC<{ title: string; right?: React.ReactNode; children: React.ReactNode }> = ({
-  title,
-  right,
-  children,
-}) => (
-  <View style={styles.block}>
-    <View style={styles.blockHead}>
-      <Text style={styles.blockTitle}>{title}</Text>
-      {right}
-    </View>
-    {children}
-  </View>
-);
+/** Points down when shut, up when open. 180ms ease-out — long enough to read as
+ *  a turn, short enough that a double-tap does not queue up. */
+const Chevron: React.FC<{ open: boolean; reduced: boolean }> = ({ open, reduced }) => {
+  const t = useSharedValue(open ? 1 : 0);
+  useEffect(() => {
+    t.value = reduced
+      ? open
+        ? 1
+        : 0
+      : withTiming(open ? 1 : 0, { duration: 180, easing: Easing.out(Easing.cubic) });
+  }, [open, reduced, t]);
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${t.value * 180}deg` }] }));
+  return (
+    <Reanimated.View style={style}>
+      <Ionicons name="chevron-down" size={18} color={D.muted} />
+    </Reanimated.View>
+  );
+};
 
 const Line: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <Text style={styles.body}>
@@ -434,7 +626,9 @@ function formatDay(iso: string | null): string {
 // scale the tab moved to. The two are neighbours, not the same page. See §2 and
 // §6 of `docs/specs/operator-trips/dashboard-tab-design.md`.
 const styles = StyleSheet.create({
-  root: { gap: 12, marginTop: 12 },
+  // No top margin: this is the whole traveler page now, not a tail on the end
+  // of a document list, and the scroll view above it already sets the inset.
+  root: { gap: 12 },
   // Identity row — a header for the blocks below, so no card border of its own.
   identity: {
     flexDirection: 'row',
@@ -443,14 +637,16 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   identityAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#E7EDEE' },
-  identityText: { flex: 1, gap: 1 },
+  identityText: { flex: 1, gap: 2 },
   identityName: {
     fontFamily: ff('Inter', '600'),
     fontSize: 15,
     fontWeight: '600',
     color: D.ink,
   },
-  identityLink: { fontFamily: ff('Inter', '500'), fontSize: 12, color: D.wait },
+  // Lower-cased as stored ('beginner', 'shortboard') — capitalising one word of
+  // four would make the country look like the odd one out.
+  identityFacts: { fontFamily: ff('Inter', '400'), fontSize: 12, color: D.muted },
   // Emergency contact — tinted with the danger hue, not filled with it: it is
   // information you reach for in a bad moment, not a warning about one.
   emergency: {
@@ -490,14 +686,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
+  blockBleed: { paddingHorizontal: 0 },
+  blockBleedOpen: { paddingBottom: 0 },
   // 12 — a sub-block header sitting under the tab's 16. Was 10, which was a
   // third value for a gap that only has two legitimate ones.
   blockHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+    gap: 8,
+    // A collapsible header is a whole-width tap target, so it gets the height a
+    // finger expects rather than the height of its text.
+    minHeight: 24,
   },
+  blockHeadBleed: { paddingHorizontal: 14 },
+  blockHeadGap: { marginBottom: 12 },
   blockTitle: {
     fontFamily: ff('Inter', '700'),
     fontSize: 14,
@@ -505,6 +707,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#333333',
   },
+  // What you read instead of opening the block.
+  blockSub: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: D.muted },
   body: { fontFamily: ff('Inter', '400'), fontSize: 13, lineHeight: 19, color: D.ink },
   muted: { fontFamily: ff('Inter', '400'), fontSize: 12, lineHeight: 18, color: D.muted },
   link: { fontFamily: ff('Inter', '400'), fontSize: 13, lineHeight: 18, color: D.accent },
@@ -570,6 +774,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  // Neutral outline — between Message (filled) and Remove (danger outline), so
+  // the three buttons read as one descending order of consequence.
+  actionQuiet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: D.cardBorder,
+    backgroundColor: '#FFFFFF',
+  },
+  actionQuietText: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 15,
+    fontWeight: '600',
+    color: D.ink,
   },
   // Outlined, not filled: the destructive action must not compete with Message
   // for the eye. Colour comes from the dashboard theme, which no longer mirrors

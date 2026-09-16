@@ -337,7 +337,16 @@ export const TripMemberSection: React.FC<{
   variant?: 'plan' | 'overview';
   /** Header text. Plan says "Members"; the operator frames say "Member". */
   title?: string;
-}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0, showCommitment = true, passportIds, variant = 'plan', title = 'Members' }) => {
+  /**
+   * What tapping an avatar actually does, for the screen reader.
+   *
+   * 'manage' on the operator Dashboard, where a member opens that person's
+   * documents, money and medical rather than their Swellyo profile. The host
+   * keeps the profile wording either way — they are not a traveler, so there is
+   * nothing to manage about them here.
+   */
+  memberPressLabel?: 'profile' | 'manage';
+}> = ({ members, participantCount, maxParticipants, committedCount, onMemberPress, onViewAll, pendingCount = 0, showCommitment = true, passportIds, variant = 'plan', title = 'Members', memberPressLabel = 'profile' }) => {
   const isOverview = variant === 'overview';
   // "View all (N)" = the actual number of members to view. Previously this used
   // the trip cap (max_participants), which made a 2-member/13-cap trip read as
@@ -389,7 +398,15 @@ export const TripMemberSection: React.FC<{
                 disabled={!onMemberPress}
                 style={styles.memberItem}
                 accessibilityRole="button"
-                accessibilityLabel={m.name ? `Open ${m.name}'s profile` : 'Open profile'}
+                accessibilityLabel={
+                  memberPressLabel === 'manage' && !m.isHost
+                    ? m.name
+                      ? `Open ${m.name}'s documents, money and medical`
+                      : 'Open traveler'
+                    : m.name
+                      ? `Open ${m.name}'s profile`
+                      : 'Open profile'
+                }
               >
                 <View>
                   {thumb ? (
