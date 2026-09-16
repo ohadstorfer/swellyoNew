@@ -139,7 +139,7 @@ export function WaitingPage() {
       />
 
       {actionError && (
-        <div className="card enter" style={{ borderColor: 'var(--danger)', marginBottom: 14 }}>
+        <div className="card enter" style={{ borderColor: 'var(--danger)', marginBottom: 16 }}>
           <div className="card-body small" style={{ color: 'var(--danger)' }}>
             {actionError}
           </div>
@@ -158,7 +158,7 @@ export function WaitingPage() {
         />
       ) : (
         <>
-          <div className="banner enter" style={{ marginBottom: 14 }}>
+          <div className="banner enter" style={{ marginBottom: 16 }}>
             <span>
               {selected.size > 0
                 ? `${plural(selected.size, 'document')} selected`

@@ -27,19 +27,19 @@ export function NotOperatorPage() {
       }}
     >
       <div className="card enter" style={{ maxWidth: 380, width: '100%' }}>
-        <div className="card-body" style={{ padding: '32px 28px', textAlign: 'center' }}>
+        <div className="card-body" style={{ padding: '32px 32px', textAlign: 'center' }}>
           <div
             aria-hidden
             style={{
               width: 12,
               height: 12,
-              borderRadius: 99,
-              background: 'var(--warn, #E0A94A)',
-              margin: '0 auto 18px',
+              borderRadius: 999,
+              background: 'var(--warn)',
+              margin: '0 auto 16px',
             }}
           />
-          <h1 style={{ fontSize: 21, marginBottom: 6 }}>Nothing to run here</h1>
-          <p className="muted small" style={{ marginBottom: 20, lineHeight: 1.5 }}>
+          <h1 style={{ fontSize: 'var(--fs-2xl)', lineHeight: '32px', marginBottom: 8 }}>Nothing to run here</h1>
+          <p className="muted small" style={{ marginBottom: 24 }}>
             This site is for people running an operator trip — the operator, or the crew they
             put on it. This account is neither yet.
           </p>
@@ -47,7 +47,7 @@ export function NotOperatorPage() {
           {user?.email && (
             <p
               className="muted"
-              style={{ fontSize: 12, marginBottom: 20, wordBreak: 'break-all' }}
+              style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginBottom: 24, wordBreak: 'break-all' }}
             >
               Signed in as <strong>{user.email}</strong>
             </p>
@@ -61,7 +61,7 @@ export function NotOperatorPage() {
             Sign out
           </button>
 
-          <p className="muted" style={{ fontSize: 12, marginTop: 20, lineHeight: 1.5 }}>
+          <p className="muted" style={{ fontSize: 'var(--fs-s)', marginTop: 24, lineHeight: '18px' }}>
             If this is wrong, check you used the same account as the Swellyo app,
             or ask Swellyo to turn on operator access.
           </p>

@@ -1080,6 +1080,22 @@ function parseLocalDate(iso: string): Date | null {
 }
 
 /**
+ * Waiver PDFs are capped at 10 MB (Figma 15258-74979). The database refuses a
+ * row pointing at a bigger file (`20260915000100_waiver_pdf_10mb_limit.sql`);
+ * this checks first, so nobody waits through an upload that will be refused.
+ */
+export const MAX_WAIVER_BYTES = 10 * 1024 * 1024;
+
+export const WAIVER_TOO_BIG_MESSAGE = 'Waiver PDFs can be up to 10 MB. Please choose a smaller file.';
+
+/** Throws a message fit to show when the file is over the limit. An unreadable
+ *  size (0) is let through; the database still checks the real one. */
+export async function assertWaiverSize(localUri: string): Promise<void> {
+  const size = await byteSizeOf(localUri);
+  if (size > MAX_WAIVER_BYTES) throw new Error(WAIVER_TOO_BIG_MESSAGE);
+}
+
+/**
  * Publish the operator's waiver as a PDF.
  *
  * Must exist before travelers can agree: `operator_trip_my_requirements` only
@@ -1102,6 +1118,7 @@ export async function publishWaiverPdf(
   tripId: string,
   localUri: string,
 ): Promise<string> {
+  await assertWaiverSize(localUri);
   const documentId = Crypto.randomUUID();
   // Must match the operator-materials policy regex exactly:
   //   ^<uuid>/operator/<uuid>\.(jpg|jpeg|png|heic|pdf)$
@@ -1281,6 +1298,7 @@ export async function uploadDefaultWaiver(
   const uid = sess.session?.user?.id;
   if (!uid) throw new Error('Not signed in');
 
+  await assertWaiverSize(localUri);
   const documentHash = await sha256OfFile(localUri);
   if (!documentHash) {
     throw new Error('Could not read that file. Try choosing it again.');
@@ -1509,6 +1527,7 @@ export async function replaceWaiverPdf(
     return publishWaiverPdf(tripId, localUri);
   }
 
+  await assertWaiverSize(localUri);
   const documentId = Crypto.randomUUID();
   const storagePath = `${tripId}/operator/${documentId}.pdf`;
 

@@ -61,12 +61,12 @@ export function TierPicker({
               <span className={`tag ${TIER_TAG[role.roleKey]}`}>Tier {role.tier}</span>
             </span>
             {role.blurb && (
-              <span className="muted small" style={{ display: 'block', marginTop: 3 }}>
+              <span className="muted small" style={{ display: 'block', marginTop: 4 }}>
                 {role.blurb}
               </span>
             )}
             {selected && (
-              <span style={{ display: 'block', marginTop: 10 }}>
+              <span style={{ display: 'block', marginTop: 12 }}>
                 {role.capabilities.map(c => (
                   <span
                     key={c}
@@ -132,7 +132,7 @@ export function ProfileFields({
       <label
         className="small muted"
         htmlFor="crew-bio"
-        style={{ display: 'block', marginTop: 14 }}
+        style={{ display: 'block', marginTop: 16 }}
       >
         A line about them
       </label>
@@ -143,7 +143,7 @@ export function ProfileFields({
         rows={3}
         onChange={e => onBio(e.target.value)}
         placeholder="Shooting from the water all week. Ten years on this coast."
-        style={{ marginTop: 6 }}
+        style={{ marginTop: 8 }}
       />
       <p className="muted small" style={{ marginTop: 4, textAlign: 'right' }}>
         {bio.length}/280

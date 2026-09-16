@@ -47,9 +47,13 @@ export interface OperatorSettings {
   policyConfirmedAt: string | null;
   defaultWaiver: DefaultWaiver | null;
   insurance: OperatorInsurance | null;
+  /** null exactly when `insurance` is null. */
+  insuranceReview: InsuranceReview | null;
   /** When they accepted, and WHICH version — a stale version is not accepted. */
   termsAcceptedAt: string | null;
   termsVersion: string | null;
+  /** The full name typed as the signature. */
+  termsSignedName: string | null;
 }
 
 /**
@@ -63,6 +67,25 @@ export interface OperatorInsurance {
   mime: string;
   sizeBytes: number | null;
   uploadedAt: string;
+  provider: string | null;
+  policyNumber: string | null;
+  /** 'YYYY-MM-DD'. A date, not a timestamp: a policy ends on a day. */
+  expiresOn: string | null;
+}
+
+/**
+ * Where Swellyo's review of the certificate stands. Written only by
+ * `review_operator_insurance()` — any change the operator makes to the
+ * certificate sends it back to `pending` (DB trigger in the app's migration
+ * 20260915000000), so this site never sends it.
+ */
+export type InsuranceStatus = 'pending' | 'approved' | 'rejected';
+
+export interface InsuranceReview {
+  status: InsuranceStatus;
+  reviewedAt: string | null;
+  /** Why it was rejected, when an admin said. */
+  note: string | null;
 }
 
 export const EMPTY_SETTINGS: OperatorSettings = {
@@ -72,13 +95,15 @@ export const EMPTY_SETTINGS: OperatorSettings = {
   policyConfirmedAt: null,
   defaultWaiver: null,
   insurance: null,
+  insuranceReview: null,
   termsAcceptedAt: null,
   termsVersion: null,
+  termsSignedName: null,
 };
 
 // One literal, not a concatenation: supabase-js parses this at the type level.
 const SETTINGS_COLUMNS =
-  'default_currency, cancellation_preset, cancellation_rules, cancellation_notes, currency_confirmed_at, policy_confirmed_at, default_waiver_path, default_waiver_name, default_waiver_hash, default_waiver_size_bytes, default_waiver_uploaded_at, insurance_path, insurance_name, insurance_mime, insurance_size_bytes, insurance_uploaded_at, terms_accepted_at, terms_version';
+  'default_currency, cancellation_preset, cancellation_rules, cancellation_notes, currency_confirmed_at, policy_confirmed_at, default_waiver_path, default_waiver_name, default_waiver_hash, default_waiver_size_bytes, default_waiver_uploaded_at, insurance_path, insurance_name, insurance_mime, insurance_size_bytes, insurance_uploaded_at, insurance_provider, insurance_policy_number, insurance_expires_on, insurance_status, insurance_reviewed_at, insurance_review_note, terms_accepted_at, terms_version, terms_signed_name';
 
 export async function fetchOperatorSettings(userId: string): Promise<OperatorSettings> {
   const { data, error } = await supabase
@@ -122,10 +147,26 @@ export async function fetchOperatorSettings(userId: string): Promise<OperatorSet
           mime: row.insurance_mime ?? 'application/pdf',
           sizeBytes: row.insurance_size_bytes ?? null,
           uploadedAt: row.insurance_uploaded_at,
+          provider: row.insurance_provider ?? null,
+          policyNumber: row.insurance_policy_number ?? null,
+          expiresOn: row.insurance_expires_on ?? null,
+        }
+      : null,
+    insuranceReview: row.insurance_path
+      ? {
+          // 'pending' for an unknown value: an unreadable status must never
+          // read as approved.
+          status:
+            row.insurance_status === 'approved' || row.insurance_status === 'rejected'
+              ? row.insurance_status
+              : 'pending',
+          reviewedAt: row.insurance_reviewed_at ?? null,
+          note: row.insurance_review_note ?? null,
         }
       : null,
     termsAcceptedAt: row.terms_accepted_at ?? null,
     termsVersion: row.terms_version ?? null,
+    termsSignedName: row.terms_signed_name ?? null,
   };
 }
 
@@ -151,6 +192,8 @@ export async function saveOperatorSettings(
     insurance?: OperatorInsurance | null;
     /** Stamps `terms_accepted_at` AND the version that was accepted. */
     acceptTermsVersion?: string;
+    /** The typed signature. Sent with `acceptTermsVersion`. */
+    termsSignedName?: string;
   },
 ): Promise<void> {
   const row: Record<string, unknown> = { user_id: userId };
@@ -182,6 +225,9 @@ export async function saveOperatorSettings(
     row.insurance_mime = i?.mime ?? null;
     row.insurance_size_bytes = i?.sizeBytes ?? null;
     row.insurance_uploaded_at = i?.uploadedAt ?? null;
+    row.insurance_provider = i?.provider?.trim() || null;
+    row.insurance_policy_number = i?.policyNumber?.trim() || null;
+    row.insurance_expires_on = i?.expiresOn || null;
   }
 
   if (patch.acceptTermsVersion) {
@@ -189,6 +235,7 @@ export async function saveOperatorSettings(
     // version with no timestamp could never answer "when".
     row.terms_accepted_at = new Date().toISOString();
     row.terms_version = patch.acceptTermsVersion;
+    row.terms_signed_name = patch.termsSignedName?.trim() || null;
   }
 
   const { error } = await supabase
@@ -221,6 +268,11 @@ export async function uploadOperatorInsurance(
   userId: string,
   file: File,
   previousPath?: string | null,
+  fields: Pick<OperatorInsurance, 'provider' | 'policyNumber' | 'expiresOn'> = {
+    provider: null,
+    policyNumber: null,
+    expiresOn: null,
+  },
 ): Promise<OperatorInsurance> {
   const ext = (file.name.split('.').pop() ?? '').toLowerCase();
   const mime = INSURANCE_MIME[ext];
@@ -246,6 +298,7 @@ export async function uploadOperatorInsurance(
     mime,
     sizeBytes: file.size,
     uploadedAt: new Date().toISOString(),
+    ...fields,
   };
 }
 
@@ -266,6 +319,9 @@ export async function uploadOperatorInsurance(
  * The hash is REQUIRED. This file is copied into every future trip, so an
  * unhashable template would quietly produce unprovable waivers on all of them.
  */
+/** Waiver PDFs are capped at 10 MB — the database refuses anything bigger. */
+export const MAX_WAIVER_BYTES = 10 * 1024 * 1024;
+
 export async function uploadDefaultWaiver(
   userId: string,
   file: File,
@@ -273,6 +329,10 @@ export async function uploadDefaultWaiver(
 ): Promise<DefaultWaiver> {
   if (file.type !== 'application/pdf') {
     throw new Error('The waiver has to be a PDF.');
+  }
+  // Same cap the database enforces (20260915000100_waiver_pdf_10mb_limit.sql).
+  if (file.size > MAX_WAIVER_BYTES) {
+    throw new Error('Waiver PDFs can be up to 10 MB. Please choose a smaller file.');
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());

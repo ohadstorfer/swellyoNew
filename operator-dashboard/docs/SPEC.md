@@ -79,6 +79,8 @@ If Eyal wants desktop strictly read-only, remove three buttons. It is a subtract
 
    **Stripe is the exception and stays one.** Connect onboarding needs the secret key and lives behind an edge function the app calls. Step 1 of setup reports the state and points at the app. Do not build a second onboarding path here.
 
+   **Amended 2026-09-15: insurance review and the typed signature.** Setup now reads and writes `operator_settings.insurance_provider`, `insurance_policy_number`, `insurance_expires_on` and `terms_signed_name`, and reads (never writes) `insurance_status`, `insurance_reviewed_at`, `insurance_review_note`. The columns and the trigger that resets the status to `pending` come from the app's `supabase/migrations/20260915000000_operator_insurance_review.sql`; the insurance step is done only when approved and not expired.
+
    **Amended 2026-09-05: the trip's own waiver.** `replaceTripWaiver` uploads a PDF to
    `<trip_id>/operator/`. The rule above says never to write into `<trip_id>/`, and that rule is
    unchanged **for traveler documents** — passports, visas, insurance and flights stay

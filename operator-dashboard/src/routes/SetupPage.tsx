@@ -37,6 +37,7 @@ import {
   uploadDefaultWaiver,
   uploadOperatorInsurance,
   CURRENCIES,
+  type OperatorInsurance,
   type OperatorSettings,
   type PayoutState,
 } from '../services/settings';
@@ -61,6 +62,8 @@ export function SetupPage() {
   const [busy, setBusy] = useState<SetupStepKey | null>(null);
   const [stepError, setStepError] = useState<string | null>(null);
   const [termsChecked, setTermsChecked] = useState(false);
+  const [signedName, setSignedName] = useState('');
+  const [insFields, setInsFields] = useState<InsuranceFields>(fieldsOf(null));
   const fileRef = useRef<HTMLInputElement>(null);
   const insuranceRef = useRef<HTMLInputElement>(null);
 
@@ -76,6 +79,7 @@ export function SetupPage() {
         fetchPayoutState(userId).catch(() => null),
       ]);
       setSettings(s);
+      setInsFields(fieldsOf(s.insurance));
       setPayout(p ?? NO_PAYOUT);
     } catch (e) {
       setError(e);
@@ -99,7 +103,11 @@ export function SetupPage() {
     setStepError(null);
     try {
       await fn();
-      setSettings(await fetchOperatorSettings(userId));
+      const fresh = await fetchOperatorSettings(userId);
+      setSettings(fresh);
+      // Only the insurance step owns these inputs. Refilling them after another
+      // step saves would wipe what the operator is still typing.
+      if (key === 'insurance') setInsFields(fieldsOf(fresh.insurance));
     } catch (e) {
       setStepError(friendlyError(e));
     } finally {
@@ -136,18 +144,37 @@ export function SetupPage() {
   const onInsurancePicked = (file: File | undefined) => {
     if (!file) return;
     void run('insurance', async () => {
+      // The fields go up WITH the file: one save, one submission for review.
       const stored = await uploadOperatorInsurance(
         userId!,
         file,
         settings.insurance?.path ?? null,
+        cleanFields(insFields),
       );
       await saveOperatorSettings(userId!, { insurance: stored });
     });
   };
 
+  const insuranceFieldsChanged =
+    settings.insurance != null &&
+    JSON.stringify(cleanFields(insFields)) !== JSON.stringify(cleanFields(fieldsOf(settings.insurance)));
+
+  // Same file, new details. The database sends it back to review (trigger in
+  // the app's migration 20260915000000), which the hint under the button says.
+  const saveInsuranceFields = () =>
+    run('insurance', async () => {
+      if (!settings.insurance) return;
+      await saveOperatorSettings(userId!, {
+        insurance: { ...settings.insurance, ...cleanFields(insFields) },
+      });
+    });
+
   const acceptTerms = () =>
     run('terms', () =>
-      saveOperatorSettings(userId!, { acceptTermsVersion: OPERATOR_TERMS_VERSION }),
+      saveOperatorSettings(userId!, {
+        acceptTermsVersion: OPERATOR_TERMS_VERSION,
+        termsSignedName: signedName.trim(),
+      }),
     );
 
   if (loading) return <Loading />;
@@ -177,7 +204,7 @@ export function SetupPage() {
 
       {/* ── 1. Stripe — reported, not run ──────────────────────────────── */}
       <StepCard n={1} step={byKey.stripe}>
-        <p className="muted small" style={{ marginBottom: 10 }}>
+        <p className="muted small" style={{ marginBottom: 12 }}>
           {byKey.stripe.done
             ? byKey.stripe.pending
               ? 'Stripe has your details and is checking them. Nothing for you to do.'
@@ -186,7 +213,7 @@ export function SetupPage() {
         </p>
         {/* No button. Stripe's forms are inside the phone app, and a button here
             could only ever open something that does not exist on desktop. */}
-        <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+        <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
           This is the one step you finish in the <strong>Swellyo app</strong>, under
           Settings → Payments. Stripe's forms are built into the app, so they
           cannot run on this site.
@@ -195,7 +222,7 @@ export function SetupPage() {
 
       {/* ── 2. Currency ───────────────────────────────────────────────── */}
       <StepCard n={2} step={byKey.currency}>
-        <p style={{ marginBottom: 10 }}>
+        <p style={{ marginBottom: 12 }}>
           <strong>{settings.defaultCurrency ?? 'Automatic — follows your country'}</strong>
         </p>
         <p className="muted small" style={{ marginBottom: 12 }}>
@@ -212,11 +239,12 @@ export function SetupPage() {
             disabled={busy === 'currency'}
             aria-label="Price currency"
             style={{
-              padding: '9px 12px',
+              padding: '8px 12px',
               borderRadius: 8,
               border: '1px solid var(--line)',
-              background: '#fff',
-              fontSize: 14,
+              background: 'var(--surface)',
+              fontSize: 'var(--fs-md)',
+              lineHeight: '20px',
               minWidth: 220,
             }}
           >
@@ -300,10 +328,55 @@ export function SetupPage() {
         {settings.insurance && (
           <p style={{ marginBottom: 4 }}><strong>{settings.insurance.name}</strong></p>
         )}
+        {byKey.insurance.review && (
+          <p
+            className="small"
+            style={{
+              marginBottom: 4,
+              color: byKey.insurance.review === 'under_review' ? undefined : 'var(--danger)',
+            }}
+          >
+            {reviewLine(byKey.insurance.review, settings)}
+          </p>
+        )}
         <p className="muted small" style={{ marginBottom: 12 }}>
           Your liability insurance certificate. A photo of the paper one is fine —
-          Swellyo keeps it, travelers never see it.
+          Swellyo keeps it, travelers never see it. Swellyo checks it before this
+          step is done.
         </p>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <input
+            type="text"
+            placeholder="Insurance provider"
+            aria-label="Insurance provider"
+            maxLength={80}
+            value={insFields.provider ?? ''}
+            onChange={e => setInsFields(f => ({ ...f, provider: e.target.value }))}
+            disabled={busy === 'insurance'}
+            style={FIELD_STYLE}
+          />
+          <input
+            type="text"
+            placeholder="Policy number"
+            aria-label="Policy number"
+            maxLength={80}
+            value={insFields.policyNumber ?? ''}
+            onChange={e => setInsFields(f => ({ ...f, policyNumber: e.target.value }))}
+            disabled={busy === 'insurance'}
+            style={FIELD_STYLE}
+          />
+          <label className="row small" style={{ gap: 8, alignItems: 'center' }}>
+            <span className="muted">Expiration date</span>
+            <input
+              type="date"
+              aria-label="Expiration date"
+              value={insFields.expiresOn ?? ''}
+              onChange={e => setInsFields(f => ({ ...f, expiresOn: e.target.value }))}
+              disabled={busy === 'insurance'}
+              style={FIELD_STYLE}
+            />
+          </label>
+        </div>
         <input
           ref={insuranceRef}
           type="file"
@@ -325,6 +398,21 @@ export function SetupPage() {
               ? 'Replace'
               : 'Upload'}
         </button>
+        {settings.insurance && (
+          <>
+            <button
+              className="btn btn-primary"
+              style={{ marginLeft: 8 }}
+              onClick={saveInsuranceFields}
+              disabled={!insuranceFieldsChanged || busy === 'insurance'}
+            >
+              Save details
+            </button>
+            <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginTop: 8 }}>
+              Saving new details sends your insurance back to Swellyo for review.
+            </p>
+          </>
+        )}
       </StepCard>
 
       {/* ── 6. Terms ──────────────────────────────────────────────────── */}
@@ -341,7 +429,7 @@ export function SetupPage() {
             border: '1px solid var(--line)',
             borderRadius: 'var(--r)',
             background: 'var(--panel)',
-            padding: 14,
+            padding: 16,
             marginBottom: 12,
             maxHeight: 360,
             overflowY: 'auto',
@@ -353,8 +441,8 @@ export function SetupPage() {
                 border: '1px solid var(--warn-line, var(--line))',
                 borderRadius: 'var(--r)',
                 background: 'var(--warn-bg, transparent)',
-                padding: '10px 12px',
-                marginBottom: 14,
+                padding: '12px 12px',
+                marginBottom: 16,
               }}
             >
               <strong style={{ display: 'block', marginBottom: 4 }}>
@@ -369,10 +457,10 @@ export function SetupPage() {
             </div>
           )}
           {SECTIONS.map(section => (
-            <section key={section.heading} style={{ marginBottom: 14 }}>
+            <section key={section.heading} style={{ marginBottom: 16 }}>
               <strong style={{ display: 'block', marginBottom: 4 }}>{section.heading}</strong>
               {section.paragraphs.map(p => (
-                <p key={p} className="small" style={{ margin: '0 0 6px' }}>
+                <p key={p} className="small" style={{ margin: '0 0 8px' }}>
                   {p}
                 </p>
               ))}
@@ -393,13 +481,13 @@ export function SetupPage() {
           <>
             <label
               className="row"
-              style={{ gap: 10, alignItems: 'flex-start', cursor: 'pointer', marginBottom: 12 }}
+              style={{ gap: 12, alignItems: 'flex-start', cursor: 'pointer', marginBottom: 12 }}
             >
               <input
                 type="checkbox"
                 checked={termsChecked}
                 onChange={e => setTermsChecked(e.target.checked)}
-                style={{ marginTop: 3 }}
+                style={{ marginTop: 4 }}
               />
               <span className="small">
                 {IS_DRAFT
@@ -407,10 +495,23 @@ export function SetupPage() {
                   : 'I agree to Swellyo’s operator terms.'}
               </span>
             </label>
+            <label className="row small" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+              <span>Full name</span>
+              <input
+                type="text"
+                required
+                maxLength={120}
+                autoComplete="name"
+                value={signedName}
+                onChange={e => setSignedName(e.target.value)}
+                disabled={busy === 'terms'}
+                style={FIELD_STYLE}
+              />
+            </label>
             <button
               className="btn btn-primary"
               onClick={acceptTerms}
-              disabled={!termsChecked || busy === 'terms'}
+              disabled={!termsChecked || !signedName.trim() || busy === 'terms'}
             >
               {busy === 'terms' ? 'Saving…' : 'Agree'}
             </button>
@@ -441,7 +542,7 @@ function StepCard({
     <div className="card enter" style={{ marginBottom: 16 }}>
       <div className="card-body">
         <div className="row-between" style={{ marginBottom: 8 }}>
-          <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <div className="row" style={{ gap: 12, alignItems: 'center' }}>
             {/* The number survives after the tick: it is what makes the banner's
                 "2 of 4" and this list obviously the same four things. */}
             <span
@@ -449,11 +550,12 @@ function StepCard({
               style={{
                 width: 22,
                 height: 22,
-                borderRadius: 99,
+                borderRadius: 999,
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: 12,
+                fontSize: 'var(--fs-s)',
+                lineHeight: '18px',
                 fontWeight: 700,
                 background: step.done ? 'var(--ok)' : 'var(--cyan-tint)',
                 color: step.done ? '#fff' : 'var(--cyan-dark)',
@@ -467,6 +569,8 @@ function StepCard({
             <span className={step.pending ? 'tag tag-wait' : 'tag tag-ok'}>
               {step.pending ? 'Checking' : 'Done'}
             </span>
+          ) : step.review === 'under_review' ? (
+            <span className="tag tag-wait">Under review</span>
           ) : step.appOnly ? (
             <span className="tag tag-idle">In the app</span>
           ) : (
@@ -478,3 +582,49 @@ function StepCard({
     </div>
   );
 }
+
+type InsuranceFields = Pick<OperatorInsurance, 'provider' | 'policyNumber' | 'expiresOn'>;
+
+function fieldsOf(i: OperatorInsurance | null): InsuranceFields {
+  return {
+    provider: i?.provider ?? null,
+    policyNumber: i?.policyNumber ?? null,
+    expiresOn: i?.expiresOn ?? null,
+  };
+}
+
+/** Empty strings become null, so "typed then cleared" is not a change. */
+function cleanFields(f: InsuranceFields): InsuranceFields {
+  return {
+    provider: f.provider?.trim() || null,
+    policyNumber: f.policyNumber?.trim() || null,
+    expiresOn: f.expiresOn || null,
+  };
+}
+
+/** 'YYYY-MM-DD' shown as a local date. Parsed by parts: `new Date('2027-01-01')` is UTC midnight and reads as the day before west of Greenwich. */
+function formatDay(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString();
+}
+
+function reviewLine(review: NonNullable<SetupStep['review']>, s: OperatorSettings): string {
+  switch (review) {
+    case 'under_review':
+      return 'Under review';
+    case 'rejected':
+      return s.insuranceReview?.note ? `Not approved: ${s.insuranceReview.note}` : 'Not approved';
+    case 'expired':
+      return s.insurance?.expiresOn ? `Expired on ${formatDay(s.insurance.expiresOn)}` : 'Expired';
+  }
+}
+
+/** Same inline input style as the currency picker above — there is no `.input` class here. */
+const FIELD_STYLE: React.CSSProperties = {
+  padding: '8px 12px',
+  borderRadius: 8,
+  border: '1px solid var(--line)',
+  background: 'var(--surface)',
+  fontSize: 'var(--fs-md)',
+  lineHeight: '20px',
+};

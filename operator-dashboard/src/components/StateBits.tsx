@@ -36,7 +36,7 @@ export function ErrorBox({
   return (
     <div className="card enter" style={{ borderColor: 'var(--danger)' }}>
       <div className="card-body">
-        <h3 style={{ marginBottom: 6 }}>{what ? `${what} did not load` : 'That did not load'}</h3>
+        <h3 style={{ marginBottom: 8 }}>{what ? `${what} did not load` : 'That did not load'}</h3>
         <p className="muted small" style={{ marginBottom: onRetry ? 12 : 0 }}>
           {friendlyError(error)}
         </p>
@@ -78,7 +78,7 @@ export function Empty({ title, note }: { title: string; note?: ReactNode }) {
   return (
     <div className="card enter">
       <div className="card-body" style={{ padding: '40px 16px', textAlign: 'center' }}>
-        <h3 style={{ marginBottom: 6 }}>{title}</h3>
+        <h3 style={{ marginBottom: 8 }}>{title}</h3>
         {note && <p className="muted small">{note}</p>}
       </div>
     </div>
@@ -93,7 +93,7 @@ export function Empty({ title, note }: { title: string; note?: ReactNode }) {
  * the row you came for.
  */
 export function Avatar({ url, name, size = 34 }: { url: string | null; name: string; size?: number }) {
-  const box = { width: size, height: size, borderRadius: 99, flexShrink: 0 } as const;
+  const box = { width: size, height: size, borderRadius: 999, flexShrink: 0 } as const;
 
   if (url) return <img src={url} alt="" style={{ ...box, objectFit: 'cover' }} />;
 
@@ -108,7 +108,7 @@ export function Avatar({ url, name, size = 34 }: { url: string | null; name: str
         border: '1px solid var(--line)',
         color: 'var(--muted)',
         fontSize: Math.round(size * 0.38),
-        fontWeight: 640,
+        fontWeight: 600,
       }}
     >
       {name.trim().charAt(0).toUpperCase() || '?'}

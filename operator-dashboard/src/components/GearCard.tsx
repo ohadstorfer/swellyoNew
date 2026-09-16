@@ -142,7 +142,7 @@ export function GearCard({ tripId, canEdit }: { tripId: string; canEdit: boolean
                     </span>
                   )}
                 </span>
-                <span className="row" style={{ gap: 6, flexShrink: 0 }}>
+                <span className="row" style={{ gap: 8, flexShrink: 0 }}>
                   <button
                     className="btn btn-sm"
                     disabled={decide.isPending}
@@ -164,7 +164,7 @@ export function GearCard({ tripId, canEdit }: { tripId: string; canEdit: boolean
         )}
 
         {/* ── The group list ────────────────────────────────────────────── */}
-        <div className="stack" style={{ gap: 6 }}>
+        <div className="stack" style={{ gap: 8 }}>
           <strong className="small">What the group needs</strong>
           {items.isPending ? (
             <span className="muted small">Loading…</span>
@@ -198,7 +198,7 @@ export function GearCard({ tripId, canEdit }: { tripId: string; canEdit: boolean
           )}
 
           {canEdit && (
-            <div className="row" style={{ gap: 6, marginTop: 4 }}>
+            <div className="row" style={{ gap: 8, marginTop: 4 }}>
               <input
                 value={newItem}
                 onChange={e => setNewItem(e.target.value.slice(0, 80))}
@@ -229,7 +229,7 @@ export function GearCard({ tripId, canEdit }: { tripId: string; canEdit: boolean
         </div>
 
         {/* ── Packing suggestions ───────────────────────────────────────── */}
-        <div className="stack" style={{ gap: 6 }}>
+        <div className="stack" style={{ gap: 8 }}>
           <strong className="small">What everyone should pack</strong>
           <span className="muted small">
             One per line. This becomes a checklist on every traveler's own phone — editing it

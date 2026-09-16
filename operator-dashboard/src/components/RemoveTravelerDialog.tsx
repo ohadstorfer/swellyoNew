@@ -166,7 +166,7 @@ export function RemoveTravelerDialog({
               color: 'var(--warn)',
               border: '1px solid var(--warn)',
               borderRadius: 'var(--r-sm)',
-              padding: '9px 11px',
+              padding: '8px 12px',
             }}
           >
             Only the trip's operator can remove a traveler who has paid, because only they can
@@ -191,7 +191,7 @@ export function RemoveTravelerDialog({
       </div>
 
       <div className="card-body">
-        <p className="small" style={{ marginBottom: 14 }}>
+        <p className="small" style={{ marginBottom: 16 }}>
           {paidUsd > 0
             ? `They have paid ${formatUsd(paidUsd)}. `
             : isOffline
@@ -208,17 +208,17 @@ export function RemoveTravelerDialog({
                 border: '1px solid var(--line)',
                 background: 'var(--panel)',
                 borderRadius: 'var(--r-sm)',
-                padding: '10px 12px',
-                marginBottom: 14,
+                padding: '12px 12px',
+                marginBottom: 16,
               }}
             >
-              <div className="small muted" style={{ marginBottom: policyLines.length ? 6 : 0 }}>
+              <div className="small muted" style={{ marginBottom: policyLines.length ? 8 : 0 }}>
                 {policyPct !== null
                   ? `This trip's policy · ${policyPct}% at today's date`
                   : "This trip's cancellation policy"}
               </div>
               {policyLines.length ? (
-                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                <ul style={{ margin: 0, paddingLeft: 16 }}>
                   {policyLines.map(line => (
                     <li key={line} className="small">
                       {line}
@@ -268,7 +268,7 @@ export function RemoveTravelerDialog({
                     style={{ marginTop: 8 }}
                   />
                   {!typedValid && custom.trim() !== '' && (
-                    <div className="small" style={{ color: 'var(--danger)', marginTop: 6 }}>
+                    <div className="small" style={{ color: 'var(--danger)', marginTop: 8 }}>
                       Enter an amount between $0 and {formatUsd(paidUsd)}.
                     </div>
                   )}
@@ -284,12 +284,12 @@ export function RemoveTravelerDialog({
             className="small"
             role="alert"
             style={{
-              marginTop: 14,
+              marginTop: 16,
               color: 'var(--warn)',
               background: 'var(--warn-bg)',
               border: '1px solid var(--warn)',
               borderRadius: 'var(--r-sm)',
-              padding: '9px 11px',
+              padding: '8px 12px',
             }}
           >
             {refundFailed}
@@ -303,12 +303,12 @@ export function RemoveTravelerDialog({
             className="small"
             role="alert"
             style={{
-              marginTop: 14,
+              marginTop: 16,
               color: 'var(--danger)',
               background: 'var(--danger-bg)',
               border: '1px solid var(--danger)',
               borderRadius: 'var(--r-sm)',
-              padding: '9px 11px',
+              padding: '8px 12px',
             }}
           >
             {error}
@@ -366,7 +366,7 @@ function Footer({ children }: { children: React.ReactNode }) {
       className="row"
       style={{
         borderTop: '1px solid var(--line)',
-        padding: '12px 16px',
+        padding: '16px 24px',
         justifyContent: 'flex-end',
         gap: 8,
       }}
@@ -405,7 +405,7 @@ function Option({
         border: `1px solid ${selected ? 'var(--cyan)' : 'var(--line)'}`,
         background: selected ? 'var(--panel)' : 'transparent',
         borderRadius: 'var(--r-sm)',
-        padding: '10px 12px',
+        padding: '12px 12px',
         marginBottom: 8,
         cursor: 'pointer',
       }}

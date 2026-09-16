@@ -174,13 +174,13 @@ function PaymentsCard({ payout }: { payout: PayoutState | null }) {
   return (
     <div className="card enter" style={{ marginBottom: 16 }}>
       <div className="card-body">
-        <div className="row-between" style={{ marginBottom: 6 }}>
+        <div className="row-between" style={{ marginBottom: 8 }}>
           <h3>Payments</h3>
           <span className={`tag tag-${copy.tone}`}>{copy.tag}</span>
         </div>
-        <p className="muted small" style={{ marginBottom: 10 }}>{copy.line}</p>
+        <p className="muted small" style={{ marginBottom: 12 }}>{copy.line}</p>
         {showAppNote && (
-          <p className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+          <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
             Connect and finish Stripe in the Swellyo app, under Settings →
             Payments. It has to be done there because Stripe's forms are built
             into the app.
@@ -190,13 +190,13 @@ function PaymentsCard({ payout }: { payout: PayoutState | null }) {
           <>
             <button
               className="btn btn-sm"
-              style={{ marginTop: 10 }}
+              style={{ marginTop: 12 }}
               onClick={() => void openDashboard()}
               disabled={opening}
             >
               {opening ? 'Opening Stripe…' : MANAGE_STRIPE_CTA}
             </button>
-            <p className="muted" style={{ fontSize: 12, lineHeight: 1.5, marginTop: 8 }}>
+            <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginTop: 8 }}>
               Opens Stripe in a new tab. Your bank account, payout schedule,
               business details and tax documents all live there.
             </p>
@@ -240,7 +240,7 @@ function CurrencyCard({
   return (
     <div className="card enter" style={{ marginBottom: 16 }}>
       <div className="card-body">
-        <h3 style={{ marginBottom: 6 }}>Default price currency</h3>
+        <h3 style={{ marginBottom: 8 }}>Default price currency</h3>
         <p className="muted small" style={{ marginBottom: 12 }}>
           New trips start priced in this. You can change it on any single trip.
         </p>
@@ -250,11 +250,12 @@ function CurrencyCard({
           disabled={saving}
           onChange={e => void change(e.target.value === '' ? null : e.target.value)}
           style={{
-            padding: '9px 12px',
+            padding: '8px 12px',
             borderRadius: 8,
             border: '1px solid var(--line)',
-            background: '#fff',
-            fontSize: 14,
+            background: 'var(--surface)',
+            fontSize: 'var(--fs-md)',
+            lineHeight: '20px',
             minWidth: 220,
           }}
         >
@@ -264,7 +265,7 @@ function CurrencyCard({
           ))}
         </select>
 
-        {err && <p className="small" style={{ color: 'var(--danger)', marginTop: 10 }}>{err}</p>}
+        {err && <p className="small" style={{ color: 'var(--danger)', marginTop: 12 }}>{err}</p>}
       </div>
     </div>
   );
@@ -319,8 +320,8 @@ function PolicyCard({
   return (
     <div className="card enter">
       <div className="card-body">
-        <h3 style={{ marginBottom: 6 }}>Cancellation policy</h3>
-        <p className="muted small" style={{ marginBottom: 14 }}>
+        <h3 style={{ marginBottom: 8 }}>Cancellation policy</h3>
+        <p className="muted small" style={{ marginBottom: 16 }}>
           Travelers see this before they pay their deposit. It is the DEFAULT new trips start
           from — a published trip keeps the terms it was published with.
         </p>
@@ -344,7 +345,7 @@ function PolicyCard({
         ))}
         {err && <p className="small" style={{ color: 'var(--danger)', marginTop: 8 }}>{err}</p>}
 
-        <div className="row" style={{ gap: 10, marginTop: 14 }}>
+        <div className="row" style={{ gap: 12, marginTop: 16 }}>
           <button
             className="btn btn-primary"
             disabled={problems.length > 0 || saving}
@@ -355,7 +356,7 @@ function PolicyCard({
           {saved && <span className="muted small">Saved</span>}
         </div>
 
-        <p className="muted" style={{ fontSize: 12, marginTop: 14, lineHeight: 1.5 }}>
+        <p className="muted" style={{ fontSize: 'var(--fs-s)', marginTop: 16, lineHeight: '18px' }}>
           You refund travelers from your own Stripe account. Swellyo shows this
           policy but does not process refunds.
         </p>
@@ -366,10 +367,11 @@ function PolicyCard({
 
 const numStyle: React.CSSProperties = {
   width: 72,
-  padding: '7px 9px',
+  padding: '8px 8px',
   borderRadius: 8,
   border: '1px solid var(--line)',
-  fontSize: 14,
+  fontSize: 'var(--fs-md)',
+  lineHeight: '20px',
 };
 
 // ── Payouts: when the money reaches the bank ───────────────────────────────
@@ -494,7 +496,7 @@ function PayoutScheduleCard() {
   return (
     <div className="card enter" style={{ marginBottom: 16 }}>
       <div className="card-body">
-        <h3 style={{ marginBottom: 6 }}>Payouts</h3>
+        <h3 style={{ marginBottom: 8 }}>Payouts</h3>
 
         {loading && <p className="muted small">Reading your schedule from Stripe…</p>}
 
@@ -508,13 +510,13 @@ function PayoutScheduleCard() {
             </p>
 
             {caveat && (
-              <p className="small" style={{ marginBottom: 16, lineHeight: 1.5 }}>
+              <p className="small" style={{ marginBottom: 16 }}>
                 {caveat}
               </p>
             )}
 
             {!status.payoutsEnabled && (
-              <p className="small" style={{ color: 'var(--danger)', marginBottom: 14 }}>
+              <p className="small" style={{ color: 'var(--danger)', marginBottom: 16 }}>
                 Stripe is not paying out to this account yet, so the schedule cannot be changed.
               </p>
             )}
@@ -523,22 +525,22 @@ function PayoutScheduleCard() {
               disabled={!status.payoutsEnabled || saving}
               style={{ border: 0, padding: 0, margin: 0 }}
             >
-              <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
+              <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
                 {INTERVALS.map(i => (
                   <label
                     key={i}
                     className="row"
-                    style={{ gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}
+                    style={{ gap: 12, alignItems: 'flex-start', cursor: 'pointer' }}
                   >
                     <input
                       type="radio"
                       name="payout-interval"
                       checked={mode === i}
                       onChange={() => { setMode(i); setNote(null); }}
-                      style={{ marginTop: 3 }}
+                      style={{ marginTop: 4 }}
                     />
                     <span>
-                      <strong style={{ fontSize: 14 }}>{INTERVAL_LABEL[i]}</strong>
+                      <strong style={{ fontSize: 'var(--fs-md)', lineHeight: '20px' }}>{INTERVAL_LABEL[i]}</strong>
                       <span className="muted small" style={{ display: 'block' }}>
                         {INTERVAL_BLURB[i]}
                       </span>
@@ -548,7 +550,7 @@ function PayoutScheduleCard() {
               </div>
 
               {mode === 'weekly' && (
-                <div className="row" style={{ gap: 8, marginBottom: 14, alignItems: 'center' }}>
+                <div className="row" style={{ gap: 8, marginBottom: 16, alignItems: 'center' }}>
                   <span className="muted small">Send on</span>
                   <select
                     value={weekly}
@@ -563,7 +565,7 @@ function PayoutScheduleCard() {
               )}
 
               {mode === 'monthly' && (
-                <div className="row" style={{ gap: 8, marginBottom: 14, alignItems: 'center' }}>
+                <div className="row" style={{ gap: 8, marginBottom: 16, alignItems: 'center' }}>
                   <span className="muted small">Send on day</span>
                   <input
                     type="number"
@@ -583,7 +585,7 @@ function PayoutScheduleCard() {
               )}
 
               {mode !== 'manual' && (
-                <div className="row" style={{ gap: 8, marginBottom: 14, alignItems: 'center' }}>
+                <div className="row" style={{ gap: 8, marginBottom: 16, alignItems: 'center' }}>
                   <span className="muted small">Hold money for</span>
                   <input
                     type="number"
@@ -611,7 +613,7 @@ function PayoutScheduleCard() {
               <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
                 {canPayOutNow(status) ? (
                   <>
-                    <p className="small" style={{ marginBottom: 10 }}>
+                    <p className="small" style={{ marginBottom: 12 }}>
                       <strong>{formatMoney(availableNow, status.currency ?? 'usd')}</strong> is
                       cleared and ready to send.
                     </p>
@@ -653,9 +655,10 @@ function clampDay(raw: string, min: number, max: number): string {
 }
 
 const selectStyle: React.CSSProperties = {
-  padding: '7px 10px',
+  padding: '8px 12px',
   borderRadius: 8,
   border: '1px solid var(--line)',
-  background: '#fff',
-  fontSize: 14,
+  background: 'var(--surface)',
+  fontSize: 'var(--fs-md)',
+  lineHeight: '20px',
 };

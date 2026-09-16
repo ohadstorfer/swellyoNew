@@ -98,7 +98,7 @@ export function AdminUpdatesCard({
             <div className="row-between">
               {/* Named before the button is pressed, not apologised for after. */}
               <span className="muted small">Everyone on the trip gets a notification.</span>
-              <div className="row" style={{ gap: 6 }}>
+              <div className="row" style={{ gap: 8 }}>
                 <button
                   className="btn btn-sm"
                   disabled={post.isPending}
@@ -131,7 +131,7 @@ export function AdminUpdatesCard({
           </p>
         ) : (
           rows.map((u: AdminUpdate) => (
-            <div key={u.id} style={{ borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+            <div key={u.id} style={{ borderTop: '1px solid var(--line)', paddingTop: 12 }}>
               <div className="row-between">
                 <strong className="small">{u.title}</strong>
                 <span className="muted small">{formatDate(u.createdAt)}</span>
@@ -144,7 +144,7 @@ export function AdminUpdatesCard({
               {canPost && (
                 <button
                   className="btn btn-sm btn-ghost"
-                  style={{ marginTop: 6 }}
+                  style={{ marginTop: 8 }}
                   disabled={remove.isPending}
                   onClick={() => remove.mutate(u.id)}
                 >

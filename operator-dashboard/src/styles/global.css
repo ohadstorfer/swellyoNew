@@ -17,7 +17,9 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.55 var(--font);
+  /* Body/M B-2 size. Line height is looser than the app's 18 — paragraphs on a
+   * desktop page run far wider than a phone line. */
+  font: var(--fs-md) / 20px var(--font);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -35,13 +37,13 @@ a:hover {
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--s-2);
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
-  border-radius: var(--r-sm);
-  padding: 8px 14px;
-  font: 500 14px/1 var(--font);
+  border-radius: var(--r);
+  padding: 10px var(--s-3);
+  font: 600 var(--fs-md) / 18px var(--font);
   cursor: pointer;
   transition: transform var(--t-press) var(--ease-out),
     background-color var(--t-fast) ease, border-color var(--t-fast) ease,
@@ -59,13 +61,16 @@ a:hover {
   outline-offset: 2px;
 }
 
+/* The app's primary button: black fill, white Montserrat Bold. */
 .btn-primary {
-  background: var(--cyan-dark);
-  border-color: var(--cyan-dark);
+  background: var(--ink);
+  border-color: var(--ink);
   color: #fff;
+  font-family: var(--font-heading);
+  font-weight: 700;
 }
 .btn-danger {
-  background: #fff;
+  background: var(--surface);
   border-color: var(--danger);
   color: var(--danger);
 }
@@ -75,8 +80,10 @@ a:hover {
   color: var(--cyan-dark);
 }
 .btn-sm {
-  padding: 5px 10px;
-  font-size: 13px;
+  padding: 6px var(--s-12);
+  font-size: var(--fs-s);
+  line-height: 18px;
+  border-radius: var(--r-sm);
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -84,7 +91,7 @@ a:hover {
     background: var(--panel);
   }
   .btn-primary:hover:not(:disabled) {
-    background: #055a75;
+    background: var(--ink-hover);
   }
   .btn-danger:hover:not(:disabled) {
     background: var(--danger-bg);
@@ -98,73 +105,75 @@ a:hover {
 .wrap {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 20px 80px;
+  padding: var(--s-5) var(--s-4) 80px;
 }
 .row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--s-2);
 }
 .row-between {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--s-12);
 }
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--s-3);
 }
 .spacer {
   flex: 1;
 }
 
+/* Headings/H-4 — Montserrat Bold 22/32. */
 h1 {
-  font-size: 24px;
-  letter-spacing: -0.02em;
-  font-weight: 680;
+  font: 700 var(--fs-2xl) / 32px var(--font-heading);
+  color: var(--text);
 }
+/* The app dashboard's section title — Inter Bold, Size/lg 16/24. */
 h2 {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 680;
-  color: var(--muted);
+  font: 700 var(--fs-lg) / 24px var(--font);
+  color: var(--text);
 }
+/* Body/M B-2 with a bold override — 14/18. */
 h3 {
-  font-size: 15px;
-  font-weight: 640;
+  font: 700 var(--fs-md) / 18px var(--font);
+  color: var(--text);
 }
 .muted {
   color: var(--muted);
 }
+/* Body/B-3 — 12/18. */
 .small {
-  font-size: 13px;
+  font-size: var(--fs-s);
+  line-height: 18px;
 }
 .mono {
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--fs-s);
 }
 
 /* ── Cards ──────────────────────────────────────────────────────────────── */
 .card {
   border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: #fff;
+  border-radius: var(--r-lg);
+  background: var(--surface);
   overflow: hidden;
 }
+/* White like the app's cards; the hairline alone separates head from body. */
 .card-head {
-  background: var(--panel);
-  padding: 11px 16px;
+  background: var(--surface);
+  padding: var(--s-12) var(--s-3);
   border-bottom: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--s-2);
 }
 .card-body {
-  padding: 14px 16px;
+  padding: var(--s-3);
 }
 
 /* A card that is also a link. Lifts slightly, never jumps. */
@@ -193,8 +202,8 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: var(--s-12);
+  padding: var(--s-12) var(--s-3);
   color: inherit;
   border-bottom: 1px solid var(--line);
   transition: background var(--t-fast) ease;
@@ -213,10 +222,9 @@ h3 {
 /* ── Tags ───────────────────────────────────────────────────────────────── */
 .tag {
   display: inline-block;
-  font-size: 11px;
-  font-weight: 680;
-  padding: 3px 9px;
-  border-radius: 99px;
+  font: 600 var(--fs-s) / 18px var(--font);
+  padding: 2px var(--s-2);
+  border-radius: 999px;
   white-space: nowrap;
 }
 .tag-ok {
@@ -256,8 +264,8 @@ h3 {
   text-align: left;
   border: 1px solid var(--line);
   border-radius: var(--r);
-  background: #fff;
-  padding: 12px 14px;
+  background: var(--surface);
+  padding: var(--s-12) var(--s-3);
   cursor: pointer;
   font: inherit;
   color: inherit;
@@ -289,11 +297,11 @@ h3 {
  * so a chip only ever fills it in. */
 .chip {
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--surface);
   color: var(--text-2);
-  border-radius: 99px;
-  padding: 6px 12px;
-  font: 500 13px/1 var(--font);
+  border-radius: 999px;
+  padding: 6px var(--s-12);
+  font: 500 var(--fs-s) / 18px var(--font);
   cursor: pointer;
   transition: transform var(--t-press) var(--ease-out), border-color var(--t-fast) ease,
     background-color var(--t-fast) ease;
@@ -350,22 +358,20 @@ button.row-link:disabled {
 table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
+/* The app's tile label — Body/B-3, muted. No uppercase: the app never shouts. */
 th {
   text-align: left;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font: 400 var(--fs-s) / 18px var(--font);
   color: var(--muted);
-  font-weight: 680;
-  padding: 9px 16px;
-  background: var(--panel);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
 td {
-  padding: 10px 16px;
+  padding: var(--s-12) var(--s-3);
   border-top: 1px solid var(--line);
   vertical-align: middle;
 }
@@ -386,16 +392,17 @@ tr.tr-open:active {
 
 /* ── Banner ─────────────────────────────────────────────────────────────── */
 .banner {
-  border: 1px solid var(--line);
+  /* The app's banner: tinted, no border, 16 radius, 14/20 SemiBold. */
+  border: 0;
   background: var(--cyan-tint);
-  border-radius: var(--r);
-  padding: 13px 16px;
+  border-radius: var(--r-lg);
+  padding: var(--s-12) var(--s-3);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--s-2);
   color: var(--cyan-dark);
-  font-weight: 640;
+  font: 600 var(--fs-md) / 20px var(--font);
   transition: transform var(--t-press) var(--ease-out);
 }
 a.banner:hover {
@@ -412,7 +419,7 @@ a.banner:active {
   width: 18px;
   height: 18px;
   border: 2px solid var(--line-strong);
-  border-top-color: var(--cyan-dark);
+  border-top-color: var(--cyan);
   border-radius: 50%;
   animation: spin 600ms linear infinite;
 }
@@ -442,7 +449,7 @@ a.banner:active {
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(28, 28, 26, 0.45);
+  background: rgba(33, 33, 33, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -457,8 +464,8 @@ a.banner:active {
 }
 /* Modals keep transform-origin center — they are not anchored to a trigger. */
 .modal {
-  background: #fff;
-  border-radius: var(--r-lg);
+  background: var(--surface);
+  border-radius: var(--r-xl);
   box-shadow: var(--shadow-lg);
   max-width: 560px;
   width: 100%;
@@ -470,6 +477,13 @@ a.banner:active {
 }
 .modal-wide {
   max-width: 900px;
+}
+/* A dialog gets more air than a card: 24 at the sides, matching the footers. */
+.modal .card-head {
+  padding: var(--s-3) var(--s-4);
+}
+.modal .card-body {
+  padding: var(--s-3) var(--s-4);
 }
 @keyframes pop {
   from {
@@ -483,8 +497,9 @@ input[type='text'] {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  padding: 9px 11px;
-  font: 14px/1.5 var(--font);
+  background: var(--surface);
+  padding: 10px var(--s-12);
+  font: var(--fs-md) / 20px var(--font);
   color: var(--text);
   resize: vertical;
 }
@@ -503,7 +518,7 @@ input[type='text']:focus {
  * often than they change, so nothing here draws attention until it is being
  * used — the only loud element is the save bar, and only once something moved. */
 .req-edit {
-  padding: 14px 0;
+  padding: var(--s-3) 0;
   border-bottom: 1px solid var(--line);
 }
 .req-edit:first-child {
@@ -512,19 +527,17 @@ input[type='text']:focus {
 
 /* A quiet divider-with-a-name, for the Payments and Not-asked-for groups. */
 .req-group {
-  font: 500 12px/1 var(--font);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: 600 var(--fs-s) / 18px var(--font);
   color: var(--muted);
-  padding: 18px 0 8px;
+  padding: var(--s-3) 0 var(--s-2);
 }
 
 .req-off {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
+  gap: var(--s-12);
+  padding: var(--s-12) 0;
   border-bottom: 1px solid var(--line);
   opacity: 0.75;
 }
@@ -537,19 +550,19 @@ input[type='text']:focus {
  * unrelated choices rather than one either/or. */
 .seg {
   display: inline-flex;
-  margin-top: 10px;
+  margin-top: var(--s-2);
   padding: 2px;
   gap: 2px;
-  background: var(--panel);
-  border-radius: 99px;
+  background: var(--panel-2);
+  border-radius: 999px;
 }
 .seg-btn {
   border: 0;
   background: transparent;
   color: var(--muted);
-  border-radius: 99px;
-  padding: 6px 13px;
-  font: 500 13px/1 var(--font);
+  border-radius: 999px;
+  padding: 6px var(--s-12);
+  font: 500 var(--fs-s) / 18px var(--font);
   cursor: pointer;
   /* Named properties, never `all`: only these three may move. */
   transition: transform var(--t-press) var(--ease-out),
@@ -563,7 +576,7 @@ input[type='text']:focus {
   outline-offset: 2px;
 }
 .seg-btn[aria-pressed='true'] {
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   box-shadow: var(--shadow-sm);
 }
@@ -577,20 +590,20 @@ input[type='text']:focus {
 .stepper {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 10px;
+  gap: var(--s-12);
+  margin-top: var(--s-2);
 }
 .stepper-btn {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   flex: none;
   display: grid;
   place-items: center;
   border: 1px solid var(--line-strong);
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
-  border-radius: 99px;
-  font: 500 16px/1 var(--font);
+  border-radius: 999px;
+  font: 500 var(--fs-lg) / 1 var(--font);
   cursor: pointer;
   transition: transform var(--t-press) var(--ease-out),
     background-color var(--t-fast) ease, opacity var(--t-fast) ease;
@@ -614,8 +627,8 @@ input[type='text']:focus {
 .stepper-label {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  font-size: 14px;
+  gap: 2px;
+  font-size: var(--fs-md);
 }
 
 /* The save bar. Enters with the card's own curve so it reads as part of the
@@ -624,10 +637,10 @@ input[type='text']:focus {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--s-12);
   flex-wrap: wrap;
-  margin-top: 16px;
-  padding-top: 14px;
+  margin-top: var(--s-3);
+  padding-top: var(--s-3);
   border-top: 1px solid var(--line);
   animation: enter var(--t-panel) var(--ease-out) both;
 }

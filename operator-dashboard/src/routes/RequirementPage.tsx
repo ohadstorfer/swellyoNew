@@ -162,7 +162,7 @@ export function RequirementPage() {
       />
 
       {actionError && (
-        <div className="card enter" style={{ borderColor: 'var(--danger)', marginBottom: 14 }}>
+        <div className="card enter" style={{ borderColor: 'var(--danger)', marginBottom: 16 }}>
           <div className="card-body small" style={{ color: 'var(--danger)' }}>
             {actionError}
           </div>
@@ -170,7 +170,7 @@ export function RequirementPage() {
       )}
 
       {isUpload && pending.length > 0 && (
-        <div className="banner enter" style={{ marginBottom: 14 }}>
+        <div className="banner enter" style={{ marginBottom: 16 }}>
           <span>
             {selected.size > 0
               ? `${plural(selected.size, 'document')} selected`
@@ -262,12 +262,12 @@ export function RequirementPage() {
                         {row.name}
                       </Link>
                       {row.item.fileDeleted && (
-                        <div className="muted" style={{ fontSize: 12 }}>
+                        <div className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           File deleted after 30 days
                         </div>
                       )}
                       {row.item.note && (
-                        <div className="muted" style={{ fontSize: 12 }}>
+                        <div className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           Note: {row.item.note}
                         </div>
                       )}

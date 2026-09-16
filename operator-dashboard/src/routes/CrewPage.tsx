@@ -159,7 +159,7 @@ export function CrewPage() {
                 className="row-link"
                 onClick={() => setEditing(member)}
               >
-                <span className="row" style={{ gap: 11, minWidth: 0 }}>
+                <span className="row" style={{ gap: 12, minWidth: 0 }}>
                   <Avatar url={member.photoUrl} name={member.name} />
                   <span style={{ minWidth: 0, textAlign: 'left' }}>
                     <span style={{ display: 'block' }}>{member.name}</span>
@@ -170,7 +170,7 @@ export function CrewPage() {
                     )}
                   </span>
                 </span>
-                <span className="row" style={{ gap: 10 }}>
+                <span className="row" style={{ gap: 12 }}>
                   <span className={`tag ${TIER_TAG[member.roleKey]}`}>
                     {roleLabel(member.roleKey)}
                   </span>

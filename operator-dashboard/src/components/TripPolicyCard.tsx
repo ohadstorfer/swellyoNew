@@ -90,7 +90,7 @@ export function TripPolicyCard({
       <div className="card-body">
         {open ? (
           <>
-            <p className="muted small" style={{ marginBottom: 14 }}>
+            <p className="muted small" style={{ marginBottom: 16 }}>
               These terms are frozen on this trip. You can change them until the first traveler
               joins — after that they are what somebody agreed to.
             </p>
@@ -100,7 +100,7 @@ export function TripPolicyCard({
                 {error}
               </p>
             )}
-            <div className="row" style={{ gap: 8, marginTop: 14 }}>
+            <div className="row" style={{ gap: 8, marginTop: 16 }}>
               <button
                 className="btn btn-primary btn-sm"
                 disabled={problems.length > 0 || save.isPending}
@@ -128,7 +128,7 @@ export function TripPolicyCard({
         ) : (
           <>
             <strong className="small">{PRESET_LABEL[stored.preset]}</strong>
-            <div style={{ marginTop: 6 }}>
+            <div style={{ marginTop: 8 }}>
               {explain(stored).map((l, i) => (
                 <div key={i} className="small muted" style={{ lineHeight: 1.6 }}>
                   • {l}
@@ -141,7 +141,7 @@ export function TripPolicyCard({
               </p>
             )}
             {!editable && (
-              <p className="muted small" style={{ marginTop: 10 }}>
+              <p className="muted small" style={{ marginTop: 12 }}>
                 {travelersJoined > 0
                   ? 'Frozen — travelers have joined on these terms.'
                   : 'Only the operator of this trip can change the refund terms.'}
@@ -157,7 +157,7 @@ export function TripPolicyCard({
             so it belongs in the same card rather than a second one repeating
             the same caveat. */}
         {editable && (
-          <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 14 }}>
+          <div style={{ borderTop: '1px solid var(--line)', marginTop: 16, paddingTop: 16 }}>
             <WaiverSwap tripId={trip.id} />
           </div>
         )}

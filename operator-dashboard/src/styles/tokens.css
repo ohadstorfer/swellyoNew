@@ -1,8 +1,15 @@
 /*
  * Design tokens.
  *
- * The palette is lifted from the operator planning docs so this site and the
- * documents Ohad and Eyal already read look like one product.
+ * The same look as the Swellyo app's operator Dashboard tab, so an operator who
+ * moves between the phone and this site sees one product. Values come from:
+ *   - the Figma file "Swellyo Data Entry App (V.1.3)" — the Typography
+ *     collection in its MOBILE mode (the app's sizes), Global Tokens spacing and
+ *     radius, and the Text / Surface / Stroke colours;
+ *   - the app's `src/components/trips/dashboard/dashboardTheme.ts` for the state
+ *     colours, which carry measured contrast ratios there (all ≥ 4.5:1 as text
+ *     on their own tint). Change them in both places or neither.
+ * The app's type scale in code is `src/theme/typography.ts`.
  *
  * Bright mode only, on purpose. This is a work tool used in daylight, and a
  * second theme is surface area nobody asked for.
@@ -10,40 +17,66 @@
 
 :root {
   /* Surfaces */
-  --bg: #ffffff;
-  --panel: #f7f7f5;
-  --panel-2: #f0f0ec;
-  --line: #e3e3de;
-  --line-strong: #d4d4cd;
+  --bg: #fafafa; /* Bg/M - secondary — the page */
+  --surface: #ffffff; /* Surface/M 01 — cards, dialogs, inputs */
+  --panel: #f7f7f7; /* Surface/M 02 — card heads, hover, icon wells */
+  --panel-2: #f0f0f0;
+  --line: #eeeeee; /* Stroke/M - 04 — card borders, dividers */
+  --line-strong: #e4e4e4; /* control borders */
 
   /* Ink */
-  --text: #1c1c1a;
-  --text-2: #3a3a36;
-  --muted: #6b6b66;
+  --text: #333333; /* Text/M - 01 */
+  --text-2: #222b30; /* Icon/primary — body ink */
+  --muted: #7b7b7b; /* Text/M - 02 */
+  --faint: #a0a0a0; /* action-card captions in the app */
+  --ink: #212121; /* Fill/M - Black — primary buttons */
+  --ink-hover: #333333;
 
   /* Brand */
-  --cyan: #05bcd3;
-  --cyan-dark: #066b8c;
-  --cyan-tint: #e6f4f8;
+  --cyan: #05bcd3; /* accent: focus rings, selection, meters */
+  --cyan-dark: #066b8c; /* accent as TEXT — #05bcd3 on white fails contrast */
+  --cyan-tint: #e4f8fb;
+  --badge: #ff5367; /* Colors/Accent/100 — count badges */
 
-  /* States */
-  --ok: #1f7a4d;
-  --ok-bg: #e8f5ee;
-  --warn: #b8532b;
-  --warn-bg: #fdf0e9;
-  --danger: #b3261e;
-  --danger-bg: #fdecea;
-  --wait: #5b5bb0;
-  --wait-bg: #eeeefb;
+  /* States — mirror dashboardTheme.ts */
+  --ok: #1f8a4c;
+  --ok-bg: #eaf7ef;
+  --warn: #8a6100;
+  --warn-bg: #fdf3dc;
+  --danger: #c4361e;
+  --danger-bg: #fceef0;
+  --wait: #066b8c;
+  --wait-bg: #e4f8fb;
 
-  /* Type */
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  /* Type — Family/Body and Family/Headings */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-heading: 'Montserrat', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Space */
-  --r-sm: 6px;
-  --r: 10px;
-  --r-lg: 14px;
+  /* Figma Size/* in Mobile mode — the numbers the app renders */
+  --fs-xxs: 9px;
+  --fs-xs: 10px;
+  --fs-s: 12px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  --fs-3xl: 24px;
+
+  /* Space — Figma Spacing/1…5. 12 is not a Figma step but the app uses it
+   * for banner and row padding, so it gets a name too. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-12: 12px;
+  --s-3: 16px;
+  --s-4: 24px;
+  --s-5: 32px;
+
+  /* Radius — Figma Radius/2, 3, 4, 6 */
+  --r-sm: 8px; /* inputs, small buttons, icon wells */
+  --r: 12px; /* buttons, choice cards */
+  --r-lg: 16px; /* cards, banners — the app's card radius */
+  --r-xl: 24px; /* dialogs */
 
   /* Motion.
    * Built-in CSS easings are too weak. This curve has the punch that makes
@@ -53,7 +86,8 @@
   --t-fast: 160ms;
   --t-panel: 200ms;
 
-  --shadow-sm: 0 1px 2px rgba(28, 28, 26, 0.06);
-  --shadow: 0 4px 16px rgba(28, 28, 26, 0.08);
-  --shadow-lg: 0 12px 40px rgba(28, 28, 26, 0.16);
+  /* The app's boxShadow01 (#596E7C26, y 2, blur 16) is --shadow. */
+  --shadow-sm: 0 1px 2px rgba(89, 110, 124, 0.08);
+  --shadow: 0 2px 16px rgba(89, 110, 124, 0.15);
+  --shadow-lg: 0 12px 40px rgba(33, 33, 33, 0.16);
 }

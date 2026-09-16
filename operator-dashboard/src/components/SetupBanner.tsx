@@ -45,30 +45,31 @@ export function SetupBanner({
         border: '1px solid var(--line)',
         background: 'var(--panel)',
         borderRadius: 'var(--r-lg)',
-        padding: '12px 14px',
-        marginBottom: 18,
+        padding: '12px 16px',
+        marginBottom: 16,
       }}
     >
-      <div className="row-between" style={{ gap: 12, marginBottom: 10 }}>
-        <div className="row" style={{ gap: 10, alignItems: 'center', minWidth: 0 }}>
+      <div className="row-between" style={{ gap: 12, marginBottom: 12 }}>
+        <div className="row" style={{ gap: 12, alignItems: 'center', minWidth: 0 }}>
           <span
             aria-hidden
             style={{
               width: 28,
               height: 28,
               flex: '0 0 auto',
-              borderRadius: 99,
+              borderRadius: 999,
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
               background: 'var(--cyan-tint)',
-              fontSize: 14,
+              fontSize: 'var(--fs-md)',
+              lineHeight: '20px',
             }}
           >
             🚀
           </span>
           <span style={{ minWidth: 0 }}>
-            <strong style={{ display: 'block', fontSize: 14.5 }}>Finish your setup</strong>
+            <strong style={{ display: 'block', fontSize: 'var(--fs-md)', lineHeight: '20px' }}>Finish your setup</strong>
             {/* Names the next step rather than counting what is left — the bar
                 below already answers "how many". */}
             <span
@@ -96,7 +97,7 @@ export function SetupBanner({
             style={{
               flex: 1,
               height: 3,
-              borderRadius: 99,
+              borderRadius: 999,
               background: i < done ? 'var(--cyan)' : 'var(--line-strong)',
             }}
           />

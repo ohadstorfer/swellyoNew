@@ -29,18 +29,18 @@ export function LoginPage() {
       }}
     >
       <div className="card enter" style={{ maxWidth: 380, width: '100%' }}>
-        <div className="card-body" style={{ padding: '32px 28px', textAlign: 'center' }}>
+        <div className="card-body" style={{ padding: '32px 32px', textAlign: 'center' }}>
           <div
             aria-hidden
             style={{
               width: 12,
               height: 12,
-              borderRadius: 99,
+              borderRadius: 999,
               background: 'var(--cyan)',
-              margin: '0 auto 18px',
+              margin: '0 auto 16px',
             }}
           />
-          <h1 style={{ fontSize: 21, marginBottom: 6 }}>Swellyo Operator</h1>
+          <h1 style={{ fontSize: 'var(--fs-2xl)', lineHeight: '32px', marginBottom: 8 }}>Swellyo Operator</h1>
           <p className="muted small" style={{ marginBottom: 24 }}>
             Review documents and export files for your trips.
           </p>
@@ -56,12 +56,12 @@ export function LoginPage() {
           </button>
 
           {error && (
-            <p className="small" style={{ color: 'var(--danger)', marginTop: 14 }}>
+            <p className="small" style={{ color: 'var(--danger)', marginTop: 16 }}>
               {error}
             </p>
           )}
 
-          <p className="muted" style={{ fontSize: 12, marginTop: 20, lineHeight: 1.5 }}>
+          <p className="muted" style={{ fontSize: 'var(--fs-s)', marginTop: 24, lineHeight: '18px' }}>
             Use the same account you use in the Swellyo app.
           </p>
         </div>

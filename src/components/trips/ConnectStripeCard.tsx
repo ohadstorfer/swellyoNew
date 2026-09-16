@@ -74,35 +74,18 @@ const nativeOnboarding = !!Onboarding && (stripeConnect?.hasStripePublishableKey
  * card is allowed to just be correct. The only motion is the app-wide 0.97
  * press scale, which is feedback, not decoration.
  */
-export const ConnectStripeCard: React.FC = () => {
-  const { state, status, loading, watchForChange } = useConnectStatus();
+/**
+ * Opening Stripe's onboarding, and re-reading the status when it closes.
+ *
+ * Shared so the setup wizard's Stripe step starts the same flow as this card
+ * without a second copy of the Expo Go guard and the close-then-watch rule.
+ * `element` must be rendered while it is non-null — it IS the onboarding sheet.
+ */
+export function useStripeOnboarding(): { start: () => void; element: React.ReactElement | null } {
+  const { watchForChange } = useConnectStatus();
   const [onboarding, setOnboarding] = React.useState(false);
-  const [openingDashboard, setOpeningDashboard] = React.useState(false);
 
-  const copy = describeConnectState(state, status);
-  // Editing details you already gave is a different job from finishing
-  // onboarding, and it stays available for the rest of the account's life —
-  // including on an account Stripe has switched off. See canManageStripeAccount.
-  const canManage = canManageStripeAccount(status);
-
-  const onManage = useCallback(async () => {
-    // No Expo Go check, unlike onConnect: this is a plain browser sheet, not
-    // the native Stripe SDK, so it works everywhere the app does.
-    setOpeningDashboard(true);
-    try {
-      await openStripeDashboard();
-      // They may have changed a bank account or cleared a requirement while
-      // they were in there. The sheet closing is the moment to re-ask — and
-      // then keep watching, because Stripe applies some of it a beat later.
-      watchForChange();
-    } catch (e) {
-      showErrorAlert('Stripe', e, 'Could not open your Stripe dashboard. Try again.');
-    } finally {
-      setOpeningDashboard(false);
-    }
-  }, [watchForChange]);
-
-  const onConnect = useCallback(() => {
+  const start = useCallback(() => {
     if (!nativeOnboarding) {
       // Expo Go, or a build with no publishable key. There is deliberately no
       // browser fallback — Ohad chose native-only on 2026-08-04 — so say what
@@ -129,8 +112,8 @@ export const ConnectStripeCard: React.FC = () => {
     watchForChange();
   }, [watchForChange]);
 
-  if (onboarding && Onboarding) {
-    return (
+  const element =
+    onboarding && Onboarding ? (
       <Onboarding
         onExit={onOnboardingExit}
         onLoadError={message => {
@@ -144,8 +127,40 @@ export const ConnectStripeCard: React.FC = () => {
           showErrorAlert('Stripe', null, message || 'Could not open Stripe. Try again.');
         }}
       />
-    );
-  }
+    ) : null;
+
+  return { start, element };
+}
+
+export const ConnectStripeCard: React.FC = () => {
+  const { state, status, loading, watchForChange } = useConnectStatus();
+  const { start: onConnect, element: onboardingElement } = useStripeOnboarding();
+  const [openingDashboard, setOpeningDashboard] = React.useState(false);
+
+  const copy = describeConnectState(state, status);
+  // Editing details you already gave is a different job from finishing
+  // onboarding, and it stays available for the rest of the account's life —
+  // including on an account Stripe has switched off. See canManageStripeAccount.
+  const canManage = canManageStripeAccount(status);
+
+  const onManage = useCallback(async () => {
+    // No Expo Go check, unlike onConnect: this is a plain browser sheet, not
+    // the native Stripe SDK, so it works everywhere the app does.
+    setOpeningDashboard(true);
+    try {
+      await openStripeDashboard();
+      // They may have changed a bank account or cleared a requirement while
+      // they were in there. The sheet closing is the moment to re-ask — and
+      // then keep watching, because Stripe applies some of it a beat later.
+      watchForChange();
+    } catch (e) {
+      showErrorAlert('Stripe', e, 'Could not open your Stripe dashboard. Try again.');
+    } finally {
+      setOpeningDashboard(false);
+    }
+  }, [watchForChange]);
+
+  if (onboardingElement) return onboardingElement;
 
   // Only on the very first read. A background refetch keeps the current card
   // on screen — blanking it to a spinner every time we re-ask Stripe would

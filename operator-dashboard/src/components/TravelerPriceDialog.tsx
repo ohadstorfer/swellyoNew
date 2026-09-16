@@ -82,11 +82,11 @@ export function TravelerPriceDialog({
           </div>
           <div className="card-body">
             <p className="small">{confirming}</p>
-            <p className="muted small" style={{ marginTop: 10 }}>
+            <p className="muted small" style={{ marginTop: 12 }}>
               Swellyo does not tell them. Let {travelerName} know yourself.
             </p>
             {error && (
-              <p className="small" style={{ color: 'var(--danger)', marginTop: 10 }}>
+              <p className="small" style={{ color: 'var(--danger)', marginTop: 12 }}>
                 {error}
               </p>
             )}
@@ -122,7 +122,7 @@ export function TravelerPriceDialog({
             value={totalText}
             onChange={e => setTotalText(e.target.value)}
             placeholder="3000"
-            style={{ marginTop: 6, width: '100%' }}
+            style={{ marginTop: 8, width: '100%' }}
           />
 
           {hasDepositStep && (
@@ -130,7 +130,7 @@ export function TravelerPriceDialog({
               <label
                 className="small muted"
                 htmlFor="price-deposit"
-                style={{ display: 'block', marginTop: 14 }}
+                style={{ display: 'block', marginTop: 16 }}
               >
                 Deposit (USD) — leave empty to use the trip's deposit
               </label>
@@ -141,7 +141,7 @@ export function TravelerPriceDialog({
                 value={depositText}
                 onChange={e => setDepositText(e.target.value)}
                 placeholder="1000"
-                style={{ marginTop: 6, width: '100%' }}
+                style={{ marginTop: 8, width: '100%' }}
               />
             </>
           )}
@@ -195,7 +195,7 @@ function Footer({
       className="row"
       style={{
         borderTop: '1px solid var(--line)',
-        padding: '12px 16px',
+        padding: '16px 24px',
         justifyContent: 'flex-end',
         gap: 8,
       }}

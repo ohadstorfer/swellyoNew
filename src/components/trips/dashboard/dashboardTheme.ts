@@ -8,15 +8,11 @@
  * private to that file, and a dashboard that quietly re-themed itself when
  * someone tuned a Plan colour would be worse than a little duplication.
  *
- * The STATE colours are not the web dashboard's, and this file no longer claims
- * they are. It used to: "if these ever drift from the web dashboard's
- * tokens.css, the two products stop looking like the same product". By the time
- * anyone measured, all eight values had already drifted — `warn` was brown
- * against its orange, `wait` blue against its purple. The claim was deleted
- * rather than repaired, because these are two products on two platforms with
- * two type scales, and a rule nobody can act on is worse than no rule. Whether
- * they should ever converge is decision D2 in
- * `docs/specs/operator-trips/dashboard-tab-design.md`.
+ * The STATE colours are the source for the web dashboard's
+ * `operator-dashboard/src/styles/tokens.css` (`--ok`, `--warn`, `--danger`,
+ * `--wait` and their `-bg` pairs). They had drifted apart once — all eight
+ * values — so on 2026-09-15 the web side was moved onto these (decision D2 in
+ * `docs/specs/operator-trips/dashboard-tab-design.md`). Change one, change both.
  *
  * What the state colours DO have to be is legible. Every one is used as TEXT on
  * its own tint, never the reverse, so each pair below carries its measured

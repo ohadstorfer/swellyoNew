@@ -156,7 +156,7 @@ export function TravelerPage() {
       />
 
       {actionError && (
-        <div className="card enter" style={{ borderColor: 'var(--danger)', marginBottom: 14 }}>
+        <div className="card enter" style={{ borderColor: 'var(--danger)', marginBottom: 16 }}>
           <div className="card-body small" style={{ color: 'var(--danger)' }}>
             {actionError}
           </div>
@@ -179,7 +179,7 @@ export function TravelerPage() {
               <img
                 src={profile.photoUrl}
                 alt=""
-                style={{ width: 72, height: 72, borderRadius: 99, objectFit: 'cover' }}
+                style={{ width: 72, height: 72, borderRadius: 999, objectFit: 'cover' }}
               />
             )}
             <div style={{ minWidth: 0 }}>
@@ -191,7 +191,7 @@ export function TravelerPage() {
                   </span>
                 )}
               </h3>
-              <p className="muted small" style={{ marginTop: 3 }}>
+              <p className="muted small" style={{ marginTop: 4 }}>
                 {[
                   profile?.age ? `${profile.age}` : null,
                   profile?.countryFrom,
@@ -202,13 +202,13 @@ export function TravelerPage() {
               </p>
 
               {profile?.bio && (
-                <p className="small" style={{ marginTop: 10, whiteSpace: 'pre-wrap', maxWidth: '62ch' }}>
+                <p className="small" style={{ marginTop: 12, whiteSpace: 'pre-wrap', maxWidth: '62ch' }}>
                   {profile.bio}
                 </p>
               )}
 
               {profile?.lifestyle && profile.lifestyle.length > 0 && (
-                <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
                   {profile.lifestyle.map(k => (
                     <span key={k} className="tag tag-idle">
                       {k.replace(/_/g, ' ')}
@@ -257,12 +257,12 @@ export function TravelerPage() {
                     <td>
                       {item.title}
                       {item.fileDeleted && (
-                        <div className="muted" style={{ fontSize: 12 }}>
+                        <div className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           File deleted after 30 days
                         </div>
                       )}
                       {item.note && (
-                        <div className="muted" style={{ fontSize: 12 }}>
+                        <div className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           Note: {item.note}
                         </div>
                       )}
@@ -275,7 +275,7 @@ export function TravelerPage() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {item.storagePath && !item.fileDeleted ? (
-                        <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                        <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
                           <button className="btn btn-sm" onClick={() => setViewing(item)}>
                             View
                           </button>
@@ -475,9 +475,10 @@ function TravelerMoneyCard({
                 border: '1px solid var(--ok)',
                 color: 'var(--ok)',
                 borderRadius: 'var(--r-sm)',
-                padding: '9px 11px',
+                padding: '8px 12px',
                 marginBottom: 12,
-                fontSize: 13,
+                fontSize: 'var(--fs-md)',
+                lineHeight: '20px',
               }}
             >
               <span aria-hidden>✓</span>
@@ -515,13 +516,13 @@ function TravelerMoneyCard({
               ))}
 
               {isOffline && (
-                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginTop: 4 }}>
                   Paid outside Swellyo. Swellyo does not know what has arrived.
                 </p>
               )}
 
               {me.events.length > 0 && (
-                <div style={{ marginTop: 6 }}>
+                <div style={{ marginTop: 8 }}>
                   {me.events.map((e, i) => (
                     <div
                       key={`${e.id}-${i}`}
@@ -542,15 +543,16 @@ function TravelerMoneyCard({
                            word changes, because the operator did not choose it. */
                         <span
                           className="row"
-                          style={{ gap: 6, fontSize: 12, color: 'var(--text)' }}
+                          style={{ gap: 8, fontSize: 'var(--fs-s)', lineHeight: '18px', color: 'var(--text)' }}
                         >
                           <span
                             style={{
                               background: 'var(--panel-2)',
                               border: '1px solid var(--line)',
-                              borderRadius: 99,
-                              padding: '1px 7px',
-                              fontSize: 11,
+                              borderRadius: 999,
+                              padding: '2px 8px',
+                              fontSize: 'var(--fs-s)',
+                              lineHeight: '18px',
                               color: 'var(--text-2)',
                             }}
                           >
@@ -562,7 +564,7 @@ function TravelerMoneyCard({
                       ) : e.eventType === 'disputed' ? (
                         /* A marker, pinned to $0 by the DB — no amount shown,
                            because no money has finally moved yet. */
-                        <span className="muted" style={{ fontSize: 12 }}>
+                        <span className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           {formatDateTime(e.createdAt)} · Dispute opened
                         </span>
                       ) : e.eventType === 'processing' ? (
@@ -570,18 +572,18 @@ function TravelerMoneyCard({
                            (~3 business days). Its own 'paid' row lands when
                            the money does, so this line never turns into an
                            amount — the next one does. */
-                        <span className="muted" style={{ fontSize: 12 }}>
+                        <span className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           {formatDateTime(e.createdAt)} · Bank payment on its way
                         </span>
                       ) : (
-                        <span className="muted" style={{ fontSize: 12 }}>
+                        <span className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                           {formatDateTime(e.createdAt)} · Payment {formatUsd(e.amountUsd)}
                         </span>
                       )}
                       {canRefund && e.eventType === 'paid' && (
                         <button
                           className="btn btn-sm btn-ghost"
-                          style={{ padding: '2px 8px', fontSize: 12 }}
+                          style={{ padding: '2px 8px', fontSize: 'var(--fs-s)', lineHeight: '18px' }}
                           onClick={() => setRefunding({ id: e.id, amountUsd: e.amountUsd })}
                         >
                           Refund
@@ -595,9 +597,9 @@ function TravelerMoneyCard({
               {/* Attempts that did not move money. An operator who was blocked
                   and sees nothing will assume the refund went through. */}
               {failedAttempts.length > 0 && (
-                <div style={{ marginTop: 6 }}>
+                <div style={{ marginTop: 8 }}>
                   {failedAttempts.map(r => (
-                    <p key={r.id} style={{ fontSize: 12, color: 'var(--warn)' }}>
+                    <p key={r.id} style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', color: 'var(--warn)' }}>
                       {formatDate(r.createdAt)} · Refund of {formatUsd(r.amountUsd)}{' '}
                       {r.status === 'blocked_insufficient_balance'
                         ? 'was not sent — your balance did not cover it'
@@ -743,13 +745,13 @@ function MedicalCard({
                 style={{
                   background: 'var(--danger-bg)',
                   borderRadius: 8,
-                  padding: '10px 12px',
+                  padding: '12px 12px',
                 }}
               >
-                <div className="muted" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '.4px' }}>
+                <div className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px' }}>
                   Emergency contact
                 </div>
-                <div className="small" style={{ marginTop: 3 }}>
+                <div className="small" style={{ marginTop: 4 }}>
                   <strong>{form.emergencyName?.trim() || 'Not named'}</strong>
                   {form.emergencyRelation?.trim() && (
                     <span className="muted"> · {form.emergencyRelation.trim()}</span>
@@ -778,7 +780,7 @@ function MedicalCard({
             <Line label="Dietary" value={answer(form.dietary, form.dietaryNone)} />
             <Line label="Injuries" value={answer(form.injuries, form.injuriesNone)} />
             <Line label="Medications" value={answer(form.medications, form.medicationsNone)} />
-            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginTop: 4 }}>
               Collected to run this trip. Never used for matching or anything else.
             </p>
           </div>

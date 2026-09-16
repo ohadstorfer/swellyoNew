@@ -14,6 +14,10 @@
  * Both then run the SAME six-state rule — the app's `connectStatus.ts` and this
  * project's `domain/connect.ts` twin. So the STEPS and their meaning are
  * shared; only where the fields come from differs.
+ *
+ * The insurance rule (`insuranceBlock`, `INSURANCE_TODO`) IS copied as-is from
+ * the app: done only once a Swellyo admin approved the certificate and it has
+ * not expired. Uploading alone is not done (Ohad, 15 Sep).
  * Anything else that drifts is a bug — an operator must not be told they are
  * finished here and unfinished there.
  *
@@ -77,12 +81,55 @@ export interface SetupStep {
   pending?: boolean;
   /** This step cannot be finished on this site — it needs the phone app. */
   appOnly?: boolean;
+  /**
+   * Insurance only: submitted but not (or no longer) accepted. The step is
+   * NOT done in any of these — unlike Stripe's `pending`.
+   */
+  review?: InsuranceBlock;
 }
+
+export type InsuranceBlock = 'under_review' | 'rejected' | 'expired';
 
 export interface OperatorSetupInput {
   payout: PayoutState;
   settings: OperatorSettings;
+  /** 'YYYY-MM-DD', for the expiry check. Defaults to the browser's today. */
+  today?: string;
 }
+
+/** Local calendar date as 'YYYY-MM-DD'. A policy ends on the operator's day. */
+export function localToday(d: Date = new Date()): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Why insurance is not done yet, or null when it is.
+ *
+ * Done means a Swellyo admin APPROVED it and it has not expired (Ohad, 15 Sep).
+ * An upload alone is not done. Expired wins over approved: an approval was of
+ * a policy that has since run out. The expiry day itself still counts.
+ */
+export function insuranceBlock(
+  settings: OperatorSettings,
+  today: string = localToday(),
+): InsuranceBlock | 'missing' | null {
+  if (!settings.insurance || !settings.insuranceReview) return 'missing';
+  const { expiresOn } = settings.insurance;
+  // String compare is safe: both are zero-padded YYYY-MM-DD.
+  if (expiresOn && expiresOn < today) return 'expired';
+  if (settings.insuranceReview.status === 'rejected') return 'rejected';
+  if (settings.insuranceReview.status === 'pending') return 'under_review';
+  return null;
+}
+
+const INSURANCE_TODO: Record<InsuranceBlock | 'missing', string> = {
+  missing: 'Upload your insurance certificate.',
+  under_review: 'Swellyo is reviewing your insurance.',
+  rejected: 'Your insurance was not approved. Upload it again.',
+  expired: 'Your insurance has expired. Upload the new one.',
+};
 
 /**
  * Stripe counts as done while Stripe is still reviewing.
@@ -104,6 +151,7 @@ export function stripeDone(p: PayoutState): boolean {
 
 export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
   const { payout, settings } = input;
+  const insurance = insuranceBlock(settings, input.today);
 
   return [
     {
@@ -140,8 +188,9 @@ export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
     {
       key: 'insurance',
       title: 'Insurance',
-      todo: 'Upload your insurance certificate.',
-      done: Boolean(settings.insurance),
+      todo: insurance ? INSURANCE_TODO[insurance] : INSURANCE_TODO.missing,
+      done: insurance === null,
+      review: insurance && insurance !== 'missing' ? insurance : undefined,
     },
     {
       key: 'terms',

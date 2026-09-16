@@ -86,7 +86,7 @@ export function ExportAllDocs({
               : 'Every document on this trip, in one zip — a folder per traveler.')}
         </span>
         {armed ? (
-          <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+          <div className="row" style={{ gap: 8, flexShrink: 0 }}>
             <button className="btn btn-sm" disabled={!!state} onClick={() => setArmed(false)}>
               Not now
             </button>

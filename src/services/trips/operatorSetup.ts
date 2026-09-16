@@ -74,12 +74,55 @@ export interface SetupStep {
    * saying out loud so "ready" is not overstated. See the note on `stripeDone`.
    */
   pending?: boolean;
+  /**
+   * Insurance only: submitted but not (or no longer) accepted. The step is
+   * NOT done in any of these — unlike Stripe's `pending`.
+   */
+  review?: InsuranceBlock;
 }
+
+export type InsuranceBlock = 'under_review' | 'rejected' | 'expired';
 
 export interface OperatorSetupInput {
   connect: ConnectState;
   settings: OperatorSettings;
+  /** 'YYYY-MM-DD', for the expiry check. Defaults to the device's today. */
+  today?: string;
 }
+
+/** Local calendar date as 'YYYY-MM-DD'. A policy ends on the operator's day. */
+export function localToday(d: Date = new Date()): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Why insurance is not done yet, or null when it is.
+ *
+ * Done means a Swellyo admin APPROVED it and it has not expired (Ohad, 15 Sep).
+ * An upload alone is not done. Expired wins over approved: an approval was of
+ * a policy that has since run out. The expiry day itself still counts.
+ */
+export function insuranceBlock(
+  settings: OperatorSettings,
+  today: string = localToday(),
+): InsuranceBlock | 'missing' | null {
+  if (!settings.insurance || !settings.insuranceReview) return 'missing';
+  const { expiresOn } = settings.insurance;
+  // String compare is safe: both are zero-padded YYYY-MM-DD.
+  if (expiresOn && expiresOn < today) return 'expired';
+  if (settings.insuranceReview.status === 'rejected') return 'rejected';
+  if (settings.insuranceReview.status === 'pending') return 'under_review';
+  return null;
+}
+
+const INSURANCE_TODO: Record<InsuranceBlock | 'missing', string> = {
+  missing: 'Upload your insurance certificate.',
+  under_review: 'Swellyo is reviewing your insurance.',
+  rejected: 'Your insurance was not approved. Upload it again.',
+  expired: 'Your insurance has expired. Upload the new one.',
+};
 
 /**
  * Stripe counts as done while it is still `under_review`.
@@ -97,6 +140,7 @@ function stripeDone(state: ConnectState): boolean {
 
 export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
   const { connect, settings } = input;
+  const insurance = insuranceBlock(settings, input.today);
 
   return [
     {
@@ -127,8 +171,9 @@ export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
     {
       key: 'insurance',
       title: 'Insurance',
-      todo: 'Upload your insurance certificate.',
-      done: Boolean(settings.insurance),
+      todo: insurance ? INSURANCE_TODO[insurance] : INSURANCE_TODO.missing,
+      done: insurance === null,
+      review: insurance && insurance !== 'missing' ? insurance : undefined,
     },
     {
       key: 'terms',

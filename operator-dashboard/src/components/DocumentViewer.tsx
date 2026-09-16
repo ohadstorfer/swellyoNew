@@ -107,14 +107,14 @@ export function DocumentViewer({
             <iframe
               src={url}
               title={`${travelerName} — ${item.title}`}
-              style={{ width: '100%', height: '62vh', border: 0, background: '#fff' }}
+              style={{ width: '100%', height: '62vh', border: 0, background: 'var(--surface)' }}
             />
           )}
           {url && !isPdf && (
             <img
               src={url}
               alt={`${travelerName} — ${item.title}`}
-              style={{ maxWidth: '100%', maxHeight: '62vh', borderRadius: 6 }}
+              style={{ maxWidth: '100%', maxHeight: '62vh', borderRadius: 8 }}
             />
           )}
         </div>

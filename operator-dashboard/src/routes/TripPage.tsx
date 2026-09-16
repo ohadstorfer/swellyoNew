@@ -314,7 +314,7 @@ export function TripPage() {
                   to={`/trips/${tripId}/d/${r.id}`}
                   className="row-between"
                   style={{
-                    padding: '9px 0',
+                    padding: '8px 0',
                     borderBottom: '1px solid var(--line)',
                     color: 'inherit',
                   }}
@@ -328,7 +328,7 @@ export function TripPage() {
                       {r.dueDate ? `Due ${formatDate(r.dueDate)}` : 'Needed to join'}
                     </span>
                   </span>
-                  <span className="row" style={{ gap: 10 }}>
+                  <span className="row" style={{ gap: 12 }}>
                     <CountPair
                       received={c?.received ?? 0}
                       approved={c?.approved ?? 0}
@@ -349,7 +349,7 @@ export function TripPage() {
                 the only question this line raises. It read as dead text while
                 the app made the same two items tappable. */}
             {!editingReqs && (waiver || medical) && (
-              <p className="small" style={{ paddingTop: 10 }}>
+              <p className="small" style={{ paddingTop: 12 }}>
                 {waiver && (
                   <Link className="muted" to={`/trips/${tripId}/d/${waiver.id}`}>
                     Waiver signed {agreedCount(waiver.id)}/{memberCount}
@@ -380,10 +380,10 @@ export function TripPage() {
                     key={r.id}
                     to={`/trips/${tripId}/d/${r.id}`}
                     className="row-between"
-                    style={{ padding: '9px 0', color: 'inherit' }}
+                    style={{ padding: '8px 0', color: 'inherit' }}
                   >
                     <span>{r.title}</span>
-                    <span className="row" style={{ gap: 10 }}>
+                    <span className="row" style={{ gap: 12 }}>
                       <CountPair
                         received={c?.received ?? 0}
                         approved={c?.approved ?? 0}
@@ -397,7 +397,7 @@ export function TripPage() {
                   </Link>
                 );
               })}
-              <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+              <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginTop: 8 }}>
                 Items you created yourself. They are counted, but they do not get their own tile.
               </p>
             </div>
@@ -426,7 +426,7 @@ export function TripPage() {
                 {plural(flags.data.medicationsReported, 'medication')}
               </p>
             )}
-            <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            <p className="muted" style={{ fontSize: 'var(--fs-s)', lineHeight: '18px', marginTop: 8 }}>
               Counts only. No names on this screen.
             </p>
           </div>
@@ -754,7 +754,7 @@ function TravelersCard({
 
           return (
             <Link key={userId} to={`/trips/${tripId}/t/${userId}`} className="row-link">
-              <span className="row" style={{ gap: 11, minWidth: 0 }}>
+              <span className="row" style={{ gap: 12, minWidth: 0 }}>
                 <Avatar url={profile?.photoUrl ?? null} name={nameOf(userId)} />
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: 'block' }}>{nameOf(userId)}</span>
@@ -763,7 +763,7 @@ function TravelersCard({
                   </span>
                 </span>
               </span>
-              <span className="row" style={{ gap: 10 }}>
+              <span className="row" style={{ gap: 12 }}>
                 {/* Late first: chasing somebody takes days, saying yes to a
                     file takes five seconds. */}
                 {late > 0 && <span className="tag tag-danger">{late} late</span>}
@@ -859,7 +859,7 @@ function MoneyCard({ tripId }: { tripId: string }) {
               <p>
                 <strong>{formatUsd(money.expectedUsd)}</strong> expected in total
               </p>
-              <p className="muted small" style={{ marginTop: 6 }}>
+              <p className="muted small" style={{ marginTop: 8 }}>
                 Paid outside Swellyo. Swellyo does not know what has arrived.
               </p>
             </>
@@ -869,7 +869,7 @@ function MoneyCard({ tripId }: { tripId: string }) {
                 <strong>{formatUsd(money.collectedUsd)}</strong> collected of{' '}
                 {formatUsd(money.expectedUsd)}
               </p>
-              <p className="muted small" style={{ marginTop: 6 }}>
+              <p className="muted small" style={{ marginTop: 8 }}>
                 {steps
                   .map(
                     s =>
@@ -880,13 +880,13 @@ function MoneyCard({ tripId }: { tripId: string }) {
             </>
           )}
           {showDue && (
-            <p className="muted small" style={{ marginTop: 6 }}>
+            <p className="muted small" style={{ marginTop: 8 }}>
               Final payment due {formatDate(dueISO)}
               {!isOffline && ' · change the date under Documents'}
             </p>
           )}
           {money.noPriceCount > 0 && (
-            <p className="muted small" style={{ marginTop: 6 }}>
+            <p className="muted small" style={{ marginTop: 8 }}>
               {plural(money.noPriceCount, 'traveler has', 'travelers have')} no price set.
             </p>
           )}
@@ -905,7 +905,7 @@ function SurfStats({ profiles }: { profiles: { surfLevel: string | null; boardTy
   const countries = new Set(profiles.map(p => p.countryFrom).filter(Boolean));
 
   return (
-    <div className="stack" style={{ gap: 7 }}>
+    <div className="stack" style={{ gap: 8 }}>
       <p>{levels.length ? levels.map(([k, n]) => `${n} ${pretty(k)}`).join(' · ') : 'Surf level not set'}</p>
       <p className="muted small">
         {boards.length ? boards.map(([k, n]) => `${n} ${pretty(k)}`).join(' · ') : 'Board type not set'}

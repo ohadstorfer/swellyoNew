@@ -42,14 +42,14 @@ export function TripsPage() {
                 <div className="card-body row-between">
                   <div>
                     <h3>{trip.title}</h3>
-                    <p className="muted small" style={{ marginTop: 3 }}>
+                    <p className="muted small" style={{ marginTop: 4 }}>
                       {formatRange(trip.startDate, trip.endDate)}
                       {trip.maxParticipants
                         ? ` · up to ${plural(trip.maxParticipants, 'spot')}`
                         : ''}
                     </p>
                   </div>
-                  <div className="row" style={{ gap: 10 }}>
+                  <div className="row" style={{ gap: 12 }}>
                     {/* Testing mode can list peer trips. Say so, or you will
                         forget which one is the real operator trip. */}
                     {trip.hostingStyle !== 'C' && (

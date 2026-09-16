@@ -139,7 +139,7 @@ export function MoneyPage() {
                   <strong>{formatUsd(money.collectedUsd)}</strong> collected of{' '}
                   {formatUsd(money.expectedUsd)}
                 </p>
-                <p className="muted small" style={{ marginTop: 6 }}>
+                <p className="muted small" style={{ marginTop: 8 }}>
                   {steps
                     .map(
                       s =>
@@ -184,7 +184,7 @@ export function MoneyPage() {
                 )}
               </p>
             )}
-            <p className="muted small" style={{ marginTop: 6 }}>
+            <p className="muted small" style={{ marginTop: 8 }}>
               The price whoever joins next is quoted. People already on the trip keep their own —
               change theirs one by one below.
             </p>

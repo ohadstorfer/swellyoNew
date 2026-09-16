@@ -307,7 +307,7 @@ largest text anywhere in Trips. It is still by far the biggest thing on the tab.
 | # | Question | Options | Blocks |
 | --- | --- | --- | --- |
 | ~~**D1**~~ | ~~`ok` and `warn` — what colour?~~ | ✅ **Resolved 2026-08-05 (Ohad): leave `#1F8A4C` / `#8A6100`, delete the "must match web" comment.** | — |
-| **D2** | The web dashboard and the app claim to match and do not. Which one moves? | (a) app moves to `tokens.css` · (b) `tokens.css` moves to the app · (c) drop the claim, they are different products | nothing — separate diff |
+| ~~**D2**~~ | ~~The web dashboard and the app claim to match and do not. Which one moves?~~ | ✅ **Resolved 2026-09-15 (Ohad): (b) — `tokens.css` moves to the app.** State colours mirror `dashboardTheme.ts`; type sizes are the app's (Figma Mobile mode); primary button is the app's black. | — |
 | **D3** | Should Scale B (operator-documents: 13 / 15 / 17) ever converge on Scale A? | (a) never · (b) later, own spec | nothing |
 | **D4** | `DocumentReviewScreen.pillAccent` is `#05BCD3` on `#E4F8FB` = **2.1:1**. Fix it? | (a) darken to `#066B8C` · (b) leave, it is two words in a pill | nothing — separate diff, out of scope here |
 

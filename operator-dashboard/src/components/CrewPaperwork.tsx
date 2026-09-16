@@ -58,7 +58,7 @@ function CheckRow({
 }) {
   return (
     <label className="row-link" style={{ cursor: disabled ? 'default' : 'pointer' }}>
-      <span className="row" style={{ gap: 11, minWidth: 0 }}>
+      <span className="row" style={{ gap: 12, minWidth: 0 }}>
         <input
           type="checkbox"
           checked={checked}
@@ -200,7 +200,7 @@ export function CrewPaperworkSection({
 
   return (
     <>
-      <div className="row-between" style={{ marginTop: 18, marginBottom: 6 }}>
+      <div className="row-between" style={{ marginTop: 16, marginBottom: 8 }}>
         <h2>Paperwork</h2>
         {reqs.isPending && <span className="muted small">Loading…</span>}
       </div>
@@ -231,7 +231,7 @@ export function CrewPaperworkSection({
                 spinning ? (
                   <span className="spinner" />
                 ) : checked ? (
-                  <span className="row" style={{ gap: 6 }}>
+                  <span className="row" style={{ gap: 8 }}>
                     {/* The travelers' deadline for the same kind, read through
                         (20260904000200). "Late" here is a flag and nothing
                         more — a guide is never locked out of a trip over

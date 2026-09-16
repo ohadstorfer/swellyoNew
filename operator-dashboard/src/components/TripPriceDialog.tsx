@@ -64,13 +64,13 @@ export function TripPriceDialog({
             value={priceText}
             onChange={e => setPriceText(e.target.value)}
             placeholder="3000"
-            style={{ marginTop: 6, width: '100%' }}
+            style={{ marginTop: 8, width: '100%' }}
           />
 
           <label
             className="small muted"
             htmlFor="trip-deposit"
-            style={{ display: 'block', marginTop: 14 }}
+            style={{ display: 'block', marginTop: 16 }}
           >
             Deposit (USD)
           </label>
@@ -81,9 +81,9 @@ export function TripPriceDialog({
             value={depositText}
             onChange={e => setDepositText(e.target.value)}
             placeholder="1000"
-            style={{ marginTop: 6, width: '100%' }}
+            style={{ marginTop: 8, width: '100%' }}
           />
-          <p className="muted small" style={{ marginTop: 6 }}>
+          <p className="muted small" style={{ marginTop: 8 }}>
             {depositHint(price, deposit)}
           </p>
 
@@ -104,7 +104,7 @@ export function TripPriceDialog({
           className="row"
           style={{
             borderTop: '1px solid var(--line)',
-            padding: '12px 16px',
+            padding: '16px 24px',
             justifyContent: 'flex-end',
             gap: 8,
           }}

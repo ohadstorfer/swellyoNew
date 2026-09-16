@@ -1,82 +1,46 @@
 /**
- * Operator setup — the four things settled once, before selling a trip.
+ * Operator setup — the checklist (Figma 15286-78166).
  *
- * ── A CHECKLIST, NOT A WIZARD ───────────────────────────────────────────────
- * Deliberate. A stepper would be wrong here for three reasons:
+ * Six things settled once before selling a trip. This screen is the hub: a row
+ * per step with a tick when done. "Start / Continue Setup" opens the step-by-
+ * step wizard (setup/OperatorSetupWizard.tsx) at the first unfinished step;
+ * tapping a row opens the wizard on that step. Leaving the wizard — finished,
+ * Exit, or Save and Exit — comes back here.
  *
- *  1. Stripe cannot be finished in one sitting. It leaves the app, and it can
- *     come back `under_review` — a stepper would either trap the operator on
- *     step 1 or lie about it being done.
- *  2. The steps are independent. Nothing about a currency depends on a waiver,
- *     so forcing an order buys nothing and costs anyone who wants to do the
- *     easy ones first.
- *  3. They WILL leave and come back. A checklist reopens showing exactly what
- *     is left; a wizard reopens asking where they were.
+ * ── Still a checklist underneath ────────────────────────────────────────────
+ * The wizard walks the steps in order, but nothing depends on that order:
+ * Stripe cannot always finish in one sitting (it can come back under review),
+ * insurance waits on Swellyo's review, and operators leave and come back. The
+ * checklist is what reopens showing exactly what is left.
  *
- * ── Looks (Figma 14984-68574) ───────────────────────────────────────────────
- * A list of the six steps — icon, title, one line — each opening its own
- * bottom sheet with that step's controls (Ohad, 14 Sep). "Start Setup" opens
- * the first unfinished one. A finished row keeps its line and gains a check.
- * Still a checklist underneath: any row, any order.
- *
- * ── The sheets are the same ones Settings uses ──────────────────────────────
- * CurrencySheet and CancellationPolicySheet are not re-implemented here. An
- * operator who sets their policy in setup and edits it later in Settings must
- * be looking at the same control, or the two will drift into disagreeing about
- * what a policy even is.
- *
- * ── Confirming is the point, not changing ───────────────────────────────────
- * Currency and policy both arrive with working defaults, so an operator can
- * finish those steps without altering a thing. That is allowed and expected —
- * what setup asks is that they LOOKED. Hence "Use USD" rather than a disabled
- * button waiting for a change that may never be needed.
+ * The rule for "done" lives in services/trips/operatorSetup.ts, shared with
+ * the Trips banner, the Create gate and the web dashboard.
  */
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BottomSheetShell } from '../../components/BottomSheetShell';
 import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
 import { ff } from '../../theme/fonts';
 import { useUserProfile } from '../../context/UserProfileContext';
-import { showErrorAlert } from '../../utils/friendlyError';
-import { ConnectStripeCard } from '../../components/trips/ConnectStripeCard';
-import { DocumentViewer } from '../../components/trips/DocumentViewer';
-import { CurrencySheet } from '../../components/settings/CurrencySheet';
-import { CancellationPolicySheet } from '../../components/settings/CancellationPolicySheet';
 import {
   fetchOperatorSettings,
-  saveOperatorSettings,
   EMPTY_OPERATOR_SETTINGS,
   type OperatorSettings,
 } from '../../services/trips/operatorSettingsService';
 import {
-  uploadDefaultWaiver,
-  uploadOperatorInsurance,
-} from '../../services/trips/tripDocumentsService';
-import { OperatorTermsSheet } from '../../components/settings/OperatorTermsSheet';
-import { summarise, PRESET_LABEL } from '../../services/trips/cancellationPolicy';
-import {
   operatorSetupSteps,
   isOperatorSetupComplete,
-  OPERATOR_TERMS_VERSION,
   SETUP_STEP_ORDER,
+  type InsuranceBlock,
   type SetupStep,
   type SetupStepKey,
 } from '../../services/trips/operatorSetup';
 import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
-import { currencyForCountry, isCurrencyCode, type CurrencyCode } from '../../utils/currency';
+import { OperatorSetupWizard } from './setup/OperatorSetupWizard';
 
-/** How each step reads on this screen (Figma 14984-68574). The service's own
- *  titles stay as they are — the Trips card and the Create gate use them. */
+/** How each step reads on this screen. The service's own titles stay as they
+ *  are — the Trips card and the Create gate use them. */
 const ROW: Record<SetupStepKey, { icon: TripIconName; title: string; line: string }> = {
   stripe: { icon: 'credit-card-01', title: 'Payments', line: 'Connect Stripe to collect payments' },
   currency: { icon: 'coins-swap-02', title: 'Currency', line: 'Set your default billing currency' },
@@ -86,19 +50,17 @@ const ROW: Record<SetupStepKey, { icon: TripIconName; title: string; line: strin
   terms: { icon: 'file-check-03', title: 'Operator agreement', line: 'Sign the Swellyo Operator Agreement' },
 };
 
+/** Insurance is the one step that can sit between "sent" and "done". */
+const REVIEW_PILL: Record<InsuranceBlock, { text: string; color: string; bg: string }> = {
+  under_review: { text: 'In review', color: '#B26A00', bg: '#FFF6E5' },
+  rejected: { text: 'Not approved', color: '#D92D46', bg: '#FFF0F2' },
+  expired: { text: 'Expired', color: '#D92D46', bg: '#FFF0F2' },
+};
+
 const C = {
-  ink: '#222B30',
+  accent: '#05BCD3',
   muted: '#7B7B7B',
   line: '#EEEEEE',
-  border: '#E4E4E4',
-  accent: '#05BCD3',
-  accentSoft: '#EBFAFC',
-  ok: '#2E9E5B',
-  okSoft: '#EAF7EF',
-  warn: '#B26A00',
-  warnSoft: '#FFF6E5',
-  surface: '#F6F8F9',
-  check: '#2BCCBD',
 };
 
 interface Props {
@@ -109,57 +71,39 @@ interface Props {
 
 export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => {
   const insets = useSafeAreaInsets();
-  // Read here rather than passed in: the currency step names what "automatic"
-  // resolves to, and a caller that forgot the prop would silently show every
-  // operator "Automatic — USD".
   const { profile } = useUserProfile();
   const country = profile?.country_from;
 
   const [settings, setSettings] = useState<OperatorSettings>(EMPTY_OPERATOR_SETTINGS);
   const [loading, setLoading] = useState(true);
-  const [busyStep, setBusyStep] = useState<SetupStepKey | null>(null);
-  const [showCurrency, setShowCurrency] = useState(false);
-  const [showPolicy, setShowPolicy] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
-  /** The step whose sheet is open. Terms has no sheet of its own here — its
-   *  existing sheet IS the step — so it never lands in this. */
-  const [openStep, setOpenStep] = useState<Exclude<SetupStepKey, 'terms'> | null>(null);
-  // The file being looked at, or null. Path only: the viewer mints its own
-  // short-lived signed URL per open and never keeps it, same as everywhere
-  // else a document is shown.
-  const [viewing, setViewing] = useState<{ path: string; title: string } | null>(null);
+  /** The step the wizard is open on, or null for the checklist. */
+  const [wizardStep, setWizardStep] = useState<SetupStepKey | null>(null);
 
-  // The SAME cache ConnectStripeCard reads. Fetching Stripe separately here
-  // would ask twice and then let the checklist and the card inside it disagree
-  // about whether Stripe is connected — and the card's post-onboarding poll
-  // updates this hook, so ticking step 1 needs no wiring at all.
+  // The SAME cache the Stripe step and ConnectStripeCard read, so the tick here
+  // and the step's own screen can never disagree.
   const { state: connectState } = useConnectStatus();
 
   const steps = operatorSetupSteps({ connect: connectState, settings });
-  const done = steps.filter(s => s.done).length;
+  const done = steps.filter(st => st.done).length;
   const complete = isOperatorSetupComplete({ connect: connectState, settings });
 
-  const load = useCallback(async () => {
-    try {
-      setSettings(await fetchOperatorSettings());
-    } catch (e) {
-      // Not fatal and not worth an alert on mount: an operator with no row yet
-      // is the normal first case, and EMPTY_OPERATOR_SETTINGS renders it
-      // correctly as "nothing done".
-      console.warn('[OperatorSetup] settings read failed:', e);
-    } finally {
-      setLoading(false);
-    }
+  const reload = useCallback(async () => {
+    const fresh = await fetchOperatorSettings();
+    setSettings(fresh);
+    return fresh;
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    reload()
+      // Not fatal: an operator with no row yet is the normal first case, and
+      // EMPTY_OPERATOR_SETTINGS renders it correctly as "nothing done".
+      .catch(e => console.warn('[OperatorSetup] settings read failed:', e))
+      .finally(() => setLoading(false));
+  }, [reload]);
 
-  // Announce completion upward, not on every render — the caller invalidates
-  // caches on this, and firing it repeatedly would refetch the trips list on
-  // every state change once setup is done.
-  const announcedRef = React.useRef(false);
+  // Announce completion upward once, not on every render — the caller
+  // invalidates caches on this.
+  const announcedRef = useRef(false);
   useEffect(() => {
     if (complete && !announcedRef.current) {
       announcedRef.current = true;
@@ -167,135 +111,7 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
     }
   }, [complete, onComplete]);
 
-  const autoCurrency = currencyForCountry(country);
-  const shownCurrency: CurrencyCode = isCurrencyCode(settings.defaultCurrency)
-    ? settings.defaultCurrency
-    : autoCurrency;
-
-  const patch = async (
-    step: SetupStepKey,
-    body: Parameters<typeof saveOperatorSettings>[0],
-    optimistic: Partial<OperatorSettings>,
-  ) => {
-    setBusyStep(step);
-    const before = settings;
-    setSettings({ ...settings, ...optimistic });
-    try {
-      await saveOperatorSettings(body);
-      setSettings(await fetchOperatorSettings());
-      // Done with that step: back to the list, where its row now has a tick.
-      setOpenStep(null);
-    } catch (e) {
-      setSettings(before);
-      showErrorAlert('Could not save', e, 'That did not save. Please try again.');
-    } finally {
-      setBusyStep(null);
-    }
-  };
-
-  const confirmCurrency = () =>
-    patch('currency', { confirmCurrency: true }, { currencyConfirmedAt: new Date().toISOString() });
-
-  const confirmPolicy = () =>
-    patch('policy', { confirmPolicy: true }, { policyConfirmedAt: new Date().toISOString() });
-
-  const chooseCurrency = (next: CurrencyCode | null) =>
-    patch(
-      'currency',
-      { defaultCurrency: next, confirmCurrency: true },
-      { defaultCurrency: next, currencyConfirmedAt: new Date().toISOString() },
-    );
-
-  const savePolicy = async (next: OperatorSettings['policy']) => {
-    // Thrown, not swallowed: CancellationPolicySheet keeps itself open and
-    // shows the message when this rejects, which is the behaviour its own
-    // save() was written for.
-    await saveOperatorSettings({ policy: next, confirmPolicy: true });
-    setSettings(await fetchOperatorSettings());
-  };
-
-  const pickWaiver = async () => {
-    try {
-      const DocumentPicker = require('expo-document-picker');
-      const res = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf',
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      const asset = !res.canceled ? res.assets?.[0] : null;
-      if (!asset?.uri) return;
-
-      setBusyStep('waiver');
-      const stored = await uploadDefaultWaiver(asset.uri, settings.defaultWaiver?.path ?? null);
-      await saveOperatorSettings({
-        defaultWaiver: {
-          path: stored.path,
-          name: asset.name ?? 'waiver.pdf',
-          hash: stored.hash,
-          sizeBytes: stored.sizeBytes,
-          uploadedAt: new Date().toISOString(),
-        },
-      });
-      setSettings(await fetchOperatorSettings());
-      setOpenStep(null);
-    } catch (e) {
-      showErrorAlert('Could not upload', e, 'That file did not upload. Please try again.');
-    } finally {
-      setBusyStep(null);
-    }
-  };
-
-  const pickInsurance = async () => {
-    try {
-      const DocumentPicker = require('expo-document-picker');
-      const res = await DocumentPicker.getDocumentAsync({
-        // Photo OR PDF. An insurance certificate is a paper document at least as
-        // often as a file, and refusing a photo of it sends them off to find a
-        // scanner. Matches the storage policy's extension allowlist.
-        type: ['application/pdf', 'image/jpeg', 'image/png', 'image/heic'],
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      const asset = !res.canceled ? res.assets?.[0] : null;
-      if (!asset?.uri) return;
-
-      setBusyStep('insurance');
-      const name = asset.name ?? 'insurance.pdf';
-      const stored = await uploadOperatorInsurance(
-        asset.uri,
-        name,
-        settings.insurance?.path ?? null,
-      );
-      await saveOperatorSettings({
-        insurance: {
-          path: stored.path,
-          name,
-          mime: stored.mime,
-          sizeBytes: stored.sizeBytes,
-          uploadedAt: new Date().toISOString(),
-        },
-      });
-      setSettings(await fetchOperatorSettings());
-      setOpenStep(null);
-    } catch (e) {
-      showErrorAlert('Could not upload', e, 'That file did not upload. Please try again.');
-    } finally {
-      setBusyStep(null);
-    }
-  };
-
-  const agreeToTerms = async () => {
-    await saveOperatorSettings({ acceptTermsVersion: OPERATOR_TERMS_VERSION });
-    setSettings(await fetchOperatorSettings());
-  };
-
-  const openRow = (key: SetupStepKey) => {
-    if (key === 'terms') setShowTerms(true);
-    else setOpenStep(key);
-  };
-
-  // "Start Setup" goes where the work is: the first step still to do.
-  const firstOpen = steps.find(st => !st.done)?.key ?? null;
+  const closeWizard = useCallback(() => setWizardStep(null), []);
 
   if (loading) {
     return (
@@ -305,14 +121,28 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
     );
   }
 
+  if (wizardStep) {
+    return (
+      <OperatorSetupWizard
+        initialStep={wizardStep}
+        settings={settings}
+        reload={reload}
+        country={country}
+        onExit={closeWizard}
+      />
+    );
+  }
+
   const byKey = Object.fromEntries(steps.map(st => [st.key, st])) as Record<SetupStepKey, SetupStep>;
+  // "Continue Setup" goes where the work is: the first step still to do.
+  const firstOpen = steps.find(st => !st.done)?.key ?? null;
 
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top }]}>
         <View style={styles.headerRow}>
           <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
-            <Ionicons name="chevron-back" size={28} color="#FFFFFF" />
+            <TripIcon name="chevron-left" size={32} color="#FFFFFF" strokeWidth={1.5} />
           </Pressable>
           {/* Once everything is done this screen is reached from Settings, not
               the setup banner — so it stops calling itself a setup. */}
@@ -334,16 +164,17 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
           {SETUP_STEP_ORDER.map(key => {
             const row = ROW[key];
             const step = byKey[key];
+            const pill = step.review ? REVIEW_PILL[step.review] : null;
             return (
               <Pressable
                 key={key}
-                onPress={() => openRow(key)}
+                onPress={() => setWizardStep(key)}
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`${row.title}. ${step.done ? 'Done' : row.line}`}
+                accessibilityLabel={`${row.title}. ${step.done ? 'Done' : pill ? pill.text : row.line}`}
               >
                 <View style={styles.rowIcon}>
-                  <TripIcon name={row.icon} size={18} color={C.ink} />
+                  <TripIcon name={row.icon} size={18} color="#222B30" />
                 </View>
                 <View style={styles.rowText}>
                   <Text style={styles.rowTitle} numberOfLines={1}>
@@ -354,7 +185,13 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
                   </Text>
                 </View>
                 {step.done ? (
-                  <Ionicons name="checkmark-circle" size={24} color={C.check} />
+                  <View style={styles.check}>
+                    <TripIcon name="check" size={14} color="#FFFFFF" strokeWidth={3} />
+                  </View>
+                ) : pill ? (
+                  <View style={[styles.pill, { backgroundColor: pill.bg }]}>
+                    <Text style={[styles.pillText, { color: pill.color }]}>{pill.text}</Text>
+                  </View>
                 ) : null}
               </Pressable>
             );
@@ -372,12 +209,12 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
         />
         <View style={[styles.footerInner, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
           <Pressable
-            onPress={() => (firstOpen ? openRow(firstOpen) : onBack())}
+            onPress={() => (firstOpen ? setWizardStep(firstOpen) : onBack())}
             style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
             accessibilityRole="button"
           >
             <Text style={styles.ctaText}>
-              {!firstOpen ? 'Start creating trips' : done === 0 ? 'Start Setup' : 'Continue Setup'}
+              {!firstOpen ? 'Finish Setup' : done === 0 ? 'Start Setup' : 'Continue Setup'}
             </Text>
           </Pressable>
           {firstOpen ? (
@@ -387,230 +224,11 @@ export const OperatorSetupScreen: React.FC<Props> = ({ onBack, onComplete }) => 
           ) : null}
         </View>
       </View>
-
-      {/* ── One sheet per step ───────────────────────────────────────────── */}
-      {/* Everything a step sheet opens (the currency / policy pickers, the file
-          viewer) is rendered INSIDE it. A sheet opened as a sibling of an open
-          sheet strands an invisible view controller on iOS and freezes touch. */}
-      <BottomSheetShell visible={openStep !== null} onClose={() => setOpenStep(null)} swipeToDismiss={false}>
-        <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 16) + 12 }]}>
-          <View style={styles.grabber} />
-          {openStep ? (
-            <>
-              <View style={styles.sheetHead}>
-                <View style={styles.rowIcon}>
-                  <TripIcon name={ROW[openStep].icon} size={18} color={C.ink} />
-                </View>
-                <Text style={styles.sheetTitle}>{ROW[openStep].title}</Text>
-                {byKey[openStep].pending ? (
-                  <View style={styles.pill}>
-                    <Text style={styles.pillText}>Checking</Text>
-                  </View>
-                ) : byKey[openStep].done ? (
-                  <Ionicons name="checkmark-circle" size={22} color={C.check} />
-                ) : null}
-              </View>
-
-              <View style={styles.sheetBody}>
-                {openStep === 'stripe' ? (
-                  // The card owns every one of the six Connect states and the
-                  // button that reopens Stripe. Reproducing any of that here
-                  // would be a second implementation of a rule with exactly one.
-                  <ConnectStripeCard />
-                ) : openStep === 'currency' ? (
-                  <>
-                    <Text style={styles.value}>
-                      {settings.defaultCurrency ?? `Automatic — ${autoCurrency}`}
-                    </Text>
-                    <Text style={styles.hint}>
-                      The currency you type prices in. Travelers still see their own, and
-                      you are always paid in US dollars.
-                    </Text>
-                    <View style={styles.actions}>
-                      {!byKey.currency.done && (
-                        <PrimaryButton
-                          label={`Use ${shownCurrency}`}
-                          busy={busyStep === 'currency'}
-                          onPress={confirmCurrency}
-                        />
-                      )}
-                      <SecondaryButton
-                        label={byKey.currency.done ? 'Change' : 'Pick another'}
-                        onPress={() => setShowCurrency(true)}
-                      />
-                    </View>
-                  </>
-                ) : openStep === 'policy' ? (
-                  <>
-                    <Text style={styles.value}>{PRESET_LABEL[settings.policy.preset]}</Text>
-                    <Text style={styles.hint}>{summarise(settings.policy)}</Text>
-                    <View style={styles.actions}>
-                      {!byKey.policy.done && (
-                        <PrimaryButton
-                          label="Use this"
-                          busy={busyStep === 'policy'}
-                          onPress={confirmPolicy}
-                        />
-                      )}
-                      <SecondaryButton
-                        label={byKey.policy.done ? 'Change' : 'Pick another'}
-                        onPress={() => setShowPolicy(true)}
-                      />
-                    </View>
-                  </>
-                ) : openStep === 'waiver' ? (
-                  <>
-                    {settings.defaultWaiver ? (
-                      <View style={styles.fileRow}>
-                        <Ionicons name="document-text-outline" size={20} color={C.muted} />
-                        <Text style={styles.fileName} numberOfLines={1}>
-                          {settings.defaultWaiver.name}
-                        </Text>
-                      </View>
-                    ) : null}
-                    <Text style={styles.hint}>
-                      A PDF every traveler agrees to before they join. Each trip gets its
-                      own copy, so replacing this never changes a trip you already
-                      published.
-                    </Text>
-                    <View style={styles.actions}>
-                      <PrimaryButton
-                        label={settings.defaultWaiver ? 'Replace PDF' : 'Upload PDF'}
-                        busy={busyStep === 'waiver'}
-                        onPress={pickWaiver}
-                        outline={Boolean(settings.defaultWaiver)}
-                      />
-                      {settings.defaultWaiver ? (
-                        <SecondaryButton
-                          label="View"
-                          onPress={() =>
-                            setViewing({ path: settings.defaultWaiver!.path, title: 'Your waiver' })
-                          }
-                        />
-                      ) : null}
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    {settings.insurance ? (
-                      <View style={styles.fileRow}>
-                        <Ionicons
-                          name={
-                            settings.insurance.mime === 'application/pdf'
-                              ? 'document-text-outline'
-                              : 'image-outline'
-                          }
-                          size={20}
-                          color={C.muted}
-                        />
-                        <Text style={styles.fileName} numberOfLines={1}>
-                          {settings.insurance.name}
-                        </Text>
-                      </View>
-                    ) : null}
-                    <Text style={styles.hint}>
-                      Your liability insurance certificate. A photo of the paper one is
-                      fine — Swellyo keeps it, travelers never see it.
-                    </Text>
-                    <View style={styles.actions}>
-                      <PrimaryButton
-                        label={settings.insurance ? 'Replace' : 'Upload'}
-                        busy={busyStep === 'insurance'}
-                        onPress={pickInsurance}
-                        outline={Boolean(settings.insurance)}
-                      />
-                      {settings.insurance ? (
-                        <SecondaryButton
-                          label="View"
-                          onPress={() =>
-                            setViewing({ path: settings.insurance!.path, title: 'Your insurance' })
-                          }
-                        />
-                      ) : null}
-                    </View>
-                  </>
-                )}
-              </View>
-            </>
-          ) : null}
-        </View>
-
-        {/* Nested, see above. */}
-        <CurrencySheet
-          visible={showCurrency}
-          onClose={() => setShowCurrency(false)}
-          value={isCurrencyCode(settings.defaultCurrency) ? settings.defaultCurrency : null}
-          country={country}
-          onSelect={chooseCurrency}
-          title="Price currency"
-          subtitle="New trips start priced in this. You can change it on any trip."
-          autoLabel="Follow my country"
-        />
-        <CancellationPolicySheet
-          visible={showPolicy}
-          onClose={() => setShowPolicy(false)}
-          value={settings.policy}
-          onSave={async next => {
-            await savePolicy(next);
-            setOpenStep(null);
-          }}
-        />
-        {/* Read-only: no approve / reject, no export. The operator checking
-            their own file, PDF or photo — the viewer picks by path. */}
-        <DocumentViewer
-          visible={!!viewing}
-          storagePath={viewing?.path ?? null}
-          title={viewing?.title ?? 'Document'}
-          onClose={() => setViewing(null)}
-        />
-      </BottomSheetShell>
-
-      <OperatorTermsSheet
-        visible={showTerms}
-        onClose={() => setShowTerms(false)}
-        accepted={byKey.terms.done}
-        onAgree={agreeToTerms}
-      />
     </View>
   );
 };
 
 // ───────────────────────────────────────────────────────────────────────────
-
-const PrimaryButton: React.FC<{
-  label: string;
-  onPress: () => void;
-  busy?: boolean;
-  outline?: boolean;
-}> = ({ label, onPress, busy, outline }) => (
-  <Pressable
-    onPress={onPress}
-    disabled={busy}
-    style={({ pressed }) => [
-      styles.btn,
-      outline ? styles.btnOutline : styles.btnPrimary,
-      busy && styles.btnBusy,
-      pressed && !busy && styles.pressed,
-    ]}
-    accessibilityRole="button"
-  >
-    {busy ? (
-      <ActivityIndicator size="small" color={outline ? C.accent : '#FFFFFF'} />
-    ) : (
-      <Text style={[styles.btnText, outline && styles.btnTextOutline]}>{label}</Text>
-    )}
-  </Pressable>
-);
-
-const SecondaryButton: React.FC<{ label: string; onPress: () => void }> = ({ label, onPress }) => (
-  <Pressable
-    onPress={onPress}
-    style={({ pressed }) => [styles.btn, styles.btnGhost, pressed && styles.pressed]}
-    accessibilityRole="button"
-  >
-    <Text style={[styles.btnText, styles.btnTextGhost]}>{label}</Text>
-  </Pressable>
-);
 
 // Figma 14984-68574, EVERY size read with get_variable_defs on its node:
 // lede Size/md 14/18; row title Size/lg 16/24 (bold override — the code export
@@ -706,90 +324,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // ── step sheet ──
-  // The shell paints no surface; without this the sheet is transparent.
-  sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 10,
-    paddingHorizontal: 20,
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#D9D9D9',
-    marginBottom: 16,
-  },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sheetTitle: {
-    flex: 1,
-    fontFamily: ff('Inter', '700'),
-    fontWeight: '700',
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#333333',
-  },
-  sheetBody: { marginTop: 16, gap: 8 },
-  pill: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 99,
-    backgroundColor: C.warnSoft,
-  },
-  pillText: {
-    fontFamily: ff('Inter', '600'),
-    fontWeight: '600',
-    fontSize: 11,
-    color: C.warn,
-  },
-
-  value: {
-    fontFamily: ff('Inter', '600'),
-    fontWeight: '600',
-    fontSize: 15,
-    color: C.ink,
-  },
-  hint: {
-    fontFamily: ff('Inter', '400'),
-    fontWeight: '400',
-    fontSize: 13,
-    lineHeight: 18,
-    color: C.muted,
-  },
-  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  fileName: {
-    flex: 1,
-    fontFamily: ff('Inter', '500'),
-    fontWeight: '500',
-    fontSize: 14,
-    color: C.ink,
-  },
-
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' },
-  btn: {
-    height: 40,
-    paddingHorizontal: 16,
-    borderRadius: 99,
+  check: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 96,
   },
-  btnPrimary: { backgroundColor: C.accent },
-  btnOutline: { borderWidth: 1, borderColor: C.accent, backgroundColor: '#FFFFFF' },
-  btnGhost: { backgroundColor: 'transparent', paddingHorizontal: 8, minWidth: 0 },
-  btnBusy: { opacity: 0.7 },
-  btnText: {
-    fontFamily: ff('Inter', '600'),
-    fontWeight: '600',
-    fontSize: 14,
-    color: '#FFFFFF',
-  },
-  btnTextOutline: { color: C.accent },
-  btnTextGhost: { color: C.muted },
-  pressed: { transform: [{ scale: 0.98 }], opacity: 0.9 },
+  pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 99 },
+  pillText: { fontFamily: ff('Inter', '600'), fontWeight: '600', fontSize: 11 },
 });
 
 export default OperatorSetupScreen;

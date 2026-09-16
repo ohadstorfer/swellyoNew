@@ -11,7 +11,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <header
         style={{
           borderBottom: '1px solid var(--line)',
-          background: '#fff',
+          background: 'var(--surface)',
           position: 'sticky',
           top: 0,
           zIndex: 10,
@@ -19,20 +19,20 @@ export function Shell({ children }: { children: ReactNode }) {
       >
         <div
           className="row-between"
-          style={{ maxWidth: 1080, margin: '0 auto', padding: '12px 20px' }}
+          style={{ maxWidth: 1080, margin: '0 auto', padding: '12px 24px' }}
         >
-          <Link to="/trips" className="row" style={{ gap: 9, color: 'var(--text)' }}>
+          <Link to="/trips" className="row" style={{ gap: 8, color: 'var(--text)' }}>
             <span
               aria-hidden
               style={{
                 width: 9,
                 height: 9,
-                borderRadius: 99,
+                borderRadius: 999,
                 background: 'var(--cyan)',
                 display: 'inline-block',
               }}
             />
-            <strong style={{ fontSize: 15 }}>Swellyo Operator</strong>
+            <strong style={{ fontSize: 'var(--fs-md)', lineHeight: '20px' }}>Swellyo Operator</strong>
           </Link>
 
           {user && (
@@ -73,7 +73,7 @@ export function PageHead({
   right?: ReactNode;
 }) {
   return (
-    <div style={{ marginBottom: 20 }}>
+    <div style={{ marginBottom: 24 }}>
       {back && (
         <Link to={back} className="small" style={{ display: 'inline-block', marginBottom: 8 }}>
           ← {backLabel ?? 'Back'}
@@ -83,7 +83,7 @@ export function PageHead({
         <div>
           <h1>{title}</h1>
           {sub && (
-            <p className="muted small" style={{ marginTop: 3 }}>
+            <p className="muted small" style={{ marginTop: 4 }}>
               {sub}
             </p>
           )}

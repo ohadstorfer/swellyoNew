@@ -48,13 +48,13 @@ export function RejectDialog({
             value={note}
             onChange={e => setNote(e.target.value)}
             placeholder="e.g. The photo is too blurry to read the number"
-            style={{ marginTop: 6 }}
+            style={{ marginTop: 8 }}
           />
         </div>
 
         <div
           className="row"
-          style={{ borderTop: '1px solid var(--line)', padding: '12px 16px', justifyContent: 'flex-end', gap: 8 }}
+          style={{ borderTop: '1px solid var(--line)', padding: '16px 24px', justifyContent: 'flex-end', gap: 8 }}
         >
           <button className="btn btn-sm" onClick={onCancel} disabled={busy}>
             Cancel

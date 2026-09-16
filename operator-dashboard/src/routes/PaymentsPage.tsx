@@ -226,7 +226,7 @@ function Th({ children, align }: { children: React.ReactNode; align?: 'right' })
   return (
     <th
       className="muted small"
-      style={{ textAlign: align ?? 'left', padding: '10px 12px', fontWeight: 600 }}
+      style={{ textAlign: align ?? 'left', padding: '12px 12px', fontWeight: 600 }}
     >
       {children}
     </th>
@@ -234,7 +234,7 @@ function Th({ children, align }: { children: React.ReactNode; align?: 'right' })
 }
 
 function Td({ children, align }: { children: React.ReactNode; align?: 'right' }) {
-  return <td style={{ textAlign: align ?? 'left', padding: '10px 12px' }}>{children}</td>;
+  return <td style={{ textAlign: align ?? 'left', padding: '12px 12px' }}>{children}</td>;
 }
 
 /**

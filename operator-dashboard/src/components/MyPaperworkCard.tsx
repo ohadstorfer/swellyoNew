@@ -89,7 +89,7 @@ export function MyPaperworkCard({ tripId }: { tripId: string }) {
                   </span>
                 )}
               </span>
-              <span className="row" style={{ gap: 6, flexShrink: 0 }}>
+              <span className="row" style={{ gap: 8, flexShrink: 0 }}>
                 {r.dueDate ? (
                   <span className={`tag ${late ? 'tag-danger' : 'tag-idle'}`}>
                     {late ? 'Late' : `Due ${formatDate(r.dueDate)}`}

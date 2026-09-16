@@ -40,12 +40,12 @@ export function PolicyFields({
 
   return (
     <>
-      <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
         {PRESETS.map(p => (
           <label
             key={p}
             className="row"
-            style={{ gap: 10, alignItems: 'flex-start', cursor: disabled ? 'default' : 'pointer' }}
+            style={{ gap: 12, alignItems: 'flex-start', cursor: disabled ? 'default' : 'pointer' }}
           >
             <input
               type="radio"
@@ -53,10 +53,10 @@ export function PolicyFields({
               checked={value.preset === p}
               disabled={disabled}
               onChange={() => onChange({ ...value, preset: p, rules })}
-              style={{ marginTop: 3 }}
+              style={{ marginTop: 4 }}
             />
             <span>
-              <strong style={{ fontSize: 14 }}>{PRESET_LABEL[p]}</strong>
+              <strong style={{ fontSize: 'var(--fs-md)', lineHeight: '20px' }}>{PRESET_LABEL[p]}</strong>
               <span className="muted small" style={{ display: 'block' }}>
                 {PRESET_BLURB[p]}
               </span>
@@ -66,7 +66,7 @@ export function PolicyFields({
       </div>
 
       {value.preset === 'custom' && (
-        <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
           {rules.map((r, i) => (
             <div key={i} className="row" style={{ gap: 8 }}>
               <input
@@ -134,15 +134,14 @@ export function PolicyFields({
             background: 'var(--panel)',
             borderRadius: 8,
             padding: 12,
-            marginBottom: 14,
+            marginBottom: 16,
           }}
         >
           <div
             className="muted"
             style={{
-              fontSize: 11,
-              textTransform: 'uppercase',
-              letterSpacing: '.4px',
+              fontSize: 'var(--fs-s)',
+              lineHeight: '18px',
               marginBottom: 4,
             }}
           >
@@ -156,7 +155,7 @@ export function PolicyFields({
         </div>
       )}
 
-      <label className="small" style={{ display: 'block', marginBottom: 6 }}>
+      <label className="small" style={{ display: 'block', marginBottom: 8 }}>
         Notes (optional)
       </label>
       <textarea
@@ -168,10 +167,11 @@ export function PolicyFields({
         style={{
           width: '100%',
           minHeight: 76,
-          padding: 10,
+          padding: 12,
           borderRadius: 8,
           border: '1px solid var(--line)',
-          fontSize: 14,
+          fontSize: 'var(--fs-md)',
+          lineHeight: '20px',
           fontFamily: 'inherit',
           resize: 'vertical',
         }}
@@ -188,8 +188,9 @@ export function PolicyFields({
 
 const numStyle: CSSProperties = {
   width: 78,
-  padding: '6px 8px',
-  borderRadius: 6,
+  padding: '8px 8px',
+  borderRadius: 8,
   border: '1px solid var(--line)',
-  fontSize: 14,
+  fontSize: 'var(--fs-md)',
+  lineHeight: '20px',
 };

@@ -85,12 +85,12 @@ export function MyCrewCard({ tripId }: { tripId: string }) {
         />
 
         {error && (
-          <p className="small" style={{ color: 'var(--danger)', marginTop: 10 }}>
+          <p className="small" style={{ color: 'var(--danger)', marginTop: 12 }}>
             {error}
           </p>
         )}
 
-        <div className="row" style={{ gap: 10, marginTop: 14 }}>
+        <div className="row" style={{ gap: 12, marginTop: 16 }}>
           <button
             className="btn btn-sm btn-primary"
             disabled={!dirty || save.isPending}

@@ -32,20 +32,23 @@ Call `mcp__figma__get_design_context` with:
 
 This returns React+Tailwind reference code, a screenshot, and metadata. **The code is a REFERENCE, not final code.**
 
-### 1b. Resolve EVERY text size with `get_variable_defs` (mandatory)
+### 1b. Name the text STYLE of every text node, then use `src/theme/typography.ts` (mandatory)
 
-Never take a font size or line height from the design-context code — not the `var(--size/…, Npx)` fallbacks, and **not bare `text-[Npx]` values either**. The export flattens sizes in a larger typography mode, and when a text layer overrides the weight (bold) it drops the variable and prints the inflated number as if it were a literal: bold `20px` is really `Size/lg 16`, `18px` is `Size/md 14`, bold `16px` is `Size/s 12`, `12px/14` is `Size/xxs 9`. Tell-tale: a `text-[0px]` wrapper around a bold `<p>`.
+Never take a font size or line height from the design-context code — not the `var(--size/…, Npx)` fallbacks, and **not bare `text-[Npx]` values either**. The Figma Typography collection's default mode is `Desktop - 1440`, so the export prints desktop sizes. When a text layer overrides the weight (bold) it also drops the variable and prints the inflated number as if it were a literal: bold `20px` is really `Size/lg 16`, `18px` is `Size/md 14`, bold `16px` is `Size/s 12`, `12px/14` is `Size/xxs 9`. Tell-tale: a `text-[0px]` wrapper around a bold `<p>`.
+
+The question to answer per text node is **"which style is this?"**, not "what number is this?".
 
 1. `mcp__figma__get_metadata` on the node → list the text node ids.
-2. `mcp__figma__get_variable_defs` on each text node. For an instance child (`I123:45;67:89`, which the tool rejects), query the parent instance and match each text by its line height / box height.
-3. If the size you are about to write is not in that node's variable list, it is wrong. A size is a true literal only when the node has no size variable at all.
-4. Put the resolved token in a style comment, e.g. `// Size/lg 16/24 (get_variable_defs 14984:68574)`.
+2. `mcp__figma__get_variable_defs` on each text node. For an instance child (`I123:45;67:89`, which the tool rejects), query the parent instance and match each text by its line height / box height. The result names the style (e.g. `Body/M B-1`) and the resolved mobile `Size/*`.
+3. Map the style with `figmaTextStyle` in `src/theme/typography.ts` (`Body/M B-1` → `MB1`) and write `...textStyles.MB1`. If the node is bold but the style is a Regular Body style, that is a weight override: write `...textStyle('MB1', '700')` — size and line height stay the style's own.
+4. No style, only a `Size/*` variable → `fontSize: fs(fontSize.lg)` + `ff()`. No size variable at all → it is a true literal; type it and add a comment saying so.
+5. Cross-check: the size in `get_variable_defs` must equal the size of the style you picked. If not, you picked the wrong style.
 
 ### 2. Analyze the design
 
 From the returned code and screenshot, identify:
 - Layout structure (flex direction, alignment, spacing)
-- Typography styles used (map to `src/theme/typography.ts` tokens)
+- Typography styles used (map to `textStyles` in `src/theme/typography.ts`, per step 1b)
 - Colors used (map to `src/theme/colors.ts` tokens)
 - Components that already exist in `src/components/`
 - Images/assets that need to be handled
@@ -55,13 +58,16 @@ From the returned code and screenshot, identify:
 
 **Typography mapping** (Figma → Project):
 
-⚠️ The px in `var(--size/…, Npx)` fallbacks are the LARGER mode. On mobile (the mode the frames use) the tokens resolve to: `Size/xxs` 9 · `Size/xs` 10 · `Size/s` 12 · `Size/md` 14 · `Size/lg` 16 · `Size/xl` 18 · `Size/2 xl` 22 · `Size/3 xl` 24 — confirm per node with step 1b, never from this table alone.
+⚠️ The px in `var(--size/…, Npx)` fallbacks are the DESKTOP mode. The mobile values live in `src/theme/typography.ts` (`fontSize`, `textStyles`) — never type a Figma size by hand.
 
-| Figma variable | Project |
+| Figma | Project |
 |---|---|
-| `family/headings, Montserrat:Bold` | `typography.fontFamilies.headings` (`Montserrat_700Bold`) |
-| `family/body, Inter:Regular` | `typography.fontFamilies.body` (`Inter_400Regular`) |
-| `Size/*` | the px `get_variable_defs` returns for that node (use `ff()` for the family) |
+| text style (`Body/M B-1`, `Headings/H-6`, …) | `...textStyles.MB1`, `...textStyles.H6` (lookup: `figmaTextStyle`) |
+| text style + bold override | `...textStyle('MB1', '700')` |
+| bare `Size/*` variable | `fontSize: fs(fontSize.lg)` + `fontFamily: ff(...)` |
+| `Family/Headings` / `Family/Body` | `ff('Montserrat', w)` / `ff('Inter', w)` from `src/theme/fonts.ts` |
+
+Don't use the old `typography` export in `src/styles/theme.ts` — it predates the Figma file and its sizes don't match.
 
 **Color mapping** (Figma → Project):
 | Figma CSS Variable | Project Token |
@@ -114,12 +120,12 @@ Transform the Figma reference code following these rules:
 - Use `scale()`, `verticalScale()`, `moderateScale()` from `../utils/responsive` for responsive sizing
 - Import theme tokens:
   ```typescript
-  import { colors } from '../theme/colors';
-  import { typography } from '../theme/typography';
-  import { borderRadius } from '../theme/borderRadius';
-  import { shadows } from '../theme/shadows';
+  import { textStyles, textStyle, fontSize } from '../theme/typography';
+  import { ff, fs } from '../theme/fonts';
+  import { colors, borderRadius, shadows } from '../styles/theme';
   import { scale, verticalScale } from '../utils/responsive';
   ```
+  (There is no `src/theme/colors.ts`, `borderRadius.ts` or `shadows.ts`. The color / radius / shadow tables below name keys that don't exist in `src/styles/theme.ts` either — check the file before using one.)
 
 **Naming:**
 - Component files: PascalCase (e.g., `TravelExperienceStep.tsx`)
@@ -139,7 +145,8 @@ Transform the Figma reference code following these rules:
 - Use `className`
 - Import from `react-native-web` directly
 - Add CSS variables — use theme tokens directly
-- Use `fontWeight` when a font family already includes the weight (e.g., `Montserrat_700Bold` already implies bold)
+- Type a raw `fontSize: <number>` for Figma text — use `textStyles` / `fontSize` from `src/theme/typography.ts`
+- Set `fontWeight` on native for weight ≥ 500 (Android adds synthetic bold on top of `Inter-Bold`); `textStyles` already handles this
 
 ### 6. Handle images and assets
 

@@ -308,6 +308,12 @@ const styles = StyleSheet.create({
   cardsScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'stretch' },
   card: {
     width: 118,
+    // Every card as tall as the tallest one. The row stretches each Pressable
+    // (contentContainer `alignItems: 'stretch'`), but PressableScale puts this
+    // style on an inner view, which keeps its own content height — so the
+    // stretch stopped at the Pressable and cards with fewer lines came up
+    // short. `flex: 1` fills that stretched height.
+    flex: 1,
     padding: 16,
     gap: 8,
     alignItems: 'center',

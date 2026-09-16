@@ -259,24 +259,24 @@ export function AddCrewDialog({
               />
 
               {debounced.length < 2 ? (
-                <p className="muted small" style={{ marginTop: 10 }}>
+                <p className="muted small" style={{ marginTop: 12 }}>
                   Type at least two letters. For anyone without an account, go back and add them as
                   a name on the trip, or send a link.
                 </p>
               ) : results.isPending ? (
-                <p className="muted small" style={{ marginTop: 10 }}>
+                <p className="muted small" style={{ marginTop: 12 }}>
                   Searching…
                 </p>
               ) : results.isError ? (
-                <p className="small" style={{ color: 'var(--danger)', marginTop: 10 }}>
+                <p className="small" style={{ color: 'var(--danger)', marginTop: 12 }}>
                   {friendlyError(results.error)}
                 </p>
               ) : (results.data ?? []).length === 0 ? (
-                <p className="muted small" style={{ marginTop: 10 }}>
+                <p className="muted small" style={{ marginTop: 12 }}>
                   Nobody found. Try their full name, or go back and send them a link.
                 </p>
               ) : (
-                <div className="card" style={{ marginTop: 10 }}>
+                <div className="card" style={{ marginTop: 12 }}>
                   {(results.data ?? []).map(person => {
                     const blocked = person.state !== 'available';
                     return (
@@ -290,7 +290,7 @@ export function AddCrewDialog({
                         disabled={blocked}
                         onClick={() => setPicked(person)}
                       >
-                        <span className="row" style={{ gap: 11, minWidth: 0 }}>
+                        <span className="row" style={{ gap: 12, minWidth: 0 }}>
                           <Avatar url={person.photoUrl} name={person.name} />
                           <span>{person.name}</span>
                         </span>
@@ -314,7 +314,7 @@ export function AddCrewDialog({
           {door === 'account' && picked && (
             <>
               <div className="row-between" style={{ marginBottom: 16 }}>
-                <span className="row" style={{ gap: 11, minWidth: 0 }}>
+                <span className="row" style={{ gap: 12, minWidth: 0 }}>
                   <Avatar url={picked.photoUrl} name={picked.name} />
                   <strong>{picked.name}</strong>
                 </span>
@@ -339,12 +339,12 @@ export function AddCrewDialog({
           {/* ── Door 2: a Listed credit ──────────────────────────────────── */}
           {door === 'listed' && (
             <>
-              <p className="muted small" style={{ marginBottom: 14 }}>
+              <p className="muted small" style={{ marginBottom: 16 }}>
                 They appear on the trip page and nowhere else. No account, no login, and nothing
                 to accept — a credit, like a photographer in a film.
               </p>
 
-              <div className="row" style={{ gap: 14, alignItems: 'center', marginBottom: 14 }}>
+              <div className="row" style={{ gap: 16, alignItems: 'center', marginBottom: 16 }}>
                 <Avatar url={photoPreview} name={displayName || '?'} size={56} />
                 <label className="btn btn-sm" style={{ cursor: 'pointer' }}>
                   {photoFile ? 'Change photo' : 'Add a photo'}
@@ -368,7 +368,7 @@ export function AddCrewDialog({
                   value={displayName}
                   onChange={e => setDisplayName(e.target.value.slice(0, 80))}
                   placeholder="Kadek Surya"
-                  style={{ width: '100%', marginTop: 6 }}
+                  style={{ width: '100%', marginTop: 8 }}
                   autoFocus
                 />
               </label>
@@ -380,7 +380,7 @@ export function AddCrewDialog({
           {/* ── Door 3: a link ───────────────────────────────────────────── */}
           {door === 'link' && !link && (
             <>
-              <p className="muted small" style={{ marginBottom: 14 }}>
+              <p className="muted small" style={{ marginBottom: 16 }}>
                 Anyone who opens this link and signs in joins the crew at the tier you pick. It can
                 be used once.
               </p>
@@ -400,7 +400,7 @@ export function AddCrewDialog({
 
           {door === 'link' && link && (
             <>
-              <p className="small" style={{ marginBottom: 10 }}>
+              <p className="small" style={{ marginBottom: 12 }}>
                 Send them this. It works once.
               </p>
               <div className="row" style={{ gap: 8 }}>
@@ -430,7 +430,7 @@ export function AddCrewDialog({
           className="row"
           style={{
             borderTop: '1px solid var(--line)',
-            padding: '12px 16px',
+            padding: '16px 24px',
             justifyContent: 'flex-end',
             gap: 8,
           }}
@@ -508,14 +508,14 @@ function TierAndPaperwork({
 }) {
   return (
     <>
-      <h2 style={{ marginBottom: 6 }}>What they can see</h2>
+      <h2 style={{ marginBottom: 8 }}>What they can see</h2>
       <TierPicker roles={roles} value={roleKey} onChange={setRoleKey} />
 
-      <div style={{ marginTop: 18 }}>
+      <div style={{ marginTop: 16 }}>
         <ProfileFields title={title} bio={bio} onTitle={setTitle} onBio={setBio} />
       </div>
 
-      <h2 style={{ marginTop: 18, marginBottom: 6 }}>Paperwork</h2>
+      <h2 style={{ marginTop: 16, marginBottom: 8 }}>Paperwork</h2>
       <p className="muted small">
         Tick what you need from them. It is asked as soon as they accept, and nobody else on the
         crew is affected. Deadlines follow the travelers' own. Leave it all off if you need

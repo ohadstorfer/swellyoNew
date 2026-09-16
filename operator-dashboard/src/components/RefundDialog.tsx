@@ -108,7 +108,7 @@ export function RefundDialog({
             className="row"
             style={{
               borderTop: '1px solid var(--line)',
-              padding: '12px 16px',
+              padding: '16px 24px',
               justifyContent: 'flex-end',
             }}
           >
@@ -129,7 +129,7 @@ export function RefundDialog({
         </div>
 
         <div className="card-body">
-          <p className="small" style={{ marginBottom: 14 }}>
+          <p className="small" style={{ marginBottom: 16 }}>
             This sends money back to {travelerName} and takes it out of{' '}
             <strong>your Stripe balance</strong>. Swellyo's commission comes back to you in
             proportion. <strong>It cannot be undone.</strong>
@@ -140,15 +140,15 @@ export function RefundDialog({
               border: '1px solid var(--line)',
               background: 'var(--panel)',
               borderRadius: 'var(--r-sm)',
-              padding: '10px 12px',
-              marginBottom: 14,
+              padding: '12px 12px',
+              marginBottom: 16,
             }}
           >
-            <div className="small muted" style={{ marginBottom: policyLines.length ? 6 : 0 }}>
+            <div className="small muted" style={{ marginBottom: policyLines.length ? 8 : 0 }}>
               This trip's cancellation policy
             </div>
             {policyLines.length ? (
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <ul style={{ margin: 0, paddingLeft: 16 }}>
                 {policyLines.map(line => (
                   <li key={line} className="small">
                     {line}
@@ -172,15 +172,15 @@ export function RefundDialog({
             autoFocus
             value={amount}
             onChange={e => setAmount(e.target.value)}
-            style={{ marginTop: 6 }}
+            style={{ marginTop: 8 }}
           />
           {!valid && amount.trim() !== '' && (
-            <div className="small" style={{ color: 'var(--danger)', marginTop: 6 }}>
+            <div className="small" style={{ color: 'var(--danger)', marginTop: 8 }}>
               Enter an amount between $0.01 and {formatUsd(paidUsd)}.
             </div>
           )}
 
-          <label className="small muted" htmlFor="refund-reason" style={{ display: 'block', marginTop: 14 }}>
+          <label className="small muted" htmlFor="refund-reason" style={{ display: 'block', marginTop: 16 }}>
             Reason (optional — kept for your records)
           </label>
           <textarea
@@ -189,19 +189,19 @@ export function RefundDialog({
             value={reason}
             onChange={e => setReason(e.target.value)}
             placeholder="e.g. Cancelled 70 days out — full refund per policy"
-            style={{ marginTop: 6 }}
+            style={{ marginTop: 8 }}
           />
 
           {error && (
             <div
               className="small"
               style={{
-                marginTop: 14,
+                marginTop: 16,
                 color: 'var(--danger)',
                 background: 'var(--danger-bg)',
                 border: '1px solid var(--danger)',
                 borderRadius: 'var(--r-sm)',
-                padding: '9px 11px',
+                padding: '8px 12px',
               }}
               role="alert"
             >
@@ -214,7 +214,7 @@ export function RefundDialog({
           className="row"
           style={{
             borderTop: '1px solid var(--line)',
-            padding: '12px 16px',
+            padding: '16px 24px',
             justifyContent: 'flex-end',
             gap: 8,
           }}

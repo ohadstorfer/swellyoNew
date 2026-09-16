@@ -321,7 +321,7 @@ function Editor({
             </div>
             <div className="card-body">
               {unOverdue.map(u => (
-                <p key={u.kind} className="small" style={{ marginBottom: 6 }}>
+                <p key={u.kind} className="small" style={{ marginBottom: 8 }}>
                   {u.count === null ? (
                     <>
                       <strong>{REQUIREMENT_CATALOG[u.kind].operatorTitle}</strong> was already
@@ -335,7 +335,7 @@ function Editor({
                   )}
                 </p>
               ))}
-              <p className="muted small" style={{ marginTop: 10 }}>
+              <p className="muted small" style={{ marginTop: 12 }}>
                 Nobody is notified. They will see the new date next time they open the trip.
               </p>
             </div>
@@ -343,7 +343,7 @@ function Editor({
               className="row"
               style={{
                 borderTop: '1px solid var(--line)',
-                padding: '12px 16px',
+                padding: '16px 24px',
                 justifyContent: 'flex-end',
                 gap: 8,
               }}

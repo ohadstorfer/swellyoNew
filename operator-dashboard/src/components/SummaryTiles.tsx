@@ -53,7 +53,7 @@ export function SummaryTiles({
     counts.capacity && counts.capacity > 0 ? Math.min(1, counts.going / counts.capacity) : 0;
 
   return (
-    <div className="stack enter" style={{ gap: 10 }}>
+    <div className="stack enter" style={{ gap: 12 }}>
       {canViewMoney && (
         <Link
           to={`/trips/${tripId}/payments`}
@@ -69,8 +69,8 @@ export function SummaryTiles({
                 ›
               </span>
             </div>
-            <div className="row" style={{ gap: 10, alignItems: 'baseline', marginTop: 4 }}>
-              <strong style={{ fontSize: 28, letterSpacing: '-0.02em' }}>
+            <div className="row" style={{ gap: 12, alignItems: 'baseline', marginTop: 4 }}>
+              <strong style={{ fontSize: 'var(--fs-3xl)', lineHeight: '32px', letterSpacing: '-0.02em' }}>
                 {formatUsd(isOffline ? summary?.expectedUsd : summary?.collectedUsd)}
               </strong>
               {!isOffline && summary && (
@@ -86,7 +86,7 @@ export function SummaryTiles({
         style={{
           display: 'grid',
           gridTemplateColumns: canViewMoney ? '1fr 1fr' : '1fr',
-          gap: 10,
+          gap: 12,
         }}
       >
         {canViewMoney && (
@@ -94,7 +94,7 @@ export function SummaryTiles({
             <div className="card-body">
               <span className="muted small">Fully paid</span>
               <div style={{ marginTop: 4 }}>
-                <strong style={{ fontSize: 22 }}>
+                <strong style={{ fontSize: 'var(--fs-lg)', lineHeight: '24px', fontWeight: 700, color: 'var(--text)' }}>
                   {summary ? `${summary.fullyPaid}/${summary.priced}` : '—'}
                 </strong>
               </div>
@@ -112,7 +112,7 @@ export function SummaryTiles({
           <div className="card-body">
             <span className="muted small">Travelers</span>
             <div style={{ marginTop: 4 }}>
-              <strong style={{ fontSize: 22 }}>
+              <strong style={{ fontSize: 'var(--fs-lg)', lineHeight: '24px', fontWeight: 700, color: 'var(--text)' }}>
                 {counts.capacity ? `${counts.going}/${counts.capacity}` : counts.going}
               </strong>
             </div>
@@ -137,17 +137,17 @@ function Meter({ pct }: { pct: number }) {
   return (
     <div
       style={{
-        height: 4,
-        borderRadius: 2,
-        background: 'var(--panel-2)',
+        height: 6,
+        borderRadius: 8,
+        background: 'var(--line-strong)',
         overflow: 'hidden',
         marginTop: 8,
       }}
     >
       <div
         style={{
-          height: 4,
-          borderRadius: 2,
+          height: 6,
+          borderRadius: 8,
           background: 'var(--cyan)',
           width: `${Math.round(pct * 100)}%`,
         }}

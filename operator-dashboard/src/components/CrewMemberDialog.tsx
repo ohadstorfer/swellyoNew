@@ -142,7 +142,7 @@ export function CrewMemberDialog({
     <div className="scrim" onClick={busy ? undefined : onClose} role="dialog" aria-modal="true">
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="card-head">
-          <span className="row" style={{ gap: 10, minWidth: 0 }}>
+          <span className="row" style={{ gap: 12, minWidth: 0 }}>
             <Avatar url={member.photoUrl} name={member.name} size={28} />
             <strong>{member.name}</strong>
           </span>
@@ -168,7 +168,7 @@ export function CrewMemberDialog({
                   was never a limit of the platform — crew photos go through the
                   image-upload edge function, and a browser can call it. See
                   services/images.ts. */}
-              <div className="row" style={{ gap: 14, alignItems: 'center', marginBottom: 14 }}>
+              <div className="row" style={{ gap: 16, alignItems: 'center', marginBottom: 16 }}>
                 <Avatar url={photoPreview ?? member.photoUrl} name={name || '?'} size={56} />
                 <label className="btn btn-sm" style={{ cursor: 'pointer' }}>
                   {member.photoUrl || photoFile ? 'Change photo' : 'Add a photo'}
@@ -194,7 +194,7 @@ export function CrewMemberDialog({
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="Marta Ruiz"
-                style={{ marginTop: 6, marginBottom: 14 }}
+                style={{ marginTop: 8, marginBottom: 16 }}
               />
             </>
           )}
@@ -203,7 +203,7 @@ export function CrewMemberDialog({
 
           {editable && (
             <>
-              <h2 style={{ marginTop: 18, marginBottom: 6 }}>What they can see</h2>
+              <h2 style={{ marginTop: 16, marginBottom: 8 }}>What they can see</h2>
               <TierPicker roles={roles} value={roleKey} onChange={setRoleKey} />
               <CrewPaperworkSection tripId={tripId} staffId={member.id} userId={member.userId} />
             </>
@@ -220,7 +220,7 @@ export function CrewMemberDialog({
           className="row"
           style={{
             borderTop: '1px solid var(--line)',
-            padding: '12px 16px',
+            padding: '16px 24px',
             gap: 8,
           }}
         >

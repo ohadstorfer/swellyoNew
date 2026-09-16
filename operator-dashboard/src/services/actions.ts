@@ -197,6 +197,11 @@ export async function replaceTripWaiver(tripId: string, file: File): Promise<voi
     throw new Error('This trip has no waiver yet. Publish one from the app first.');
   }
 
+  // Same cap the database enforces (20260915000100_waiver_pdf_10mb_limit.sql).
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('Waiver PDFs can be up to 10 MB. Please choose a smaller file.');
+  }
+
   const bytes = new Uint8Array(await file.arrayBuffer());
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   const documentHash = Array.from(new Uint8Array(digest))

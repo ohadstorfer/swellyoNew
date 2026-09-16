@@ -81,7 +81,7 @@ export function JoinRequestsCard({ tripId }: { tripId: string }) {
           const busy = pendingId === r.id;
           return (
             <div key={r.id} className="row-between" style={{ gap: 12, alignItems: 'flex-start' }}>
-              <div className="row" style={{ gap: 10, alignItems: 'flex-start', minWidth: 0 }}>
+              <div className="row" style={{ gap: 12, alignItems: 'flex-start', minWidth: 0 }}>
                 <Avatar url={p?.photoUrl ?? null} name={p?.name ?? 'Traveler'} />
                 <div style={{ minWidth: 0 }}>
                   <strong>{p?.name ?? 'Traveler'}</strong>
@@ -97,14 +97,14 @@ export function JoinRequestsCard({ tripId }: { tripId: string }) {
                   {/* Their own words. It is the only thing on this card the
                       operator cannot get anywhere else, so it is not truncated. */}
                   {r.note && (
-                    <p className="small" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
+                    <p className="small" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
                       {r.note}
                     </p>
                   )}
                 </div>
               </div>
 
-              <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+              <div className="row" style={{ gap: 8, flexShrink: 0 }}>
                 <button
                   className="btn btn-sm"
                   disabled={busy}

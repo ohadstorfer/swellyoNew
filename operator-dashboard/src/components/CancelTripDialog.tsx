@@ -86,7 +86,7 @@ export function CancelTripDialog({
             )}
 
             {blocked.length > 0 && (
-              <div className="stack" style={{ marginTop: 14 }}>
+              <div className="stack" style={{ marginTop: 16 }}>
                 <strong className="small">{plural(blocked.length, 'refund')} did not go out</strong>
                 {blocked.map((b, i) => (
                   <div key={i} className="small muted">
@@ -103,7 +103,7 @@ export function CancelTripDialog({
               </div>
             )}
 
-            <div className="row" style={{ gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+            <div className="row" style={{ gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
               {blocked.length > 0 && (
                 <button
                   className="btn btn-sm"
@@ -136,17 +136,17 @@ export function CancelTripDialog({
                 value={reason}
                 onChange={e => setReason(e.target.value.slice(0, 200))}
                 placeholder="Cyclone forecast for the whole week"
-                style={{ width: '100%', marginTop: 6 }}
+                style={{ width: '100%', marginTop: 8 }}
               />
             </label>
 
-            <label className="small" style={{ display: 'block', marginTop: 14 }}>
+            <label className="small" style={{ display: 'block', marginTop: 16 }}>
               Type CANCEL to confirm
               <input
                 value={confirm}
                 onChange={e => setConfirm(e.target.value)}
                 autoComplete="off"
-                style={{ width: '100%', marginTop: 6 }}
+                style={{ width: '100%', marginTop: 8 }}
               />
             </label>
 
@@ -159,7 +159,7 @@ export function CancelTripDialog({
               </div>
             )}
 
-            <div className="row" style={{ gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+            <div className="row" style={{ gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
               <button className="btn btn-sm" disabled={run.isPending} onClick={onClose}>
                 Keep the trip
               </button>

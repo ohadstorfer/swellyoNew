@@ -24,8 +24,10 @@ const EMPTY: OperatorSettings = {
   policyConfirmedAt: null,
   defaultWaiver: null,
   insurance: null,
+  insuranceReview: null,
   termsAcceptedAt: null,
   termsVersion: null,
+  termsSignedName: null,
 };
 
 const insurance = {
@@ -34,7 +36,11 @@ const insurance = {
   mime: 'image/jpeg',
   sizeBytes: 10,
   uploadedAt: '2026-08-11T00:00:00Z',
+  provider: 'Lloyds',
+  policyNumber: 'POL-1',
+  expiresOn: '2027-01-01',
 };
+const approved = { status: 'approved' as const, reviewedAt: '2026-08-12T00:00:00Z', note: null };
 
 const settings = (over: Partial<OperatorSettings> = {}): OperatorSettings => ({
   ...EMPTY,
@@ -61,9 +67,11 @@ const ready = (over: Partial<OperatorSetupInput> = {}): OperatorSetupInput => ({
     policyConfirmedAt: '2026-08-11T00:00:00Z',
     defaultWaiver: waiver,
     insurance,
+    insuranceReview: approved,
     termsAcceptedAt: '2026-08-11T00:00:00Z',
     termsVersion: OPERATOR_TERMS_VERSION,
   }),
+  today: '2026-09-15',
   ...over,
 });
 
@@ -108,13 +116,6 @@ describe('operatorSetupSteps', () => {
     expect(isOperatorSetupComplete(stale)).toBe(false);
   });
 
-  it('insurance is done only with a stored certificate', () => {
-    expect(byKey(ready()).insurance.done).toBe(true);
-    expect(
-      byKey(ready({ settings: settings({ ...ready().settings, insurance: null }) })).insurance.done,
-    ).toBe(false);
-  });
-
   it('a brand new operator has nothing done', () => {
     const fresh: OperatorSetupInput = { payout: payout(), settings: settings() };
     expect(operatorSetupSteps(fresh).every(s => !s.done)).toBe(true);
@@ -147,6 +148,42 @@ describe('a default value is not a confirmed one', () => {
   it('confirming without changing anything is enough', () => {
     expect(isOperatorSetupComplete(ready())).toBe(true);
     expect(ready().settings.defaultCurrency).toBeNull();
+  });
+});
+
+describe('insurance', () => {
+  const withIns = (over: Partial<OperatorSettings>, today = '2026-09-15') =>
+    byKey(ready({ settings: settings({ ...ready().settings, ...over }), today })).insurance;
+
+  it('is done only when approved', () => {
+    expect(withIns({}).done).toBe(true);
+    expect(withIns({}).review).toBeUndefined();
+    expect(withIns({ insurance: null, insuranceReview: null }).done).toBe(false);
+  });
+
+  it('an upload waiting for review is NOT done', () => {
+    // Ohad, 15 Sep: uploading alone no longer finishes the step.
+    const s = withIns({ insuranceReview: { status: 'pending', reviewedAt: null, note: null } });
+    expect(s.done).toBe(false);
+    expect(s.review).toBe('under_review');
+  });
+
+  it('a rejected certificate is NOT done and says so', () => {
+    const s = withIns({ insuranceReview: { status: 'rejected', reviewedAt: 'x', note: 'blurry' } });
+    expect(s.done).toBe(false);
+    expect(s.review).toBe('rejected');
+    expect(s.todo).toMatch(/not approved/);
+  });
+
+  it('an approved but expired policy is NOT done', () => {
+    expect(withIns({}, '2027-01-01').done).toBe(true); // the last day still counts
+    const s = withIns({}, '2027-01-02');
+    expect(s.done).toBe(false);
+    expect(s.review).toBe('expired');
+  });
+
+  it('no expiry date is not treated as expired', () => {
+    expect(withIns({ insurance: { ...insurance, expiresOn: null } }).done).toBe(true);
   });
 });
 
