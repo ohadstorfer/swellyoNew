@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
       "appleTeamId": "683UA9HZYT",
-      "buildNumber": "47",
+      "buildNumber": "48",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
