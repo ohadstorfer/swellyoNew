@@ -244,7 +244,11 @@ export type TripDetailFocus =
   // Operator trips: push the traveler-onboarding flow on top of the trip card.
   // Not a section of the Plan tab — an onboarding traveler cannot see the Plan
   // tab at all. It resolves to the plain overview for anyone already in.
-  | 'onboarding';
+  | 'onboarding'
+  // The trip page's Chat tab (docs/specs/trip-chat-tab.md). Every way into a
+  // trip's group chat lands here. Falls back to the Overview for anyone who
+  // cannot see the tab.
+  | 'chat';
 
 /**
  * Where tapping a notification should land. Single source of truth for both

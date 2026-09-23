@@ -19,7 +19,7 @@ import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 import RootNavigator from '../navigation/RootNavigator';
 import { NotificationPermissionModal } from './notifications/NotificationPermissionModal';
 import { useNotificationPermissionPrompt } from '../hooks/notifications/useNotificationPermissionPrompt';
-import { pushRootCard, navigationRef } from '../navigation/navigationRef';
+import { pushChatCard, pushRootCard, navigationRef } from '../navigation/navigationRef';
 import type { RootStackParamList } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
 import { useTripsBottomNavControl, type NavKey } from './trips/TripsBottomNav';
@@ -1584,8 +1584,8 @@ export const AppContent: React.FC = () => {
     heroImageUrl?: string | null;
     tripId?: string;
   }) => {
-    // Trip group chats are cards — the trip card stays underneath.
-    pushRootCard('ChatCard', {
+    // Trip group chats live on the trip page's Chat tab (pushChatCard reroutes).
+    pushChatCard({
       conversationId: params.conversationId,
       otherUserId: '',
       otherUserName: params.title,

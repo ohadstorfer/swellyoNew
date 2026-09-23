@@ -19,6 +19,7 @@ export type ConversationAction =
   | { type: 'SET_UNREAD_COUNT'; payload: { conversationId: string; count: number } }
   | { type: 'SET_UNREAD_COUNTS'; payload: { counts: Record<string, number> } }
   | { type: 'REPLACE_ALL'; payload: { conversations: Conversation[] } }
+  | { type: 'REMOVE_CONVERSATION'; payload: { conversationId: string } }
   | { type: 'APPEND_CONVERSATIONS'; payload: { conversations: Conversation[] } }
   | { type: 'SYNC_FROM_SERVER'; payload: { conversations: Conversation[] } }
   | { type: 'UPDATE_CONVERSATION'; payload: { conversation: Conversation } }
@@ -321,6 +322,15 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
       const next = [...state];
       next[index] = { ...existing, members: updatedMembers };
       return next;
+    }
+
+    // Left a trip chat. REPLACE_ALL keeps rows missing from a fetch, so a
+    // departed chat has to be taken out explicitly.
+    case 'REMOVE_CONVERSATION': {
+      const { conversationId } = action.payload;
+      return state.some(c => c.id === conversationId)
+        ? state.filter(c => c.id !== conversationId)
+        : state;
     }
 
     case 'REPLACE_ALL': {

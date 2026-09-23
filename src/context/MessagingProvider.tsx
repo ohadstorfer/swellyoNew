@@ -30,7 +30,7 @@ import { resetForLogout as imageUploadResetForLogout } from '../services/messagi
 import { showInAppBanner } from '../services/notifications/inAppBannerBus';
 import { messagePreviewText } from '../services/messaging/messagePreviewText';
 import { getStorageThumbUrl } from '../services/media/imageService';
-import { pushRootCard } from '../navigation/navigationRef';
+import { pushChatCard } from '../navigation/navigationRef';
 import { writeShareRecents } from '../services/shareRecentsCache';
 import { useOnboarding } from './OnboardingContext';
 import {
@@ -820,7 +820,7 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
             title: groupName ? `${senderName ?? 'Someone'} - ${groupName}` : senderName ?? 'New message',
             body: messagePreviewText(lm, { currentUserId: myId }),
             onPress: () =>
-              pushRootCard('ChatCard', {
+              pushChatCard({
                 conversationId: conv.id,
                 otherUserId: isDirect ? senderMember?.user_id ?? '' : '',
                 otherUserName: isDirect ? senderName ?? 'User' : groupName ?? 'Group Chat',
@@ -1032,6 +1032,10 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
       unsub = messagingService.subscribeToUserInbox(user.id, (intent) => {
+        if (intent.kind === 'leave') {
+          dispatch({ type: 'REMOVE_CONVERSATION', payload: { conversationId: intent.conversationId } });
+          return;
+        }
         // Collect the affected conversation ids and coalesce bursts (e.g. a group
         // message fans out one event per member-side change) into a single sync.
         pendingConvIds.add(intent.conversationId);

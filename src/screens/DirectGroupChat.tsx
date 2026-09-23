@@ -30,7 +30,9 @@ import { Text } from '../components/Text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay';
 import { colors, spacing, typography, borderRadius } from '../styles/theme';
-import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, getMuteUntilFromMember, FileMetadata, ContactMetadata, MessageSearchResult } from '../services/messaging/messagingService';
+import { ff } from '../theme/fonts';
+import { useConversationMute } from '../hooks/useConversationMute';
+import { messagingService, Message, RealtimeSubscriptionStatus, ReplyToSnapshot, MUTE_ALWAYS_UNTIL, FileMetadata, ContactMetadata, MessageSearchResult } from '../services/messaging/messagingService';
 import { AttachPanel } from '../components/AttachPanel';
 import { KeyboardIcon } from '../components/icons/KeyboardIcon';
 import { useAttachPanel } from '../hooks/useAttachPanel';
@@ -45,7 +47,6 @@ import { ProfileImage } from '../components/ProfileImage';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { chatHistoryCache } from '../services/messaging/chatHistoryCache';
 import { messageOutbox } from '../services/messaging/messageOutbox';
-import { loadCachedConversationList, saveCachedConversationList } from '../services/messaging/conversationListCache';
 import * as Crypto from 'expo-crypto';
 import { MessageActionsMenu, type BubbleRadii } from '../components/MessageActionsMenu';
 import { MessageReactionsRow } from '../components/MessageReactionsRow';
@@ -382,6 +383,21 @@ interface DirectGroupChatProps {
   sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
   // Opened from message search — scroll to this message + flash it once loaded.
   targetMessageId?: string;
+  // Rendered as the trip page's Chat tab, under the trip's own header and tabs
+  // (docs/specs/trip-chat-tab.md). No header of its own: no back arrow, no
+  // title row, no ⋮ menu. The search bar still shows here when it is open.
+  embedded?: boolean;
+  // Embedded only: bump this to open the in-chat search (the trip's ⋮ menu has
+  // "Search chat"). 0 / undefined never opens it.
+  searchRequestKey?: number;
+  // Embedded only: tells the trip page when search opens or closes, so it can
+  // hide its tab bar while the search bar stands in its place.
+  onSearchActiveChange?: (active: boolean) => void;
+  // Left or removed from the trip. The history up to the day they left stays
+  // readable; no send, react, edit, delete, typing, realtime or read marks.
+  // The server enforces all of it — this only stops the UI from offering it.
+  readOnly?: boolean;
+  readOnlyMessage?: string;
 }
 
 export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
@@ -400,6 +416,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   onOpenSurftripDetail,
   sharedMedia,
   targetMessageId,
+  embedded = false,
+  searchRequestKey,
+  onSearchActiveChange,
+  readOnly = false,
+  readOnlyMessage = "You're no longer on this trip.",
 }) => {
   // Get markAsRead and setCurrentConversationId from MessagingProvider
   const { markAsRead, markReadRealtime, flushReadWatermark, setCurrentConversationId: setMessagingCurrentConversationId, dispatch: messagingDispatch, conversations: providerConversations } = useMessaging();
@@ -906,7 +927,11 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
 
       // Set current conversation in MessagingProvider
       setMessagingCurrentConversationId(currentConversationId);
-      
+
+      // Departed: history only. The server refuses realtime and read marks for
+      // them anyway, so asking would just be failed requests.
+      if (readOnly) return;
+
       // Mark conversation as read (can handle currentUserId being null initially)
       // Will be called again when currentUserId becomes available
       if (currentUserId) {
@@ -1287,14 +1312,14 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         setMessagingCurrentConversationId(null);
       }
     };
-  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId, isFocused]);
+  }, [currentConversationId, markAsRead, setMessagingCurrentConversationId, reconnectAttempt, otherUserId, isFocused, readOnly]);
 
   // Separate useEffect to mark as read when currentUserId becomes available
   useEffect(() => {
-    if (currentConversationId && currentUserId) {
+    if (currentConversationId && currentUserId && !readOnly) {
       markAsRead(currentConversationId, false);
     }
-  }, [currentConversationId, currentUserId, markAsRead]);
+  }, [currentConversationId, currentUserId, markAsRead, readOnly]);
 
   // Flush the pending read watermark when the screen unmounts or the conversation changes.
   useEffect(() => {
@@ -1426,7 +1451,6 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     return () => clearTimeout(t);
   }, [currentConversationId, currentUserId]);
 
-  // Mute state derived synchronously from the provider so the menu opens with the
   // Group display name for the media-review chip. otherUserName can arrive
   // empty for groups opened outside the conversations list, so fall back to the
   // conversation's title (the group name).
@@ -1435,82 +1459,9 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     return conv?.title || otherUserName || undefined;
   }, [providerConversations, currentConversationId, otherUserName]);
 
-  // correct Mute/Unmute label immediately — no async fetch on mount.
-  const mutedUntil = useMemo(() => {
-    if (!currentConversationId || !currentUserId) return null;
-    const conv = providerConversations.find(c => c.id === currentConversationId);
-    const meMember = conv?.members?.find(m => m.user_id === currentUserId);
-    return getMuteUntilFromMember(meMember);
-  }, [providerConversations, currentConversationId, currentUserId]);
-
-  const applyMute = useCallback(async (until: Date | null) => {
-    if (!currentConversationId || !currentUserId) return;
-    const effective = until && until.getTime() > Date.now() ? until : null;
-    const newMutedUntil = effective?.toISOString() ?? null;
-
-    // Optimistic dispatch first so the menu and the conversations list reflect
-    // the change instantly. UPDATE_MEMBER_PREFERENCES does NOT reorder the list.
-    const currentConv = providerConversations.find(c => c.id === currentConversationId);
-    const existingPrefs = currentConv?.members?.find(m => m.user_id === currentUserId)?.preferences ?? {};
-    messagingDispatch({
-      type: 'UPDATE_MEMBER_PREFERENCES',
-      payload: {
-        conversationId: currentConversationId,
-        userId: currentUserId,
-        preferences: { ...existingPrefs, muted_until: newMutedUntil },
-      },
-    });
-
-    try {
-      await messagingService.setMuteUntil(currentConversationId, until);
-      // Re-dispatch after server confirms — guarantees the state survives any
-      // concurrent REPLACE_ALL / SYNC_FROM_SERVER that may have raced with the
-      // optimistic update.
-      messagingDispatch({
-        type: 'UPDATE_MEMBER_PREFERENCES',
-        payload: {
-          conversationId: currentConversationId,
-          userId: currentUserId,
-          preferences: { ...existingPrefs, muted_until: newMutedUntil },
-        },
-      });
-      // Persist to the conversation list cache so reload + useFocusEffect that
-      // re-loads from cache don't revert to stale preferences. Without this,
-      // REPLACE_ALL from cache overwrites the optimistic dispatch.
-      try {
-        const cached = await loadCachedConversationList();
-        if (cached) {
-          const updated = cached.map((c) =>
-            c.id === currentConversationId
-              ? {
-                  ...c,
-                  members: (c.members ?? []).map((m) =>
-                    m.user_id === currentUserId
-                      ? { ...m, preferences: { ...(m.preferences ?? {}), muted_until: newMutedUntil } }
-                      : m
-                  ),
-                }
-              : c
-          );
-          await saveCachedConversationList(updated);
-        }
-      } catch (cacheErr) {
-        console.warn('[DirectMessageScreen] cache update after mute failed:', cacheErr);
-      }
-    } catch (err) {
-      console.warn('[DirectMessageScreen] setMuteUntil failed:', err);
-      // Roll back the optimistic dispatch on failure.
-      messagingDispatch({
-        type: 'UPDATE_MEMBER_PREFERENCES',
-        payload: {
-          conversationId: currentConversationId,
-          userId: currentUserId,
-          preferences: existingPrefs,
-        },
-      });
-      Alert.alert('Error', 'Could not update mute settings. Please try again.');
-    }
-  }, [currentConversationId, providerConversations, currentUserId, messagingDispatch]);
+  // Correct Mute/Unmute label immediately — no async fetch on mount. Shared
+  // with the trip page's ⋮ menu, which mutes the embedded trip chat.
+  const { mutedUntil, applyMute } = useConversationMute(currentConversationId, currentUserId);
 
   // Subscribe to other user's online status
   useEffect(() => {
@@ -3989,6 +3940,18 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
     lastSearchJumpRef.current = null;
   }, []);
 
+  // Embedded: the trip page's ⋮ "Search chat" bumps this key to open search.
+  useEffect(() => {
+    if (searchRequestKey) setChatSearchActive(true);
+  }, [searchRequestKey]);
+  const onSearchActiveChangeRef = useRef(onSearchActiveChange);
+  onSearchActiveChangeRef.current = onSearchActiveChange;
+  useEffect(() => {
+    onSearchActiveChangeRef.current?.(chatSearchActive);
+  }, [chatSearchActive]);
+  // Unmounting with search open (tab switch) must hand the tab bar back.
+  useEffect(() => () => onSearchActiveChangeRef.current?.(false), []);
+
   // Android hardware back closes the search bar instead of leaving the chat
   // (mirrors the global MessageSearchOverlay's handler).
   useEffect(() => {
@@ -4030,7 +3993,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       uploadState: message.upload_state,
     });
 
-    if (!currentUserId) {
+    // Read-only history: nothing to copy/reply/react/edit/delete from.
+    if (!currentUserId || readOnly) {
       return;
     }
     if (message.deleted) {
@@ -4763,6 +4727,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
       message.type === 'video' || !!message.video_metadata;
     
     const canSwipeReply =
+      !readOnly &&
       !message.deleted &&
       !message.is_system &&
       message.upload_state !== 'failed';
@@ -5517,9 +5482,17 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
   return (
     <ChatErrorBoundary resetKeys={[currentConversationId]} onGoBack={onBack}>
     <View style={{ flex: 1 }}>
-    <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={['top']}>
-      {/* Header */}
-      <View style={[styles.headerContainer, { paddingTop: insets.top + (Platform.OS === 'web' ? 24 : 12) }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: '#212121' }]} edges={embedded ? [] : ['top']}>
+      {/* Header. Embedded in the trip page there is none — the trip's own
+          header and tabs sit above — except the search bar while it is open. */}
+      {(!embedded || chatSearchActive) && (
+      <View
+        style={
+          embedded
+            ? [styles.headerContainer, styles.embeddedSearchHeader]
+            : [styles.headerContainer, { paddingTop: insets.top + (Platform.OS === 'web' ? 24 : 12) }]
+        }
+      >
         <View style={styles.headerGradientBorder} />
         <View style={styles.header}>
           {chatSearchActive ? (
@@ -5613,6 +5586,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
           )}
         </View>
       </View>
+      )}
 
       {/* Chat menu dropdown - rendered outside header to avoid overflow clipping */}
       {showChatMenu && (
@@ -5975,8 +5949,17 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
                   onPress={() => { setEditingMessageId(null); setEditingText(''); }}
                 />
               )}
-              {composer}
-              {panelOpen && (
+              {readOnly ? (
+                <View
+                  style={[styles.readOnlyBar, { paddingBottom: Math.max(insets.bottom, 12) + 4 }]}
+                  accessibilityRole="text"
+                >
+                  <Text style={styles.readOnlyBarText}>{readOnlyMessage}</Text>
+                </View>
+              ) : (
+                composer
+              )}
+              {panelOpen && !readOnly && (
                 <AttachPanel
                   height={panelHeight}
                   dismissing={panelDismissing}
@@ -5991,7 +5974,7 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         );
 
         return (
-          <View style={styles.chatContainer}>
+          <View style={[styles.chatContainer, embedded && styles.chatContainerEmbedded]}>
             {useGestureArea ? (
               <KeyboardGestureArea
                 interpolator="linear"
@@ -6040,8 +6023,8 @@ export const DirectGroupChat: React.FC<DirectGroupChatProps> = ({
         currentUserId={currentUserId}
         membersById={reactorInfoById}
         initialEmoji={reactionsSheet?.emoji}
-        onRemoveOwn={() => reactionsSheet && removeReaction(reactionsSheet.messageId)}
-        onAddReaction={(emoji) => reactionsSheet && setReaction(reactionsSheet.messageId, emoji)}
+        onRemoveOwn={() => reactionsSheet && !readOnly && removeReaction(reactionsSheet.messageId)}
+        onAddReaction={(emoji) => reactionsSheet && !readOnly && setReaction(reactionsSheet.messageId, emoji)}
       />
 
       {/* Delete Confirmation Modal (Web only) */}
@@ -6707,6 +6690,32 @@ const styles = StyleSheet.create({
     // Leave room for the absolute headerContainer above.
     // headerContainer height = paddingTop + content (avatar 52) + paddingBottom 14.
     paddingTop: (Platform.OS === 'web' ? 24 : 12) + 52 + 14,
+  },
+  // Embedded (trip Chat tab): no absolute header to clear. The search bar,
+  // when open, sits in the normal flow above the list instead.
+  chatContainerEmbedded: {
+    paddingTop: 0,
+  },
+  embeddedSearchHeader: {
+    position: 'relative',
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  // Stands where the composer would be for someone who left the trip.
+  readOnlyBar: {
+    paddingTop: 14,
+    paddingHorizontal: 24,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E0E0E0',
+    alignItems: 'center',
+  },
+  readOnlyBarText: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#7B7B7B',
+    textAlign: 'center',
   },
   backgroundImage: {
     ...StyleSheet.absoluteFillObject,

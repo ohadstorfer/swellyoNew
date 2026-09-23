@@ -101,6 +101,26 @@ class MessageOutbox {
     return this.markSent(clientId);
   }
 
+  /**
+   * Drop every unsent message for one conversation. For a trip chat the user
+   * left or was removed from: the server refuses those sends for good, so
+   * retrying them would go on forever (docs/specs/trip-chat-tab.md, req 17).
+   */
+  async dropConversation(conversationId: string): Promise<number> {
+    return this.withLock(async () => {
+      const map = await this.load();
+      let dropped = 0;
+      for (const [k, v] of map) {
+        if (v.conversationId === conversationId) {
+          map.delete(k);
+          dropped++;
+        }
+      }
+      if (dropped > 0) await this.persist();
+      return dropped;
+    });
+  }
+
   async getAll(): Promise<OutboxEntry[]> {
     const map = await this.load();
     return Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);

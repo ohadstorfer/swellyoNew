@@ -50,7 +50,7 @@ import { SwellyoTeamWelcome } from './SwellyoTeamWelcome';
 import { OnboardingWelcomeScreen } from './OnboardingWelcomeScreen';
 import { ProfileImage } from '../components/ProfileImage';
 import { ConversationListSkeleton } from '../components/skeletons';
-import { pushRootCard } from '../navigation/navigationRef';
+import { pushChatCard, pushRootCard } from '../navigation/navigationRef';
 import { useTutorial } from '../context/TutorialContext';
 import { ChatErrorBoundary } from '../components/chat/ChatErrorBoundary';
 
@@ -222,8 +222,11 @@ export default function ConversationsScreen({
     surftripId?: string;
     targetMessageId?: string;
   }) => {
-    if (sel.id) setCurrentConversationId(sel.id);
-    pushRootCard('ChatCard', {
+    // Trip group chats open the trip on its Chat tab (pushChatCard reroutes);
+    // the tab sets the current conversation itself, only while it is visible.
+    const isTripChat = sel.isDirect === false && !!sel.tripId && !sel.surftripId;
+    if (sel.id && !isTripChat) setCurrentConversationId(sel.id);
+    pushChatCard({
       conversationId: sel.id,
       otherUserId: sel.otherUserId,
       otherUserName: sel.otherUserName,

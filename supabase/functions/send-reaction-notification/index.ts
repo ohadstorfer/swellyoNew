@@ -76,10 +76,16 @@ async function sendReactionPush(
   // Mute check — if the message author has muted this conversation, skip the push.
   const { data: recipientMember } = await supabase
     .from('conversation_members')
-    .select('preferences')
+    .select('preferences, left_at')
     .eq('conversation_id', conversationId)
     .eq('user_id', recipientId)
     .maybeSingle();
+  // Left or removed from the trip: their old messages can still get reactions,
+  // but they are out of the chat — no push.
+  if (recipientMember?.left_at) {
+    console.log(`[Reaction Push] Skipping ${recipientId} — left the chat`);
+    return;
+  }
   const mutedUntilRaw = recipientMember?.preferences?.muted_until;
   if (mutedUntilRaw) {
     const mutedUntilMs = Date.parse(mutedUntilRaw);

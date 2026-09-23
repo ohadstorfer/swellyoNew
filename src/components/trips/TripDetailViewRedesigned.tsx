@@ -17,7 +17,7 @@
 //     addition to the top chips — duplicated on purpose).
 //   • Accommodation is a rounded-32 card with an info pill.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 // Remote user-content images (hero, avatars, stay photo) go through expo-image
 // for its disk cache — upload URLs are immutable, so cached copies never stale.
 import { Image as CachedImage } from 'expo-image';
@@ -83,6 +83,10 @@ import {
 import { TRIP_TYPE_WORD, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
 import { formatTripPrice, formatTripPriceRange } from '../../utils/currency';
 import { useViewer } from '../../hooks/useViewer';
+
+/** How long the cover takes to slide away (or back). The trip screen waits
+ *  this long before swapping in the Chat tab, so the two must stay in step. */
+export const HERO_SLIDE_MS = 300;
 
 const FONT_INTER = Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter';
 const FONT_MONTSERRAT = Platform.OS === 'web' ? 'Montserrat, sans-serif' : 'Montserrat';
@@ -303,13 +307,16 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const reduceMotion = useReducedMotion();
   const heroH = useSharedValue(0);
   const heroCollapse = useSharedValue(heroCollapsed ? 1 : 0);
-  useEffect(() => {
+  // Layout effect, not a passive one: on the no-animation path this has to land
+  // in the same UI frame as the commit that switched tabs, or the hero shows
+  // for a frame before snapping shut.
+  useLayoutEffect(() => {
     const to = heroCollapsed ? 1 : 0;
     // Only a tap animates. The screen choosing a tab for you on open (or from a
     // notification) should just land there, not play a hero leaving.
     heroCollapse.value =
       animateHeroCollapse && !reduceMotion
-        ? withTiming(to, { duration: 300, easing: Easing.bezier(0.77, 0, 0.175, 1) })
+        ? withTiming(to, { duration: HERO_SLIDE_MS, easing: Easing.bezier(0.77, 0, 0.175, 1) })
         : to;
   }, [heroCollapsed, animateHeroCollapse, reduceMotion, heroCollapse]);
   const heroClipStyle = useAnimatedStyle(() => {
@@ -818,18 +825,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           {/* ---- Crew ---- */}
           {/* Operator trips only, and only the people the operator chose to show
               (capability `profile.shown_to_travelers`, filtered server-side).
-              Hidden for anyone with the Plan tab — same rule as Participants
-              below — because the crew moved to Plan for them. Cards, not a
-              list: Figma 14980-66208, operator ringed in the accent colour. */}
-          {!hideParticipants && (
-            <CrewCards
-              crew={crew}
-              title="Staff"
-              variant="overview"
-              onViewAll={onViewAllCrew}
-              style={styles.section}
-            />
-          )}
+              Shown to EVERYONE, unlike Participants below: whether you are still
+              deciding or already booked, "who runs this trip" belongs on the
+              page that describes the trip. Travelers used to meet them as a list
+              on Plan instead — one section, two designs; the cards won (Ohad,
+              18 Sep). Peer trips pass an empty array and CrewCards renders null.
+              Figma 14980-66208, operator ringed in the accent colour. */}
+          <CrewCards
+            crew={crew}
+            title="Staff"
+            variant="overview"
+            onViewAll={onViewAllCrew}
+            style={styles.section}
+          />
 
           {/* ---- About this trip ---- */}
           {vm.description || isHost ? (
@@ -1763,10 +1771,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  // Crew: a vertical list, not the horizontal avatar strip participants use.
-  // There are a handful of them and the title ("Head Guide") is the point —
-  // a scrolling row of faces would hide exactly the thing worth reading.
-  // Crew styles moved into CrewSection.tsx with the section itself.
+  // Crew styles live in CrewSection.tsx with the section itself.
   // Tappable avatar row — bleeds edge-to-edge so it scrolls to the screen edge.
   avatarScroll: {
     marginHorizontal: -16,

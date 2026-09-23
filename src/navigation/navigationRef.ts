@@ -1,4 +1,4 @@
-import { createNavigationContainerRef, StackActions } from '@react-navigation/native';
+import { CommonActions, createNavigationContainerRef, StackActions } from '@react-navigation/native';
 import type { TripDetailFocus } from '../services/notifications/notificationsService';
 import type { GroupTrip } from '../services/trips/groupTripsService';
 
@@ -12,10 +12,28 @@ export type MainTabsParamList = {
   Profile: undefined;
 };
 
+/** What a trip's Chat tab can be opened with. */
+export type TripChatParams = {
+  /** Opened from message search — scroll to this message + flash it on load. */
+  targetMessageId?: string;
+  /** OS-share media handoff — prefills the composer's media preview. */
+  sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' };
+  /** Opened from a "Review request" commitment notification. */
+  reviewCommitment?: boolean;
+};
+
 export type RootStackParamList = {
   HomeTabs: { screen?: keyof MainTabsParamList } | undefined;
   /** Trip detail card — push() so trip→profile→trip chains stack. */
-  TripDetail: { tripId: string; focus?: TripDetailFocus | null };
+  TripDetail: {
+    tripId: string;
+    focus?: TripDetailFocus | null;
+    /** With focus 'chat': handed straight to the embedded group chat. */
+    chat?: TripChatParams;
+    /** Bumped when an already-open trip card is asked to show its chat again,
+     *  so the screen re-applies the focus. See openTripChat(). */
+    focusNonce?: number;
+  };
   /** Host edit wizard, card above the trip detail. */
   EditTrip: { trip: GroupTrip };
   /** Operator-only flat edit screen for a hosting_style='C' trip. Distinct from
@@ -169,4 +187,43 @@ export function pushRootCard<RouteName extends Exclude<keyof RootStackParamList,
   if (key === lastPush.key && now - lastPush.ts < DUP_PUSH_WINDOW_MS) return;
   lastPush = { key, ts: now };
   navigationRef.dispatch(StackActions.push(name, params));
+}
+
+/**
+ * Open a trip on its Chat tab — the one way into a trip's group chat
+ * (docs/specs/trip-chat-tab.md, req 19-20).
+ *
+ * If that same trip is already the top card, switch its tab instead of pushing
+ * a duplicate: `focusNonce` makes the screen re-apply the focus even when it
+ * was already 'chat'. Lower in the stack, or not open at all: push a new card,
+ * so back behaves as usual.
+ */
+export function openTripChat(tripId: string, chat?: TripChatParams) {
+  if (!navigationRef.isReady()) return;
+  const top = navigationRef.getCurrentRoute();
+  if (top?.name === 'TripDetail' && (top.params as { tripId?: string } | undefined)?.tripId === tripId) {
+    navigationRef.dispatch({
+      ...CommonActions.setParams({ focus: 'chat', chat, focusNonce: Date.now() }),
+      source: top.key,
+    });
+    return;
+  }
+  pushRootCard('TripDetail', { tripId, focus: 'chat', chat });
+}
+
+/**
+ * Open a chat card — unless it is a trip's group chat, which has no card any
+ * more: it lives on the trip page's Chat tab, so open that instead. Surftrip
+ * chats and DMs are unchanged. Use this wherever a ChatCard used to be pushed.
+ */
+export function pushChatCard(params: RootStackParamList['ChatCard']) {
+  if (params.isDirect === false && params.tripId && !params.surftripId) {
+    openTripChat(params.tripId, {
+      targetMessageId: params.targetMessageId,
+      sharedMedia: params.sharedMedia,
+      reviewCommitment: params.reviewCommitment,
+    });
+    return;
+  }
+  pushRootCard('ChatCard', params);
 }

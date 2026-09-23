@@ -13,12 +13,13 @@ import {
   Platform,
   TextInput,
   KeyboardAvoidingView,
+  Keyboard,
   Share,
   RefreshControl,
   type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Reanimated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
+import Reanimated, { FadeIn, FadeInUp, FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useOnboarding } from '../../context/OnboardingContext';
@@ -73,7 +74,7 @@ import {
   type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
 import { type TripDetailVM, BOARD_SHORT } from '../../components/trips/TripDetailView';
-import { TripDetailViewRedesigned } from '../../components/trips/TripDetailViewRedesigned';
+import { TripDetailViewRedesigned, HERO_SLIDE_MS } from '../../components/trips/TripDetailViewRedesigned';
 import {
   EditTextSheet,
   EditCoverSheet,
@@ -102,7 +103,7 @@ import { ReportTripSheet } from '../../components/ReportTripSheet';
 import { ShareTripStorySheet } from '../../components/trips/ShareTripStorySheet';
 import { TripStaffSheet } from '../../components/trips/TripStaffSheet';
 import { travelerCounts } from '../../components/trips/dashboard/dashboardWork';
-import { CrewSection, CrewCards } from '../../components/trips/CrewSection';
+import { CrewCards } from '../../components/trips/CrewSection';
 import { useTripCrew, useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
 import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
 import { fetchMyStaffRow, ensureOperatorOnCrew } from '../../services/trips/tripStaffService';
@@ -146,7 +147,12 @@ import { ManageRequirementsSheet } from '../../components/trips/ManageRequiremen
 import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
 import { ff } from '../../theme/fonts';
 import { supabase } from '../../config/supabase';
-import { messagingService } from '../../services/messaging/messagingService';
+import { useMessaging } from '../../context/MessagingProvider';
+import { useTripChatMembership } from '../../hooks/trips/useTripChat';
+import { TripChatTab } from '../../components/trips/TripChatTab';
+import { MuteChatSheet } from '../../components/trips/MuteChatSheet';
+import { useConversationMute } from '../../hooks/useConversationMute';
+import type { TripChatParams } from '../../navigation/navigationRef';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import {
@@ -205,7 +211,6 @@ import { useUserProfile } from '../../context/UserProfileContext';
 interface TripDetailScreenProps {
   tripId: string;
   onBack: () => void;
-  onOpenGroupChat?: (params: { conversationId: string; title: string; heroImageUrl?: string | null; tripId?: string }) => void;
   onEditTrip?: (trip: GroupTrip) => void;
   /** Operator (host_id owner) tap on the "Edit trip" menu entry — pushes the
    *  flat OperatorEditTrip screen. Distinct from onEditTrip, which reopens the
@@ -227,6 +232,11 @@ interface TripDetailScreenProps {
    * or the target section isn't rendered.
    */
   initialFocus?: TripDetailFocus | null;
+  /** With initialFocus 'chat': handed to the embedded chat (jump target,
+   *  shared media, commitment review). */
+  initialChat?: TripChatParams | null;
+  /** Bumped when this card is asked to show its chat again while open. */
+  focusNonce?: number;
   /** "View all" on the admin-updates preview pushes the full Updates list. */
   onViewAllUpdates?: () => void;
   /** "View all" on the Members section / Overview Participants row pushes the full
@@ -447,7 +457,7 @@ type PaymentsCache = {
 };
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenPayments, onOpenNotifications, onOpenTrip, initialFocus, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenPayments, onOpenNotifications, onOpenTrip, initialFocus, initialChat, focusNonce, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
@@ -1025,7 +1035,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     }
   }, [queryClient]);
 
-  const [openingChat, setOpeningChat] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   // Operator trips only. `cancelling` above still drives the peer-trip Alert
@@ -1239,12 +1248,62 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const isStaffViewer = !isHost && !isApprovedMember && can('roster.view');
 
 
+  /**
+   * The Chat tab (docs/specs/trip-chat-tab.md). The server keeps the chat's
+   * member rows in sync with hosts, travelers and chat staff, so a member row
+   * — active or departed — is the real answer. The other three only cover the
+   * moment before the chat exists (legacy trips create it on first open).
+   * Kept on cancelled and finished trips: the chat outlives the trip.
+   * `chat.participate`, never a tier name, so an UPDATE to the tiers changes
+   * who chats without a release.
+   */
+  const chatMembership = useTripChatMembership(tripId, !!currentUserId);
+  const chatReadOnly = !!chatMembership.data?.leftAt;
+  const canSeeChat =
+    isHost || isApprovedMember || can('chat.participate') || !!chatMembership.data?.isMember;
+  // Settled enough to decide a deep link: an error falls back to the other rules.
+  const chatMembershipKnown = !!chatMembership.data || chatMembership.isError || !currentUserId;
+  // Joining, leaving or being removed changes the chat row on the server (a
+  // trigger does it). Re-read it when the trip says membership moved, so a
+  // removal flips the Chat tab to read-only without a restart.
+  const membershipSignature = `${isHost}:${isApprovedMember}:${can('chat.participate')}`;
+  const lastMembershipSignature = useRef(membershipSignature);
+  useEffect(() => {
+    if (lastMembershipSignature.current === membershipSignature) return;
+    lastMembershipSignature.current = membershipSignature;
+    queryClient.invalidateQueries({ queryKey: tripsKeys.chatMembership(tripId) });
+  }, [membershipSignature, queryClient, tripId]);
+
+  // Unread pill on the Chat tab. None while the tab is open (the chat marks
+  // itself read), and none for someone who left — their chat is history.
+  const { conversations: messagingConversations } = useMessaging();
+  const chatConversationId = chatMembership.data?.conversationId ?? null;
+  const chatUnread = useMemo(
+    () =>
+      chatConversationId
+        ? messagingConversations.find(c => c.id === chatConversationId)?.unread_count ?? 0
+        : 0,
+    [messagingConversations, chatConversationId],
+  );
+  // Mute for the trip chat. The Chat tab has no chat header, so it lives in
+  // the ⋮ menu. Only for an ACTIVE member with a chat that already exists —
+  // a departed user gets no pushes anyway.
+  const chatMute = useConversationMute(
+    chatMembership.data?.isMember && !chatMembership.data?.leftAt ? chatConversationId : null,
+    currentUserId,
+  );
+  const [muteSheetOpen, setMuteSheetOpen] = useState(false);
+
   const visibleTabs = useMemo<TripTab[]>(() => {
     // Overview on the left, like the traveler's pair (Ohad, 14 Sep). They
     // still OPEN on Dashboard — see the default-tab effect below.
-    if (canSeeDashboard) return ['overview', 'dashboard'];
-    return canSeePlan ? ['overview', 'plan'] : ['overview'];
-  }, [canSeePlan, canSeeDashboard]);
+    const base: TripTab[] = canSeeDashboard
+      ? ['overview', 'dashboard']
+      : canSeePlan
+        ? ['overview', 'plan']
+        : ['overview'];
+    return canSeeChat ? [...base, 'chat'] : base;
+  }, [canSeePlan, canSeeDashboard, canSeeChat]);
 
   // A tab that stops being available must not leave the screen showing nothing
   // — losing host rights, or the trip locking, would otherwise strand the
@@ -1301,21 +1360,112 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     if (toggleYTimer.current) clearTimeout(toggleYTimer.current);
   }, []);
   const [toggleStuck, setToggleStuck] = useState(false);
-  /** Set by the first tab TAP. The hero only animates away on a tap — when the
-   *  screen picks the tab itself (default tab, a notification) it just lands. */
-  const [tabTapped, setTabTapped] = useState(false);
+  /** Set by a tab TAP. The hero only animates away on a tap — when the screen
+   *  picks the tab itself (default tab, a notification) it just lands. */
+  const [animateHero, setAnimateHero] = useState(false);
+  // The Chat tab has no hero of its own, so the slide plays on the scroll page
+  // first and the chat body mounts after it (see handleTabChange). `true` once
+  // the chat is really on screen; lags `activeTab` by the slide.
+  const [chatBodyVisible, setChatBodyVisible] = useState(false);
+  const chatRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (chatRevealTimer.current) clearTimeout(chatRevealTimer.current);
+  }, []);
+  // Coming back from the chat to the Overview: mount the cover collapsed for
+  // one beat, then let it slide back in. Waits a moment rather than one frame
+  // so the hero has reported its height — the slide is sized off it.
+  const [heroRevealFromChat, setHeroRevealFromChat] = useState(false);
+  useEffect(() => {
+    if (!heroRevealFromChat) return;
+    const id = setTimeout(() => setHeroRevealFromChat(false), 50);
+    return () => clearTimeout(id);
+  }, [heroRevealFromChat]);
+  const reduceMotion = useReducedMotion();
+  // Any way off the Chat tab (a tap, or the tab disappearing) hides its body.
+  useEffect(() => {
+    if (activeTab !== 'chat') setChatBodyVisible(false);
+  }, [activeTab]);
   const handleTabChange = useCallback(
     (tab: TripTab) => {
       if (tab === activeTab) return;
-      setTabTapped(true);
+      // A keyboard left up from search or the composer must not carry over.
+      Keyboard.dismiss();
+      // The Chat tab replaces the whole scroll body, so the scroll offset
+      // starts over on the way in and out: the ScrollView remounts at the top,
+      // and a stale offset would show the sticky clone. A tap during the slide
+      // cancels the pending swap.
+      if (chatRevealTimer.current) {
+        clearTimeout(chatRevealTimer.current);
+        chatRevealTimer.current = null;
+      }
+      if (tab === 'chat') {
+        setChatSearchOpen(false);
+        // From the Overview with its cover in view: play the same slide-out
+        // Dashboard and Plan get, on the page you are looking at, and swap in
+        // the chat once the tab bar has reached the top. The chat's own bar
+        // sits exactly there, so the swap does not move anything.
+        // Skipped when the cover is already gone (scrolled away, or coming
+        // from Dashboard/Plan), on a locked trip (its banner sits above the
+        // tabs, so they would jump at the swap), and with Reduce Motion.
+        const slideHero =
+          activeTab === 'overview' && !toggleStuck && !isLockedForTabs && !reduceMotion;
+        if (slideHero) {
+          setAnimateHero(true);
+          setActiveTab('chat');
+          chatRevealTimer.current = setTimeout(() => {
+            chatRevealTimer.current = null;
+            scrollY.setValue(0);
+            setToggleStuck(false);
+            setChatBodyVisible(true);
+          }, HERO_SLIDE_MS);
+          return;
+        }
+        scrollY.setValue(0);
+        setToggleStuck(false);
+        setAnimateHero(false);
+        setActiveTab('chat');
+        setChatBodyVisible(true);
+        return;
+      }
+      if (activeTab === 'chat') {
+        // Leaving the chat: the page remounts at the top. Back to the Overview
+        // it mounts with the cover collapsed and slides it back in — the mirror
+        // of leaving. Dashboard/Plan keep it collapsed, so they just land.
+        setChatSearchOpen(false);
+        setChatBodyVisible(false);
+        scrollY.setValue(0);
+        setToggleStuck(false);
+        const revealHero = tab === 'overview' && !isLockedForTabs && !reduceMotion;
+        setHeroRevealFromChat(revealHero);
+        setAnimateHero(revealHero);
+        setActiveTab(tab);
+        return;
+      }
+      // Dashboard and Plan are the tabs that put the hero away.
+      const collapsesHero = tab === 'plan' || tab === 'dashboard';
       // Tapped from the sticky clone, deep in the page: go back to the top
-      // first, so the hero leaving (or coming back) is something you see and
-      // the new tab starts at its beginning rather than mid-way down.
-      if (toggleStuck) scrollRef.current?.scrollTo({ y: 0, animated: false });
+      // first, so the new tab starts at its beginning rather than mid-way down.
+      if (toggleStuck) {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+        // You had already scrolled the cover away, so jumping to the top and
+        // THEN playing it out flashes a hero you were not looking at. Land on
+        // Plan/Dashboard with it already gone; coming back to Overview still
+        // reveals it, which reads as the tab bringing the cover back.
+        setAnimateHero(!collapsesHero);
+      } else {
+        setAnimateHero(true);
+      }
       setActiveTab(tab);
     },
-    [activeTab, toggleStuck],
+    [activeTab, toggleStuck, scrollY, isLockedForTabs, reduceMotion],
   );
+  // Chat tab state: the params a deep link brought, a key that remounts the
+  // chat when a new deep link arrives, the ⋮ "Search chat" trigger, and
+  // whether search is open (it stands in for the tab bar).
+  const [chatParams, setChatParams] = useState<TripChatParams | null>(null);
+  const [chatMountKey, setChatMountKey] = useState(0);
+  const [chatSearchKey, setChatSearchKey] = useState(0);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
   const sectionYs = useRef<Record<string, number>>({});
   const appliedFocusRef = useRef<string | null>(null);
   const registerSection = useCallback(
@@ -1349,6 +1499,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
     // membershipKnown: placeholder-seeded data has participants: [] — deciding
     // the Plan-vs-Overview fallback on it would dump members on Overview.
     if (!trip || !initialFocus || !membershipKnown) return;
+    if (initialFocus === 'chat') return; // handled by the Chat-tab effect below
     const token = `${tripId}:${initialFocus}`;
     if (appliedFocusRef.current === token) return; // once per (trip, focus)
     appliedFocusRef.current = token;
@@ -1401,6 +1552,27 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       cancelled = true;
     };
   }, [trip, tripId, initialFocus, isHost, isApprovedMember, isOnboardingTraveler, membershipKnown, onStartOnboarding, canSeeDashboard]);
+  // Deep link to the Chat tab — from the Messages list, a push, a banner, a
+  // share or message search. Once per (trip, nonce): the nonce changes when
+  // this same card is asked again (openTripChat), so it re-applies. Anyone who
+  // cannot see the tab stays on the Overview, with no error.
+  const appliedChatFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (initialFocus !== 'chat' || !trip || !membershipKnown || !chatMembershipKnown) return;
+    const token = `${tripId}:${focusNonce ?? 0}`;
+    if (appliedChatFocusRef.current === token) return;
+    appliedChatFocusRef.current = token;
+    if (!canSeeChat) return;
+    Keyboard.dismiss();
+    scrollY.setValue(0);
+    setToggleStuck(false);
+    setAnimateHero(false);
+    setChatParams(initialChat ?? null);
+    setChatMountKey(k => k + 1);
+    setActiveTab('chat');
+    setChatBodyVisible(true);
+  }, [initialFocus, initialChat, focusNonce, trip, tripId, membershipKnown, chatMembershipKnown, canSeeChat, scrollY]);
+
   const meParticipant = useMemo(
     () => participants.find(p => p.user_id === currentUserId),
     [participants, currentUserId]
@@ -1593,32 +1765,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
       if (prevCore) queryClient.setQueryData(tripsKeys.detail(tripId), prevCore);
       hapticError();
       Alert.alert('Could not approve', friendlyErrorMessage(e, 'Please try again.'));
-    }
-  };
-
-  const handleOpenGroupChat = async () => {
-    if (!trip || !onOpenGroupChat) return;
-    setOpeningChat(true);
-    try {
-      let conv = await messagingService.getConversationByTripId(trip.id);
-      if (!conv) {
-        // Legacy trip created before this feature shipped — create the conversation lazily.
-        conv = await messagingService.createGroupConversation(
-          trip.title || 'Surftrip',
-          [],
-          { trip_id: trip.id }
-        );
-      }
-      onOpenGroupChat({
-        conversationId: conv.id,
-        title: trip.title || 'Surftrip',
-        heroImageUrl: trip.hero_image_url ?? null,
-        tripId: trip.id,
-      });
-    } catch (e: any) {
-      Alert.alert('Could not open chat', friendlyErrorMessage(e, 'Please try again.'));
-    } finally {
-      setOpeningChat(false);
     }
   };
 
@@ -2816,9 +2962,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   const isFull =
     trip?.max_participants != null &&
     (trip?.participant_count ?? 0) >= trip.max_participants;
-  // isHost derives from trip.host_id, which the placeholder DOES carry — hosts
-  // get their chat CTA immediately; members wait one fetch.
-  const showChatCta = (isHost || (membershipKnown && isApprovedMember)) && !isCancelled;
   /**
    * Approved for this operator trip but not through onboarding. Everything else
    * on this screen already treats them as a stranger; this is the one thing
@@ -2829,7 +2972,9 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
    * to pay a deposit for a trip that is not happening.
    */
   const showOnboardingCta = membershipKnown && isOnboardingTraveler && !isLocked;
-  const stickyCtaVisible = showJoinCta || showChatCta || showOnboardingCta;
+  // The group chat is a tab now (no floating "Trip Chat"), and nothing floats
+  // over the Chat tab — it has its own composer at the bottom.
+  const stickyCtaVisible = (showJoinCta || showOnboardingCta) && activeTab !== 'chat';
 
   // Has the trip started yet? Gates "Mark as completed" — a host can close a
   // trip that's underway, not an upcoming one.
@@ -2858,6 +3003,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // on a peer trip's cover stays "Edit cover".
   const canEditOperatorTrip =
     (isTripOwner || can('trip.edit')) && !!isOperatorTrip && !isLocked && !!onEditOperatorTrip;
+  const showChat = canSeeChat && activeTab === 'chat';
   const showPlan = canSeePlan && activeTab === 'plan';
   const showDashboard = canSeeDashboard && activeTab === 'dashboard';
   /** Anything that replaces the Overview body. */
@@ -2866,6 +3012,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   // thing back when Plan was the only second tab — it is not any more, and a
   // host on a locked operator trip has Overview + Dashboard and no Plan.
   const showTabs = visibleTabs.length > 1;
+  const tabBadges =
+    chatUnread > 0 && !chatReadOnly && activeTab !== 'chat' ? { chat: chatUnread } : undefined;
 
   // Alias for the bottom-spacer below; kept identical to stickyCtaVisible.
   const hasStickyFooter = stickyCtaVisible;
@@ -2889,15 +3037,42 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
   };
   const menuItems: TripMenuEntry[] = (
     [
-      // Chat — members + host, while the trip isn't cancelled (chat lives on
-      // even once a trip is completed).
-      ((isHost || isApprovedMember) && !isCancelled) && {
+      // Chat — same people as the Chat tab, cancelled trips included (the
+      // chat outlives the trip). It just switches to the tab.
+      (canSeeChat && !showChat) && {
         key: 'chat',
         icon: 'chatbubble-outline',
         label: 'Trip Chat',
         group: 0,
-        onPress: handleOpenGroupChat,
+        onPress: () => handleTabChange('chat'),
       },
+      // Search chat — on the Chat tab. Opens the search bar in place of the
+      // tab bar; closing it brings the tabs back.
+      showChat && {
+        key: 'searchChat',
+        icon: 'search-outline',
+        label: 'Search chat',
+        group: 0,
+        onPress: () => setChatSearchKey(k => k + 1),
+      },
+      // Mute / unmute the trip chat — from any tab.
+      (canSeeChat && !chatReadOnly && !!chatMembership.data?.isMember && !!chatConversationId) && (
+        chatMute.mutedUntil
+          ? {
+              key: 'unmuteChat',
+              icon: 'notifications-outline' as const,
+              label: 'Unmute chat',
+              group: 0,
+              onPress: () => chatMute.applyMute(null),
+            }
+          : {
+              key: 'muteChat',
+              icon: 'notifications-off-outline' as const,
+              label: 'Mute chat',
+              group: 0,
+              onPress: () => setMuteSheetOpen(true),
+            }
+      ),
       // Report + Share — everyone, members and non-members alike.
       { key: 'report', icon: 'warning-outline', label: 'Report Trip', group: 1, onPress: () => setReportSheetVisible(true) },
       { key: 'share', icon: 'paper-plane-outline', label: 'Share Trip', group: 1, onPress: handleShare },
@@ -3055,7 +3230,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               accessibilityLabel="Trip options"
             >
-              {cancelling || completing || openingChat ? (
+              {cancelling || completing ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <Ionicons name="ellipsis-vertical" size={22} color="#FFFFFF" />
@@ -3074,6 +3249,44 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           bottom `ctaOverlay` fog, so the fog reads as a persistent grey veil after
           any sheet interaction. Disabling the KAV on Android keeps content at rest
           in the #FAFAFA clearance buffer, where the fog is invisible as designed. */}
+      {showChat && chatBodyVisible ? (
+        // Chat tab: no hero, no scroll body. The tab bar sits fixed under the
+        // header and the chat fills the rest, down to the bottom edge (the
+        // composer pads the home indicator itself). Outside the KAV below —
+        // the chat does its own keyboard padding and must not get it twice.
+        <View style={styles.chatTabRoot}>
+          {!chatSearchOpen && (
+            <View style={styles.chatTabBar}>
+              <TripTabToggle
+                value={activeTab}
+                onChange={handleTabChange}
+                tabs={visibleTabs}
+              />
+            </View>
+          )}
+          <Reanimated.View entering={FadeIn.duration(180)} style={styles.chatTabBody}>
+          <TripChatTab
+            key={chatMountKey}
+            tripId={trip.id}
+            title={trip.title || 'Surftrip'}
+            heroImageUrl={trip.hero_image_url ?? null}
+            membership={chatMembership.data}
+            readOnly={chatReadOnly}
+            chat={chatParams}
+            searchRequestKey={chatSearchKey}
+            onSearchActiveChange={setChatSearchOpen}
+            onViewProfile={
+              onViewUserProfile
+                ? userId => {
+                    if (userId !== currentUserId) onViewUserProfile(userId);
+                  }
+                : undefined
+            }
+            onBack={onBack}
+          />
+          </Reanimated.View>
+        </View>
+      ) : (
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -3112,8 +3325,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             <Ionicons name="checkmark-done-outline" size={18} color="#445" />
             <Text style={styles.endedText}>
               {isCompleted
-                ? 'This trip has been completed. The chat stays open below.'
-                : 'This trip has ended. The chat stays open below.'}
+                ? 'This trip has been completed. The chat stays open in the Chat tab.'
+                : 'This trip has ended. The chat stays open in the Chat tab.'}
             </Text>
           </View>
         )}
@@ -3189,14 +3402,15 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                   toggleYTimer.current = setTimeout(() => setToggleY(y), 60);
                 }}
               >
-                <TripTabToggle value={activeTab} onChange={handleTabChange} tabs={visibleTabs} />
+                <TripTabToggle value={activeTab} onChange={handleTabChange} tabs={visibleTabs} badges={tabBadges} />
               </View>
             ) : null
           }
-          bodyHidden={bodyReplaced}
-          // Dashboard and Plan slide the cover + countdown away (Ohad, 14 Sep).
-          heroCollapsed={bodyReplaced}
-          animateHeroCollapse={tabTapped}
+          bodyHidden={bodyReplaced || activeTab === 'chat'}
+          // Dashboard, Plan and Chat slide the cover + countdown away (Ohad,
+          // 14 Sep). Chat only passes through here while the slide plays.
+          heroCollapsed={bodyReplaced || activeTab === 'chat' || heroRevealFromChat}
+          animateHeroCollapse={animateHero}
           // Members who have the Plan tab now see the participants there (Figma
           // 13455-38686), so drop the Overview Participants row for them. Locked
           // trips (no Plan tab) and non-members keep it as the only member view.
@@ -3354,19 +3568,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           />
         </View>
 
-        {/* 1.2) Crew — moved here from the Overview for everyone who joined
-            (the Overview keeps it only for people still deciding). Same data,
-            now answering "who is running your trip" instead of selling it.
-            Renders nothing on peer trips: the query is disabled there and
-            CrewSection returns null on an empty list. */}
-        {!showDashboard && (
-          <View onLayout={registerSection('crew')}>
-            <CrewSection
-              crew={crewQuery.data ?? []}
-              style={{ marginTop: 24, paddingHorizontal: 4 }}
-            />
-          </View>
-        )}
+        {/* 1.2) Crew used to sit here for everyone who joined, as a vertical
+            list. It went back to the Overview as cards (Ohad, 18 Sep) — one
+            section with one design, and "who runs this trip" reads the same
+            whether you have booked or not. The Dashboard keeps its own
+            manageable copy below ("My staff"). */}
 
         {/* 1.5) Commit pill — below the members + commitment bar (approved
             members only; the host can't commit). Never on an operator trip:
@@ -3396,8 +3602,8 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
           </View>
         )}
 
-        {/* 2.5) My staff — Dashboard only (Figma 14980-65921). Travelers meet the
-            crew as a list higher up; the operator manages it from here. */}
+        {/* 2.5) My staff — Dashboard only (Figma 14980-65921). The same cards
+            everyone sees on the Overview, plus the add/manage affordances. */}
         {showDashboard && (
           <View style={styles.planSection} onLayout={registerSection('crew')}>
             <CrewCards
@@ -3634,7 +3840,7 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             keeps its floating button on the hero cover (TripDetailViewRedesigned
             `onShare`). */}
 
-        {/* Clearance for the floating sticky footer (Trip Chat / Join a Trip)
+        {/* Clearance for the floating sticky footer (Join a Trip / onboarding)
             so the last content isn't hidden behind it; smaller otherwise. */}
         <View style={{ height: hasStickyFooter ? insets.bottom + 96 : 40 }} />
       </Animated.ScrollView>
@@ -3657,10 +3863,11 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
             },
           ]}
         >
-          <TripTabToggle value={activeTab} onChange={handleTabChange} tabs={visibleTabs} />
+          <TripTabToggle value={activeTab} onChange={handleTabChange} tabs={visibleTabs} badges={tabBadges} />
         </Animated.View>
       )}
       </KeyboardAvoidingView>
+      )}
 
       {/* Sticky CTA — floating pill over a foggy fade (mirrors the profile
           "Connect to …" button). The overlay fades scroll content into the
@@ -3714,30 +3921,6 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
                 ? `Start onboarding — ${onboardingLeft} left`
                 : 'Start onboarding'}
             </Text>
-          </TouchableOpacity>
-        </Reanimated.View>
-      )}
-
-      {/* Members get quick access to the group chat (Figma "Trip Chat", accent). */}
-      {showChatCta && (
-        <Reanimated.View
-          entering={FadeInUp.duration(220)}
-          style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}
-        >
-          <TouchableOpacity
-            style={[styles.ctaBtn, styles.ctaChat]}
-            onPress={handleOpenGroupChat}
-            disabled={openingChat}
-            activeOpacity={0.85}
-          >
-            {openingChat ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Ionicons name="chatbubble-outline" size={18} color="#FFFFFF" />
-                <Text style={styles.ctaPrimaryText}>Trip Chat</Text>
-              </>
-            )}
           </TouchableOpacity>
         </Reanimated.View>
       )}
@@ -4092,10 +4275,10 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         onClose={() => setPaymentIssue(null)}
         onRetry={handleRetryPayment}
         onMessageOrganiser={
-          onOpenGroupChat
+          canSeeChat
             ? () => {
                 setPaymentIssue(null);
-                handleOpenGroupChat();
+                handleTabChange('chat');
               }
             : undefined
         }
@@ -4338,6 +4521,12 @@ export default function TripDetailScreen({ tripId, onBack, onOpenGroupChat, onEd
         />
       )}
 
+      <MuteChatSheet
+        visible={muteSheetOpen}
+        onClose={() => setMuteSheetOpen(false)}
+        onMute={until => chatMute.applyMute(until)}
+      />
+
       {/* Header overflow (⋮) menu. Rendered at the SafeAreaView root (not inside
           the header) so it isn't clipped, and above everything via zIndex. A
           full-screen transparent backdrop dismisses it on any outside tap. */}
@@ -4531,6 +4720,18 @@ const styles = StyleSheet.create({
 
   keyboardAvoider: { flex: 1, backgroundColor: '#FAFAFA' },
   scrollContent: { paddingBottom: 24 },
+
+  chatTabRoot: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+  },
+  // Same white strip the sticky clone uses, but static: it never scrolls.
+  chatTabBar: {
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    zIndex: 2,
+  },
+  chatTabBody: { flex: 1 },
 
   // Sticky Overview/Plan clone — pinned to the top of the scroll area (right
   // under the black header). paddingHorizontal cancels the toggle's -16 bleed so

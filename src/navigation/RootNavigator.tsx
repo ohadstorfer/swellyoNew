@@ -53,7 +53,7 @@ import { setPendingTab, usePendingTab } from './pendingTabState';
 import { hideSwellyFabNow, showSwellyFab, swellyFabOpacity } from './swellyFabVisibility';
 import { useSwellyHintVisible } from './swellyHintState';
 import SwellyTapHint, { SWELLY_HINT_WIDTH, SWELLY_HINT_HEIGHT } from '../components/SwellyTapHint';
-import { navigationRef, pushRootCard } from './navigationRef';
+import { navigationRef, pushChatCard, pushRootCard } from './navigationRef';
 import { friendlyErrorMessage } from '../utils/friendlyError';
 
 /**
@@ -118,13 +118,14 @@ function ProfileTabScreen() {
 
 function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'TripDetail'>) {
   const { tripCard } = useMainNav();
-  const { tripId, focus } = route.params;
+  const { tripId, focus, chat, focusNonce } = route.params;
   return (
     <TripDetailScreen
       tripId={tripId}
       initialFocus={focus ?? null}
+      initialChat={chat ?? null}
+      focusNonce={focusNonce}
       onBack={() => navigation.goBack()}
-      onOpenGroupChat={tripCard.onOpenGroupChat}
       onEditTrip={trip => navigation.dispatch(StackActions.push('EditTrip', { trip }))}
       onEditOperatorTrip={editTripId => navigation.dispatch(StackActions.push('OperatorEditTrip', { tripId: editTripId }))}
       onViewUserProfile={userId => tripCard.onViewUserProfile(userId, tripId)}
@@ -650,7 +651,8 @@ function HomeTabsExtras() {
   // mounted, so a cold-start request waits in AppContent state until then.
   useEffect(() => {
     if (!requestedChatCard) return;
-    pushRootCard('ChatCard', requestedChatCard);
+    // Trip group chats reroute to the trip's Chat tab.
+    pushChatCard(requestedChatCard);
     onRequestedChatCardConsumed();
   }, [requestedChatCard, onRequestedChatCardConsumed]);
 

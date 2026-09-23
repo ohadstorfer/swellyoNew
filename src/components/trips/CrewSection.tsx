@@ -1,19 +1,16 @@
 /**
  * CrewSection — the trip's crew, and the sheet behind each face.
  *
- * Two shapes of the same data: `CrewSection` (a list) and `CrewCards` (a row of
- * cards, the operator-trip Overview and Dashboard). The list renders in:
- *   - Overview, for people who have NOT joined (TripDetailViewRedesigned) —
- *     part of the sales page.
- *   - Plan, for everyone who HAS (TripDetailScreen) — the same people, now as
- *     "who is running your trip".
+ * `CrewCards` is the one shape: a horizontal row of cards, rendered as "Staff"
+ * on the Overview (TripDetailViewRedesigned, everyone — booked or still
+ * deciding) and as "My staff" on the operator's Dashboard (TripDetailScreen).
+ * A vertical-list variant used to serve the Plan tab; it was dropped on
+ * 18 Sep so one section does not wear two designs.
  *
- * The list card cuts a bio at three lines so one chatty guide cannot bury the
- * next person. Tapping a row opens the full card in a bottom sheet — photo,
- * role, the whole bio. Crew are not trip members, so there is no profile
- * screen to push; the sheet IS the profile (staff rows carry `user_id` for a
- * later "open their real profile", but the RPC deliberately does not expose
- * it yet).
+ * Tapping a card opens the full profile in a bottom sheet — photo, role, the
+ * whole bio. Crew are not trip members, so there is no profile screen to push;
+ * the sheet IS the profile (staff rows carry `user_id` for a later "open their
+ * real profile", but the RPC deliberately does not expose it yet).
  *
  * Data is `useTripCrew`'s rows verbatim: already filtered server-side to
  * accepted people whose tier carries `profile.shown_to_travelers`.
@@ -68,48 +65,6 @@ const Avatar: React.FC<{ url: string | null; size: number }> = ({ url, size }) =
   );
 };
 
-export const CrewSection: React.FC<{
-  crew: CrewMember[];
-  /** The section heading. Overview says "Crew"; Plan can say the same. */
-  title?: string;
-  style?: any;
-}> = ({ crew, title = 'Crew', style }) => {
-  const [open, setOpen] = useState<CrewMember | null>(null);
-
-  if (crew.length === 0) return null;
-
-  return (
-    <View style={style}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.list}>
-        {crew.map(c => (
-          <Pressable
-            key={c.id}
-            style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            onPress={() => setOpen(c)}
-            accessibilityRole="button"
-            accessibilityLabel={`About ${c.name ?? 'crew member'}`}
-          >
-            <Avatar url={c.avatarUrl} size={44} />
-            <View style={styles.rowText}>
-              <Text style={styles.name} numberOfLines={1}>{c.name}</Text>
-              {!!c.title && (
-                <Text style={styles.role} numberOfLines={1}>{c.title}</Text>
-              )}
-              {/* Three lines, then it stops — the sheet has the rest. */}
-              {!!c.bio && (
-                <Text style={styles.bio} numberOfLines={3}>{c.bio}</Text>
-              )}
-            </View>
-          </Pressable>
-        ))}
-      </View>
-
-      <CrewSheet member={open} onClose={() => setOpen(null)} />
-    </View>
-  );
-};
-
 /** The full card behind a crew face: photo, role, the whole bio. Crew are not
  *  trip members, so there is no profile screen to push — the sheet IS the
  *  profile. */
@@ -139,9 +94,8 @@ const CrewSheet: React.FC<{ member: CrewMember | null; onClose: () => void }> = 
  * The crew as a row of cards — "Staff" on the Overview, "My staff" on the
  * operator's Dashboard (Figma 14980-66208 / 14980-65921).
  *
- * Same people and same sheet as CrewSection; only the shape differs. The
- * operator's card wears the accent border, because on a page of faces the one
- * person accountable for the trip should be findable at a glance.
+ * The operator's card wears the accent border, because on a page of faces the
+ * one person accountable for the trip should be findable at a glance.
  *
  * `onAddStaff` adds the dashed "+ Add staff" card — pass it only to someone who
  * may manage the crew. `onViewAll` likewise: there is no read-only crew screen,
@@ -241,44 +195,6 @@ export const CrewCards: React.FC<{
 };
 
 const styles = StyleSheet.create({
-  sectionTitle: {
-    fontFamily: ff('Montserrat', '600'),
-    fontSize: 16,
-    lineHeight: 22,
-    color: C.ink,
-    includeFontPadding: false,
-    marginBottom: 12,
-  },
-  list: { gap: 12 },
-  // flex-start, not centre: a row with a three-line blurb would otherwise
-  // float its avatar to the middle of the paragraph.
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  rowPressed: { opacity: 0.7 },
-  rowText: { flex: 1 },
-  name: {
-    fontFamily: ff('Montserrat', '600'),
-    fontSize: 14,
-    lineHeight: 20,
-    color: C.ink,
-    includeFontPadding: false,
-  },
-  role: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12,
-    lineHeight: 17,
-    color: C.textMuted,
-    marginTop: 2,
-    includeFontPadding: false,
-  },
-  bio: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12,
-    lineHeight: 17,
-    color: C.textMuted,
-    marginTop: 3,
-    includeFontPadding: false,
-  },
-
   // ── CrewCards (Figma 14980-66234) ──
   cardsHeader: {
     flexDirection: 'row',
@@ -411,4 +327,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CrewSection;
+export default CrewCards;

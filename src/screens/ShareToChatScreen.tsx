@@ -93,6 +93,15 @@ export function ShareToChatScreen() {
   }, [conversations, query]);
 
   const openChat = (c: Conversation, sharedMedia?: { uri: string; mimeType: string; kind: 'image' | 'video' }) => {
+    // A trip's group chat lives on the trip page's Chat tab, not in a card.
+    const tripId = !c.is_direct && typeof c.metadata?.trip_id === 'string' ? c.metadata.trip_id : null;
+    const surftripId = !c.is_direct && typeof c.metadata?.surftrip_id === 'string' ? c.metadata.surftrip_id : null;
+    if (tripId && !surftripId) {
+      navigation.dispatch(
+        StackActions.replace('TripDetail', { tripId, focus: 'chat', chat: { sharedMedia } }),
+      );
+      return;
+    }
     navigation.dispatch(
       StackActions.replace('ChatCard', {
         conversationId: c.id,

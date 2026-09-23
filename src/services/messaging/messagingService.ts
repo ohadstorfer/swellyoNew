@@ -12,7 +12,11 @@ import { withTimeout } from './withTimeout';
 // for the new-conversation event (conversation_members INSERT). message_id is absent
 // for member_added — the handler only needs conversation_id either way.
 export type InboxEvent = { conversation_id: string; message_id?: string; op: string };
-export type InboxIntent = { kind: 'touch'; conversationId: string; messageId?: string };
+export type InboxIntent =
+  | { kind: 'touch'; conversationId: string; messageId?: string }
+  // 'member_left': the user left or was removed from a trip, and the server
+  // marked their chat row departed. The chat leaves their Messages list.
+  | { kind: 'leave'; conversationId: string };
 
 /**
  * Pure mapper: converts a raw user-inbox broadcast payload into an intent the
@@ -21,6 +25,7 @@ export type InboxIntent = { kind: 'touch'; conversationId: string; messageId?: s
  */
 export function inboxEventToIntent(e: InboxEvent): InboxIntent | null {
   if (!e || !e.conversation_id) return null;
+  if (e.op === 'member_left') return { kind: 'leave', conversationId: e.conversation_id };
   return { kind: 'touch', conversationId: e.conversation_id, messageId: e.message_id };
 }
 
@@ -407,15 +412,21 @@ class MessagingService {
       // not reflect activity — a user who joined many group chats recently can
       // push older but actively-used direct chats off page 1, hiding them in
       // the UI. We page on conversations.updated_at instead.
+      // `*` so a departed row (left_at set — they left or were removed from the
+      // trip) can be dropped: that chat is read-only history on the trip page,
+      // not a Messages-list entry. `*` rather than naming left_at keeps this
+      // working against a database that predates the column.
       const { data: membershipData, error: membershipError } = await supabase
         .from('conversation_members')
-        .select('conversation_id')
+        .select('*')
         .eq('user_id', user.id);
 
       if (membershipError) throw membershipError;
       markStage('memberships');
 
-      const allMemberConversationIds = (membershipData || []).map(m => m.conversation_id);
+      const allMemberConversationIds = (membershipData || [])
+        .filter((m: { left_at?: string | null }) => !m.left_at)
+        .map(m => m.conversation_id);
 
       if (allMemberConversationIds.length === 0) {
         return { conversations: [], hasMore: false };
@@ -490,7 +501,8 @@ class MessagingService {
         }),
       supabase
         .from('conversation_members')
-        .select('conversation_id, user_id, role, joined_at, last_read_message_id, last_read_at, preferences')
+        // `*` to read left_at without breaking on a database that lacks it.
+        .select('*')
         .in('conversation_id', conversationIds),
       supabase
         .from('conversation_members')
@@ -499,7 +511,11 @@ class MessagingService {
         .in('conversation_id', conversationIds),
     ]);
     const { data: lastMessages, error: messagesError } = lastMessagesRes;
-    const { data: allMembersData, error: allMembersError } = allMembersRes;
+    // Members who left the trip are no longer in the chat's member list.
+    const allMembersData = allMembersRes.data?.filter(
+      (m: { left_at?: string | null }) => !m.left_at,
+    ) ?? null;
+    const allMembersError = allMembersRes.error;
     const { data: userMemberData, error: userMemberError } = userMemberRes;
     markStage?.('lastMessages+members+readState');
 
@@ -1996,6 +2012,9 @@ class MessagingService {
       .select('*')
       .eq('is_direct', false)
       .eq('metadata->>trip_id', tripId)
+      // Some trips have duplicate chats (made by the old client). The oldest
+      // is the real one — the server syncs members into that one only.
+      .order('created_at', { ascending: true })
       .limit(1)
       .maybeSingle();
 
@@ -3369,14 +3388,17 @@ class MessagingService {
       }
 
       // Get all conversations where user is a member
+      // Departed rows are dropped — see getConversations.
       const { data: membershipData, error: membershipError } = await supabase
         .from('conversation_members')
-        .select('conversation_id')
+        .select('*')
         .eq('user_id', user.id);
 
       if (membershipError) throw membershipError;
 
-      const conversationIds = membershipData.map(m => m.conversation_id);
+      const conversationIds = membershipData
+        .filter((m: { left_at?: string | null }) => !m.left_at)
+        .map(m => m.conversation_id);
 
       if (conversationIds.length === 0) {
         return [];

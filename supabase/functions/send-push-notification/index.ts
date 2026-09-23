@@ -346,12 +346,15 @@ serve(async (req) => {
       );
     }
 
-    // Get conversation members (exclude sender)
+    // Get conversation members (exclude sender). Only ACTIVE ones: someone who
+    // left or was removed from the trip keeps a row with left_at set, for their
+    // read-only history — they get no pushes for new messages.
     const { data: members, error: membersError } = await supabase
       .from('conversation_members')
       .select('user_id, preferences')
       .eq('conversation_id', conversation_id)
-      .neq('user_id', sender_id);
+      .neq('user_id', sender_id)
+      .is('left_at', null);
 
     if (membersError) {
       console.error(`[Push Notification] [${requestId}] Error fetching members:`, membersError);

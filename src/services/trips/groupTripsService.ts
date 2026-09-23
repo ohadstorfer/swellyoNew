@@ -1747,14 +1747,9 @@ export async function leaveTrip(tripId: string, userId: string): Promise<void> {
     console.warn('[groupTripsService] leaveTrip join_request delete failed:', joinReqErr);
   }
 
-  try {
-    const conv = await messagingService.getConversationByTripId(tripId);
-    if (conv?.id) {
-      await messagingService.removeConversationMember(conv.id, userId);
-    }
-  } catch (chatError) {
-    console.warn('[groupTripsService] leaveTrip chat removal failed:', chatError);
-  }
+  // The trip chat is not touched here. A trigger on group_trip_participants
+  // marks the member row departed (left_at), which keeps their history
+  // readable and stops everything else (docs/specs/trip-chat-tab.md, req 23).
 }
 
 /**
@@ -1807,12 +1802,11 @@ export async function removeParticipant(
   reason?: string | null
 ): Promise<void> {
   // Only the participant delete is awaited — it's what makes the member row
-  // disappear. The banner, join-request cleanup, chat removal, and push all
+  // disappear. The banner, join-request cleanup and push all
   // tolerate failure with a warn (as before), so they run in the background
   // instead of holding the UI for ~8 extra round trips.
 
-  // Shared lookup: the banner (pre-delete) and chat removal (post-delete)
-  // both need the trip's conversation.
+  // The banner needs the trip's conversation.
   const convPromise = messagingService.getConversationByTripId(tripId).catch(convErr => {
     console.warn('[groupTripsService] removeParticipant conversation lookup failed:', convErr);
     return null;
@@ -1886,16 +1880,10 @@ export async function removeParticipant(
       }
     });
 
-  void (async () => {
-    try {
-      const conv = await convPromise;
-      if (conv?.id) {
-        await messagingService.removeConversationMember(conv.id, userId);
-      }
-    } catch (chatError) {
-      console.warn('[groupTripsService] removeParticipant chat removal failed:', chatError);
-    }
-  })();
+  // Chat access is the server's job now: a trigger marks their chat row
+  // departed. The client delete this replaced only ever worked for the chat's
+  // creator — a co-host removing someone deleted 0 rows under RLS, and the
+  // removed person kept the chat.
 
   supabase.functions
     .invoke('send-trip-removed-notification', {

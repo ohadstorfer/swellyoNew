@@ -11,7 +11,7 @@
 // Only shown to members (host + approved); non-members never see it.
 
 import React, { useEffect } from 'react';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -22,12 +22,13 @@ import Animated, {
 import { ff } from '../../theme/fonts';
 import { TripIcon, type TripIconName } from './tripIcons';
 
-export type TripTab = 'overview' | 'plan' | 'dashboard';
+export type TripTab = 'overview' | 'plan' | 'dashboard' | 'chat';
 
 export const TAB_LABEL: Record<TripTab, string> = {
   overview: 'Overview',
   plan: 'Plan',
   dashboard: 'Dashboard',
+  chat: 'Chat',
 };
 
 interface Props {
@@ -35,6 +36,9 @@ interface Props {
   onChange: (tab: TripTab) => void;
   /** Which tabs this viewer gets, in order. Defaults to the traveler's two. */
   tabs?: TripTab[];
+  /** Unread counts shown as a small pill next to a tab's label (Chat). 0 or
+   *  missing = no pill. */
+  badges?: Partial<Record<TripTab, number>>;
 }
 
 /**
@@ -45,6 +49,7 @@ interface Props {
 const TAB_ICON: Partial<Record<TripTab, TripIconName>> = {
   dashboard: 'layout-alt-04',
   overview: 'sun-setting-03',
+  chat: 'message-text-circle-02',
 };
 
 const DEFAULT_TABS: TripTab[] = ['overview', 'plan'];
@@ -54,7 +59,7 @@ const DEFAULT_TABS: TripTab[] = ['overview', 'plan'];
 // stopped. Same curve the app's other on-screen movement uses.
 const SLIDE = { duration: 220, easing: Easing.bezier(0.77, 0, 0.175, 1) };
 
-export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT_TABS }) => {
+export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT_TABS, badges }) => {
   const count = tabs.length;
   const index = Math.max(0, tabs.indexOf(value));
   const withIcons = tabs.every(t => !!TAB_ICON[t]);
@@ -62,7 +67,13 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT
   // Animated in tab-INDEX units, not pixels, so the same value drives both the
   // slide and each label's weight crossfade.
   const position = useSharedValue(index);
-  const width = useSharedValue(0);
+  // Seeded with the window width — the bar bleeds edge to edge, so that is its
+  // width on a phone — and corrected by onLayout. Starting at 0 put the
+  // underline under the FIRST tab for the frame before layout, so a bar that
+  // mounts on another tab (the Chat tab's own bar, a trip opening on
+  // Dashboard) flicked back to Overview and then jumped.
+  const { width: windowWidth } = useWindowDimensions();
+  const width = useSharedValue(windowWidth);
 
   useEffect(() => {
     position.value = withTiming(index, SLIDE);
@@ -91,6 +102,7 @@ export const TripTabToggle: React.FC<Props> = ({ value, onChange, tabs = DEFAULT
           index={i}
           position={position}
           selected={tab === value}
+          badge={badges?.[tab] ?? 0}
           onPress={() => onChange(tab)}
         />
       ))}
@@ -113,8 +125,9 @@ const TabSegment: React.FC<{
   index: number;
   position: SharedValue<number>;
   selected: boolean;
+  badge: number;
   onPress: () => void;
-}> = ({ label, icon, index, position, selected, onPress }) => {
+}> = ({ label, icon, index, position, selected, badge, onPress }) => {
   // 1 when this tab is active, 0 once the indicator is a full tab away. The
   // clamp is what keeps a three-tab jump (Overview -> Dashboard) from flashing
   // the middle label as it passes over Plan.
@@ -134,7 +147,7 @@ const TabSegment: React.FC<{
       activeOpacity={0.8}
       accessibilityRole="tab"
       accessibilityState={{ selected }}
-      accessibilityLabel={label}
+      accessibilityLabel={badge > 0 ? `${label}, ${badge} unread` : label}
     >
       <View style={styles.segmentRow}>
         {icon ? <TripIcon name={icon} size={16} color="#333333" /> : null}
@@ -149,6 +162,13 @@ const TabSegment: React.FC<{
             {label}
           </Animated.Text>
         </View>
+        {/* Static on purpose: it changes with every message, so a pop would
+            fire all day. */}
+        {badge > 0 ? (
+          <View style={styles.badge}>
+            <Animated.Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Animated.Text>
+          </View>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -211,6 +231,23 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+  },
+  badge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: '#05BCD3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    fontFamily: ff('Inter', '700'),
+    ...(Platform.OS === 'web' ? { fontWeight: '700' as const } : null),
+    fontSize: 11,
+    lineHeight: 14,
+    color: '#FFFFFF',
+    includeFontPadding: false,
   },
   // Accent underline — one segment wide, slides to the active tab. Sits on top
   // of the container's hairline. Width comes from the animated style, because
