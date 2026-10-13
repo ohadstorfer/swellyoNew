@@ -112,4 +112,5 @@
 - [Stripe Test-Mode Connected Balance Funding](research_stripe_test_mode_connected_balance.md) — 4000000000000077/tok_bypassPending, on_behalf_of ambiguity, fund-then-Transfer fallback, delay_days unavailable on Express
 - [WeTravel Traveler-Facing Flow](research_wetravel_traveler_flow.md) — checkout/questionnaire/eSignature, payment plans, Manage Booking portal, emails, no self-serve cancel
 - [Market: Fishing Trip Operators](research_market_fishing_trip_operators.md) — Nervous Waters 19 ops; Orvis/Frontiers/YellowDog block scrapers; no public prices
+- [US Regulatory: Wallet + Vendor Payouts](research_us_regulatory_wallet_payouts.md) — agent-of-payee limits, FinCEN, OFAC Nicaragua, seller-of-travel
 - [Stripe Instant Bank Payments](research_stripe_instant_bank_payments.md) — 2.6%+30c, auto via Link, guarantees bank-returns not disputes, on_behalf_of unverified by name
