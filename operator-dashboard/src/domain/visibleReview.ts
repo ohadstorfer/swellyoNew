@@ -3,7 +3,7 @@
  *
  * ── Why this exists ─────────────────────────────────────────────────────────
  * A Manager has no `medical.view` (lost it on 24 Aug, 20260824000000). RLS
- * refuses them `organized_trip_medical_forms`, so `fetchTripReview` reads every
+ * refuses them `organized_trip_personal_info`, so `fetchTripReview` reads every
  * traveler's medical form as not filled in. That is a FALSE ZERO, not a hidden
  * row — and on 9 Sep 2026 the web dashboard showed it in two places:
  *

@@ -60,7 +60,7 @@ export const STAFF_KIND_COPY: Record<StaffKind, { title: string; sub: string }> 
   passport: { title: 'Passport', sub: 'A photo of the passport page.' },
   visa: { title: 'Visa', sub: 'Their entry permit for this destination.' },
   waiver: { title: 'Waiver', sub: 'They read your terms and agree by typing their name.' },
-  medical: { title: 'Medical info', sub: 'Allergies, diet, injuries, medication.' },
+  medical: { title: 'Personal info', sub: 'Allergies, diet, injuries, medication.' },
   insurance: { title: 'Insurance', sub: 'Their policy document or confirmation.' },
   flights: { title: 'Flight details', sub: 'Their ticket, so you can plan the pickup.' },
 };
@@ -363,7 +363,7 @@ export async function fetchStaffFulfilment(tripId: string): Promise<Set<string>>
       .select('user_id, requirement_id')
       .eq('trip_id', tripId),
     supabase
-      .from('organized_trip_medical_forms')
+      .from('organized_trip_personal_info')
       .select('user_id, completed_at')
       .eq('trip_id', tripId),
   ]);

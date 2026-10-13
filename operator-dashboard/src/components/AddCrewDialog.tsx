@@ -50,7 +50,7 @@ import { useAuth } from '../lib/auth';
 import { friendlyError } from '../lib/errors';
 import { Avatar } from './StateBits';
 import { CrewPaperworkPicker } from './CrewPaperwork';
-import { ProfileFields, TierPicker } from './CrewFields';
+import { LocalField, ProfileFields, TierPicker } from './CrewFields';
 
 const BLOCKED_REASON: Record<Exclude<StaffSearchResult['state'], 'available'>, string> = {
   traveler: 'Already a traveler on this trip',
@@ -80,6 +80,7 @@ export function AddCrewDialog({
   const [roleKey, setRoleKey] = useState<StaffRoleKey>('crew');
   const [title, setTitle] = useState('');
   const [bio, setBio] = useState('');
+  const [isLocal, setIsLocal] = useState(false);
   const [kinds, setKinds] = useState<StaffKind[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,6 +141,7 @@ export function AddCrewDialog({
         title,
         bio,
         requirementIds,
+        isLocal,
       });
     },
     onMutate: () => setError(null),
@@ -155,7 +157,7 @@ export function AddCrewDialog({
       // The ROW first, the photo second. An upload that fails must not lose the
       // operator the name and title they typed — the credit exists without a
       // face, and the crew page can add one later.
-      const staffId = await addListedCrew({ tripId, displayName, title, bio });
+      const staffId = await addListedCrew({ tripId, displayName, title, bio, isLocal });
       if (photoFile && user) {
         const url = await uploadCrewPhoto(photoFile, user.id);
         await updateCrewMember({ id: staffId, userId: null }, { photoUrl: url });
@@ -178,6 +180,7 @@ export function AddCrewDialog({
         title,
         bio,
         requirementIds,
+        isLocal,
       });
     },
     onMutate: () => setError(null),
@@ -330,6 +333,8 @@ export function AddCrewDialog({
                 setTitle={setTitle}
                 bio={bio}
                 setBio={setBio}
+                isLocal={isLocal}
+                setIsLocal={setIsLocal}
                 kinds={kinds}
                 setKinds={setKinds}
               />
@@ -374,6 +379,7 @@ export function AddCrewDialog({
               </label>
 
               <ProfileFields title={title} bio={bio} onTitle={setTitle} onBio={setBio} />
+              <LocalField value={isLocal} onChange={setIsLocal} />
             </>
           )}
 
@@ -392,6 +398,8 @@ export function AddCrewDialog({
                 setTitle={setTitle}
                 bio={bio}
                 setBio={setBio}
+                isLocal={isLocal}
+                setIsLocal={setIsLocal}
                 kinds={kinds}
                 setKinds={setKinds}
               />
@@ -493,6 +501,8 @@ function TierAndPaperwork({
   setTitle,
   bio,
   setBio,
+  isLocal,
+  setIsLocal,
   kinds,
   setKinds,
 }: {
@@ -503,6 +513,8 @@ function TierAndPaperwork({
   setTitle: (s: string) => void;
   bio: string;
   setBio: (s: string) => void;
+  isLocal: boolean;
+  setIsLocal: (v: boolean) => void;
   kinds: StaffKind[];
   setKinds: (k: StaffKind[]) => void;
 }) {
@@ -513,6 +525,7 @@ function TierAndPaperwork({
 
       <div style={{ marginTop: 16 }}>
         <ProfileFields title={title} bio={bio} onTitle={setTitle} onBio={setBio} />
+        <LocalField value={isLocal} onChange={setIsLocal} />
       </div>
 
       <h2 style={{ marginTop: 16, marginBottom: 8 }}>Paperwork</h2>

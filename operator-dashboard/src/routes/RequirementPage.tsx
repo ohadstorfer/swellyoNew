@@ -100,11 +100,11 @@ export function RequirementPage() {
         <PageHead
           back={`/trips/${tripId}`}
           backLabel={trip.data.title}
-          title={hidden ? 'Medical form' : 'Not found'}
+          title={hidden ? 'Personal info' : 'Not found'}
         />
         <p className="muted">
           {hidden
-            ? 'Medical answers are for the operator and co-operators only.'
+            ? 'Personal info answers are for the operator and co-operators only.'
             : 'That requirement is no longer on this trip.'}
         </p>
       </>

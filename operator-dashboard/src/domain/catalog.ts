@@ -18,7 +18,7 @@ const LABELS: Record<string, string> = {
   visa: 'Visas',
   flights: 'Flights',
   waiver: 'Waiver',
-  medical: 'Medical form',
+  medical: 'Personal info',
 };
 
 /** Plural label for a tile row. Falls back to the operator's own wording. */
@@ -108,14 +108,14 @@ export const REQUIREMENT_CATALOG: Record<
     operatorSub: 'Travelers read your terms and agree by typing their name.',
   },
   medical: {
-    title: 'Medical info',
+    title: 'Personal info',
     helpText: 'Allergies, diet, injuries and medication.',
     // ⚠️ 'upload', not 'acknowledge', and not a typo. The database resolves an
     // 'acknowledge' row by looking for an agreement the medical form never
     // writes, so it would wait forever. See the app's catalog for the full
     // branch order.
     reqType: 'upload',
-    operatorTitle: 'Medical info',
+    operatorTitle: 'Personal info',
     operatorSub: 'Allergies, diet, injuries, medication. A form, not a file.',
   },
   insurance: {

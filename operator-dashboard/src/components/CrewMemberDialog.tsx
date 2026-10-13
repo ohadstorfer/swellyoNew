@@ -29,7 +29,7 @@ import { useAuth } from '../lib/auth';
 import { friendlyError } from '../lib/errors';
 import { Avatar } from './StateBits';
 import { CrewPaperworkSection } from './CrewPaperwork';
-import { ProfileFields, TierPicker, TIER_TAG } from './CrewFields';
+import { LocalField, ProfileFields, TierPicker, TIER_TAG } from './CrewFields';
 
 export function CrewMemberDialog({
   tripId,
@@ -61,6 +61,7 @@ export function CrewMemberDialog({
   const [name, setName] = useState(member.name);
   const [title, setTitle] = useState(member.title ?? '');
   const [bio, setBio] = useState(member.bio ?? '');
+  const [isLocal, setIsLocal] = useState(member.isLocal);
   const [roleKey, setRoleKey] = useState<StaffRoleKey>(member.roleKey);
   const [error, setError] = useState<string | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
@@ -95,6 +96,8 @@ export function CrewMemberDialog({
       await updateCrewMember(member, {
         title,
         bio,
+        // Only sent when it changed — a no-op write is still a write.
+        ...(isLocal !== member.isLocal ? { isLocal } : {}),
         // Offered for a Listed credit only — the service refuses both for
         // anyone with an account, which is the same rule stated twice on
         // purpose.
@@ -200,6 +203,7 @@ export function CrewMemberDialog({
           )}
 
           <ProfileFields title={title} bio={bio} onTitle={setTitle} onBio={setBio} />
+          <LocalField value={isLocal} onChange={setIsLocal} />
 
           {editable && (
             <>

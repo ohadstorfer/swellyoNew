@@ -151,3 +151,36 @@ export function ProfileFields({
     </>
   );
 }
+
+/**
+ * "Local to this area" — the operator says this person lives where the trip
+ * happens. The app's trip overview counts them as "Local Crew".
+ *
+ * Kept OUT of ProfileFields on purpose: MyCrewCard reuses those fields for a
+ * crew member editing their own row, and this one is the operator's call
+ * (`guard_staff_self_edit` refuses it from anyone else).
+ */
+export function LocalField({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="row" style={{ gap: 12, marginTop: 8, cursor: 'pointer' }}>
+      <input
+        type="checkbox"
+        checked={value}
+        onChange={e => onChange(e.target.checked)}
+        style={{ width: 16, height: 16, flexShrink: 0, accentColor: 'var(--cyan-dark)' }}
+      />
+      <span>
+        <span style={{ display: 'block' }}>Local to this area</span>
+        <span className="muted small" style={{ display: 'block', marginTop: 2 }}>
+          Counted as local crew on the trip page.
+        </span>
+      </span>
+    </label>
+  );
+}

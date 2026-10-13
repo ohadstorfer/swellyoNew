@@ -171,6 +171,7 @@ export function CrewPage() {
                   </span>
                 </span>
                 <span className="row" style={{ gap: 12 }}>
+                  {member.isLocal && <span className="tag tag-idle">Local</span>}
                   <span className={`tag ${TIER_TAG[member.roleKey]}`}>
                     {roleLabel(member.roleKey)}
                   </span>

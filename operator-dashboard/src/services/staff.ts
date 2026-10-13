@@ -22,6 +22,7 @@
  */
 import { supabase } from '../lib/supabase';
 import type { TripCapability } from './access';
+import { staffInviteUrl } from '../domain/inviteLinks';
 
 /**
  * The six tiers. Order matters for display only — never for a permission check.
@@ -78,6 +79,12 @@ export type CrewMember = {
   acceptedAt: string | null;
   /** They have an account but have not accepted the invite yet. */
   pending: boolean;
+  /**
+   * The operator marked them local to the trip area (`is_local`, app
+   * migration 20261002000000). Drives the app overview's "Local Crew" count.
+   * The operator's call — `guard_staff_self_edit` stops crew setting it.
+   */
+  isLocal: boolean;
 };
 
 /**
@@ -135,7 +142,7 @@ export async function fetchStaffRoles(): Promise<StaffRole[]> {
 export async function fetchCrew(tripId: string): Promise<CrewMember[]> {
   const { data, error } = await supabase
     .from('organized_trip_staff')
-    .select('id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at')
+    .select('id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at, is_local')
     .eq('trip_id', tripId)
     .is('revoked_at', null);
   if (error) throw error;
@@ -170,6 +177,7 @@ export async function fetchCrew(tripId: string): Promise<CrewMember[]> {
         invitedAt: r.invited_at,
         acceptedAt: r.accepted_at ?? null,
         pending: !!r.user_id && !r.accepted_at,
+        isLocal: !!r.is_local,
       };
     })
     .sort((a, b) => TIER_ORDER.indexOf(a.roleKey) - TIER_ORDER.indexOf(b.roleKey));
@@ -212,9 +220,17 @@ export async function updateCrewRole(staffId: string, roleKey: StaffRoleKey): Pr
  */
 export async function updateCrewMember(
   member: Pick<CrewMember, 'id' | 'userId'>,
-  patch: { title?: string; bio?: string; displayName?: string; photoUrl?: string | null },
+  patch: {
+    title?: string;
+    bio?: string;
+    displayName?: string;
+    photoUrl?: string | null;
+    /** Operator only — the self-edit guard refuses it from the crew member. */
+    isLocal?: boolean;
+  },
 ): Promise<void> {
-  const update: Record<string, string | null> = {};
+  const update: Record<string, string | boolean | null> = {};
+  if (patch.isLocal !== undefined) update.is_local = patch.isLocal;
   if (patch.title !== undefined) update.title = patch.title.trim() || null;
   if (patch.bio !== undefined) update.bio = patch.bio.trim() || null;
 
@@ -322,6 +338,7 @@ export async function inviteStaffMember(params: {
   title?: string;
   bio?: string;
   requirementIds?: string[];
+  isLocal?: boolean;
 }): Promise<void> {
   const { error } = await supabase.rpc('invite_staff_member', {
     p_trip_id: params.tripId,
@@ -330,6 +347,7 @@ export async function inviteStaffMember(params: {
     p_title: params.title?.trim() || null,
     p_requirement_ids: params.requirementIds ?? [],
     p_bio: params.bio?.trim() || null,
+    p_is_local: !!params.isLocal,
   });
   if (error) throw error;
 }
@@ -356,6 +374,7 @@ export async function addListedCrew(params: {
   title?: string;
   bio?: string;
   photoUrl?: string | null;
+  isLocal?: boolean;
 }): Promise<string> {
   const name = params.displayName.trim();
   // `ots_listed_needs_name` refuses a row with neither an account nor a name.
@@ -380,6 +399,7 @@ export async function addListedCrew(params: {
       title: params.title?.trim() || null,
       bio: params.bio?.trim() || null,
       photo_url: params.photoUrl ?? null,
+      is_local: !!params.isLocal,
       // Nobody has to accept a credit for themselves — there is no account to
       // accept with. Stamped so the crew list does not show them as pending
       // forever. Same as the app's Listed path.
@@ -397,6 +417,11 @@ export async function addListedCrew(params: {
  * The app shares it through the OS share sheet; a desktop copies it to the
  * clipboard, which is what a desktop does with a link. Same RPC, same link.
  *
+ * The RPC returns a bare TOKEN (`returns text`), not a URL. This used to be
+ * handed straight to the copy button, so operators were pasting an
+ * unclickable hex string into WhatsApp. Wrap it the way the app does in
+ * src/services/trips/tripStaffService.ts.
+ *
  * The paperwork rides on the invite and is applied when they accept — there is
  * no staff row to assign it to before then (20260813160000).
  */
@@ -406,6 +431,7 @@ export async function createStaffInviteLink(params: {
   title?: string;
   bio?: string;
   requirementIds?: string[];
+  isLocal?: boolean;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('create_staff_invite', {
     p_trip_id: params.tripId,
@@ -413,9 +439,10 @@ export async function createStaffInviteLink(params: {
     p_title: params.title?.trim() || null,
     p_requirement_ids: params.requirementIds ?? [],
     p_bio: params.bio?.trim() || null,
+    p_is_local: !!params.isLocal,
   });
   if (error) throw error;
-  return data as string;
+  return staffInviteUrl(data as string);
 }
 
 /**
@@ -434,7 +461,7 @@ export async function fetchMyCrewRow(tripId: string): Promise<CrewMember | null>
   const { data, error } = await supabase
     .from('organized_trip_staff')
     .select(
-      'id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at, revoked_at',
+      'id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at, revoked_at, is_local',
     )
     .eq('trip_id', tripId)
     .eq('user_id', user.id)
@@ -454,5 +481,6 @@ export async function fetchMyCrewRow(tripId: string): Promise<CrewMember | null>
     invitedAt: (data.invited_at as string | null) ?? '',
     acceptedAt: (data.accepted_at as string | null) ?? null,
     pending: !data.accepted_at,
+    isLocal: !!data.is_local,
   };
 }

@@ -47,7 +47,7 @@ export async function fetchCounts(tripId: string): Promise<CountRow[]> {
  */
 export async function fetchMedicalFlags(tripId: string): Promise<MedicalFlags> {
   const { data, error } = await supabase
-    .from('organized_trip_medical_flags')
+    .from('organized_trip_personal_info_flags')
     .select('injuries_reported, allergies_reported, dietary_reported, medications_reported, forms_completed')
     .eq('trip_id', tripId)
     .maybeSingle();

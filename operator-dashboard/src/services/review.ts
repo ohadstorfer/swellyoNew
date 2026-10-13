@@ -99,7 +99,7 @@ export async function fetchTripReview(
       .select('user_id, requirement_id, agreed_at, operator_document_id')
       .eq('trip_id', tripId),
     supabase
-      .from('organized_trip_medical_forms')
+      .from('organized_trip_personal_info')
       .select('user_id, completed_at')
       .eq('trip_id', tripId),
     fetchCurrentWaiver(tripId),

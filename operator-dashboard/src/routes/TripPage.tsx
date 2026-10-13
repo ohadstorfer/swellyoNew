@@ -73,7 +73,7 @@ export function TripPage() {
   // zero a Manager saw on 9 Sep 2026. See domain/visibleReview.
   const review = useTripReview(tripId, userIds, members.isSuccess);
   const counts = useQuery({ queryKey: ['counts', tripId], queryFn: () => fetchCounts(tripId) });
-  // Counts, but still medical: `organized_trip_medical_flags` is a
+  // Counts, but still medical: `organized_trip_personal_info_flags` is a
   // security_invoker view over the answers, so a Manager gets zeroes rather
   // than an error — a card reading "0 injuries · 0 allergies" on a trip that
   // has both. Hide it on the same capability the app hides its copy of this
@@ -358,7 +358,7 @@ export function TripPage() {
                 {waiver && medical && <span className="muted"> · </span>}
                 {medical && (
                   <Link className="muted" to={`/trips/${tripId}/d/${medical.id}`}>
-                    Medical form {agreedCount(medical.id)}/{memberCount}
+                    Personal info {agreedCount(medical.id)}/{memberCount}
                   </Link>
                 )}
               </p>
@@ -408,7 +408,7 @@ export function TripPage() {
         {canViewMedical && (
         <div className="card enter">
           <div className="card-head">
-            <h2>Medical flags</h2>
+            <h2>Personal info flags</h2>
             {medical && (
               <Link className="small" to={`/trips/${tripId}/d/${medical.id}`}>
                 View all

@@ -94,7 +94,7 @@ export async function fetchMedicalForm(
   userId: string,
 ): Promise<MedicalForm | null> {
   const { data, error } = await supabase
-    .from('organized_trip_medical_forms')
+    .from('organized_trip_personal_info')
     .select(
       'user_id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, emergency_name, emergency_phone, emergency_relation, completed_at',
     )
@@ -125,7 +125,7 @@ export async function fetchMedicalForm(
 /** Every completed medical form on the trip — for the medical view-all page. */
 export async function fetchMedicalForms(tripId: string): Promise<MedicalForm[]> {
   const { data, error } = await supabase
-    .from('organized_trip_medical_forms')
+    .from('organized_trip_personal_info')
     .select(
       'user_id, allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, emergency_name, emergency_phone, emergency_relation, completed_at',
     )

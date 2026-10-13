@@ -65,7 +65,7 @@ export const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'chat.participate': 'Group chat · updates · 1:1',
   'payments.view_status': 'Payment status',
   'docs.view': 'Documents · flights · passports',
-  'medical.view': 'Medical status',
+  'medical.view': 'Personal info status',
   'trip.edit': 'Edit trip, gear and required docs',
   'docs.approve': 'Approve documents',
   'travelers.remove': 'Remove a traveler',

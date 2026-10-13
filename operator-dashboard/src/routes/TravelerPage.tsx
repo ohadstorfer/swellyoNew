@@ -692,7 +692,7 @@ function MedicalCard({
   function exportText() {
     if (!form) return;
     const lines = [
-      `Medical notes — ${name}`,
+      `Personal info — ${name}`,
       `Completed: ${formatDate(form.completedAt)}`,
       '',
       // First in the file too. Whoever opens this on a laptop at a clinic is
@@ -722,7 +722,7 @@ function MedicalCard({
   return (
     <div className="card enter">
       <div className="card-head">
-        <h2>Medical</h2>
+        <h2>Personal info</h2>
         {form?.completedAt && (
           <button className="btn btn-sm" onClick={exportText}>
             Export
