@@ -31,7 +31,7 @@ const formatFt = (n: number): string =>
 const SHAPES: readonly WaveShapeKind[] = ['soft', 'wally', 'barrel'] as const;
 
 const SHAPE_LABEL: Record<WaveShapeKind, string> = {
-  soft: 'Mellow',
+  soft: 'Soft',
   wally: 'Standing',
   barrel: 'Barrel',
 };
@@ -115,7 +115,7 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
           </View>
           <View style={styles.headerText}>
             <Text style={styles.cardTitle}>Shape</Text>
-            <Text style={styles.cardSubtitle}>How powerful the wave breaks</Text>
+            <Text style={styles.cardSubtitle}>Rollers to hollow tubes, what waves will your trip focus on?</Text>
           </View>
         </View>
         <View style={styles.sliderArea}>
@@ -123,8 +123,8 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
             value={shape}
             onChange={onShapeChange}
             bubbleLabel={SHAPE_LABEL[activeShape]}
-            minLabel="Mellow"
-            maxLabel="Barreling"
+            minLabel="Soft"
+            maxLabel="Hollow"
           />
         </View>
       </View>
@@ -137,7 +137,7 @@ export const WaveSheetContent: React.FC<WaveSheetContentProps> = ({
           </View>
           <View style={styles.headerText}>
             <Text style={styles.cardTitle}>Size</Text>
-            <Text style={styles.cardSubtitle}>Average wave height</Text>
+            <Text style={styles.cardSubtitle}>Average wave height goal for the group.</Text>
           </View>
         </View>
         <View style={styles.sliderArea}>

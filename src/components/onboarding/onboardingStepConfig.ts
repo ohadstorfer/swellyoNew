@@ -30,12 +30,12 @@ export const ONBOARDING_STEP_DISPLAY: Record<OnboardingStepKey, StepDisplay> = {
   // Welcome ("What are you here for?") has no label or progress bar — the chrome
   // hides both for this key; they fade/animate in on the first real step.
   welcome: { label: '', progress: 0 },
-  step1: { label: 'Surf Juice 1/3', progress: 1 / 3 },
-  step2: { label: 'Surf Juice 1/3', progress: 1 / 3 },
-  videoUpload: { label: 'Surf Juice 1/3', progress: 1 / 3 },
-  step3: { label: 'Travel Deets 2/3', progress: 2 / 3 },
-  step4: { label: 'Travel Deets 2/3', progress: 2 / 3 },
-  step5: { label: 'Travel Deets 2/3', progress: 2 / 3 },
+  step1: { label: 'Surf Juice - 1/3', progress: 1 / 3 },
+  step2: { label: 'Surf Juice - 1/3', progress: 1 / 3 },
+  videoUpload: { label: 'Surf Juice - 1/3', progress: 1 / 3 },
+  step3: { label: 'Travel Deets - 2/3', progress: 2 / 3 },
+  step4: { label: 'Travel Deets - 2/3', progress: 2 / 3 },
+  step5: { label: 'Travel Deets - 2/3', progress: 2 / 3 },
   step6: { label: 'Finish Up! 3/3', progress: 1 },
   step7: { label: 'Finish Up! 3/3', progress: 1 },
 };

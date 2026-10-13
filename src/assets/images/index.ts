@@ -103,12 +103,20 @@ export const Images = {
     plannedTogether: require('./create-trip/planned-together.png'),
     hosted: require('./create-trip/hosted.png'),
     tripOperator: require('./create-trip/trip-operator.png'),
+    // The photo on the My Trips "Create a trip" card (Figma 17779:50950).
+    card: require('./create-trip/create-trip-card.png'),
     background: require('./create-trip/create-bg.png'),
   },
   levels: {
     beginner: require('./levels/beginner.png'),
     intermediate: require('./levels/intermediate.jpg'),
     advanced: require('./levels/advanced.jpg'),
+  },
+  // Stay certification logos (trip Overview, Figma 17488:28118). The CI file
+  // is the full wordmark + emblem; callers crop it to the emblem.
+  stayCerts: {
+    conservationInternational: require('./trips/conservation-international.png'),
+    stoke: require('./trips/stoke-certified.png'),
   },
   tripDeets: {
     location: require('../icons/location-icon.png'),

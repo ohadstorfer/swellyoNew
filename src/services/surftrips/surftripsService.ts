@@ -10,6 +10,7 @@ import type {
   SurftripJoinRequest,
 } from '../../types/surftrips';
 import type { ParticipantProfile } from '../trips/groupTripsService';
+import { surftripInviteUrl } from '../../constants/inviteLinks';
 
 /**
  * Create a surftrip group via the security-definer RPC. The RPC creates the
@@ -99,9 +100,7 @@ export async function getSurftripInviteUrl(groupId: string): Promise<string> {
     console.error('[surftripsService] getSurftripInviteUrl error:', error);
     throw new Error(error?.message || 'Could not create invite link');
   }
-  const token = String(data);
-  const base = 'https://swellyo-invite.netlify.app';
-  return `${base}/?surftrip=${encodeURIComponent(groupId)}&t=${encodeURIComponent(token)}`;
+  return surftripInviteUrl(groupId, String(data));
 }
 
 export type AcceptInviteOutcome =

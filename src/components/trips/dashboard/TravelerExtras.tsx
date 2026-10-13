@@ -373,11 +373,11 @@ export const TravelerExtras: React.FC<{
           who never filled it in, and hiding is the only answer that does not
           assert something false. */}
       {medical.isError ? (
-        <Block title="Medical" appear>
+        <Block title="Personal info" appear>
           <Text style={styles.muted}>Could not load.</Text>
         </Block>
       ) : form?.completedAt ? (
-        <Block title="Medical" appear>
+        <Block title="Personal info" appear>
           <MedicalAnswers form={form} />
         </Block>
       ) : null}

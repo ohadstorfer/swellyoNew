@@ -35,6 +35,9 @@ import OperatorTripEditScreen from '../screens/operator/OperatorTripEditScreen';
 import TravelerOnboardingScreen from '../screens/trips/TravelerOnboardingScreen';
 import StaffPaperworkScreen from '../screens/trips/StaffPaperworkScreen';
 import TripPaymentsScreen from '../screens/trips/TripPaymentsScreen';
+import TripGuestPaymentsScreen from '../screens/trips/TripGuestPaymentsScreen';
+import TripJoinRequestsScreen from '../screens/trips/TripJoinRequestsScreen';
+import TripTravelerScreen from '../screens/trips/TripTravelerScreen';
 import OperatorEditDestinationScreen from '../screens/operator/OperatorEditDestinationScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
@@ -158,6 +161,7 @@ function TripDetailCardScreen({ route, navigation }: NativeStackScreenProps<Root
       }
       onViewAllUpdates={() => navigation.dispatch(StackActions.push('TripUpdates', { tripId }))}
       onViewAllMembers={() => navigation.dispatch(StackActions.push('TripMembers', { tripId }))}
+      onOpenJoinRequests={() => navigation.dispatch(StackActions.push('TripJoinRequests', { tripId }))}
       onViewAllGroupGear={() => navigation.dispatch(StackActions.push('PackingAndGear', { tripId }))}
       onViewAllYourGear={() => navigation.dispatch(StackActions.push('YourGear', { tripId }))}
       onManageSuggestedGear={() => navigation.dispatch(StackActions.push('ManageSuggestedGear', { tripId }))}
@@ -235,6 +239,46 @@ function TripMembersCardScreen({ route, navigation }: NativeStackScreenProps<Roo
           StackActions.push('ProfileCard', { userId, joinRequest: { tripId, requestId } })
         )
       }
+      onOpenTraveler={userId => navigation.dispatch(StackActions.push('TripTraveler', { tripId, userId }))}
+    />
+  );
+}
+
+function TripJoinRequestsCardScreen({
+  route,
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'TripJoinRequests'>) {
+  const { tripCard } = useMainNav();
+  const { tripId } = route.params;
+  return (
+    <TripJoinRequestsScreen
+      tripId={tripId}
+      onBack={() => navigation.goBack()}
+      // Same handler the Members list uses for "Message".
+      onMessage={tripCard.onStartConversation}
+      // Same push the Members list makes, so Decline is one tap away.
+      onReviewRequest={(userId, requestId) =>
+        navigation.dispatch(
+          StackActions.push('ProfileCard', { userId, joinRequest: { tripId, requestId } })
+        )
+      }
+    />
+  );
+}
+
+function TripTravelerCardScreen({
+  route,
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'TripTraveler'>) {
+  const { tripCard } = useMainNav();
+  const { tripId, userId } = route.params;
+  return (
+    <TripTravelerScreen
+      tripId={tripId}
+      userId={userId}
+      onBack={() => navigation.goBack()}
+      onViewUserProfile={profileUserId => tripCard.onViewUserProfile(profileUserId, tripId)}
+      onMessage={tripCard.onStartConversation}
     />
   );
 }
@@ -318,6 +362,40 @@ function TripPaymentsCardScreen({
           name: p.name,
           avatarUrl: p.profile_image_url,
         }))}
+      onOpenGuestPayments={() =>
+        navigation.dispatch(StackActions.push('TripGuestPayments', { tripId, tripTitle }))
+      }
+    />
+  );
+}
+
+/** Same roster read as TripPaymentsCardScreen, under the same key — arriving
+ *  from the Payments page it is already cached. */
+function TripGuestPaymentsCardScreen({
+  route,
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'TripGuestPayments'>) {
+  const { tripId, tripTitle } = route.params;
+  const participants = useQuery({
+    queryKey: [...tripsKeys.detail(tripId), 'participants'] as const,
+    queryFn: () => getTripParticipants(tripId),
+  });
+
+  return (
+    <TripGuestPaymentsScreen
+      tripId={tripId}
+      tripTitle={tripTitle ?? null}
+      onBack={() => navigation.goBack()}
+      travelers={(participants.data ?? [])
+        .filter(p => p.role !== 'host')
+        .map(p => ({
+          userId: p.user_id,
+          name: p.name,
+          avatarUrl: p.profile_image_url,
+        }))}
+      onOpenTraveler={userId =>
+        navigation.dispatch(StackActions.push('TripTraveler', { tripId, userId }))
+      }
     />
   );
 }
@@ -533,9 +611,11 @@ function OperatorSetupCardScreen({ navigation }: NativeStackScreenProps<RootStac
 }
 
 function NotificationsPanelScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'NotificationsPanel'>) {
+  const { profileEditor } = useMainNav();
   return (
     <NotificationsPanel
       userId={route.params.userId}
+      onOpenProfileDestinations={() => profileEditor.open('destinations')}
       onClose={() => navigation.goBack()}
       // The panel STAYS in the stack under the trip card — backing out of the
       // trip lands on the open panel (the bug this migration started from).
@@ -590,6 +670,8 @@ function HomeTabsExtras() {
     requestedTab, onRequestedTabConsumed,
     requestedTripCard, onRequestedTripCardConsumed,
     requestedChatCard, onRequestedChatCardConsumed,
+    requestedSurftripCard, onRequestedSurftripCardConsumed,
+    requestedStaffPaperwork, onRequestedStaffPaperworkConsumed,
     lineupProps,
   } = useMainNav();
   // Android draws the system nav bar inside the layout, so the floating Swelly
@@ -655,6 +737,22 @@ function HomeTabsExtras() {
     pushChatCard(requestedChatCard);
     onRequestedChatCardConsumed();
   }, [requestedChatCard, onRequestedChatCardConsumed]);
+
+  // Surftrip-card opens from invite links — same mount-safe pattern again.
+  useEffect(() => {
+    if (!requestedSurftripCard) return;
+    pushRootCard('SurftripCard', requestedSurftripCard);
+    onRequestedSurftripCardConsumed();
+  }, [requestedSurftripCard, onRequestedSurftripCardConsumed]);
+
+  // Crew paperwork after accepting a crew invite. Queued, so by the time this
+  // runs the accept sheet's Modal is gone and the trip card it sits on top of
+  // has been pushed — the paperwork's OS pickers are safe to open.
+  useEffect(() => {
+    if (!requestedStaffPaperwork) return;
+    pushRootCard('StaffPaperwork', requestedStaffPaperwork);
+    onRequestedStaffPaperworkConsumed();
+  }, [requestedStaffPaperwork, onRequestedStaffPaperworkConsumed]);
 
   // Swelly floating avatar — Lineup tab only, hidden while an overlay is up
   // (including the full-screen message search).
@@ -970,6 +1068,9 @@ export default function RootNavigator() {
         options={{ presentation: 'card' }}
       />
       <RootStack.Screen name="TripPayments" component={TripPaymentsCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="TripGuestPayments" component={TripGuestPaymentsCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="TripJoinRequests" component={TripJoinRequestsCardScreen} options={{ presentation: 'card' }} />
+      <RootStack.Screen name="TripTraveler" component={TripTravelerCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripUpdates" component={TripUpdatesCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="TripMembers" component={TripMembersCardScreen} options={{ presentation: 'card' }} />
       <RootStack.Screen name="PackingAndGear" component={PackingAndGearCardScreen} options={{ presentation: 'card' }} />

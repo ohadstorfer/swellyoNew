@@ -22,6 +22,7 @@ import { Image as CachedImage } from 'expo-image';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { Images } from '../../assets/images';
 import { ff } from '../../theme/fonts';
+import { textStyle, textStyles } from '../../theme/typography';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { getCountryFlagEmoji } from '../../utils/countryFlags';
 import { SwellyoBadgeIcon } from '../icons/BrandIcons';
@@ -117,6 +118,10 @@ export const CrewCards: React.FC<{
 
   if (crew.length === 0 && !onAddStaff) return null;
 
+  // The Overview frame (Figma 17488:28106) sets role and country in B-3; the
+  // Dashboard keeps its smaller line.
+  const metaStyle = variant === 'overview' ? styles.cardMetaOverview : styles.cardMeta;
+
   return (
     <View style={style}>
       <View style={[styles.cardsHeader, variant === 'overview' && styles.cardsHeaderOverview]}>
@@ -134,7 +139,10 @@ export const CrewCards: React.FC<{
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.cardsScroll}
-        contentContainerStyle={styles.cardsScrollContent}
+        contentContainerStyle={[
+          styles.cardsScrollContent,
+          variant === 'overview' && styles.cardsScrollContentOverview,
+        ]}
       >
         {crew.map(c => {
           const flag = getCountryFlagEmoji(c.countryFrom);
@@ -158,14 +166,14 @@ export const CrewCards: React.FC<{
                   {c.name}
                 </Text>
                 {!!c.title && (
-                  <Text style={styles.cardMeta} numberOfLines={1}>
+                  <Text style={metaStyle} numberOfLines={1}>
                     {c.title}
                   </Text>
                 )}
                 {c.countryFrom ? (
                   <View style={styles.cardCountryRow}>
                     {flag ? <Text style={styles.cardFlag}>{flag}</Text> : null}
-                    <Text style={styles.cardMeta} numberOfLines={1}>
+                    <Text style={metaStyle} numberOfLines={1}>
                       {c.countryFrom}
                     </Text>
                   </View>
@@ -203,7 +211,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   // The Overview's own SectionTitle spacing, so it lines up with its neighbours.
-  cardsHeaderOverview: { marginBottom: 22 },
+  cardsHeaderOverview: { marginBottom: 16 },
   cardsTitle: {
     fontFamily: ff('Inter', '700'),
     fontSize: 16,
@@ -211,17 +219,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: C.ink,
   },
+  // Body/M B-1 bold 16/24 — the overview's section-title size (Figma
+  // 17157:26290; the export's 20 is the desktop mode).
   cardsTitleOverview: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
+    ...textStyle('MB1', '700'),
     color: C.ink,
   },
   cardsLink: { fontFamily: ff('Inter', '400'), fontSize: 14, lineHeight: 18, color: '#05BCD3' },
   // Bleeds to the screen edge like every other horizontal row on the trip page.
   cardsScroll: { marginHorizontal: -16 },
   cardsScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'stretch' },
+  // Figma 17488:28105 — 5 between the Overview's cards.
+  cardsScrollContentOverview: { gap: 5 },
   card: {
     width: 118,
     // Every card as tall as the tallest one. The row stretches each Pressable
@@ -245,10 +254,8 @@ const styles = StyleSheet.create({
   cardText: { alignSelf: 'stretch', alignItems: 'center' },
   // Size/s 12/18 (get_variable_defs on 14980:66042; the export says 16).
   cardName: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 12,
-    lineHeight: 18,
-    fontWeight: '700',
+    // Body/B-3 with a bold override (design context 17488:28106: Inter Bold).
+    ...textStyle('B3', '700'),
     color: C.ink,
     textAlign: 'center',
   },
@@ -256,6 +263,13 @@ const styles = StyleSheet.create({
     fontFamily: ff('Inter', '400'),
     fontSize: 10,
     lineHeight: 17,
+    color: C.textMuted,
+    textAlign: 'center',
+    flexShrink: 1,
+  },
+  // Body/B-3 12/18 (get_variable_defs 17488:28106).
+  cardMetaOverview: {
+    ...textStyles.B3,
     color: C.textMuted,
     textAlign: 'center',
     flexShrink: 1,

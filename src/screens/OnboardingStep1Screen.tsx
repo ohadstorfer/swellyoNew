@@ -204,7 +204,9 @@ export const OnboardingStep1Screen: React.FC<OnboardingStep1ScreenProps> = ({
 
       {/* Subtitle */}
       <View style={[styles.subtitleContainer, isDesktop && styles.subtitleContainerDesktop]}>
-        <Text style={styles.subtitle}>Pick your go-to board.</Text>
+        <Text style={styles.subtitle}>
+          Sharing the board you ride{'\n'}creates more aligned connections.
+        </Text>
       </View>
 
       {/* Board Carousel — fills remaining space; its height drives the board size. */}
@@ -357,15 +359,16 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   subtitle: {
-    fontSize: 18, // var(--Size-lg, 18px)
+    // Headings/H-6 — Size/md 14 over Size/2-xl 22 (Figma 13977:36081).
+    fontSize: 14,
     fontWeight: '700', // Montserrat Bold
     fontFamily: Platform.select({
       web: 'Montserrat, sans-serif',
       default: 'Montserrat',
     }),
-    color: '#000',
+    color: '#333333',
     textAlign: 'center',
-    lineHeight: 24, // var(--Size-2-xl, 24px) - 133.333% of 18px
+    lineHeight: 22,
   },
   description: {
     fontSize: 16, // var(--Size-md, 16px)

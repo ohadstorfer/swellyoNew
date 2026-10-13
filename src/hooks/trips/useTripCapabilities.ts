@@ -99,6 +99,8 @@ export function useTripCrew(tripId: string | null | undefined, enabled = true) {
           roleKey: s.role_key,
           countryFrom: s.country_from,
           hasAccount: !!s.user_id,
+          // The overview's "Local Crew" card counts these.
+          isLocal: s.isLocal,
         }));
     },
     staleTime: 5 * 60 * 1000,

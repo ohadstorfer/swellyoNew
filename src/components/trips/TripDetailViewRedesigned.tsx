@@ -7,6 +7,14 @@
 // pure label/format helpers (imported from TripDetailView), so the data contract
 // stays in one place.
 //
+// 2 Oct 2026 — Figma 17157:26127 (Ohad): the top card carries the host and
+// the surf stats (level, wave type, wave range) instead of a countdown; three
+// small cards under it (Participants, Local Crew, Trip Vibe) replace the row of
+// eight; the price moves to the bar at the bottom of the trip screen (see
+// `priceDetailsRef`). "How this trip works" and "Wave information" are gone
+// (waves live in the top card). "Who it's for" stays — age range has no other
+// home. All trip types.
+//
 // What changed vs TripDetailView:
 //   • Countdown rendered as 4 bordered boxes (accent number + label inside).
 //   • Info chips get a rounded icon box above the label/value.
@@ -29,7 +37,6 @@ import {
   Platform,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,38 +56,27 @@ import {
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { CrewCards } from './CrewSection';
+import { StayCertRows } from './overview/StayCertRows';
 import { Images } from '../../assets/images';
 import { TripIcon, type TripIconName } from './tripIcons';
+import { textStyle, textStyles } from '../../theme/typography';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { Thumb } from '../Thumb';
 
 // Trip Overview icon color (Figma "Untitled UI" ink).
 const ICON_INK = '#222B30';
 
-// "How this trip works" rows — map each structure slug to a Figma icon so the
-// whole section uses the same icon set (Figma node 12557-5173).
-const STRUCTURE_ICON: Record<string, TripIconName> = {
-  shared_decisions: 'bar-chart-square-01',
-  structured_schedule: 'calendar-date',
-  loose_schedule: 'sun-setting-03',
-  book_own_stay: 'passport',
-  book_together: 'home-03',
-  group_all_day: 'users-02',
-  own_thing_day: 'map-01',
-};
 import {
   type TripDetailViewProps,
   BOARD_IMAGE_EVEN,
   BOARD_SHORT,
-  STRUCTURE_DISPLAY,
   BUDGET_VIBE,
+  computeCountdownTarget,
   formatAge,
   formatDateRange,
   formatSkillLevel,
   formatSkillRange,
-  computeCountdownTarget,
 } from './TripDetailView';
-import { TRIP_TYPE_WORD, TRIP_TYPE_GRADIENT } from '../../services/trips/tripVocabulary';
 import { formatTripPrice, formatTripPriceRange } from '../../utils/currency';
 import { useViewer } from '../../hooks/useViewer';
 
@@ -98,13 +94,9 @@ function openStayUrl(raw: string) {
   Linking.openURL(url).catch(() => {});
 }
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
-// Info chips show ~2.4 per screen. Page gutter is 16, gap is 10.
-const CHIP_WIDTH = Math.round((SCREEN_WIDTH - 16) / 2.4) - 8;
-
-// Surf-style board height. Figma spec is 70 (node 12558-4942); bumped slightly
-// larger here. Widths derive from each board's aspect ratio so they stay even.
-const BOARD_H = 92;
+// Surf-style board height — Figma's 70 (12558-4942, again in 17020-29476).
+// Widths derive from each board's aspect ratio so they stay even.
+const BOARD_H = 70;
 
 const C = {
   accent: '#05BCD3', // countdown numbers (brighter Figma accent)
@@ -118,12 +110,15 @@ const C = {
   textHowDesc: '#4A5565',
   border: '#EEEEEE',
   borderCard: '#E8E8E8',
+  borderChip: '#E4E4E4', // Colors/Neutral/400 — "About <host>" profile chips
+  borderIconCell: '#CFCFCF', // Stroke/M - 03 — boxed icon cells
   iconBubble: '#F4F6F7',
   surface: '#FFFFFF',
   surfaceMuted: '#F7F7F7',
   chipBg: '#EEEEEE',
   brandTealTint: '#E6F4F8',
   avatarBg: '#9CB6C0',
+  verified: '#B72DF2', // Fill/Tertiary — "Trip Vibe" label, "Verified Swellyo Stay"
 };
 
 // Icon per "What's included" category — keyed by display title, mirroring the
@@ -140,6 +135,51 @@ const INCLUDE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   [CATEGORY_TITLE.wellness]: 'leaf-outline',
   [CATEGORY_TITLE.custom]: 'sparkles-outline',
 };
+
+// ---------------------------------------------------------------------------
+const SectionTitle: React.FC<{ title: string; right?: React.ReactNode }> = ({ title, right }) => (
+  <View style={styles.sectionTitleRow}>
+    <Text style={styles.sectionTitle}>{title}</Text>
+    {right ?? null}
+  </View>
+);
+
+// Small "Edit" pill (Figma admin view) — white surface, hairline border, a
+// pencil glyph + label. Shown only to the host.
+const EditPill: React.FC<{ label: string; onPress?: () => void }> = ({ label, onPress }) => (
+  <TouchableOpacity
+    style={styles.editPill}
+    onPress={onPress}
+    activeOpacity={0.7}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+  >
+    <TripIcon name="edit-02" size={14} color={C.ink} />
+    <Text style={styles.editPillText}>{label}</Text>
+  </TouchableOpacity>
+);
+
+// Icon-box + label + value cell, used by "Who it's for" and "Wave information".
+const IconCell: React.FC<{
+  icon: TripIconName;
+  label: string;
+  value: string;
+}> = ({ icon, label, value }) => (
+  <View style={styles.iconCell}>
+    <View style={styles.iconCellBox}>
+      <TripIcon name={icon} size={18} color={ICON_INK} strokeWidth={1.1} />
+    </View>
+    <View style={styles.iconCellText}>
+      <Text style={styles.iconCellLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text style={styles.iconCellValue} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
+  </View>
+);
+
 
 // ---------------------------------------------------------------------------
 // Countdown — 4 bordered boxes (number + label stacked inside each box).
@@ -220,49 +260,73 @@ const CountdownBoxes: React.FC<{ target: Date | null }> = ({ target }) => {
   );
 };
 
-// ---------------------------------------------------------------------------
-const SectionTitle: React.FC<{ title: string; right?: React.ReactNode }> = ({ title, right }) => (
-  <View style={styles.sectionTitleRow}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    {right ?? null}
-  </View>
-);
+/** Cover height below the status bar. */
+const HERO_H = 340;
+const MAX_COVER_PHOTOS = 10;
 
-// Small "Edit" pill (Figma admin view) — white surface, hairline border, a
-// pencil glyph + label. Shown only to the host.
-const EditPill: React.FC<{ label: string; onPress?: () => void }> = ({ label, onPress }) => (
-  <TouchableOpacity
-    style={styles.editPill}
-    onPress={onPress}
-    activeOpacity={0.7}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-  >
-    <TripIcon name="edit-02" size={14} color={C.ink} />
-    <Text style={styles.editPillText}>{label}</Text>
-  </TouchableOpacity>
-);
-
-// Icon-box + label + value cell, used by "Who it's for" and "Wave information".
-const IconCell: React.FC<{
-  icon: TripIconName;
-  label: string;
-  value: string;
-}> = ({ icon, label, value }) => (
-  <View style={styles.iconCell}>
-    <View style={styles.iconCellBox}>
-      <TripIcon name={icon} size={22} color={ICON_INK} strokeWidth={1.1} />
+/** The cover. One photo is just the photo; two or more swipe sideways with
+ *  dots and an "n / N" count (Figma 17488:27976). */
+const HeroCover: React.FC<{ uris: string[]; height: number }> = ({ uris, height }) => {
+  const [width, setWidth] = useState(0);
+  const [index, setIndex] = useState(0);
+  const many = uris.length > 1;
+  const photo = (uri: string, i: number, w?: number) => (
+    <Thumb
+      key={i}
+      uri={uri}
+      widthPx={1280}
+      style={{ width: w ?? '100%', height }}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      transition={150}
+    />
+  );
+  return (
+    <View
+      style={[styles.hero, { height }, uris.length === 0 && styles.heroPlaceholder]}
+      onLayout={e => setWidth(e.nativeEvent.layout.width)}
+    >
+      {uris.length === 0 ? (
+        <Ionicons name="image-outline" size={40} color="#B0B0B0" />
+      ) : many && width > 0 ? (
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={e => {
+            const next = Math.round(e.nativeEvent.contentOffset.x / width);
+            setIndex(prev => (prev !== next ? next : prev));
+          }}
+        >
+          {uris.map((u, i) => photo(u, i, width))}
+        </ScrollView>
+      ) : (
+        photo(uris[0], 0)
+      )}
+      {uris.length > 0 ? (
+        <LinearGradient
+          pointerEvents="none"
+          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,1)']}
+          locations={[0.14, 0.75]}
+          style={styles.heroShade}
+        />
+      ) : null}
+      {many ? (
+        <>
+          <View style={styles.heroDots} pointerEvents="none">
+            {uris.map((_, i) => (
+              <View key={i} style={[styles.heroDot, i === index && styles.heroDotActive]} />
+            ))}
+          </View>
+          <View style={styles.heroCount} pointerEvents="none">
+            <Text style={styles.heroCountText}>{`${index + 1} / ${uris.length}`}</Text>
+          </View>
+        </>
+      ) : null}
     </View>
-    <View style={styles.iconCellText}>
-      <Text style={styles.iconCellLabel} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text style={styles.iconCellValue} numberOfLines={2}>
-        {value}
-      </Text>
-    </View>
-  </View>
-);
+  );
+};
 
 // ---------------------------------------------------------------------------
 export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
@@ -273,6 +337,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   membersSlot,
   onEditTrip,
   heroCollapsed = false,
+  heroCardCountdown = false,
+  heroCollapsedHeight = 0,
+  heroTopInset = 0,
+  heroControls,
   animateHeroCollapse = false,
   onParticipantPress,
   onSeeAllParticipants,
@@ -289,6 +357,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onEditDescription,
   onEditDates,
   onEditAccommodation,
+  priceDetailsRef,
 }) => {
   const viewer = useViewer();
   // What this trip was priced in. A viewer on the same currency sees the
@@ -299,9 +368,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [aboutHostExpanded, setAboutHostExpanded] = useState(false);
 
-  // ── Hero collapse (Dashboard / Plan) ──────────────────────────────────────
-  // Those tabs are work, not the sales page, so the cover + countdown slide up
-  // under the black header and the tabs sit right below it (Ohad, 14 Sep).
+  // ── Hero collapse (Chat) ──────────────────────────────────────────────────
+  // The chat has no cover, so on the way in the cover + card slide up under
+  // the black header and the tabs sit right below it. Dashboard and Plan used
+  // to do the same (14 Sep); since 6 Oct they keep the cover (Figma
+  // 17488:28466) and only swap the card to a countdown.
   // `heroH` is the hero's natural height, measured on an inner view that is
   // never clipped, so it stays right while the outer one shrinks.
   const reduceMotion = useReducedMotion();
@@ -321,9 +392,11 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   }, [heroCollapsed, animateHeroCollapse, reduceMotion, heroCollapse]);
   const heroClipStyle = useAnimatedStyle(() => {
     const c = heroCollapse.value;
-    if (heroH.value === 0) return c === 1 ? { height: 0, overflow: 'hidden' as const } : {};
+    if (heroH.value === 0) {
+      return c === 1 ? { height: heroCollapsedHeight, overflow: 'hidden' as const } : {};
+    }
     return {
-      height: heroH.value * (1 - c),
+      height: heroH.value * (1 - c) + heroCollapsedHeight * c,
       // Visible at rest so the countdown card's shadow is not cut off.
       overflow: c > 0 ? ('hidden' as const) : ('visible' as const),
     };
@@ -335,8 +408,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     opacity: 1 - heroCollapse.value * 0.6,
   }));
 
+  // Under the round buttons when the cover carries them (44 tall, 8 above).
+  const editPillTop = heroControls ? { top: heroTopInset + 8 + 44 + 8, right: 16 } : null;
+
   const dateRange = formatDateRange(vm);
-  const countdownTarget = computeCountdownTarget(vm);
   const skillLabel = formatSkillLevel(vm.skillLevels); // compact "Beginner+" for the chip
   const skillRange = formatSkillRange(vm.skillLevels); // "Beginner – Intermediate" for the cell
   const ageLabel = formatAge(vm.ageMin, vm.ageMax);
@@ -360,18 +435,12 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const surfStyles = vm.surfStyles
     .filter(s => s !== 'all')
     .sort((a, b) => orderRank(a) - orderRank(b));
-  // Pill font scales with how much room the boards illustration leaves: with all
-  // 4 boards it eats ~half the row, so drop to 10px to keep the pills in 2 lines.
-  // 3 or fewer boards → narrower illustration → pills keep their normal 14px
-  // (don't balloon to a bigger size when there's only one board).
-  const surfPillFontSize = surfStyles.length >= 4 ? 10 : 14;
-  const structures = vm.structureSlugs.filter(s => STRUCTURE_DISPLAY[s]);
 
   const waveSizeLabel =
     vm.waveSizeMin != null && vm.waveSizeMax != null
       ? vm.waveSizeMin === vm.waveSizeMax
-        ? `${vm.waveSizeMax} ft`
-        : `${vm.waveSizeMin}–${vm.waveSizeMax} ft`
+        ? `${vm.waveSizeMax} Feet`
+        : `${vm.waveSizeMin}–${vm.waveSizeMax} Feet`
       : null;
 
   const showAccommodation =
@@ -384,57 +453,15 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const addOns = priceInclusionAddOns(vm.priceInclusions);
   const hasPriceDetail = includeSections.length > 0 || addOns.length > 0;
 
-  // Horizontal info chips below the countdown — fixed order, each shown only
-  // when it has data.
   const budgetLabel = formatTripPriceRange(vm.budgetMin ?? null, vm.budgetMax ?? null, pricing, viewer);
   const budgetVibe = vm.budgetTier ? BUDGET_VIBE[vm.budgetTier] : null;
-  // Coloured trip-type tag straddling the top of the countdown card.
-  const typeTagWord = vm.hostingStyle ? TRIP_TYPE_WORD[vm.hostingStyle] : null;
-  const typeTagGradient = vm.hostingStyle ? TRIP_TYPE_GRADIENT[vm.hostingStyle] : null;
-  const chips: {
-    icon: TripIconName;
-    label: string;
-    value: string;
-    highlight?: boolean;
-    footer?: string;
-    onPress?: () => void;
-  }[] = [];
-  // "Trip Operator" trips (hosting_style 'C') are fully-planned: they're always
-  // presented as a fixed "Price" that taps into the "What's included" sheet —
-  // even when only a budget range was captured instead of a fixed cost.
+  // "Trip Operator" trips (hosting_style 'C') are fully-planned: their price
+  // opens the "What's included" sheet — even when only a budget range was
+  // captured instead of a fixed cost.
   const isOperator = vm.hostingStyle === 'C';
   // "Planned Together" trips (hosting_style 'A') are group-led — there is no
   // single organizer to spotlight, so the leader's "About" self-intro is hidden.
   const isPlannedTogether = vm.hostingStyle === 'A';
-  if (vm.costPerPerson != null) {
-    chips.push({
-      icon: 'currency-dollar-circle',
-      label: 'Price',
-      value: priceLabel ?? '',
-      highlight: true,
-      footer: hasPriceDetail ? 'What’s included' : undefined,
-      onPress: hasPriceDetail ? () => setShowIncludes(true) : undefined,
-    });
-  } else if (budgetLabel) {
-    const operatorIncludes = isOperator && hasPriceDetail;
-    chips.push({
-      icon: 'currency-dollar-circle',
-      label: isOperator ? 'Price' : budgetVibe ?? 'Budget',
-      value: budgetLabel,
-      highlight: true,
-      // Operator price → "what's included"; AI budget range → "see estimation".
-      footer: operatorIncludes
-        ? 'What’s included'
-        : !isOperator
-          ? 'See estimation'
-          : undefined,
-      onPress: operatorIncludes
-        ? () => setShowIncludes(true)
-        : !isOperator
-          ? () => setShowBudgetInfo(true)
-          : undefined,
-    });
-  }
 
   // Static "Based on" chips for the budget-info sheet — from data we already
   // have, no extra AI call.
@@ -460,19 +487,57 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
     { icon: 'car-outline', text: 'Getting around the spot and nearby' },
     { icon: 'water-outline', text: 'Everyday surf activities' },
   ];
-  chips.push({ icon: 'bar-chart-10', label: 'Level', value: skillLabel });
-  chips.push({ icon: 'calendar', label: 'Age range', value: ageLabel });
-  chips.push({ icon: 'users-02', label: 'Participants', value: participantsLabel });
-  // Trip type is now shown as the coloured tag above the countdown card, so it's
-  // no longer repeated as a chip here.
-  if (vibeLabel) chips.push({ icon: 'sun-setting-03', label: 'Trip Vibe', value: vibeLabel });
-  if (waveSizeLabel) chips.push({ icon: 'ruler', label: 'Wave size', value: waveSizeLabel });
-  if (vm.waveShapeLabel)
-    chips.push({ icon: 'waves', label: 'Wave shape', value: vm.waveShapeLabel });
 
-  // "Who it's for" / "Wave information" only render when they have real data.
+  // "Who it's for" only renders when it has real data.
   const showWhoFor = vm.ageMin != null || vm.ageMax != null || vm.skillLevels.length > 0;
-  const showWaveInfo = !!waveSizeLabel || !!vm.waveShapeLabel;
+
+  // The price lives in the trip screen's bottom bar now. Tapping it opens the
+  // same sheet the Price card used to: "What's included" on an itemised
+  // operator price, "About this estimate" on an AI budget range.
+  const priceDetailsAction: (() => void) | null =
+    hasPriceDetail && (vm.costPerPerson != null || isOperator)
+      ? () => setShowIncludes(true)
+      : !isOperator && budgetLabel
+        ? () => setShowBudgetInfo(true)
+        : null;
+  useEffect(() => {
+    if (!priceDetailsRef) return;
+    priceDetailsRef.current = priceDetailsAction;
+    return () => {
+      priceDetailsRef.current = null;
+    };
+  });
+
+  // ── Top card (Figma 17157:26147) ──
+  // The host on the left — not on "planned together" trips, which have none.
+  const heroHost = !isPlannedTogether && aboutHost?.name ? aboutHost : null;
+  // The host's own crew card, if they put themselves on the crew: its title
+  // ("Local Guide") is how the Figma names them ("Oscar - Local Guide").
+  const hostCrewTitle =
+    crew.find(c => c.roleKey === 'operator' && c.title?.trim())?.title?.trim() ?? null;
+  const heroStats: { icon: TripIconName; label: string; value: string }[] = [];
+  if (vm.skillLevels.length > 0)
+    heroStats.push({ icon: 'bar-chart-10', label: 'Level', value: skillLabel });
+  if (vm.waveShapeLabel)
+    heroStats.push({ icon: 'waves', label: 'Wave type', value: vm.waveShapeLabel });
+  if (waveSizeLabel) heroStats.push({ icon: 'ruler', label: 'Wave Range', value: waveSizeLabel });
+
+  // ── The three cards under it (Figma 17157:26177) ──
+  // "Local Crew" counts the crew the operator marked local (staff `is_local`).
+  const localCrew = crew.filter(c => c.isLocal).length;
+  // Icons are Figma's own (17488:28030 / 28038 / 28044): the pin and the
+  // sunset are the same glyphs TripIcon already carries.
+  const infoCards: { icon: TripIconName; label: string; value: string; tint: string }[] = [
+    { icon: 'users-02', label: 'Participants', value: participantsLabel, tint: C.accent },
+  ];
+  if (crew.length > 0)
+    infoCards.push({
+      icon: 'marker-pin-05',
+      label: 'Local Crew',
+      value: `${localCrew}/${crew.length}`,
+      tint: '#F37A3C',
+    });
+  if (vibeLabel) infoCards.push({ icon: 'sun-setting-03', label: 'Trip Vibe', value: vibeLabel, tint: C.verified });
 
   // Host (admin) "Set" affordances for loosely-planned trips. Trip Operator (C)
   // always ships with exact dates + a specific stay, so it's excluded — A/B can
@@ -485,53 +550,54 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   const canEditDates = isHost && isLooseFlow && !hasExactDates && !!onEditDates;
   const canEditStay = isHost && isLooseFlow && !hasSpecificStay && !!onEditAccommodation;
 
-  // Trip Operator (Flow C): host profile detail badges shown in "About <host>",
-  // mirroring the create-trip "About you" stats (age, origin, level, board, trips).
-  // Two lines of badges (mirrors the create-flow "About you" card): top =
-  // trips + board, bottom = level, age, origin.
-  const hostBadgesTop: string[] = aboutHost
+  // Host profile detail badges shown in "About <host>", mirroring the
+  // create-trip "About you" stats. ONE wrapping flow in Figma's order — trips,
+  // board, level, origin, age — not a fixed two-row split: the chips are
+  // different widths per host, so any hardcoded split leaves a ragged line.
+  // Only the trips chip carries the island emoji (Figma 17022-31883; the others
+  // have that layer hidden).
+  const hostBadges: { label: string; emoji?: string }[] = aboutHost
     ? ([
-        aboutHost.surfTrips != null ? `${aboutHost.surfTrips} Surf Trips` : null,
-        aboutHost.boardLabel,
-      ].filter(Boolean) as string[])
+        aboutHost.surfTrips != null
+          ? { label: `${aboutHost.surfTrips} Surf Trips`, emoji: '🏝️' }
+          : null,
+        aboutHost.boardLabel ? { label: aboutHost.boardLabel } : null,
+        aboutHost.surfLevelLabel ? { label: aboutHost.surfLevelLabel } : null,
+        aboutHost.countryFrom ? { label: aboutHost.countryFrom } : null,
+        aboutHost.age != null ? { label: `${aboutHost.age} yrs` } : null,
+      ].filter(Boolean) as { label: string; emoji?: string }[])
     : [];
-  const hostBadgesBottom: string[] = aboutHost
-    ? ([
-        aboutHost.surfLevelLabel,
-        aboutHost.age != null ? `${aboutHost.age} yrs` : null,
-        aboutHost.countryFrom,
-      ].filter(Boolean) as string[])
-    : [];
-  const hasHostBadges = hostBadgesTop.length > 0 || hostBadgesBottom.length > 0;
+  const hasHostBadges = hostBadges.length > 0;
 
   // "Local knowledge" lines for the About block — the host's familiarity with the
   // destination and the stay (Captain + Operator). Names come from the trip VM.
-  const hostFamiliarity: { icon: keyof typeof Ionicons.glyphMap; place: string; label: string }[] = [];
+  // Figma 17022-31903/31912 pin the icons to the Untitled-UI set, in a boxed
+  // cell, so they are TripIcons rather than Ionicons.
+  const hostFamiliarity: { icon: TripIconName; place: string; label: string }[] = [];
   if (aboutHost?.destinationFamiliarityLabel && vm.destinationLabel) {
     hostFamiliarity.push({
-      icon: 'navigate-outline',
+      icon: 'marker-pin-05',
       place: vm.destinationLabel,
       label: aboutHost.destinationFamiliarityLabel,
     });
   }
   if (aboutHost?.stayFamiliarityLabel && vm.accommodationName) {
     hostFamiliarity.push({
-      icon: 'home-outline',
+      icon: 'home-03',
       place: vm.accommodationName,
       label: aboutHost.stayFamiliarityLabel,
     });
   }
 
-  // Surf style moves below Member on operator trips (Figma 14980-66208), so it
-  // is built once and placed by trip type.
+  // Surf style — one block, placed under Accommodation for every trip type.
   const surfStyleSection = surfStyles.length > 0 ? (
-    <View style={styles.section}>
+    <View style={[styles.section, styles.sectionLineAbove]}>
       <SectionTitle title="Surf style" />
       <View style={styles.surfCard}>
         <View style={styles.surfPills}>
           {surfStyles.map(s => (
             <View key={s} style={styles.surfPill}>
-              <Text style={[styles.surfPillText, { fontSize: surfPillFontSize }]}>
+              <Text style={styles.surfPillText}>
                 {BOARD_SHORT[s] ?? s}
               </Text>
             </View>
@@ -575,21 +641,19 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             heroH.value = e.nativeEvent.layout.height;
           }}
         >
-          {vm.heroImageUri ? (
-            <Thumb
-              uri={vm.heroImageUri}
-              widthPx={1280}
-              style={styles.hero}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              transition={150}
-            />
-          ) : (
-            <View style={[styles.hero, styles.heroPlaceholder]}>
-              <Ionicons name="image-outline" size={40} color="#B0B0B0" />
-            </View>
-          )}
-          {onShare ? (
+          <HeroCover
+            uris={
+              vm.galleryImageUris && vm.galleryImageUris.length > 0
+                ? vm.galleryImageUris.slice(0, MAX_COVER_PHOTOS)
+                : vm.heroImageUri
+                  ? [vm.heroImageUri]
+                  : []
+            }
+            height={HERO_H + heroTopInset}
+          />
+          {heroControls ? (
+            <View style={[styles.heroControls, { top: heroTopInset + 8 }]}>{heroControls}</View>
+          ) : onShare ? (
             <TouchableOpacity
               style={styles.shareFab}
               onPress={onShare}
@@ -601,41 +665,82 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
               <Ionicons name="share-social-outline" size={22} color={C.ink} />
             </TouchableOpacity>
           ) : null}
-          {/* Operator trips edit the whole trip from here (Figma 14980-66208) —
-              the wizard owns the cover too. Peer hosts keep the cover sheet. */}
-          {isOperator ? (
-            onEditTrip ? (
-              <View style={styles.editCoverPill}>
-                <EditPill label="Edit trip" onPress={onEditTrip} />
-              </View>
-            ) : null
-          ) : isHost ? (
-            <View style={styles.editCoverPill}>
+          {/* Operator trips have no pill here: the whole trip is edited from
+              the ⋮ menu ("Edit trip"), and the wizard owns the cover too. Peer
+              hosts keep the cover sheet. */}
+          {!isOperator && isHost ? (
+            <View style={[styles.editCoverPill, editPillTop]}>
               <EditPill label="Edit cover" onPress={onEditCover} />
             </View>
           ) : null}
           <View style={styles.heroCard}>
-            {/* Coloured trip-type tag, straddling the top edge of the card. */}
-            {typeTagWord ? (
-              <View style={styles.typeTagWrap} pointerEvents="none">
-                <LinearGradient
-                  colors={typeTagGradient ?? [C.accent, C.accent, C.accent]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.typeTag}
-                >
-                  <Text style={styles.typeTagText}>{typeTagWord}</Text>
-                </LinearGradient>
+            <View style={styles.heroCardTop}>
+              <View style={styles.heroDateRow}>
+                {/* formatDateRange already ends with " · N days". */}
+                <Text style={styles.heroDate}>{dateRange}</Text>
+                {canEditDates ? <EditPill label="Set dates" onPress={onEditDates} /> : null}
+              </View>
+              <Text style={styles.heroTitle} numberOfLines={2}>
+                {vm.title || vm.destinationLabel || 'Your trip'}
+              </Text>
+            </View>
+            {heroCardCountdown ? (
+              <CountdownBoxes target={computeCountdownTarget(vm)} />
+            ) : heroHost || heroStats.length > 0 ? (
+              <View
+                style={[
+                  styles.heroCardBottom,
+                  !(heroHost && heroStats.length > 0) && styles.heroCardBottomSolo,
+                ]}
+              >
+                {heroHost ? (
+                  <TouchableOpacity
+                    style={styles.heroHost}
+                    onPress={onAboutHostPress}
+                    disabled={!onAboutHostPress}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${heroHost.name}'s profile`}
+                  >
+                    {heroHost.avatarUrl ? (
+                      <Thumb
+                        uri={heroHost.avatarUrl}
+                        size={160}
+                        style={styles.heroHostAvatar}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                    ) : (
+                      <CachedImage
+                        source={Images.defaultAvatar}
+                        style={styles.heroHostAvatar}
+                        contentFit="cover"
+                      />
+                    )}
+                    <Text style={styles.heroHostName} numberOfLines={1}>
+                      {`By ${heroHost.name?.split(' ')[0] ?? ''}`}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {heroStats.length > 0 ? (
+                  <View style={styles.heroStats}>
+                    {heroStats.map(st => (
+                      <View key={st.label} style={styles.heroStat}>
+                        <View style={styles.heroStatIcon}>
+                          <TripIcon name={st.icon} size={20} color={ICON_INK} strokeWidth={1.1} />
+                        </View>
+                        <View style={styles.heroStatText}>
+                          <Text style={styles.heroStatLabel}>{st.label}</Text>
+                          <Text style={styles.heroStatValue} numberOfLines={1}>
+                            {st.value}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             ) : null}
-            <View style={styles.heroDateRow}>
-              <Text style={styles.heroDate}>{dateRange}</Text>
-              {canEditDates ? <EditPill label="Set dates" onPress={onEditDates} /> : null}
-            </View>
-            <Text style={styles.heroTitle} numberOfLines={2}>
-              {vm.title || vm.destinationLabel || 'Your trip'}
-            </Text>
-            <CountdownBoxes target={countdownTarget} />
           </View>
         </Reanimated.View>
       </Reanimated.View>
@@ -646,82 +751,77 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
 
       {!bodyHidden && (
         <>
-          {/* ---- Info chips — horizontal scroll, fixed order ---- */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.chipsScroll}
-            contentContainerStyle={styles.chipsScrollContent}
-          >
-            {chips.map((c, i) => {
-              const inner = (
-                <>
-                  <View style={[styles.chipIconBox, c.highlight && styles.chipIconBoxHighlight]}>
-                    <TripIcon
-                      name={c.icon}
-                      size={22}
-                      color={c.highlight ? '#FFFFFF' : ICON_INK}
-                      strokeWidth={1.1}
-                    />
-                  </View>
-                  <View style={styles.chipText}>
-                    <Text style={styles.chipLabel} numberOfLines={1}>
-                      {c.label}
-                    </Text>
-                    <Text style={styles.chipValue} numberOfLines={2}>
-                      {c.value}
-                    </Text>
-                    {c.footer ? (
-                      <View style={styles.chipFooterRow}>
-                        <Text style={styles.chipFooter} numberOfLines={1}>
-                          {c.footer}
-                        </Text>
-                        <Ionicons name="arrow-forward" size={14} color={C.brandTeal} />
-                      </View>
-                    ) : null}
-                  </View>
-                </>
-              );
-              const cardStyle = c.highlight ? [styles.chip, styles.chipHighlight] : styles.chip;
-              return c.onPress ? (
-                <TouchableOpacity
-                  key={`${c.label}-${i}`}
-                  activeOpacity={0.85}
-                  onPress={c.onPress}
-                  style={cardStyle}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${c.label} ${c.value}.${c.footer ? ` ${c.footer}` : ''}`}
-                >
-                  {inner}
-                </TouchableOpacity>
-              ) : (
-                <View key={`${c.label}-${i}`} style={cardStyle}>
-                  {inner}
+          {/* ---- Three info cards (Figma 17157:26177) ---- */}
+          <View style={styles.infoRow}>
+            {infoCards.map(card => (
+              <View key={card.label} style={styles.infoCard}>
+                <View style={styles.chipIconBox}>
+                  <TripIcon name={card.icon} size={18} color={ICON_INK} strokeWidth={1.1} />
                 </View>
-              );
-            })}
-          </ScrollView>
+                <View>
+                  <Text style={[styles.chipLabel, { color: card.tint }]} numberOfLines={1}>
+                    {card.label}
+                  </Text>
+                  <Text style={styles.chipValue} numberOfLines={2}>
+                    {card.value}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* ---- About this trip ---- */}
+          {vm.description || isHost ? (
+            <View style={[styles.section, styles.sectionLineBelow]}>
+              <SectionTitle
+                title="About this trip"
+                right={
+                  isHost ? <EditPill label="Edit" onPress={onEditDescription} /> : undefined
+                }
+              />
+              {vm.description ? (
+                <>
+                  <Text style={styles.body} numberOfLines={aboutExpanded ? undefined : 4}>
+                    {vm.description}
+                  </Text>
+                  {vm.description.length > 140 ? (
+                    <TouchableOpacity
+                      onPress={() => setAboutExpanded(v => !v)}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.seeMore}>{aboutExpanded ? 'See less' : 'See More'}</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.bodyPlaceholder}>
+                  Add a description so surfers know what this trip is about.
+                </Text>
+              )}
+            </View>
+          ) : null}
 
           {/* ---- About <host> (organizer self-intro) — host_lead_note. Shown
                   when the host wrote one, or always to the host so they can add
                   one via "Edit Profile". ---- */}
-          {/* NOT ON OPERATOR TRIPS. Product Specs §3 ("no more 'about the
-              operator' section"), built 23 Aug 2026. A Captain is a peer
-              selling themselves as the person to travel with; an operator is a
-              business, and the doc puts the people who run the trip in the Crew
-              section right below instead.
+          {/* Operator trips DO get this card again (Ohad, 27 Sep 2026, Figma
+              17022-31876) — reversing Product Specs §3 ("no more 'about the
+              operator' section") and the "settled" note in
+              docs/operator-spec-gaps-plan.html. The reason the spec's removal
+              did not hold: the operator is NOT in the Crew list below unless
+              they add themselves (nothing creates a staff row for the owner),
+              so an operator trip showed no face at all on the overview while
+              the create flow kept collecting `host_lead_note` with nowhere to
+              put it. The card shows the OWNER's surfer profile, the same as a
+              Captain's — that is what the Figma draws.
 
-              ⚠️ The operator is NOT in that Crew list unless they add
-              themselves — nothing creates a staff row for the owner (the
-              staff/traveler triggers exempt the host, so it is allowed, just
-              never automatic). Until they do, an operator trip shows no face at
-              all on the overview, and `host_lead_note` is still collected in
-              the create flow with nowhere to appear. See the audit, item #1. */}
+              Still not on "planned together" trips (style A): there is no host
+              selling the trip, everyone plans it. */}
           {!isPlannedTogether &&
-          !isOperator &&
           aboutHost &&
           (aboutHost.bio || isHost || hasHostBadges || hostFamiliarity.length > 0) ? (
-            <View style={styles.section}>
+            <View style={[styles.section, styles.sectionLineBelow]}>
               <View style={styles.aboutHostHeader}>
                 <TouchableOpacity
                   style={styles.aboutHostIdentity}
@@ -748,77 +848,83 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   )}
                   <Text style={styles.aboutHostName} numberOfLines={1}>
                     {aboutHost.name
-                      ? `About ${aboutHost.name}`
+                      ? hostCrewTitle
+                        ? `${aboutHost.name} - ${hostCrewTitle}`
+                        : aboutHost.name
                       : isOperator
                         ? 'About the operator'
                         : 'About the Captain'}
                   </Text>
                 </TouchableOpacity>
-                {isHost ? <EditPill label="Edit Profile" onPress={onEditAboutHost} /> : null}
               </View>
               {hasHostBadges ? (
-                <View style={styles.hostBadgeGroup}>
-                  {hostBadgesTop.length > 0 ? (
-                    <View style={styles.hostBadgeRow}>
-                      {hostBadgesTop.map((b, i) => (
-                        <View key={`top-${b}-${i}`} style={styles.hostBadge}>
-                          <Text style={styles.hostBadgeText} numberOfLines={1}>
-                            {b}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
-                  {hostBadgesBottom.length > 0 ? (
-                    <View style={styles.hostBadgeRow}>
-                      {hostBadgesBottom.map((b, i) => (
-                        <View key={`bot-${b}-${i}`} style={styles.hostBadge}>
-                          <Text style={styles.hostBadgeText} numberOfLines={1}>
-                            {b}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
-              {hostFamiliarity.length > 0 ? (
-                <View style={styles.hostFamiliarity}>
-                  {hostFamiliarity.map((f, i) => (
-                    <View key={`fam-${i}`} style={styles.hostFamRow}>
-                      <Ionicons name={f.icon} size={16} color={C.brandTeal} />
-                      <Text style={styles.hostFamText}>
-                        <Text style={styles.hostFamPlace}>{f.place}</Text>
-                        {` · ${f.label}`}
+                <View style={styles.hostBadgeRow}>
+                  {hostBadges.map((b, i) => (
+                    <View key={`${b.label}-${i}`} style={styles.hostBadge}>
+                      {b.emoji ? <Text style={styles.hostBadgeEmoji}>{b.emoji}</Text> : null}
+                      <Text style={styles.hostBadgeText} numberOfLines={1}>
+                        {b.label}
                       </Text>
                     </View>
                   ))}
                 </View>
               ) : null}
+              {/* Bio sits ABOVE the local-knowledge rows (Figma 17022-31901
+                  before 17022-31903). */}
               {aboutHost.bio ? (
-                <>
-                  <Text style={styles.body} numberOfLines={aboutHostExpanded ? undefined : 4}>
-                    {aboutHost.bio}
-                  </Text>
-                  {aboutHost.bio.length > 140 ? (
-                    <TouchableOpacity
-                      onPress={() => setAboutHostExpanded(v => !v)}
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.seeMore}>
-                        {aboutHostExpanded ? 'See less' : 'See more'}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </>
+                <Text style={styles.hostBio} numberOfLines={aboutHostExpanded ? undefined : 4}>
+                  {aboutHost.bio}
+                </Text>
               ) : (
-                <Text style={styles.bodyPlaceholder}>
+                // The empty hint IS the host's way in to the bio sheet — there
+                // is no Edit Profile pill any more (Figma 17488:28054).
+                <Text
+                  style={styles.bodyPlaceholder}
+                  onPress={isHost ? onEditAboutHost : undefined}
+                  accessibilityRole={isHost && onEditAboutHost ? 'button' : undefined}
+                >
                   {isOperator
                     ? 'Tell surfers who you are and why you run great trips.'
                     : 'Tell surfers who you are and why you’re the Captain for this trip.'}
                 </Text>
               )}
+              {hostFamiliarity.length > 0 ? (
+                <View style={styles.hostFamiliarity}>
+                  {hostFamiliarity.map((f, i) => (
+                    <View key={`fam-${i}`} style={styles.hostFamRow}>
+                      <View style={styles.hostFamIconCell}>
+                        {/* Both icons are traced at a ~16 viewBox while Figma
+                            draws them in an 18 one, and strokeWidth is in
+                            VIEWBOX units — so plain 1 would render 1.125px.
+                            16/18 gives back Figma's 1px hairline. */}
+                        <TripIcon
+                          name={f.icon}
+                          size={18}
+                          color={C.inkBody}
+                          strokeWidth={16 / 18}
+                        />
+                      </View>
+                      <Text style={styles.hostFamText} numberOfLines={1}>
+                        <Text style={styles.hostFamPlace}>{f.place}</Text>
+                        {`  ${f.label}`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {/* Last in the card, under the local-knowledge rows (Figma
+                  17022-31921) — it still toggles the BIO above. */}
+              {aboutHost.bio && aboutHost.bio.length > 140 ? (
+                <TouchableOpacity
+                  onPress={() => setAboutHostExpanded(v => !v)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.hostSeeMore}>
+                    {aboutHostExpanded ? 'See less' : 'See More'}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
 
@@ -833,50 +939,18 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
               Figma 14980-66208, operator ringed in the accent colour. */}
           <CrewCards
             crew={crew}
-            title="Staff"
+            title="Crew"
             variant="overview"
             onViewAll={onViewAllCrew}
-            style={styles.section}
+            style={[styles.section, styles.sectionLineBelow]}
           />
-
-          {/* ---- About this trip ---- */}
-          {vm.description || isHost ? (
-            <View style={styles.section}>
-              <SectionTitle
-                title="About this trip"
-                right={
-                  isHost ? <EditPill label="Edit" onPress={onEditDescription} /> : undefined
-                }
-              />
-              {vm.description ? (
-                <>
-                  <Text style={styles.body} numberOfLines={aboutExpanded ? undefined : 4}>
-                    {vm.description}
-                  </Text>
-                  {vm.description.length > 140 ? (
-                    <TouchableOpacity
-                      onPress={() => setAboutExpanded(v => !v)}
-                      activeOpacity={0.7}
-                      accessibilityRole="button"
-                    >
-                      <Text style={styles.seeMore}>{aboutExpanded ? 'See less' : 'See more'}</Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </>
-              ) : (
-                <Text style={styles.bodyPlaceholder}>
-                  Add a description so surfers know what this trip is about.
-                </Text>
-              )}
-            </View>
-          ) : null}
 
           {/* ---- Accommodation ---- */}
           {/* Right under "About this trip", above Surf style: where someone
               stays is a bigger deal on an operator trip than board choice, so
               it reads early instead of dangling at the very bottom. */}
           {showAccommodation || canEditStay ? (
-            <View style={styles.section}>
+            <View style={[styles.section, styles.sectionStay]}>
               {/* The empty-state card below is itself the "add" affordance for
                   the host, so the header keeps just the title (Figma 13518-9184). */}
               <SectionTitle title="Accommodation" />
@@ -902,20 +976,42 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                     </View>
                   )}
                   <View style={styles.stayPill}>
-                    <View style={styles.stayPillIcon}>
-                      <TripIcon name="home-03" size={24} color={ICON_INK} />
-                    </View>
+                    {/* The stay's own logo when there is one (Figma
+                        17488:28129), the house icon otherwise. */}
+                    {vm.accommodationLogoUri ? (
+                      <Thumb
+                        uri={vm.accommodationLogoUri}
+                        size={114}
+                        style={styles.stayLogo}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                    ) : (
+                      <View style={styles.stayPillIcon}>
+                        <TripIcon name="home-03" size={18} color={ICON_INK} />
+                      </View>
+                    )}
                     <View style={{ flex: 1 }}>
                       <Text style={styles.stayName} numberOfLines={1}>
                         {vm.accommodationName}
                       </Text>
-                      <Text style={styles.stayMeta} numberOfLines={1}>
-                        {vm.accommodationKindLabel
-                          ? `${vm.accommodationKindLabel} · Leading option`
-                          : 'Leading option'}
-                      </Text>
+                      {vm.accommodationVerified ? (
+                        <Text style={[styles.stayMeta, styles.stayVerified]} numberOfLines={1}>
+                          Verified Swellyo Stay
+                        </Text>
+                      ) : (
+                        <Text style={styles.stayMeta} numberOfLines={1}>
+                          {vm.accommodationKindLabel
+                            ? `${vm.accommodationKindLabel} · Leading option`
+                            : 'Leading option'}
+                        </Text>
+                      )}
                     </View>
                   </View>
+                  <StayCertRows
+                    ciSurfConservation={vm.ciSurfConservation}
+                    stokeCertified={vm.stokeCertified}
+                  />
                 </TouchableOpacity>
               ) : (
                 // Empty state (no specific stay yet). Host (loose flow) → a big
@@ -938,7 +1034,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   {vm.accommodationKindLabel ? (
                     <View style={styles.stayPill}>
                       <View style={styles.stayPillIcon}>
-                        <TripIcon name="home-03" size={24} color={ICON_INK} />
+                        <TripIcon name="home-03" size={18} color={ICON_INK} />
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.stayName} numberOfLines={1}>
@@ -955,6 +1051,77 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
+          {/* ---- Member (operator trips) — the screen's Member section, then
+              Surf style after it: that is the Figma order (14980-66208). ---- */}
+          {!hideParticipants && membersSlot ? (
+            <View style={styles.section}>{membersSlot}</View>
+          ) : null}
+
+          {/* ---- Participants — tappable avatars, scroll right for more ----
+              Hidden for members who have the Plan tab: they see the richer
+              Members section there (Figma 13455-38686). */}
+          {!hideParticipants && !membersSlot && (
+          <View style={styles.section}>
+            <View style={styles.sectionTitleRow}>
+              <View style={styles.participantsTitle}>
+                <Text style={styles.sectionTitle}>Members</Text>
+              </View>
+              {onSeeAllParticipants && participants.length > 0 ? (
+                <TouchableOpacity onPress={onSeeAllParticipants} hitSlop={8}>
+                  <Text style={styles.seeAllLink}>
+                    {vm.maxParticipants
+                      ? `View all (${vm.participantCount}/${vm.maxParticipants})`
+                      : `View all (${vm.participantCount})`}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {participants.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.avatarScroll}
+                contentContainerStyle={styles.avatarScrollContent}
+              >
+                {participants.map(p => (
+                  <TouchableOpacity
+                    key={p.id}
+                    activeOpacity={0.8}
+                    onPress={onParticipantPress ? () => onParticipantPress(p.id) : undefined}
+                    disabled={!onParticipantPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={p.name ? `Open ${p.name}'s profile` : 'Open profile'}
+                    style={styles.avatarCol}
+                  >
+                    {p.avatarUrl ? (
+                      <CachedImage
+                        source={{ uri: getStorageThumbUrl(p.avatarUrl, 144) ?? p.avatarUrl }}
+                        style={styles.avatar}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                    ) : (
+                      <CachedImage
+                        source={Images.defaultAvatar}
+                        style={styles.avatar}
+                        contentFit="cover"
+                      />
+                    )}
+                    {/* First name under the avatar (Figma 17020-29522). */}
+                    {p.name ? (
+                      <Text style={styles.avatarName} numberOfLines={1}>
+                        {p.name.split(' ')[0]}
+                      </Text>
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.mutedSmall}>No one yet</Text>
+            )}
+          </View>
+          )}
+
           {/* ---- What's included ---- */}
           {/* Flow C only, and only when the operator actually itemised the
               price. The same rows the Price chip's sheet shows — but nobody
@@ -962,7 +1129,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
               paying for" is the page's whole sales question. Five rows here,
               the sheet for the rest. */}
           {isOperator && hasPriceDetail ? (
-            <View style={styles.section}>
+            <View style={[styles.section, styles.sectionLineAbove]}>
               <SectionTitle title="What's included" />
               <View style={styles.sheetList}>
                 {includeSections.slice(0, 5).map((sec, i) => (
@@ -998,96 +1165,16 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {!isOperator ? surfStyleSection : null}
+          {/* Surf style sits under Accommodation, above How this trip works,
+              on every trip type (Figma 17020-29433 — the operator overview).
+              It used to drop below Member on operator trips (14980-66208);
+              the newer frame moves it back up. */}
+          {surfStyleSection}
 
-          {/* ---- How this trip works ---- */}
-          {structures.length > 0 ? (
-            <View style={styles.section}>
-              <SectionTitle title="How this trip works" />
-              <View style={{ gap: 30, marginTop: 16 }}>
-                {structures.map(slug => {
-                  const d = STRUCTURE_DISPLAY[slug];
-                  return (
-                    <View key={slug} style={styles.howRow}>
-                      <TripIcon name={STRUCTURE_ICON[slug] ?? 'map-01'} size={24} color={ICON_INK} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.howTitle}>{d.title}</Text>
-                        <Text style={styles.howDesc}>{d.desc}</Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
-
-          {/* ---- Member (operator trips) — the screen's Member section, then
-              Surf style after it: that is the Figma order (14980-66208). ---- */}
-          {!hideParticipants && membersSlot ? (
-            <View style={styles.section}>{membersSlot}</View>
-          ) : null}
-          {isOperator ? surfStyleSection : null}
-
-          {/* ---- Participants — tappable avatars, scroll right for more ----
-              Hidden for members who have the Plan tab: they see the richer
-              Members section there (Figma 13455-38686). */}
-          {!hideParticipants && !membersSlot && (
-          <View style={styles.section}>
-            <View style={styles.sectionTitleRow}>
-              <View style={styles.participantsTitle}>
-                <Text style={styles.sectionTitle}>Participants</Text>
-                {vm.participantCount > 0 ? (
-                  <Text style={styles.participantsCount}>{vm.participantCount}</Text>
-                ) : null}
-              </View>
-              {onSeeAllParticipants && participants.length > 0 ? (
-                <TouchableOpacity onPress={onSeeAllParticipants} hitSlop={8}>
-                  <Text style={styles.seeAllLink}>View all</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-            {participants.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.avatarScroll}
-                contentContainerStyle={styles.avatarScrollContent}
-              >
-                {participants.map(p => (
-                  <TouchableOpacity
-                    key={p.id}
-                    activeOpacity={0.8}
-                    onPress={onParticipantPress ? () => onParticipantPress(p.id) : undefined}
-                    disabled={!onParticipantPress}
-                    accessibilityRole="button"
-                    accessibilityLabel={p.name ? `Open ${p.name}'s profile` : 'Open profile'}
-                  >
-                    {p.avatarUrl ? (
-                      <CachedImage
-                        source={{ uri: getStorageThumbUrl(p.avatarUrl, 144) ?? p.avatarUrl }}
-                        style={styles.avatar}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                      />
-                    ) : (
-                      <CachedImage
-                        source={Images.defaultAvatar}
-                        style={styles.avatar}
-                        contentFit="cover"
-                      />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            ) : (
-              <Text style={styles.mutedSmall}>No one yet</Text>
-            )}
-          </View>
-          )}
 
           {/* ---- Who it's for ---- */}
           {showWhoFor ? (
-            <View style={[styles.section, styles.sectionPadBottom]}>
+            <View style={[styles.section, styles.sectionLineAbove, styles.sectionPadBottom]}>
               <SectionTitle title="Who it's for" />
               <View style={styles.cellRow}>
                 <IconCell icon="calendar-date" label="Age range" value={ageLabel} />
@@ -1096,20 +1183,6 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
             </View>
           ) : null}
 
-          {/* ---- Wave information ---- */}
-          {showWaveInfo ? (
-            <View style={[styles.section, styles.sectionPadBottom]}>
-              <SectionTitle title="Wave information" />
-              <View style={styles.cellRow}>
-                <IconCell icon="ruler" label="Wave size" value={waveSizeLabel ?? '—'} />
-                <IconCell
-                  icon="waves"
-                  label="Wave shape"
-                  value={vm.waveShapeLabel ?? '—'}
-                />
-              </View>
-            </View>
-          ) : null}
 
         </>
       )}
@@ -1291,52 +1364,92 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     backgroundColor: '#FFFFFF',
   },
+  // Figma 17488:27976 — the card overlaps the cover's last 61px. Height is set
+  // inline (HERO_H + the status-bar inset the cover runs under).
   hero: {
     width: '100%',
-    height: 280,
     backgroundColor: C.border,
+    overflow: 'hidden',
   },
   heroPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroCard: {
-    marginTop: -120,
-    marginHorizontal: 24,
-    backgroundColor: C.surface,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 26,
-    paddingBottom: 32,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 3,
-    alignItems: 'center',
-  },
-  // Coloured trip-type tag — centered, straddling the card's top edge.
-  typeTagWrap: {
+  // Figma 17488:27977 — black rising from the bottom, 252 tall.
+  heroShade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 252 },
+  // Figma 17488:28286 — 26 above the card (which starts 61 from the bottom).
+  heroDots: {
     position: 'absolute',
-    top: -14,
     left: 0,
     right: 0,
+    bottom: 87,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  heroDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EEEEEE' },
+  heroDotActive: { width: 24, backgroundColor: '#FFFFFF' },
+  // Figma 17488:28287 — "1 / 14".
+  heroCount: {
+    position: 'absolute',
+    right: 20,
+    bottom: 80,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    backgroundColor: 'rgba(33,33,33,0.7)',
+  },
+  heroCountText: { ...textStyles.MB2, color: '#FFFFFF' },
+  // Figma 17488:27978 — back on the left, the actions on the right.
+  heroControls: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 2,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  // Figma 17488:27990 — one white card on the Card Shadow (0 0 24 #00000017):
+  // the date + name on top, the host and the surf stats below.
+  heroCard: {
+    marginTop: -61,
+    marginHorizontal: 18,
+    backgroundColor: C.surface,
+    borderRadius: 16,
+    shadowColor: '#000000',
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  heroCardTop: { paddingHorizontal: 20, paddingVertical: 10, alignItems: 'center' },
+  // Figma 17488:27997 — the host 48 from the left edge, the stats 48 from the
+  // right. `gap` is only the floor between them on a narrow phone.
+  heroCardBottom: {
+    flexDirection: 'row',
     alignItems: 'center',
-    zIndex: 5,
+    justifyContent: 'space-between',
+    gap: 16,
+    paddingHorizontal: 48,
+    paddingTop: 8,
+    paddingBottom: 16,
   },
-  typeTag: {
-    paddingHorizontal: 16,
-    paddingVertical: 7,
-    borderRadius: 9,
-  },
-  typeTagText: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
+  // Only one of the two (no host on planned-together trips): centre it.
+  heroCardBottomSolo: { justifyContent: 'center' },
+  heroHost: { alignItems: 'center', gap: 8, width: 74 },
+  heroHostAvatar: { width: 74, height: 74, borderRadius: 37, backgroundColor: C.border },
+  // "By <name>" — B-4 bold (get_variable_defs 17488:28003).
+  heroHostName: { ...textStyle('B4', '700'), color: C.ink, textAlign: 'center' },
+  // Figma 17488:28004 — 8 between the rows, icon centred on its two lines.
+  heroStats: { gap: 8, flexShrink: 1 },
+  heroStat: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  heroStatIcon: { padding: 5, borderRadius: 4, backgroundColor: C.surfaceMuted },
+  // flexShrink, not flex: 1 — with no host beside it (planned-together trips)
+  // the stats column has no set width, and flex: 1 collapses the text to 0.
+  heroStatText: { flexShrink: 1 },
+  heroStatLabel: { ...textStyles.B4, color: C.textFaint, marginBottom: -3 },
+  heroStatValue: { ...textStyle('B3', '700'), color: C.ink },
   heroDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1344,34 +1457,33 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroDate: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    fontWeight: '400',
-    lineHeight: 18,
+    // Body/B-3 12/18 (get_variable_defs 17488:27993).
+    ...textStyles.B3,
     color: C.textMuted,
     textAlign: 'center',
   },
   heroTitle: {
     marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
+    // Body/M B-1 16/24, bold override (get_variable_defs 17020:29668).
+    ...textStyle('MB1', '700'),
     color: C.ink,
     textAlign: 'center',
   },
 
   // Countdown boxes
+  // Figma 17488:29008: 48px boxes, 8 radius, 16 apart; 16 under the title
+  // (10 of it is heroCardTop's padding), 24 to the card's edge.
   countdownRow: {
-    marginTop: 16,
+    marginTop: 6,
+    marginBottom: 24,
     flexDirection: 'row',
-    gap: 12,
+    gap: 16,
     justifyContent: 'center',
   },
   countdownBox: {
-    width: 64,
-    height: 64,
-    borderRadius: 10,
+    width: 48,
+    height: 48,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.surface,
@@ -1379,48 +1491,91 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 1,
   },
+  // Figma draws Heebo ExtraBold 18 (a literal, no size variable). Heebo is
+  // not loaded in the app, so the family stays Montserrat at Figma's size.
   countdownValue: {
     fontFamily: FONT_MONTSERRAT,
-    fontSize: 22,
-    lineHeight: 26,
+    fontSize: 18,
+    lineHeight: 22,
     fontWeight: '800',
     color: C.accent,
   },
+  // Body/text-xs 10/16 (get_variable_defs 17020:29673).
   countdownLabel: {
     fontFamily: FONT_INTER,
-    fontSize: 12,
+    fontSize: 10,
     lineHeight: 16,
     fontWeight: '400',
     color: C.inkBody,
   },
 
   // Info chips — horizontal scroll, bleeds edge-to-edge.
-  chipsScroll: {
-    marginTop: 34,
-    marginHorizontal: -16,
+  // Figma 17157:26177 — three equal cards, 8 apart.
+  infoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    // Line up with the hero card's edges (18 from the screen). The root
+    // already pads 16, so only 2 more here.
+    marginHorizontal: 2,
+    // Figma 17488:28026 — 20 under the tabs (12 gap + 8 padding), 8 below.
+    marginTop: 20,
+    marginBottom: 8,
   },
-  chipsScrollContent: {
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  chip: {
-    width: CHIP_WIDTH,
-    flexDirection: 'column',
+  infoCard: {
+    flex: 1,
+    // Keep the icon box its own size (38x38), not stretched across the card.
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 8,
+    padding: 8,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 18,
-    padding: 12,
     backgroundColor: C.surface,
   },
-  chipHighlight: {
-    borderColor: C.brandTeal,
+  chipsScroll: {
+    marginTop: 26,
+    marginBottom: 12,
+    marginHorizontal: -16,
   },
+  // Vertical padding gives the price card's all-round shadow room; the
+  // bottom margin is the carousel's own `pb-20` (Figma 17020-29593).
+  chipsScrollContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    gap: 16,
+  },
+  // Info cards — Figma 17020-29614: 132 wide, 8 padding, 16 radius, 8 gap.
+  chip: {
+    width: 132,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 16,
+    padding: 8,
+    backgroundColor: C.surface,
+  },
+  // Price card — no border, a soft all-round shadow instead (Figma "Card
+  // Shadow" 0/0/12 9%), and 28 between the top row and the footer.
+  chipHighlight: {
+    borderColor: 'transparent',
+    gap: 28,
+    shadowColor: '#000',
+    shadowOpacity: 0.09,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  chipHighlightTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  // 38x38: 18px icon in 10px padding.
   chipIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
+    padding: 10,
+    borderRadius: 8,
     backgroundColor: C.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1432,65 +1587,65 @@ const styles = StyleSheet.create({
   chipText: {
     width: '100%',
   },
+  chipTextBeside: {
+    flex: 1,
+  },
   chipLabel: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '400',
+    // Body/B-4 10/17 (get_variable_defs 17020:29601).
+    ...textStyles.B4,
     color: C.textFaint,
   },
   chipValue: {
-    fontFamily: FONT_INTER,
-    fontSize: 17,
-    lineHeight: 20,
-    fontWeight: '700',
+    // Body/B-3 12/18, bold override (get_variable_defs 17020:29602).
+    ...textStyle('B3', '700'),
     color: C.ink,
   },
-  chipFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 6,
-  },
   chipFooter: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    fontWeight: '600',
-    color: C.brandTeal,
+    alignSelf: 'stretch',
+    textAlign: 'center',
+    // Body/B-3 12/18 (get_variable_defs 17020:29607).
+    ...textStyles.B3,
+    color: C.accent,
   },
 
-  // Sections — separated by a hairline top border like the Figma rows.
+  // Sections — 20 above and below the content. The hairlines follow Figma
+  // 17488:27988: one UNDER About, the host and Crew; none around Accommodation
+  // and Member; one ABOVE Surf style and whatever comes after it.
   section: {
-    marginTop: 36,
-    paddingTop: 36,
+    paddingVertical: 20,
+  },
+  sectionLineBelow: {
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  sectionLineAbove: {
     borderTopWidth: 1,
     borderTopColor: C.border,
+  },
+  // Accommodation closes on 16, not 20 (Figma 17488:28114).
+  sectionStay: {
+    paddingBottom: 16,
   },
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 22,
+    marginBottom: 16,
   },
   // Extra breathing room under the icon-cell sections (Who it's for / Wave)
-  // before the next section's divider line.
+  // before the next section's divider line (Figma frame `pb-20`).
   sectionPadBottom: {
-    paddingBottom: 16,
+    paddingBottom: 40,
   },
   sectionTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
+    // Body/M B-1 16/24 with a Bold override (get_variable_defs 17020:29409).
+    ...textStyle('MB1', '700'),
     color: C.ink,
   },
   body: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
+    // Body/B-3 12/18 (get_variable_defs 17020:29411).
+    ...textStyles.B3,
     color: C.textMuted,
-    // Wrap the description earlier so it doesn't run to the right edge.
-    marginRight: 44,
   },
   bodyPlaceholder: {
     fontFamily: FONT_INTER,
@@ -1549,7 +1704,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 12,
+    // Figma 17022-31876 stacks the card's blocks on a flat 16 gap.
+    marginBottom: 16,
+    paddingRight: 24,
   },
   // Avatar + name → tappable identity (opens the host's profile). Kept separate
   // from the Edit Profile pill so only the identity is the touch target.
@@ -1569,68 +1726,91 @@ const styles = StyleSheet.create({
   },
   aboutHostName: {
     flex: 1,
-    fontFamily: FONT_INTER,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
+    // Body/M B-1 16/24 with a Bold override (get_variable_defs 17022:31879).
+    // The design-context export prints 20 — that is the Desktop-mode
+    // inflation, not the size this phone frame renders.
+    ...textStyle('MB1', '700'),
     color: C.ink,
   },
-  // Host profile detail badges (Trip Operator) — soft pill tags under the bio.
-  hostBadgeGroup: {
-    gap: 8,
-    marginBottom: 22,
-  },
+  // Host profile detail badges — one wrapping flow of outlined chips
+  // (Figma 17022-31880/31881).
   hostBadgeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 16,
   },
-  // Floating chips — white, no border/fill tint, soft drop shadow so they lift
-  // off the card.
   hostBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    paddingVertical: 4,
+    borderRadius: 32,
+    borderWidth: 1,
+    borderColor: C.borderChip,
+    backgroundColor: C.surface,
+    overflow: 'hidden',
   },
   hostBadgeText: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 16,
-    fontWeight: '600',
-    color: C.inkBody,
+    // 14px (Body/M B-2) — Ohad, 2 Oct 2026. Figma's B-5 9px read too small.
+    ...textStyles.MB2,
+    color: C.ink,
+  },
+  hostBadgeEmoji: {
+    // Same size as the label. NO fontFamily: Inter has no emoji glyphs, and on
+    // web a font with no fallback draws 🏝️ as two empty boxes. The system
+    // font picks up the emoji font on every platform.
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  // Bio — Body/B-3 12/18 (get_variable_defs 17022:31902). Its own style rather
+  // than the shared `body`, which is 14/20 and reserved for section prose.
+  hostBio: {
+    ...textStyles.B3,
+    color: C.textMuted,
   },
   // "Local knowledge" rows in the About block — destination + stay familiarity.
   hostFamiliarity: {
-    gap: 8,
-    marginBottom: 16,
+    gap: 16,
+    marginTop: 16,
   },
   hostFamRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  // 38x38 cell: 18px icon in 10px padding (Figma 17022-31904).
+  hostFamIconCell: {
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.borderIconCell,
+    backgroundColor: C.surfaceMuted,
+  },
   hostFamText: {
     flex: 1,
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
-    color: C.inkBody,
+    // Body/B-3 12/18 (get_variable_defs 17022:31907, 17022:31908).
+    ...textStyles.B3,
+    color: C.ink,
   },
   hostFamPlace: {
-    fontWeight: '700',
+    // Native bakes the weight into the family, so the bold run needs the
+    // Bold family — `fontWeight` alone renders Regular on iOS.
+    ...textStyle('B3', '700'),
+  },
+  hostSeeMore: {
+    marginTop: 16,
+    // Body/B-3 12/18 (get_variable_defs 17022:31921).
+    ...textStyles.B3,
+    color: C.accent,
   },
   seeMore: {
-    marginTop: 8,
-    fontFamily: FONT_INTER,
-    fontSize: 15,
-    fontWeight: '400',
-    color: C.brandTeal,
+    marginTop: 16,
+    // Body/M B-2 14/18 (get_variable_defs 17020:29412).
+    ...textStyles.MB2,
+    color: C.accent,
   },
   seeAll: {
     fontFamily: FONT_INTER,
@@ -1649,39 +1829,35 @@ const styles = StyleSheet.create({
     borderColor: C.border,
     borderRadius: 20,
     backgroundColor: C.surface,
-    // Less vertical padding so the boards can grow without the card getting taller.
-    paddingLeft: 12,
-    paddingRight: 12, // tighter gap to the right of the boards
-    paddingVertical: 8,
+    // Figma 17020-29449: px 12, py 16.
+    paddingHorizontal: 12,
+    paddingVertical: 16,
   },
   surfPills: {
     flex: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    columnGap: 8,
-    rowGap: 12,
+    // Figma 17488:28212 — 8 both ways.
+    gap: 8,
   },
   surfPill: {
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.chipBg,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: 15,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   surfPillText: {
-    fontFamily: FONT_INTER,
-    // Base size comes from surfPillFontSize (16, or 12 with 4 boards) — set inline.
-    fontSize: 16,
-    lineHeight: 22,
-    fontWeight: '400',
+    // Body/B-4 10/17 (get_variable_defs 17020:29458).
+    ...textStyles.B4,
     color: C.ink,
     textAlign: 'center',
   },
   boardsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 12,
+    gap: 16,
     height: BOARD_H,
   },
 
@@ -1689,62 +1865,52 @@ const styles = StyleSheet.create({
   howRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 14,
+    gap: 8,
   },
   howTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '700',
+    // Body/B-4 10/17, bold override (get_variable_defs 17020:29503).
+    ...textStyle('B4', '700'),
     color: '#0A0A0A',
   },
   howDesc: {
-    marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 17,
+    // Body/B-4 10/17 (get_variable_defs 17020:29504).
+    ...textStyles.B4,
     color: C.textHowDesc,
   },
 
   // Icon-box cells (Who it's for / Wave information / Accommodation fallback)
+  // Figma 17020-29564: the title→cells gap is 24 (16 from the title row + 8).
   cellRow: {
     flexDirection: 'row',
-    gap: 4,
+    marginTop: 8,
   },
   iconCell: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    alignItems: 'flex-start',
+    gap: 8,
   },
-  // White square sized to the height of the label+value text beside it.
+  // 38x38 white square: 18px icon in 10px padding, 8 radius.
   iconCellBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
+    padding: 10,
+    borderRadius: 8,
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 2,
   },
   iconCellText: {
     flex: 1,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
   },
   iconCellLabel: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '400',
+    // Body/B-3 12/18 (get_variable_defs 17020:29569).
+    ...textStyles.B3,
     color: C.textMuted,
   },
   iconCellValue: {
-    marginTop: 3,
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '700',
+    // Body/B-3 12/18, bold override (get_variable_defs 17020:29570).
+    ...textStyle('B3', '700'),
     color: C.ink,
   },
 
@@ -1762,10 +1928,20 @@ const styles = StyleSheet.create({
   },
   // "View all" → full Members screen (Figma 13459-48582).
   seeAllLink: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '400',
+    // Body/M B-2 14/18 (get_variable_defs 17020:29519).
+    ...textStyles.MB2,
     color: '#05BCD3',
+  },
+  // Name under each avatar — Figma 13439:36846 (B-4, Text/M-03).
+  avatarCol: {
+    alignItems: 'center',
+    gap: 2,
+  },
+  avatarName: {
+    width: 48,
+    ...textStyles.B4,
+    color: C.textFaint,
+    textAlign: 'center',
   },
   avatarRow: {
     flexDirection: 'row',
@@ -1808,22 +1984,18 @@ const styles = StyleSheet.create({
   },
 
   // Accommodation card
+  // Figma 17020-29417: white, 32 radius, 10 padding, 12 gap — no border and
+  // no shadow; the #FAFAFA page behind it is the contrast.
   stayCard: {
     backgroundColor: C.surface,
-    borderRadius: 36,
-    padding: 16,
+    borderRadius: 32,
+    padding: 10,
     gap: 12,
-    // No border — a small float instead.
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
   },
   stayImage: {
     width: '100%',
     aspectRatio: 328 / 198, // ≈ 3.3 wide : 2 tall (landscape, per Figma)
-    borderRadius: 28,
+    borderRadius: 24,
     backgroundColor: C.surfaceMuted,
   },
   stayImagePlaceholder: {
@@ -1842,35 +2014,36 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: C.textHowDesc,
   },
+  // Info pill — Figma 17020-29427: px 8, py 7, 8 gap, 32 radius.
   stayPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     backgroundColor: C.surfaceMuted,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderRadius: 32,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
   },
+  // 38x38 white circle: 18px icon in 10px padding.
   stayPillIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 28,
+    padding: 10,
+    borderRadius: 32,
     backgroundColor: C.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // The stay's logo fills the same 38px circle (Figma 17488:28129).
+  stayLogo: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.surface },
+  // "Verified Swellyo Stay" — B-4 in Fill/Tertiary (17488:28132).
+  stayVerified: { color: C.verified },
   stayName: {
-    fontFamily: FONT_INTER,
-    fontSize: 16,
-    lineHeight: 18,
-    fontWeight: '700',
+    // Body/B-3 12/18, bold override (get_variable_defs 17020:29431).
+    ...textStyle('B3', '700'),
     color: '#0A0A0A',
   },
   stayMeta: {
-    marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 18,
+    // Body/B-4 10/17 (get_variable_defs 17020:29432).
+    ...textStyles.B4,
     color: C.textHowDesc,
   },
 

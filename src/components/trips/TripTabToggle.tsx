@@ -49,7 +49,7 @@ interface Props {
 const TAB_ICON: Partial<Record<TripTab, TripIconName>> = {
   dashboard: 'layout-alt-04',
   overview: 'sun-setting-03',
-  chat: 'message-text-circle-02',
+  chat: 'message-circle-02',
 };
 
 const DEFAULT_TABS: TripTab[] = ['overview', 'plan'];

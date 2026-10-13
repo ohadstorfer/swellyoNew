@@ -396,7 +396,7 @@ export async function fetchTripMoney(tripId: string): Promise<TripMoney> {
  */
 export async function fetchMedicalFlags(tripId: string): Promise<MedicalFlags> {
   const { data, error } = await supabase
-    .from('organized_trip_medical_forms')
+    .from('organized_trip_personal_info')
     .select(
       'allergies, allergies_none, dietary, dietary_none, injuries, injuries_none, medications, medications_none, completed_at',
     )

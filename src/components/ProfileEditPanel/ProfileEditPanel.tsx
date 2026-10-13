@@ -68,6 +68,12 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   surfer: SupabaseSurfer | null;
+  /**
+   * Open already scrolled to a section. Set by the "you skipped your
+   * destinations" reminder (bell row and push), whose whole point is that
+   * section — landing on the cover photo would make them hunt for it.
+   */
+  focus?: 'destinations' | null;
 };
 
 const SafeAreaContainer = Platform.OS === 'web' ? View : SafeAreaView;
@@ -132,7 +138,7 @@ const BOARD_ID_TO_DB: Record<number, string> = {
   3: 'soft_top',
 };
 
-export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) => {
+export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer, focus = null }) => {
   const { width: screenWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { updateProfile } = useUserProfile();
@@ -777,6 +783,25 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
     [persist],
   );
 
+  // `focus` — scroll to the destinations section once the panel has slid in and
+  // the section has been laid out. Runs once per open: the section's y changes
+  // as images above it load, and chasing it would yank the scroll mid-read.
+  const scrollRef = useRef<ScrollView>(null);
+  const [destinationsY, setDestinationsY] = useState<number | null>(null);
+  const focusDoneRef = useRef(false);
+  useEffect(() => {
+    if (!visible) {
+      focusDoneRef.current = false;
+      return;
+    }
+    if (focus !== 'destinations' || destinationsY == null || focusDoneRef.current) return;
+    const timer = setTimeout(() => {
+      focusDoneRef.current = true;
+      scrollRef.current?.scrollTo({ y: Math.max(0, destinationsY - insets.top - 16), animated: true });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [visible, focus, destinationsY, insets.top]);
+
   // Close any open sub-editor whenever the parent panel itself closes,
   // so that re-opening the panel always lands on the main view.
   useEffect(() => {
@@ -888,6 +913,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
         >
           <SafeAreaContainer style={styles.safeArea} edges={[ 'bottom']}>
             <ScrollView
+              ref={scrollRef}
               style={styles.scroll}
               contentContainerStyle={[
                 styles.scrollContent,
@@ -1091,6 +1117,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                   </TouchableOpacity>
                 </Section>
 
+                <View onLayout={e => setDestinationsY(e.nativeEvent.layout.y)}>
                 <Section title="Where you've surfed">
                   <View style={styles.destinationsBlock}>
                     {destinations.length === 0 ? (
@@ -1120,6 +1147,7 @@ export const ProfileEditPanel: React.FC<Props> = ({ visible, onClose, surfer }) 
                     </View>
                   </View>
                 </Section>
+                </View>
 
                 <Section title="Lifestyle">
                   <View style={styles.destinationsBlock}>

@@ -288,7 +288,7 @@ export const OnboardingStep6LifestyleScreen: React.FC<Props> = ({
     <View style={styles.contentRoot}>
       <View style={styles.headerCopy}>
         <Text style={styles.subtitle}>
-          Beyond surfing,{'\n'}what else are you into?
+          Out of the water, whats{'\n'}your vibe?
         </Text>
         <Text style={styles.helper}>Select 3 or more!</Text>
       </View>

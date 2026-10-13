@@ -241,3 +241,46 @@ export function travelerCounts(args: {
   }
   return { going, onboarding, capacity: args.maxParticipants ?? null };
 }
+
+// ---------------------------------------------------------------------------
+// Per-traveler pay status — the Payments page tile and the Guests payments list
+// ---------------------------------------------------------------------------
+
+/** Where one traveler stands. `no_price` is the operator's own backlog. */
+export type PayStatus = 'full' | 'deposit' | 'awaiting' | 'no_price';
+
+/**
+ * One traveler's status, by the SAME rule `tripSummary` uses for "fully paid".
+ *
+ * ⚠️ The `settled` test below is a copy of the one inside `tripSummary`. Change
+ * one, change both — otherwise the Guests payments list and the Dashboard tile
+ * disagree about the same person.
+ *
+ * `deposit` means the Deposit STEP itself is paid, and not everything is
+ * (Ohad, 9 Oct). Money paid part of the way by any other route — a partial
+ * payment on a trip with no deposit step — is still `awaiting`: "Deposit paid"
+ * on someone who was never asked for a deposit would be a label that lies.
+ */
+export function travelerPayStatus(t: {
+  totalUsd: number | null;
+  paidUsd: number;
+  steps: { kind?: string; state: string }[];
+}): PayStatus {
+  if (t.totalUsd === null) return 'no_price';
+  const settled =
+    t.steps.length > 0
+      ? t.steps.every(s => s.state === 'paid')
+      : t.paidUsd >= t.totalUsd && t.totalUsd > 0;
+  if (settled) return 'full';
+  return t.steps.some(s => s.kind === 'deposit' && s.state === 'paid') ? 'deposit' : 'awaiting';
+}
+
+/** How many travelers are in each status. `full` always equals
+ *  `tripSummary().fullyPaid`, and the three paid groups add up to `priced`. */
+export function payStatusCounts(
+  travelers: { totalUsd: number | null; paidUsd: number; steps: { kind?: string; state: string }[] }[],
+): Record<PayStatus, number> {
+  const counts: Record<PayStatus, number> = { full: 0, deposit: 0, awaiting: 0, no_price: 0 };
+  for (const t of travelers) counts[travelerPayStatus(t)] += 1;
+  return counts;
+}

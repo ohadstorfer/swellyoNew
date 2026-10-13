@@ -65,7 +65,7 @@ export const STAFF_KIND_COPY: Record<string, { title: string; sub: string }> = {
   passport:  { title: 'Passport',       sub: 'A photo of the passport page.' },
   visa:      { title: 'Visa',           sub: 'Their entry permit for this destination.' },
   waiver:    { title: 'Waiver',         sub: 'They read your terms and agree by typing their name.' },
-  medical:   { title: 'Medical info',   sub: 'Allergies, diet, injuries, medication.' },
+  medical:   { title: 'Personal info',  sub: 'Allergies, diet, injuries, medication.' },
   insurance: { title: 'Insurance',      sub: 'Their policy document or confirmation.' },
   flights:   { title: 'Flight details', sub: 'Their ticket, so you can plan the pickup.' },
 };
@@ -410,7 +410,7 @@ export async function fetchStaffPaperworkEvidence(params: {
       .eq('user_id', userId)
       .in('requirement_id', ids),
     supabase
-      .from('organized_trip_medical_forms')
+      .from('organized_trip_personal_info')
       .select('completed_at')
       .eq('trip_id', tripId)
       .eq('user_id', userId)
@@ -507,7 +507,7 @@ export async function fetchStaffRequirementsAsMe(
       .eq('user_id', userId)
       .in('requirement_id', ids),
     supabase
-      .from('organized_trip_medical_forms')
+      .from('organized_trip_personal_info')
       .select('completed_at')
       .eq('trip_id', tripId)
       .eq('user_id', userId)

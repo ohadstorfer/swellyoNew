@@ -14,6 +14,7 @@ import { clearAllMatchedUsers } from './tripPlanningStorage';
 import { clearCachedUserProfile } from './userProfileCache';
 import { clearPreloadCache } from '../services/media/videoPreloadService';
 import { avatarCacheService } from '../services/media/avatarCacheService';
+import { clearCoverImageCache } from '../services/media/coverImageCache';
 import { clearSwellyShaperChatId } from '../screens/SwellyShaperScreen';
 import { swellyShaperService } from '../services/swelly/swellyShaperService';
 import { messagingService } from '../services/messaging/messagingService';
@@ -53,6 +54,7 @@ export function registerLogoutHandlers(): void {
 
   // Avatar prefetch tracking (in-memory)
   logoutRegistry.register(() => avatarCacheService.clearCache());
+  logoutRegistry.register(() => clearCoverImageCache());
 
   // Swelly Shaper: clear persisted chat ID (AsyncStorage) and in-memory service state
   // So User B never sees or continues User A's Swelly Shaper conversation

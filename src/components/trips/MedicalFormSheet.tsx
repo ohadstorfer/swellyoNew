@@ -18,6 +18,11 @@
  * 4 Sep 2026 — Product Specs §"Trip onboarding" listed it from the start and
  * the table never had a column for it.
  *
+ * The form itself (`MedicalFormBody` + `useMedicalForm`) is exported on its
+ * own: traveler onboarding renders it INLINE as the "Personal Info" step
+ * (Figma 17134:25594), and the Plan tab keeps this sheet. One form, two
+ * frames — two copies of "what counts as answered" would drift.
+ *
  * Spec: docs/specs/operator-trips/waiver-medical.md
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -32,10 +37,12 @@ import {
   Keyboard,
   useWindowDimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheetShell } from '../BottomSheetShell';
 import { ff } from '../../theme/fonts';
+import { textStyle, textStyles } from '../../theme/typography';
+import { PersonalInfoIcon } from './PersonalInfoIcon';
+import { PhoneField } from './PhoneField';
 import {
   fetchMyMedicalForm,
   saveMedicalForm,
@@ -60,11 +67,13 @@ const CONTACT_FIELDS: {
   autoComplete?: 'name' | 'tel' | 'off';
   max: number;
 }[] = [
-  { key: 'emergencyName', label: 'Full name', placeholder: 'Who should we call?', autoComplete: 'name', max: 120 },
+  { key: 'emergencyName', label: 'Full name', placeholder: 'Full Name', autoComplete: 'name', max: 120 },
   {
     key: 'emergencyPhone',
     label: 'Phone number',
-    placeholder: 'Include the country code',
+    // Drawn by PhoneField (flag + dial code picker). Still stored as one
+    // string, "+371 21234567".
+    placeholder: 'Phone number',
     keyboardType: 'phone-pad',
     autoComplete: 'tel',
     max: 40,
@@ -72,7 +81,7 @@ const CONTACT_FIELDS: {
   {
     key: 'emergencyRelation',
     label: 'Relationship',
-    placeholder: 'Mother, partner, friend…',
+    placeholder: 'Relationship (optional)',
     optional: true,
     autoComplete: 'off',
     max: 60,
@@ -84,37 +93,250 @@ const FIELDS: {
   noneKey: keyof MedicalForm;
   label: string;
   placeholder: string;
+  /** The "nothing to declare" radio. */
   noneLabel: string;
+  /** The "I have something" radio — the one that opens the text box. */
+  someLabel: string;
+  icon: React.ReactNode;
 }[] = [
   {
     key: 'allergies',
     noneKey: 'allergiesNone',
     label: 'Allergies',
-    placeholder: 'Peanuts, penicillin, bee stings…',
+    placeholder: 'Peanuts, penicillin, bee stings...',
     noneLabel: 'No allergies',
+    someLabel: 'I have allergies',
+    icon: <PersonalInfoIcon name="allergies" />,
   },
   {
     key: 'dietary',
     noneKey: 'dietaryNone',
-    label: 'Diet',
-    placeholder: 'Vegetarian, gluten free…',
-    noneLabel: 'No dietary needs',
+    label: 'Dietary needs',
+    placeholder: 'Vegetarian, gluten free',
+    noneLabel: 'I have no dietary needs',
+    someLabel: 'I have dietary needs',
+    icon: <PersonalInfoIcon name="dietary" />,
   },
   {
     key: 'injuries',
     noneKey: 'injuriesNone',
     label: 'Injuries or conditions',
-    placeholder: 'Shoulder injury, asthma…',
-    noneLabel: 'None',
+    placeholder: 'Shoulder injury, asthma...',
+    noneLabel: 'I have no injuries or conditions',
+    someLabel: 'I have something to share',
+    icon: <PersonalInfoIcon name="injuries" />,
   },
   {
     key: 'medications',
     noneKey: 'medicationsNone',
     label: 'Medication',
-    placeholder: 'Anything you take regularly',
-    noneLabel: 'None',
+    placeholder: 'Anything you take regularly...',
+    noneLabel: "I don't take any medication",
+    someLabel: 'I take medication',
+    icon: <PersonalInfoIcon name="medication" />,
   },
 ];
+
+/**
+ * Load, edit and save one traveler's medical form. `active` is the sheet's
+ * `visible`, or always true for the inline onboarding step.
+ */
+export function useMedicalForm(tripId: string, userId: string, active: boolean, onSaved: () => void) {
+  const [form, setForm] = useState<MedicalForm>(EMPTY_MEDICAL_FORM);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const existing = await fetchMyMedicalForm(tripId, userId);
+        if (!cancelled) setForm(existing ?? EMPTY_MEDICAL_FORM);
+      } catch (e) {
+        console.error('[MedicalFormSheet] load failed:', e);
+        if (!cancelled) setForm(EMPTY_MEDICAL_FORM);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, tripId, userId]);
+
+  // Every field must be answered: either text, or an explicit "none".
+  const answersComplete = FIELDS.every(f => {
+    const none = form[f.noneKey] as boolean;
+    return none || (form[f.key] as string).trim().length > 0;
+  });
+  // A name and a number. `isMedicalFormComplete` asks the same question of a
+  // SAVED form — same rule, one place, so the form cannot let through
+  // something the dashboard then reports as missing.
+  const contactComplete =
+    form.emergencyName.trim().length > 0 && form.emergencyPhone.trim().length > 0;
+  const complete = answersComplete && contactComplete;
+  const hint = complete
+    ? null
+    : !contactComplete
+      ? 'Add an emergency contact — a name and a phone number.'
+      : 'Answer every question — pick an option, and add details if you have any.';
+
+  const save = useCallback(async () => {
+    if (saving || !complete) return;
+    setSaving(true);
+    try {
+      await saveMedicalForm(tripId, userId, form);
+      setSaving(false);
+      onSaved();
+    } catch (e) {
+      console.error('[MedicalFormSheet] save failed:', e);
+      setSaving(false);
+      showErrorAlert('Could not save', e, 'Could not save your personal info. Please try again.');
+    }
+  }, [saving, complete, tripId, userId, form, onSaved]);
+
+  return { form, setForm, loading, saving, complete, hint, save };
+}
+
+/**
+ * The form body — Figma 17134:25594. An "Emergency contact" card, then one
+ * card per question: icon, label, two radios ("none" / "I have…") and a text
+ * box. The box is always drawn; picking "none" greys it out and empties it.
+ *
+ * ⚠️ NOTHING IS PRE-SELECTED. A fresh form shows both radios empty, so a
+ * traveler who scrolls past has answered nothing — "none" is only ever an
+ * explicit choice, which is the whole point of the `*_none` columns. The table
+ * has no column for "picked I-have but wrote nothing yet", so that half lives
+ * in `pickedSome` here and the question stays unanswered until text is typed.
+ */
+export const MedicalFormBody: React.FC<{
+  form: MedicalForm;
+  setForm: React.Dispatch<React.SetStateAction<MedicalForm>>;
+}> = ({ form, setForm }) => {
+  const setField = (key: FieldKey, value: string) =>
+    setForm(prev => ({ ...prev, [key]: value }));
+
+  const setContact = (key: ContactKey, value: string) =>
+    setForm(prev => ({ ...prev, [key]: value }));
+
+  const [pickedSome, setPickedSome] = useState<Set<FieldKey>>(() => new Set());
+
+  // Picking "none" clears the text — keeping both would be contradictory data
+  // the operator has to guess at.
+  const pickNone = (noneKey: keyof MedicalForm, textKey: FieldKey) =>
+    setForm(prev => ({ ...prev, [noneKey]: true, [textKey]: '' }));
+
+  const pickSome = (noneKey: keyof MedicalForm, textKey: FieldKey) => {
+    setPickedSome(prev => (prev.has(textKey) ? prev : new Set(prev).add(textKey)));
+    setForm(prev => (prev[noneKey] ? { ...prev, [noneKey]: false } : prev));
+  };
+
+  return (
+    <View style={styles.formStack}>
+      {/* ── Emergency contact ─────────────────────────────────────────────
+          First, and set apart as its own floating card, because it is the only
+          block here that exists to be used rather than read. */}
+      <View style={styles.contactBlock}>
+        <View style={styles.contactHead}>
+          <View style={styles.deetIcon}>
+            <PersonalInfoIcon name="user" />
+          </View>
+          <View style={styles.contactHeadText}>
+            <Text style={styles.blockTitle}>Emergency contact</Text>
+            <Text style={styles.blockSub}>
+              One person we can reach if something happens to you.
+            </Text>
+          </View>
+        </View>
+        {CONTACT_FIELDS.map(c =>
+          c.key === 'emergencyPhone' ? (
+            <PhoneField
+              key={c.key}
+              value={form[c.key]}
+              onChangeText={t => setContact(c.key, t)}
+              placeholder={c.placeholder}
+              maxLength={c.max}
+              accessibilityLabel={c.label}
+            />
+          ) : (
+          <TextInput
+            key={c.key}
+            value={form[c.key]}
+            onChangeText={t => setContact(c.key, t.slice(0, c.max))}
+            placeholder={c.placeholder}
+            placeholderTextColor="#7B7B7B"
+            keyboardType={c.keyboardType ?? 'default'}
+            autoComplete={c.autoComplete}
+            accessibilityLabel={c.optional ? `${c.label}, optional` : c.label}
+            style={styles.input}
+          />
+          ),
+        )}
+      </View>
+
+      <View style={styles.deetsGroup}>
+        <Text style={styles.deetsTitle}>Basic deets</Text>
+        {FIELDS.map(f => {
+          const none = form[f.noneKey] as boolean;
+          const text = form[f.key] as string;
+          const some = !none && (pickedSome.has(f.key) || text.trim().length > 0);
+          return (
+            <View key={f.key} style={styles.deetCard}>
+              <View style={styles.deetRow}>
+                <View style={styles.deetIcon}>{f.icon}</View>
+                <Text style={styles.deetLabel}>{f.label}</Text>
+              </View>
+              <View accessibilityRole="radiogroup" style={styles.radioGroup}>
+                <RadioRow
+                  label={f.noneLabel}
+                  selected={none}
+                  onPress={() => pickNone(f.noneKey, f.key)}
+                />
+                <RadioRow
+                  label={f.someLabel}
+                  selected={some}
+                  onPress={() => pickSome(f.noneKey, f.key)}
+                />
+              </View>
+              <TextInput
+                value={text}
+                onChangeText={t => setField(f.key, t.slice(0, 500))}
+                placeholder={f.placeholder}
+                placeholderTextColor={none ? '#A0A0A0' : '#7B7B7B'}
+                editable={!none}
+                multiline
+                accessibilityLabel={f.label}
+                style={[styles.input, styles.inputMulti, none && styles.inputOff]}
+              />
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+};
+
+const RadioRow: React.FC<{ label: string; selected: boolean; onPress: () => void }> = ({
+  label,
+  selected,
+  onPress,
+}) => (
+  <Pressable
+    onPress={onPress}
+    hitSlop={{ top: 6, bottom: 6, left: 4, right: 12 }}
+    style={styles.radioRow}
+    accessibilityRole="radio"
+    accessibilityState={{ selected }}
+    accessibilityLabel={label}
+  >
+    <View style={[styles.box, selected && styles.boxOn]}>
+      {selected ? <View style={styles.radioDot} /> : null}
+    </View>
+    <Text style={styles.noneText}>{label}</Text>
+  </Pressable>
+);
 
 export const MedicalFormSheet: React.FC<{
   visible: boolean;
@@ -132,9 +354,12 @@ export const MedicalFormSheet: React.FC<{
   // InviteMembersSheet.
   const { height: windowHeight } = useWindowDimensions();
   const maxSheetHeight = Math.round(windowHeight * 0.9);
-  const [form, setForm] = useState<MedicalForm>(EMPTY_MEDICAL_FORM);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const { form, setForm, loading, saving, complete, hint, save } = useMedicalForm(
+    tripId,
+    userId,
+    visible,
+    onSaved,
+  );
 
   // Let go of the keyboard BEFORE the sheet starts sliding out. A TextInput in
   // here is the Modal's first responder, and iOS dismissing the two in the
@@ -151,66 +376,6 @@ export const MedicalFormSheet: React.FC<{
     wasVisible.current = visible;
   }, [visible]);
 
-  useEffect(() => {
-    if (!visible) return;
-    let cancelled = false;
-    setLoading(true);
-    (async () => {
-      try {
-        const existing = await fetchMyMedicalForm(tripId, userId);
-        if (!cancelled) setForm(existing ?? EMPTY_MEDICAL_FORM);
-      } catch (e) {
-        console.error('[MedicalFormSheet] load failed:', e);
-        if (!cancelled) setForm(EMPTY_MEDICAL_FORM);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [visible, tripId, userId]);
-
-  const setField = (key: FieldKey, value: string) =>
-    setForm(prev => ({ ...prev, [key]: value }));
-
-  const setContact = (key: ContactKey, value: string) =>
-    setForm(prev => ({ ...prev, [key]: value }));
-
-  const toggleNone = (noneKey: keyof MedicalForm, textKey: FieldKey) =>
-    setForm(prev => {
-      const next = !prev[noneKey];
-      // Turning "none" on clears the text — keeping both would be contradictory
-      // data the operator has to guess at.
-      return { ...prev, [noneKey]: next, ...(next ? { [textKey]: '' } : {}) };
-    });
-
-  // Every field must be answered: either text, or an explicit "none".
-  const answersComplete = FIELDS.every(f => {
-    const none = form[f.noneKey] as boolean;
-    return none || (form[f.key] as string).trim().length > 0;
-  });
-  // A name and a number. `isMedicalFormComplete` asks the same question of a
-  // SAVED form — same rule, one place, so the sheet cannot let through
-  // something the dashboard then reports as missing.
-  const contactComplete =
-    form.emergencyName.trim().length > 0 && form.emergencyPhone.trim().length > 0;
-  const complete = answersComplete && contactComplete;
-
-  const handleSave = useCallback(async () => {
-    if (saving || !complete) return;
-    setSaving(true);
-    try {
-      await saveMedicalForm(tripId, userId, form);
-      setSaving(false);
-      onSaved();
-    } catch (e) {
-      console.error('[MedicalFormSheet] save failed:', e);
-      setSaving(false);
-      showErrorAlert('Could not save', e, 'Could not save your medical info. Please try again.');
-    }
-  }, [saving, complete, tripId, userId, form, onSaved]);
-
   return (
     <BottomSheetShell visible={visible} onClose={onClose} avoidKeyboard>
       {({ panHandlers }) => (
@@ -225,7 +390,7 @@ export const MedicalFormSheet: React.FC<{
         >
           <View {...panHandlers} style={styles.grabWrap}>
             <View style={styles.grabber} />
-            <Text style={styles.title}>Medical info</Text>
+            <Text style={styles.title}>Personal Info</Text>
             <Text style={styles.sub}>Only you and your trip organiser can see this.</Text>
           </View>
 
@@ -236,68 +401,12 @@ export const MedicalFormSheet: React.FC<{
           ) : (
             <>
               <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent}>
-                {/* ── Emergency contact ─────────────────────────────────────
-                    First, and visually set apart, because it is the only block
-                    here that exists to be used rather than read. */}
-                <View style={styles.contactBlock}>
-                  <Text style={styles.blockTitle}>Emergency contact</Text>
-                  <Text style={styles.blockSub}>
-                    One person we can reach if something happens to you on this trip.
-                  </Text>
-                  {CONTACT_FIELDS.map(c => (
-                    <View key={c.key} style={styles.field}>
-                      <Text style={styles.label}>
-                        {c.label}
-                        {c.optional ? <Text style={styles.optional}>  Optional</Text> : null}
-                      </Text>
-                      <TextInput
-                        value={form[c.key]}
-                        onChangeText={t => setContact(c.key, t.slice(0, c.max))}
-                        placeholder={c.placeholder}
-                        placeholderTextColor="#9A9A9A"
-                        keyboardType={c.keyboardType ?? 'default'}
-                        autoComplete={c.autoComplete}
-                        style={styles.input}
-                      />
-                    </View>
-                  ))}
-                </View>
-
-                {FIELDS.map(f => {
-                  const none = form[f.noneKey] as boolean;
-                  return (
-                    <View key={f.key} style={styles.field}>
-                      <Text style={styles.label}>{f.label}</Text>
-                      <TextInput
-                        value={form[f.key] as string}
-                        onChangeText={t => setField(f.key, t.slice(0, 500))}
-                        placeholder={f.placeholder}
-                        placeholderTextColor="#9A9A9A"
-                        editable={!none}
-                        multiline
-                        style={[styles.input, none && styles.inputDisabled]}
-                      />
-                      <Pressable
-                        onPress={() => toggleNone(f.noneKey, f.key)}
-                        style={styles.noneRow}
-                        accessibilityRole="checkbox"
-                        accessibilityState={{ checked: none }}
-                      >
-                        <View style={[styles.box, none && styles.boxOn]}>
-                          {none ? (
-                            <Ionicons name="checkmark" size={13} color="#FFFFFF" />
-                          ) : null}
-                        </View>
-                        <Text style={styles.noneText}>{f.noneLabel}</Text>
-                      </Pressable>
-                    </View>
-                  );
-                })}
+                <MedicalFormBody form={form} setForm={setForm} />
               </ScrollView>
 
               <View style={styles.footer}>
                 <Pressable
-                  onPress={handleSave}
+                  onPress={save}
                   disabled={!complete || saving}
                   style={[styles.primaryBtn, (!complete || saving) && styles.btnDisabled]}
                 >
@@ -307,13 +416,7 @@ export const MedicalFormSheet: React.FC<{
                     <Text style={styles.primaryBtnText}>Save</Text>
                   )}
                 </Pressable>
-                {!complete ? (
-                  <Text style={styles.hint}>
-                    {!contactComplete
-                      ? 'Add an emergency contact — a name and a phone number.'
-                      : 'Answer every question — write something, or tick the box.'}
-                  </Text>
-                ) : null}
+                {hint ? <Text style={styles.hint}>{hint}</Text> : null}
               </View>
             </>
           )}
@@ -343,63 +446,73 @@ const styles = StyleSheet.create({
   center: { padding: 32, alignItems: 'center' },
   body: { borderTopWidth: 1, borderTopColor: '#EEEEEE' },
   bodyContent: { padding: 20, gap: 18 },
-  // The emergency contact reads as one object, not three loose inputs — a
-  // tinted card with its own heading, so it does not look like a fifth
-  // question in the list below it.
+  formStack: { gap: 24 },
+  // Figma 17134:25614 — a floating white card, set apart from the questions.
   contactBlock: {
-    gap: 14,
-    padding: 16,
-    borderRadius: 14,
-    backgroundColor: '#F5FBFC',
-    borderWidth: 1,
-    borderColor: '#DCEFF2',
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 24,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 4,
   },
-  blockTitle: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#212121',
-  },
-  blockSub: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12,
-    lineHeight: 17,
-    color: '#7B7B7B',
-    marginTop: -8,
-  },
-  optional: { fontFamily: ff('Inter', '400'), fontSize: 11, color: '#9A9A9A' },
-  field: { gap: 8 },
-  label: {
-    fontFamily: ff('Inter', '600'),
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#212121',
-  },
+  // MB2 bold 14/18 + B3 (the export's bold 18 is the desktop mode).
+  blockTitle: { ...textStyle('MB2', '700'), color: '#333333' },
+  blockSub: { ...textStyles.B3, color: '#333333' },
   input: {
-    minHeight: 52,
+    minHeight: 56,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E4E4E4',
-    padding: 12,
-    fontFamily: ff('Inter', '400'),
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#212121',
-    textAlignVertical: 'top',
+    borderColor: '#CFCFCF',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    ...textStyles.MB2,
+    color: '#333333',
   },
-  inputDisabled: { backgroundColor: '#F7F7F5', color: '#9A9A9A' },
-  noneRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  inputMulti: { paddingTop: 18, paddingBottom: 18, textAlignVertical: 'top' },
+  // Surface/M 03 — the box under a "none" answer.
+  inputOff: { backgroundColor: '#E4E4E4' },
+  contactHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  contactHeadText: { flex: 1, gap: 1 },
+  radioGroup: { gap: 12 },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFFFFF' },
+  deetsGroup: { gap: 15 },
+  deetsTitle: { ...textStyle('MB1', '700'), color: '#333333', marginBottom: -7 },
+  deetCard: {
+    gap: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: '#FFFFFF',
+  },
+  deetRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  deetIcon: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#F7F7F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deetLabel: { flex: 1, ...textStyle('B3', '700'), color: '#333333' },
   box: {
-    width: 18,
-    height: 18,
-    borderRadius: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#D5D7DA',
     alignItems: 'center',
     justifyContent: 'center',
   },
   boxOn: { backgroundColor: '#05BCD3', borderColor: '#05BCD3' },
-  noneText: { fontFamily: ff('Inter', '400'), fontSize: 13, color: '#555555' },
+  noneText: { ...textStyles.B3, color: '#333333' },
   footer: {
     paddingHorizontal: 20,
     paddingTop: 14,

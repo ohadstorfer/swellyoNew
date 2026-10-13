@@ -124,6 +124,11 @@ export type NotificationType =
   // blank "Notification" with an empty body — exactly what
   // `operator_document_rejected` did before July.
   | 'onboarding_unfinished'
+  // Skipped "Where have you traveled?" in onboarding and still has no
+  // destinations. Written by `scan_destination_reminders()` on an hourly cron
+  // (20261002000300): `data.stage` is '3d' then '7d', and after that it never
+  // fires again. About the profile, so it carries no trip_id.
+  | 'profile_destinations_missing'
   // The operator's half of the same scan: one digest per TRIP, never one per
   // stuck traveler, so `data.count` is the message and who they are is a tap
   // away. Same 20 Aug fix as above.
@@ -187,6 +192,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   operator_dispute_closed: true,
   trip_dates_changed: true,
   onboarding_unfinished: true,
+  profile_destinations_missing: true,
   operator_onboarding_stalled: true,
   operator_traveler_confirmed: true,
   operator_payment_landed: true,
@@ -910,6 +916,21 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
         icon: 'hourglass-outline',
       };
     }
+    case 'profile_destinations_missing':
+      // Two sends, two voices. The first asks; the second, four days later,
+      // says what they are missing out on — repeating the question would read
+      // as the same notification delivered twice.
+      return d.stage === '7d'
+        ? {
+            title: 'Your profile is missing your surf trips',
+            body: 'Add a destination so surfers heading the same way can find you.',
+            icon: 'map-outline',
+          }
+        : {
+            title: 'Where have you surfed?',
+            body: 'Add your surf trips to your profile to match with surfers who know the same spots.',
+            icon: 'map-outline',
+          };
     case 'operator_onboarding_stalled': {
       // One row per TRIP, never one per stuck traveler — ten people stalling on
       // a big trip is one notification. Same batching, and same reasoning, as

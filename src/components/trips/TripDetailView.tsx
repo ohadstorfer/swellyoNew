@@ -103,6 +103,10 @@ const INCLUDE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 // ---------------------------------------------------------------------------
 export interface TripDetailVM {
   heroImageUri: string | null;
+  /** More cover photos, cover first. The Overview swipes through them when
+   *  there are two or more (max 10 shown). Nothing fills this yet — trips store
+   *  one cover today — so the cover alone is what renders. */
+  galleryImageUris?: string[];
   title: string | null;
   destinationLabel: string | null;
 
@@ -136,6 +140,16 @@ export interface TripDetailVM {
   accommodationName: string | null;
   accommodationImageUri: string | null;
   accommodationUrl: string | null;
+  // Overview stay card extras (Figma 17488:28118). All optional and nothing
+  // fills them yet — each row shows only when its field is set.
+  /** The stay's own logo, in the round cell next to its name. */
+  accommodationLogoUri?: string | null;
+  /** "Verified Swellyo Stay" under the stay's name. */
+  accommodationVerified?: boolean | null;
+  /** Conservation International "Surf Protected Ecosystem" row. */
+  ciSurfConservation?: boolean | null;
+  /** "Sustainable STOKE Certified Provider" row. */
+  stokeCertified?: boolean | null;
 
   // Flow C — fixed per-person price + rich "What's included". Null for A/B.
   costPerPerson?: number | null;
@@ -488,7 +502,14 @@ export interface TripDetailViewProps {
     roleKey?: string;
     countryFrom?: string | null;
     hasAccount?: boolean;
+    /** The operator marked them local to the area (staff `is_local`). Counted
+     *  by the overview's "Local Crew" card. */
+    isLocal?: boolean;
   }[];
+  /** The trip screen's bottom price bar calls this to open the price details
+   *  ("What's included" / "About this estimate"). Filled by the redesigned
+   *  overview; null when there is nothing to open. */
+  priceDetailsRef?: React.MutableRefObject<(() => void) | null>;
   /** Operator trips: "View all" on the Staff cards. Only passed to someone who
    *  may manage the crew — there is no read-only crew screen to open. */
   onViewAllCrew?: () => void;
@@ -498,9 +519,20 @@ export interface TripDetailViewProps {
   /** Operator trips: the cover pill reads "Edit trip" and opens the trip editor
    *  instead of the cover sheet (Figma 14980-66208). Absent = no pill for them. */
   onEditTrip?: () => void;
-  /** Slide the hero (cover + countdown card) away — the Dashboard and Plan tabs.
+  /** Slide the hero (cover + card) away — the Chat tab, which has no cover.
    *  Only TripDetailViewRedesigned reads it. */
   heroCollapsed?: boolean;
+  /** Dashboard and Plan: the top card counts down to the trip instead of
+   *  showing the host and the surf stats (Figma 17488:29001). */
+  heroCardCountdown?: boolean;
+  /** Height the collapsed hero keeps, so the tabs land under the screen's dark
+   *  bar instead of behind it. 0 when that bar is in the layout flow. */
+  heroCollapsedHeight?: number;
+  /** Status-bar inset the cover runs under. The cover grows by this much. */
+  heroTopInset?: number;
+  /** Buttons drawn over the top of the cover (back, share, bell, more). They
+   *  scroll away with it. Replaces the built-in share button. */
+  heroControls?: React.ReactNode;
   /** Animate that change. False when the screen picked the tab itself. */
   animateHeroCollapse?: boolean;
   /** Open a participant's profile (tap on their avatar). */

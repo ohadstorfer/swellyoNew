@@ -9,6 +9,7 @@ import {
   saveCachedFullProfile,
 } from '../utils/userProfileCache';
 import { avatarCacheService } from '../services/media/avatarCacheService';
+import { warmCoverImage } from '../services/media/coverImageCache';
 import { useOnboarding } from './OnboardingContext';
 import { calculateAgeFromDOB } from '../utils/ageCalculation';
 import { ageGateService } from '../services/ageGate/ageGateService';
@@ -137,6 +138,12 @@ export const UserProfileProvider: React.FC<{ children: React.ReactNode }> = ({ c
       });
     }
   }, [profile?.profile_image_url]);
+
+  // Same for the profile cover: find the URL that works (thumbnail, or the
+  // original when no thumbnail exists) and get its bytes into the cache.
+  useEffect(() => {
+    warmCoverImage(profile?.cover_image_url);
+  }, [profile?.cover_image_url]);
 
   // Re-check age when the app returns to foreground — covers the case where
   // the JS bundle stays alive across the user's birthday (no cold start).

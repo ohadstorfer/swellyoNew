@@ -36,6 +36,7 @@ import Reanimated, {
 import { AdminUpdateRow, AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
+import { textStyle } from '../../../theme/typography';
 import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../../assets/images';
@@ -717,7 +718,11 @@ export const YourGearCard: React.FC<{
    *  ('suggestions'). Renders the "+ Add item" row; omit to hide it (e.g. a
    *  cancelled trip or a viewer who can't edit). */
   onAddItem?: () => void;
-}> = ({ rows, totalCount, mode, onOpen, onToggleItem, onAddItem }) => {
+  /** Header text, when the default for the mode is not right — the operator
+   *  Dashboard names its two lists differently (Figma 17776-48075). */
+  title?: string;
+  subtitle?: string;
+}> = ({ rows, totalCount, mode, onOpen, onToggleItem, onAddItem, title: titleProp, subtitle: subtitleProp }) => {
   const PREVIEW = 3;
   const isSuggestions = mode === 'suggestions';
   const displayRows =
@@ -729,8 +734,9 @@ export const YourGearCard: React.FC<{
   const total = displayRows.length;
   const preview = displayRows.slice(0, PREVIEW);
 
-  const title = isSuggestions ? 'What should members pack?' : 'Your Gear';
-  const subtitle = isSuggestions ? 'Things they should bring for themselves' : 'Things you want to bring';
+  const title = titleProp ?? (isSuggestions ? 'What should members pack?' : 'My Packing List');
+  const subtitle =
+    subtitleProp ?? (isSuggestions ? 'Things they should bring for themselves' : 'Things you want to bring');
   const emptyText = isSuggestions ? 'No gear yet' : 'No personal gear yet';
 
   return (
@@ -1921,7 +1927,9 @@ const styles = StyleSheet.create({
   // Bleed edge-to-edge so avatars scroll to the screen edge.
   memberScroll: { marginHorizontal: -16, marginTop: 16 },
   // Overview variant: that page's SectionTitle is 20/24 with 22 below it.
-  memberTitleOverview: { fontSize: 20, lineHeight: 24 },
+  // Body/M B-1 bold 16/24, same as every overview section title (Figma
+  // 17157:26305 — the export's 20 is the desktop mode).
+  memberTitleOverview: { ...textStyle('MB1', '700') },
   memberHeaderOverview: { marginBottom: 6 },
   memberScrollContent: { paddingHorizontal: 16, gap: 8, alignItems: 'flex-start' },
   memberItem: { width: 68, alignItems: 'center' },

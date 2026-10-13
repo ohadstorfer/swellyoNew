@@ -81,6 +81,14 @@ export type RootStackParamList = {
    * TravelerOnboarding's header warns about.
    */
   TripPayments: { tripId: string; tripTitle?: string | null };
+  /** Where each traveler stands on paying — opened from the "Total Guests
+   *  Payments" tile on TripPayments. A card for the same reason: CSV export. */
+  TripGuestPayments: { tripId: string; tripTitle?: string | null };
+  /** Every pending join request on one trip — the Dashboard's "Join Request"
+   *  action card. Approve / Contact on the row; Decline is in the profile. */
+  TripJoinRequests: { tripId: string };
+  /** One traveler on an operator trip, as the operator sees them. */
+  TripTraveler: { tripId: string; userId: string };
   /** Full "Updates" list — "View all" target of the Plan-tab admin updates. */
   TripUpdates: { tripId: string };
   /** Full "Members" list — "View all" target of the Overview Participants row and

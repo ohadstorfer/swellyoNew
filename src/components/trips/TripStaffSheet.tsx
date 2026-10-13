@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, TextInput, ActivityIndicator,
-  StyleSheet, useWindowDimensions, Share, Platform, Alert,
+  StyleSheet, useWindowDimensions, Share, Platform, Alert, Pressable,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +31,7 @@ import {
   listStaffRoles, listTripStaff, addTripStaff, updateTripStaffRole, revokeTripStaff,
   createStaffInviteLink, updateTripStaffListed, canChangeTier,
   searchUsersForStaff, inviteStaffMember, updateTripStaffProfile, STAFF_PROFESSIONS,
+  setStaffLocal,
   type StaffRole, type StaffRoleKey, type TripStaffMember, type StaffSearchResult,
 } from '../../services/trips/tripStaffService';
 import { uploadCrewPhoto } from '../../services/storage/storageService';
@@ -152,6 +153,8 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
   // "Photographer" and "Shooting from the water all week, ten years on this
   // coast" are different questions with different answers.
   const [draftBio, setDraftBio] = useState('');
+  // "Local to this area" — feeds the overview's Local Crew count.
+  const [draftLocal, setDraftLocal] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // Local file URI while picking; becomes an S3 URL on save. Kept apart from
@@ -254,6 +257,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     setDraftRole('crew');
     setDraftKinds([]);
     setDraftBio('');
+    setDraftLocal(false);
     setInviteUrl(null);
     setCopied(false);
     setDraftPhotoLocal(null);
@@ -305,6 +309,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
         title: draftTitle,
         bio: draftBio,
         requirementIds,
+        isLocal: draftLocal,
       });
       setStaff(await listTripStaff(tripId));
       setMode({ kind: 'list' });
@@ -313,7 +318,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     } finally {
       setSaving(false);
     }
-  }, [mode, tripId, draftRole, draftTitle, draftBio, draftKinds]);
+  }, [mode, tripId, draftRole, draftTitle, draftBio, draftKinds, draftLocal]);
 
   // Only ever offered for a Listed credit: they have no account, so there is no
   // profile photo to fall back on and the operator is the only one who can put
@@ -351,6 +356,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
         title: draftTitle,
         bio: draftBio,
         requirementIds,
+        isLocal: draftLocal,
       });
       setInviteUrl(url);
       setCopied(false);
@@ -361,7 +367,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     } finally {
       setSaving(false);
     }
-  }, [tripId, draftRole, draftTitle, draftBio, draftKinds]);
+  }, [tripId, draftRole, draftTitle, draftBio, draftKinds, draftLocal]);
 
   const handleShareLink = useCallback(async () => {
     if (!inviteUrl) return;
@@ -382,6 +388,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     setDraftName(member.name);
     setDraftTitle(member.title ?? '');
     setDraftBio(member.bio ?? '');
+    setDraftLocal(member.isLocal);
     setDraftRole(member.role_key);
     setDraftPhotoLocal(null);
     setDraftPhotoUrl(member.photo_url);
@@ -414,6 +421,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
           title: draftTitle,
           bio: draftBio,
           photoUrl: photoUrl ?? undefined,
+          isLocal: draftLocal,
         });
       } else if (mode.kind === 'edit') {
         // How travelers see them is editable on EVERY row — it belongs to the
@@ -425,6 +433,12 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
           title: draftTitle,
           bio: draftBio,
         });
+        // Only when it changed: the column does not exist until
+        // 20261002000000_staff_is_local.sql is applied, and an untouched tick
+        // must not fail every other edit before then.
+        if (draftLocal !== mode.member.isLocal) {
+          await setStaffLocal(mode.member.id, draftLocal);
+        }
         if (canChangeTier(mode.member)) {
           await updateTripStaffRole(mode.member.id, draftRole);
         } else {
@@ -445,7 +459,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     } finally {
       setSaving(false);
     }
-  }, [mode, tripId, operatorId, draftRole, draftName, draftTitle, draftBio, draftPhotoLocal, draftPhotoUrl]);
+  }, [mode, tripId, operatorId, draftRole, draftName, draftTitle, draftBio, draftLocal, draftPhotoLocal, draftPhotoUrl]);
 
   const handleRemove = useCallback(async (member: TripStaffMember) => {
     setSaving(true);
@@ -607,6 +621,25 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
         textAlignVertical="top"
       />
       <Text style={styles.counter}>{draftBio.length}/400</Text>
+
+      {/* Local to the trip area — counted as "Local Crew" on the overview. A
+          tick rather than a switch: it is one fact about them, set once. */}
+      <Pressable
+        onPress={() => setDraftLocal(v => !v)}
+        style={({ pressed }) => [styles.localRow, pressed && styles.localRowPressed]}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: draftLocal }}
+        accessibilityLabel="Local to this area"
+      >
+        <View style={[styles.localBox, draftLocal && styles.localBoxOn]}>
+          {draftLocal ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+        </View>
+        <View style={styles.localText}>
+          <Text style={styles.localTitle}>Local to this area</Text>
+          <Text style={styles.localSub}>They live where the trip happens.</Text>
+        </View>
+      </Pressable>
+
       <Text style={styles.noteText}>
         Travelers see this on the trip page, under their name. Both are optional, and you can
         change them later.
@@ -1332,6 +1365,22 @@ const styles = StyleSheet.create({
   chipTextOn: { color: '#0B7C8A' },
 
   textArea: { minHeight: 92, paddingTop: 11 },
+  localRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    marginTop: 14, padding: 12,
+    borderWidth: 1, borderColor: '#E2E5E8', borderRadius: 12, backgroundColor: '#FFFFFF',
+  },
+  // Press feedback: a subtle scale, so the tick answers the finger.
+  localRowPressed: { transform: [{ scale: 0.97 }] },
+  localBox: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 1, borderColor: '#D5D7DA',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  localBoxOn: { backgroundColor: '#05BCD3', borderColor: '#05BCD3' },
+  localText: { flex: 1 },
+  localTitle: { fontFamily: ff('Inter', '600'), fontSize: 14, color: '#212121', includeFontPadding: false },
+  localSub: { fontFamily: ff('Inter', '400'), fontSize: 12, color: '#7B7B7B', marginTop: 2, includeFontPadding: false },
   counter: {
     fontFamily: ff('Inter', '400'), fontSize: 11, color: '#B9BEC3',
     alignSelf: 'flex-end', marginTop: 4, includeFontPadding: false,

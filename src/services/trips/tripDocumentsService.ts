@@ -63,7 +63,7 @@ export type RequirementAction = 'upload' | 'agree' | 'medical' | 'pay';
  *
  *     when req_type = 'pay'         -> pay state
  *     when req_type = 'acknowledge' -> looks for a group_trip_acknowledgements row
- *     when kind     = 'medical'     -> looks at organized_trip_medical_forms.completed_at
+ *     when kind     = 'medical'     -> looks at organized_trip_personal_info.completed_at
  *     ...
  *
  * The `acknowledge` branch is tested BEFORE the `medical` branch. Giving medical
@@ -134,13 +134,13 @@ export const REQUIREMENT_CATALOG: Record<
     operatorSub: 'Travelers read your terms and agree by typing their name.',
   },
   medical: {
-    title: 'Medical info',
+    title: 'Personal info',
     helpText: 'Allergies, diet, injuries and medication.',
     // See the warning above — 'upload' is load-bearing, not a typo.
     reqType: 'upload',
     action: 'medical',
     allowPdf: false,
-    operatorTitle: 'Medical info',
+    operatorTitle: 'Personal info',
     operatorSub: 'Allergies, diet, injuries, medication. A form, not a file.',
   },
   deposit: {
@@ -1645,7 +1645,7 @@ export async function fetchMyMedicalForm(
   userId: string,
 ): Promise<MedicalForm | null> {
   const { data, error } = await supabase
-    .from('organized_trip_medical_forms')
+    .from('organized_trip_personal_info')
     .select(
       // One literal, deliberately long: supabase-js infers the row type from
       // this string, and a concatenation defeats it and lands you in
@@ -1704,7 +1704,7 @@ export async function saveMedicalForm(
   const existing = await fetchMyMedicalForm(tripId, userId);
   if (existing?.id) {
     const { error } = await supabase
-      .from('organized_trip_medical_forms')
+      .from('organized_trip_personal_info')
       .update(payload)
       .eq('id', existing.id);
     if (error) throw error;
@@ -1712,7 +1712,7 @@ export async function saveMedicalForm(
   }
 
   const { error } = await supabase
-    .from('organized_trip_medical_forms')
+    .from('organized_trip_personal_info')
     .insert({ trip_id: tripId, user_id: userId, ...payload });
   if (error) throw error;
 }
@@ -1811,7 +1811,7 @@ export async function fetchTripReview(
       .select('user_id, requirement_id, agreed_at, operator_document_id')
       .eq('trip_id', tripId),
     supabase
-      .from('organized_trip_medical_forms')
+      .from('organized_trip_personal_info')
       .select('user_id, completed_at')
       .eq('trip_id', tripId),
     fetchWaiver(tripId),

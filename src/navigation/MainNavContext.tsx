@@ -46,6 +46,20 @@ export interface MainNavContextValue {
    */
   requestedChatCard: RootStackParamList['ChatCard'] | null;
   onRequestedChatCardConsumed: () => void;
+  /**
+   * Surftrip-card open from an invite link. Same mount-safe pattern as
+   * requestedTripCard — the invite resolver can fire before the root stack
+   * mounts on a cold start, and an imperative push would be dropped silently.
+   */
+  requestedSurftripCard: RootStackParamList['SurftripCard'] | null;
+  onRequestedSurftripCardConsumed: () => void;
+  /**
+   * Crew paperwork, after a crew invite is accepted. Queued so it cannot be
+   * pushed in the same tick the accept sheet's Modal unmounts — StaffPaperwork
+   * opens OS pickers, and a picker racing a Modal teardown is the PHPicker hang.
+   */
+  requestedStaffPaperwork: RootStackParamList['StaffPaperwork'] | null;
+  onRequestedStaffPaperworkConsumed: () => void;
   /** Swelly chat card: persisted conversation state + callbacks (AppContent
    *  owns the state so a re-opened card is warm). */
   swellyChat: {
@@ -61,6 +75,11 @@ export interface MainNavContextValue {
     onViewProfile: (userId: string) => void;
     onOpenTripDetail: (tripId: string) => void;
     onOpenSurftripDetail: (groupId: string) => void;
+  };
+  /** The user's own profile editor (a Modal AppContent owns). `focus` opens it
+   *  scrolled to a section — used by the skipped-destinations reminder. */
+  profileEditor: {
+    open: (focus?: 'destinations') => void;
   };
   /** ProfileCard (other users): message handler. */
   profileCard: {

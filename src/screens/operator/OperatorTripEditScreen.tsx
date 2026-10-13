@@ -919,7 +919,6 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
 
         <EditSection title="Manage">
           <EditRow label="Requirements" onPress={() => setSheet('requirements')} />
-          <EditRow label="Group gear" onPress={() => navigation.navigate('ManageGear', { tripId })} />
           <EditRow label="Packing suggestions" onPress={() => navigation.navigate('ManageSuggestedGear', { tripId })} />
           <EditRow label="Admin updates" onPress={() => navigation.navigate('TripUpdates', { tripId })} />
         </EditSection>

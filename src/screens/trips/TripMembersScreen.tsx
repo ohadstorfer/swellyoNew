@@ -125,9 +125,11 @@ interface Props {
   /** Host only — open a requester's profile to review (Approve/Decline live
    *  inside the profile). */
   onReviewRequest?: (userId: string, requestId: string) => void;
+  /** Operator trips — open a traveler's own page (documents, money, actions). */
+  onOpenTraveler?: (userId: string) => void;
 }
 
-export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, onMessage, onReviewRequest }: Props) {
+export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, onMessage, onReviewRequest, onOpenTraveler }: Props) {
   const { user: contextUser } = useOnboarding();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -161,6 +163,14 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
     [participants, currentUserId]
   );
   const isInsider = isHost || isMember;
+  /**
+   * Whoever runs an operator trip opens a traveler's PAGE from this list, not
+   * the options sheet (Figma 17776-48993 → 48991). `docs.view` is the same
+   * gate the trip screen puts on that page. Hosts and crew are not travelers —
+   * the page has nothing on them — so their rows keep the sheet.
+   */
+  const opensTravelerPage =
+    !!onOpenTraveler && trip?.hosting_style === 'C' && (isHost || can('docs.view'));
   // Insiders see who's committed; outside viewers do not. Operator trips
   // (hosting_style 'C') have no commitment at all — the traveler paid — so the
   // count and the badges go away here too, the same as in the Plan tab. This
@@ -457,7 +467,13 @@ export default function TripMembersScreen({ tripId, onBack, onViewUserProfile, o
                 return (
                   <Pressable
                     key={p.user_id}
-                    onPress={isOwnRow ? undefined : () => setSheetMember(p)}
+                    onPress={
+                      isOwnRow
+                        ? undefined
+                        : opensTravelerPage && p.role !== 'host'
+                          ? () => onOpenTraveler?.(p.user_id)
+                          : () => setSheetMember(p)
+                    }
                     disabled={isOwnRow || isRemoving}
                     style={[
                       styles.row,

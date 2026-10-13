@@ -48,16 +48,23 @@ import {
   Animated,
   Alert,
   Platform,
+  Image,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Reanimated, { FadeIn, FadeOut, useReducedMotion } from 'react-native-reanimated';
 import { WaiverStepInline } from '../../components/trips/WaiverStepInline';
-import { MedicalFormSheet } from '../../components/trips/MedicalFormSheet';
+import { MedicalFormBody, useMedicalForm } from '../../components/trips/MedicalFormSheet';
 // No PayAmountSheet here on purpose — the deposit is all-or-nothing during
 // onboarding. See openSheet().
 import { RequirementUploadFlow } from '../../components/trips/RequirementUploadFlow';
 import { ff } from '../../theme/fonts';
+import { textStyle, textStyles } from '../../theme/typography';
+import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
+import { isExpoGo } from '../../utils/keyboardAvoidingView';
+import { getTripById, type GroupTrip } from '../../services/trips/groupTripsService';
 import { hapticLight, hapticSuccess, hapticError } from '../../utils/haptics';
 import { friendlyErrorMessage, showErrorAlert } from '../../utils/friendlyError';
 import {
@@ -76,6 +83,7 @@ import {
   fetchPaidByRequirement,
   fetchInFlightByRequirement,
   amountOutstanding,
+  amountDue,
   isPayingInFull,
   startCheckout,
   type PayStep,
@@ -93,6 +101,37 @@ function formatDue(iso: string | null): string | null {
   if (Number.isNaN(d.getTime())) return null;
   return `${DUE_MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
+
+/** 'YYYY-MM-DD' as LOCAL midnight. `new Date(s)` reads it as UTC and moves
+ *  the day for anyone west of Greenwich. */
+function parseDay(iso: string | null | undefined): Date | null {
+  const m = iso ? /^(\d{4})-(\d{2})-(\d{2})/.exec(iso) : null;
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "Jun 15 - 22, 2026", "Jun 28 - Jul 3, 2026", "Dec 28, 2026 - Jan 3, 2027". */
+function formatTripRange(startIso: string | null, endIso: string | null): string | null {
+  const a = parseDay(startIso);
+  if (!a) return null;
+  const b = parseDay(endIso);
+  const md = (d: Date) => `${DUE_MONTHS[d.getMonth()]} ${d.getDate()}`;
+  if (!b) return `${md(a)}, ${a.getFullYear()}`;
+  if (a.getFullYear() !== b.getFullYear()) {
+    return `${md(a)}, ${a.getFullYear()} - ${md(b)}, ${b.getFullYear()}`;
+  }
+  const end = a.getMonth() === b.getMonth() ? `${b.getDate()}` : md(b);
+  return `${md(a)} - ${end}, ${b.getFullYear()}`;
+}
+
+const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`;
+
+/** Keyboard-aware on dev/prod builds; the plain ScrollView in Expo Go, where
+ *  react-native-keyboard-controller's native module is absent. */
+const FormScroll: React.ComponentType<any> = isExpoGo
+  ? ScrollView
+  : require('react-native-keyboard-controller').KeyboardAwareScrollView;
 
 // ---------------------------------------------------------------------------
 // Tokens — the Plan tab's palette, so a traveler who finishes onboarding and
@@ -119,14 +158,18 @@ const C = {
 const PAYMENT_CONFIRM_ATTEMPTS = 6;
 const PAYMENT_CONFIRM_INTERVAL_MS = 1600;
 
-const KIND_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
-  waiver: 'document-text-outline',
-  medical: 'medkit-outline',
-  deposit: 'card-outline',
-  insurance: 'shield-checkmark-outline',
-  flights: 'airplane-outline',
-  visa: 'document-attach-outline',
+// The Figma set (17114:26904) — Untitled-UI icons, drawn as TripIcons.
+const KIND_ICON: Record<string, TripIconName> = {
+  waiver: 'file-05',
+  medical: 'medical-cross',
+  deposit: 'currency-dollar-circle',
+  balance: 'currency-dollar-circle',
+  insurance: 'shield-tick',
+  passport: 'passport',
+  flights: 'plane',
+  visa: 'file-05',
 };
+const kindIcon = (kind: string): TripIconName => KIND_ICON[kind] ?? 'file-05';
 
 // ---------------------------------------------------------------------------
 // PressableScale — the same tactile 0.97 the Plan tab uses. A CTA that does not
@@ -177,23 +220,52 @@ const ProgressBar: React.FC<{ value: number; animate: boolean }> = ({ value, ani
       <Animated.View
         style={[
           styles.progressFill,
-          // scaleX from a full-width bar anchored left. transformOrigin has no
-          // RN equivalent, so the -50%/+50% pair does the anchoring.
-          {
-            transform: [
-              { translateX: -0.5 },
-              { scaleX: progress },
-              { translateX: 0.5 },
-            ],
-          },
+          // scaleX from a full-width bar anchored at its left edge.
+          { transformOrigin: 'left', transform: [{ scaleX: progress }] },
         ]}
       />
     </View>
   );
 };
 
+/** The trip at a glance — photo, name, place, dates. Figma 17306:27884 (intro)
+ *  and 17115:27201 (deposit); the caller picks the surface. */
+const TripSummaryCard: React.FC<{
+  imageUrl?: string | null;
+  name: string;
+  place?: string | null;
+  range?: string | null;
+  style?: StyleProp<ViewStyle>;
+}> = ({ imageUrl, name, place, range, style }) => (
+  <View style={[styles.tripCardBox, style]}>
+    {imageUrl ? (
+      <Image source={{ uri: imageUrl }} style={styles.tripCardImg} resizeMode="cover" />
+    ) : null}
+    <View style={styles.tripCardBody}>
+      <View>
+        <Text style={styles.tripCardTitle} numberOfLines={1}>
+          {name}
+        </Text>
+        {place ? (
+          <Text style={styles.tripCardMeta} numberOfLines={1}>
+            {place}
+          </Text>
+        ) : null}
+      </View>
+      {range ? (
+        <View style={styles.tripCardDates}>
+          <TripIcon name="calendar" size={16} color="#7B7B7B" />
+          <Text style={styles.tripCardMeta}>{range}</Text>
+        </View>
+      ) : null}
+    </View>
+  </View>
+);
+
+/** One requirement card — Figma 17114:26905: grey icon box, title + one line,
+ *  and a pill on the right only when there is something to say. */
 const Row: React.FC<{
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: TripIconName;
   title: string;
   sub?: string | null;
   pill?: { label: string; tone: 'must' | 'later' | 'done' };
@@ -201,7 +273,7 @@ const Row: React.FC<{
 }> = ({ icon, title, sub, pill, dim }) => (
   <View style={styles.row}>
     <View style={[styles.rowIcon, dim && styles.rowIconDone]}>
-      <Ionicons name={icon} size={15} color={dim ? C.done : C.ink} />
+      <TripIcon name={icon} size={18} color={dim ? C.done : '#333333'} />
     </View>
     <View style={styles.rowBody}>
       <Text style={[styles.rowTitle, dim && styles.rowTitleDim]} numberOfLines={1}>
@@ -234,6 +306,72 @@ const Row: React.FC<{
     ) : null}
   </View>
 );
+
+/**
+ * The medical form as a step of its own ("Personal Info", Figma 17134:25594) —
+ * the form IS the step, not a sheet over an empty one. A separate component
+ * because `useMedicalForm` is a hook and the step screen renders it only on
+ * this one step.
+ */
+const MedicalStepInline: React.FC<{
+  tripId: string;
+  userId: string;
+  header: React.ReactNode;
+  bottomInset: number;
+  skippable: boolean;
+  onSkip: () => void;
+  onSaved: () => void;
+}> = ({ tripId, userId, header, bottomInset, skippable, onSkip, onSaved }) => {
+  const { form, setForm, loading, saving, complete, hint, save } = useMedicalForm(
+    tripId,
+    userId,
+    true,
+    onSaved,
+  );
+  return (
+    <View style={styles.screen}>
+      {header}
+      {loading ? (
+        <View style={styles.centre}>
+          <ActivityIndicator color={C.accent} />
+        </View>
+      ) : (
+        <FormScroll
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          {...(isExpoGo ? {} : { bottomOffset: 24 })}
+        >
+          <Text style={styles.title}>Personal Info</Text>
+          <Text style={[styles.sub, { marginBottom: 16 }]}>
+            Only you and your trip organiser can see this.
+          </Text>
+          <MedicalFormBody form={form} setForm={setForm} />
+        </FormScroll>
+      )}
+      <View style={[styles.footer, { paddingBottom: bottomInset }]}>
+        <PressableScale
+          style={[styles.btn, (!complete || saving || loading) && styles.btnDisabled]}
+          disabled={!complete || saving || loading}
+          onPress={save}
+          accessibilityLabel="Save and continue"
+        >
+          {saving ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Text style={styles.btnText}>Save and continue</Text>
+          )}
+        </PressableScale>
+        {hint && !loading ? <Text style={styles.hint}>{hint}</Text> : null}
+        {skippable ? (
+          <PressableScale style={styles.btnOutline} disabled={saving} onPress={onSkip}>
+            <Text style={styles.btnOutlineText}>Skip — I'll do it later</Text>
+          </PressableScale>
+        ) : null}
+      </View>
+    </View>
+  );
+};
 
 type Phase = 'loading' | 'intro' | 'step' | 'done' | 'full' | 'error';
 
@@ -275,9 +413,9 @@ export default function TravelerOnboardingScreen({
   const [prices, setPrices] = useState<TravelerPrices | null>(null);
   const [paidByRequirement, setPaidByRequirement] = useState<Record<string, number>>({});
 
-  // Which sheet is open. One at a time, by construction.
-  // No 'pay' variant — the deposit has no sheet, it goes straight to Checkout.
-  const [sheet, setSheet] = useState<'medical' | 'upload' | null>(null);
+  // Which sheet is open. Only uploads have one now — the waiver and medical
+  // render inside their step, and the deposit goes straight to Checkout.
+  const [sheet, setSheet] = useState<'upload' | null>(null);
 
   // The cancellation-policy tick. This screen is where it matters most: the
   // deposit is the first and largest payment, and it never opens an amount
@@ -306,6 +444,24 @@ export default function TravelerOnboardingScreen({
    * write.
    */
   const checkoutEpochRef = useRef(0);
+
+  // The trip itself — its photo, place and dates dress the intro card and the
+  // deposit step (Figma 17114:27162, 17115:27361). Decoration only: nothing
+  // waits on it, and a failed read just leaves those cards out.
+  const [trip, setTrip] = useState<GroupTrip | null>(null);
+  useEffect(() => {
+    const ac = new AbortController();
+    getTripById(tripId, ac.signal)
+      .then(t => {
+        if (aliveRef.current && t) setTrip(t);
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [tripId]);
+  const tripName = trip?.title || tripTitle || 'Your trip';
+  const tripRange = formatTripRange(trip?.start_date ?? null, trip?.end_date ?? null);
+  const tripPlace =
+    trip?.destination?.short_label || trip?.destination?.name || null;
 
   const loadPlan = useCallback(async (): Promise<OnboardingPlan | null> => {
     try {
@@ -366,7 +522,7 @@ export default function TravelerOnboardingScreen({
   const [walk, setWalk] = useState<OnboardingStep[]>([]);
   const step: OnboardingStep | undefined = walk[index];
   const total = walk.length;
-  const progress = total === 0 ? 1 : Math.min(index / total, 1);
+  const progress = total === 0 ? 1 : Math.min((index + 1) / total, 1);
 
   const catalog = step ? REQUIREMENT_CATALOG[step.kind] : null;
 
@@ -544,36 +700,11 @@ export default function TravelerOnboardingScreen({
     setPhase('error');
   }, [tripId, onFinished, loadPlan]);
 
-  /**
-   * Steps that open themselves.
-   *
-   * The medical form is here because its step screen would otherwise be a toll
-   * booth: a title and a button that opens the thing they came for.
-   *
-   * The WAIVER is NOT here — it no longer has a sheet at all. The document
-   * renders inside the step (WaiverStepInline), which is the same idea taken
-   * one step further: nothing to open, because nothing is hidden.
-   *
-   * Uploads are deliberately excluded: their CTA ends in an OS picker, and a
-   * picker that appears without being asked for is alarming rather than fast.
-   * The deposit is excluded too — it leaves for Stripe, and money should never
-   * move on a screen the traveler did not tap.
-   */
-  const AUTO_OPEN: Record<string, 'medical'> = {
-    medical: 'medical',
-  };
-  const autoOpened = useRef<string | null>(null);
-  useEffect(() => {
-    if (phase !== 'step' || !step) return;
-    const target = AUTO_OPEN[step.action];
-    if (!target) return;
-    // Once per step. Without the guard, closing the sheet would immediately
-    // re-open it and the traveler could never reach the Skip button or the ×.
-    const token = `${step.requirement.requirementId}:${index}`;
-    if (autoOpened.current === token) return;
-    autoOpened.current = token;
-    setSheet(target);
-  }, [phase, step, index]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Nothing opens itself any more. The waiver and the medical form both render
+  // INSIDE their step (WaiverStepInline, MedicalStepInline), so there is no
+  // sheet to auto-open. Uploads end in an OS picker — one that appears without
+  // being asked for is alarming rather than fast — and the deposit leaves for
+  // Stripe, which must never happen on a screen the traveler did not tap.
 
   const enter = reduceMotion ? undefined : FadeIn.duration(220);
   const exit = reduceMotion ? undefined : FadeOut.duration(120);
@@ -630,51 +761,64 @@ export default function TravelerOnboardingScreen({
   }, [tripId, userId]);
 
   // ── Chrome ───────────────────────────────────────────────────────────────
-  const header = (
-    <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-      <View style={styles.headerRow}>
-        <Pressable
-          onPress={onClose}
-          style={styles.close}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Close onboarding"
-        >
-          <Ionicons name="close" size={22} color={C.muted} />
-        </Pressable>
+  // Dev only. Deliberately quiet and on the far side of the header from the
+  // back arrow — a destructive button should not sit under the thumb that is
+  // reaching for "leave".
+  const resetButton = devMode ? (
+    <Pressable
+      onPress={handleReset}
+      disabled={resetting}
+      style={styles.resetBtn}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel="Reset this onboarding"
+    >
+      {resetting ? (
+        <ActivityIndicator size="small" color={C.warn} />
+      ) : (
+        <>
+          <Ionicons name="refresh" size={13} color={C.warn} />
+          <Text style={styles.resetText}>Reset</Text>
+        </>
+      )}
+    </Pressable>
+  ) : null;
 
-        {/* Dev only. Deliberately quiet and on the far side of the header from
-            the × — a destructive button should not sit under the thumb that is
-            reaching for "close". */}
-        {devMode ? (
+  // Figma "Step Process" (17115:27593): back arrow, "Required - 1/7" in the
+  // middle, and a short bar under it. The arrow LEAVES the flow rather than
+  // stepping back — every step's state is on the server, so leaving strands
+  // nothing, while walking back onto a paid deposit would offer to pay again.
+  const stepLabel =
+    phase === 'step' && step
+      ? `${step.skippable ? 'Optional' : 'Required'} - ${index + 1}/${total}`
+      : phase === 'done'
+        ? 'All done'
+        : '';
+  const header = (
+    <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.headerRow}>
+        <View style={styles.headerSide}>
           <Pressable
-            onPress={handleReset}
-            disabled={resetting}
-            style={styles.resetBtn}
-            hitSlop={10}
+            onPress={onClose}
+            hitSlop={12}
             accessibilityRole="button"
-            accessibilityLabel="Reset this onboarding"
+            accessibilityLabel="Leave onboarding"
           >
-            {resetting ? (
-              <ActivityIndicator size="small" color={C.warn} />
-            ) : (
-              <>
-                <Ionicons name="refresh" size={13} color={C.warn} />
-                <Text style={styles.resetText}>Reset</Text>
-              </>
-            )}
+            <Ionicons name="arrow-back" size={24} color="#333333" />
           </Pressable>
-        ) : null}
+        </View>
+        <Text style={styles.headerLabel} numberOfLines={1}>
+          {stepLabel}
+        </Text>
+        <View style={[styles.headerSide, styles.headerSideRight]}>{resetButton}</View>
       </View>
       {phase === 'step' || phase === 'done' ? (
         <ProgressBar value={phase === 'done' ? 1 : progress} animate={!reduceMotion} />
-      ) : (
-        <View style={styles.progressTrack} />
-      )}
+      ) : null}
     </View>
   );
 
-  const footerPad = { paddingBottom: Math.max(insets.bottom, 14) + 6 };
+  const footerPad = { paddingBottom: Math.max(insets.bottom, 16) + 8 };
 
   // ── Loading / error ──────────────────────────────────────────────────────
   if (phase === 'loading') {
@@ -734,55 +878,72 @@ export default function TravelerOnboardingScreen({
   }
 
   // ── Intro ────────────────────────────────────────────────────────────────
+  // Figma 17306:27733: a white trip card (photo, name, place, dates), then
+  // the checklist.
   if (phase === 'intro') {
     const musts = walk.filter(s => !s.skippable);
     const laters = walk.filter(s => s.skippable);
     return (
       <View style={styles.screen}>
-        {header}
-        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
-          <Reanimated.View entering={enter}>
-            <Text style={styles.eyebrow}>{tripTitle ?? 'Your trip'}</Text>
-            <Text style={styles.title}>You're in. Now let's get you ready.</Text>
-            <Text style={styles.sub}>
-              {musts.length > 0
-                ? `${musts.length} ${musts.length === 1 ? 'thing' : 'things'} the organiser needs${
-                    laters.length > 0 ? `, and ${laters.length} you can do later.` : '.'
-                  }`
-                : 'A few optional things you can send whenever you have them.'}
-            </Text>
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 24 }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.introBar, { marginTop: insets.top + 8 }]}>
+            <Pressable
+              onPress={onClose}
+              style={styles.introBackBtn}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Leave onboarding"
+            >
+              <Ionicons name="arrow-back" size={22} color="#333333" />
+            </Pressable>
+            {resetButton}
+          </View>
+          <TripSummaryCard
+            imageUrl={trip?.hero_image_url}
+            name={tripName}
+            place={tripPlace}
+            range={tripRange}
+            style={styles.introCard}
+          />
+
+          <Reanimated.View entering={enter} style={styles.introBody}>
+            <Text style={styles.title}>You’re in. Now let’s get you ready.</Text>
 
             <View style={styles.list}>
               {musts.map(s => (
                 <Row
                   key={s.requirement.requirementId}
-                  icon={KIND_ICON[s.kind] ?? 'document-outline'}
+                  icon={kindIcon(s.kind)}
                   title={REQUIREMENT_CATALOG[s.kind].title}
                   sub={REQUIREMENT_CATALOG[s.kind].helpText}
                   pill={{ label: 'Required', tone: 'must' }}
                 />
               ))}
+              {/* Optional ones carry no pill — the absence of "Required" is
+                  the message (Figma 17114:26908). */}
               {laters.map(s => (
                 <Row
                   key={s.requirement.requirementId}
-                  icon={KIND_ICON[s.kind] ?? 'document-outline'}
+                  icon={kindIcon(s.kind)}
                   title={REQUIREMENT_CATALOG[s.kind].title}
                   sub={REQUIREMENT_CATALOG[s.kind].helpText}
-                  pill={{ label: 'Optional', tone: 'later' }}
                 />
               ))}
             </View>
 
-            {musts.length > 0 ? (
-              <Text style={styles.note}>
-                You'll join the trip once the required ones are done.
-              </Text>
-            ) : null}
+            <Text style={styles.note}>
+              {musts.length > 0
+                ? 'You’ll join the trip once the required ones are done'
+                : 'All optional — send them whenever you have them'}
+            </Text>
           </Reanimated.View>
         </ScrollView>
         <View style={[styles.footer, footerPad]}>
           <PressableScale
-            style={[styles.btn, styles.btnAccent]}
+            style={styles.btn}
             onPress={() => {
               hapticLight();
               setPhase('step');
@@ -821,7 +982,7 @@ export default function TravelerOnboardingScreen({
               {settled.map(s => (
                 <Row
                   key={s.requirement.requirementId}
-                  icon={KIND_ICON[s.kind] ?? 'document-outline'}
+                  icon={kindIcon(s.kind)}
                   title={REQUIREMENT_CATALOG[s.kind].title}
                   pill={{ label: s.action === 'pay' ? 'Paid' : 'Done', tone: 'done' }}
                   dim
@@ -829,7 +990,7 @@ export default function TravelerOnboardingScreen({
               ))}
               {skipped.length > 0 ? (
                 <Row
-                  icon="time-outline"
+                  icon="clock"
                   title={`${skipped.length} ${skipped.length === 1 ? 'task' : 'tasks'} left`}
                   sub={skipped.map(s => REQUIREMENT_CATALOG[s.kind].title).join(', ')}
                   pill={{ label: 'Optional', tone: 'later' }}
@@ -846,7 +1007,7 @@ export default function TravelerOnboardingScreen({
         </ScrollView>
         <View style={[styles.footer, footerPad]}>
           <PressableScale
-            style={[styles.btn, styles.btnAccent, activating && styles.btnDisabled]}
+            style={[styles.btn, activating && styles.btnDisabled]}
             disabled={activating}
             onPress={finish}
           >
@@ -880,31 +1041,27 @@ export default function TravelerOnboardingScreen({
 
   const openSheet = () => {
     hapticLight();
-    // 'agree' never reaches here — the waiver step returns its own layout.
-    if (step.action === 'medical') setSheet('medical');
+    // 'agree' and 'medical' never reach here — both return their own layout.
     // Payment goes STRAIGHT to Checkout for the whole amount — no
     // pay-part-of-it sheet. Onboarding is the moment someone is buying their
     // place; a half-paid deposit does not hold a spot, so offering to split it
     // here would let them leave believing they are in when they are not.
     // Partial payments still exist for the BALANCE, in the Plan tab, which is
     // where paying over time actually makes sense.
-    else if (step.action === 'pay') runCheckout();
+    if (step.action === 'pay') runCheckout();
     else setSheet('upload');
   };
 
+  // ('agree' and 'medical' are absent: both steps own their footer and return
+  // before this is read.)
   const ctaLabel =
     step.action === 'pay'
       ? outstandingUsd > 0
-        ? `Pay $${outstandingUsd.toLocaleString('en-US')}`
+        ? `Review & pay ${usd(outstandingUsd)}`
         : 'Pay'
-      // The medical form opens on its own, so its CTA is only ever a way BACK
-      // in after closing the sheet. ('agree' is absent: the waiver step has its
-      // own footer and returns before this is read.)
-      : step.action === 'medical'
-        ? 'Reopen the form'
-        : rejected
-            ? 'Send a new one'
-            : 'Upload';
+      : rejected
+        ? 'Send a new one'
+        : 'Upload';
 
   // ── The waiver reads INSIDE this screen ──────────────────────────────────
   // Its own layout, because the document has to fill the space and scroll
@@ -916,9 +1073,6 @@ export default function TravelerOnboardingScreen({
       <View style={styles.screen}>
         {header}
         <View style={[styles.body, styles.bodyFill]}>
-          <Text style={styles.eyebrow}>
-            Step {index + 1} of {total} · {step.skippable ? 'Optional' : 'Required'}
-          </Text>
           <Text style={styles.title}>{catalog.title}</Text>
           <Text style={styles.sub}>{catalog.helpText}</Text>
           <WaiverStepInline
@@ -933,6 +1087,36 @@ export default function TravelerOnboardingScreen({
     );
   }
 
+  // ── Personal info renders INSIDE this screen too ─────────────────────────
+  if (step.action === 'medical') {
+    return (
+      <MedicalStepInline
+        key={step.requirement.requirementId}
+        tripId={tripId}
+        userId={userId}
+        header={header}
+        bottomInset={footerPad.paddingBottom}
+        skippable={step.skippable}
+        onSkip={skipStep}
+        onSaved={completeStep}
+      />
+    );
+  }
+
+  // Deposit copy (Figma 17115:27201). "Secure your spot" is only true of the
+  // deposit — the payment that buys the place.
+  const isDeposit = step.kind === 'deposit';
+  const stepTitle =
+    isDeposit && payingInFull ? 'Full payment' : isDeposit ? 'Secure your spot' : catalog.title;
+  const stepSub =
+    isDeposit && payingInFull
+      ? 'This trip is one payment. Pay the full cost to confirm your place.'
+      : isDeposit
+        ? 'Pay your deposit to confirm your place on this trip.'
+        : catalog.helpText;
+  const remainingAfterDeposit =
+    isDeposit && !payingInFull && prices ? amountDue('balance', prices) : null;
+
   return (
     <View style={styles.screen}>
       {header}
@@ -940,17 +1124,8 @@ export default function TravelerOnboardingScreen({
         {/* Keyed on the step so each one fades in as its own thing rather than
             the text swapping in place, which reads as a glitch. */}
         <Reanimated.View key={step.requirement.requirementId} entering={enter} exiting={exit}>
-          <Text style={styles.eyebrow}>
-            Step {index + 1} of {total} · {step.skippable ? 'Optional' : 'Required'}
-          </Text>
-          <Text style={styles.title}>
-            {step.kind === 'deposit' && payingInFull ? 'Full payment' : catalog.title}
-          </Text>
-          <Text style={styles.sub}>
-            {step.kind === 'deposit' && payingInFull
-              ? 'This trip is one payment. Pay the full cost to confirm your place.'
-              : catalog.helpText}
-          </Text>
+          <Text style={styles.title}>{stepTitle}</Text>
+          <Text style={styles.sub}>{stepSub}</Text>
 
           {rejected && step.requirement.note ? (
             <View style={styles.calloutWarn}>
@@ -960,37 +1135,46 @@ export default function TravelerOnboardingScreen({
           ) : null}
 
           {step.action === 'pay' ? (
-            <View style={styles.amountCard}>
-              <Text style={styles.amountBig}>
-                {outstandingUsd > 0 ? `$${outstandingUsd.toLocaleString('en-US')}` : '—'}
-              </Text>
-              {/* Suppressed when the deposit IS the total: "$3,000 / of $3,000
-                  total" is a caption that answers nothing and invites a
-                  second look for the difference. */}
-              {prices?.totalUsd != null && step.kind === 'deposit' && !payingInFull ? (
-                <Text style={styles.amountCap}>
-                  of ${prices.totalUsd.toLocaleString('en-US')} total
-                </Text>
+            <>
+              {/* The trip being paid for — photo, name, place, dates. */}
+              {trip ? (
+                <TripSummaryCard
+                  imageUrl={trip.hero_image_url}
+                  name={tripName}
+                  place={tripPlace}
+                  range={tripRange}
+                  style={styles.tripCard}
+                />
               ) : null}
-            </View>
-          ) : AUTO_OPEN[step.action] ? (
-            // This step opens its own sheet, so what is behind it is a backdrop
-            // for a fraction of a second. A big dashed placeholder there was
-            // pure flash — and the moment they close the sheet it became an
-            // empty box explaining nothing. A quiet line and the CTA is all
-            // this needs to be.
-            <Text style={styles.backdropHint}>
-              {step.action === 'medical'
-                ? 'Only the organiser and the guides can see this.'
-                : 'Take a minute to read it before you agree.'}
-            </Text>
+
+              <View style={styles.amountCard}>
+                <Text style={styles.amountLabel}>
+                  {isDeposit ? (payingInFull ? 'Full payment' : 'Deposit') : catalog.title}
+                </Text>
+                <Text style={styles.amountBig}>
+                  {outstandingUsd > 0 ? usd(outstandingUsd) : '—'}
+                </Text>
+                {/* Suppressed when the deposit IS the total: "$3,000 / Trip
+                    total $3,000" is a line that answers nothing and invites a
+                    second look for the difference. */}
+                {prices?.totalUsd != null && remainingAfterDeposit != null ? (
+                  <>
+                    <View style={styles.amountDivider} />
+                    <View style={styles.amountRow}>
+                      <Text style={styles.amountRowLabel}>Trip total</Text>
+                      <Text style={styles.amountRowValue}>{usd(prices.totalUsd)}</Text>
+                    </View>
+                    <View style={styles.amountRow}>
+                      <Text style={styles.amountRowLabel}>Remaining after deposit</Text>
+                      <Text style={styles.amountRowValue}>{usd(remainingAfterDeposit)}</Text>
+                    </View>
+                  </>
+                ) : null}
+              </View>
+            </>
           ) : (
             <View style={styles.illustration}>
-              <Ionicons
-                name={KIND_ICON[step.kind] ?? 'document-outline'}
-                size={30}
-                color={C.faint}
-              />
+              <TripIcon name={kindIcon(step.kind)} size={30} color={C.faint} />
               <Text style={styles.illustrationText}>{catalog.operatorSub}</Text>
             </View>
           )}
@@ -1020,7 +1204,7 @@ export default function TravelerOnboardingScreen({
         ) : (
           <>
             <PressableScale
-              style={[styles.btn, styles.btnAccent, busy && styles.btnDisabled]}
+              style={[styles.btn, busy && styles.btnDisabled]}
               disabled={busy}
               onPress={openSheet}
             >
@@ -1047,19 +1231,6 @@ export default function TravelerOnboardingScreen({
           later. ─────────────────────────────────────────────────────────── */}
       {/* No waiver sheet — the waiver renders inside its own step and returns
           above, so nothing here is reachable for it. */}
-
-      {step.action === 'medical' ? (
-        <MedicalFormSheet
-          visible={sheet === 'medical'}
-          onClose={() => setSheet(null)}
-          tripId={tripId}
-          userId={userId}
-          onSaved={() => {
-            setSheet(null);
-            completeStep();
-          }}
-        />
-      ) : null}
 
       {/* No sheet for the pay step — see openSheet(). It goes straight to
           Stripe Checkout for the full outstanding amount.
@@ -1095,17 +1266,23 @@ export default function TravelerOnboardingScreen({
   );
 }
 
+// Sizes are the Figma MOBILE mode, read with get_variable_defs — the export's
+// bold numbers are the desktop mode (bold 18 there is MB2 14 here).
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.bg },
 
-  header: { paddingHorizontal: 20, paddingBottom: 14 },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+  // ── Step header (Figma "Step Process", 17115:27593) ──
+  header: { paddingHorizontal: 16, paddingBottom: 16, alignItems: 'center', gap: 16 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', height: 24, alignSelf: 'stretch' },
+  headerSide: { width: 60, justifyContent: 'center' },
+  headerSideRight: { alignItems: 'flex-end' },
+  headerLabel: {
+    flex: 1,
+    ...textStyle('MB2', '700'),
+    color: '#333333',
+    textAlign: 'center',
+    paddingHorizontal: 10,
   },
-  close: { padding: 2 },
   resetBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1117,17 +1294,39 @@ const styles = StyleSheet.create({
   },
   resetText: { fontFamily: ff('Inter', '700'), fontSize: 11.5, color: C.warn },
   progressTrack: {
-    height: 3,
-    borderRadius: 99,
-    backgroundColor: '#EAEAE4',
+    width: 237,
+    height: 4,
+    borderRadius: 8,
+    backgroundColor: '#CFCFCF',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     width: '100%',
-    borderRadius: 99,
-    backgroundColor: C.accent,
+    borderRadius: 8,
+    backgroundColor: '#212121',
   },
+
+  // ── Intro (Figma 17306:27733) ──
+  introBar: {
+    marginHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  introBackBtn: { padding: 8, borderRadius: 48 },
+  // Card Shadow: 0 0 24 #00000017.
+  introCard: {
+    marginTop: 24,
+    marginHorizontal: 16,
+    backgroundColor: C.surface,
+    shadowColor: '#000000',
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  introBody: { paddingHorizontal: 16, paddingTop: 32 },
 
   body: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
   /** The waiver step: a real flex container, not ScrollView content, so the
@@ -1136,36 +1335,11 @@ const styles = StyleSheet.create({
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   centreTop: { alignItems: 'center', marginBottom: 22 },
 
-  eyebrow: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 11,
-    letterSpacing: 0.9,
-    textTransform: 'uppercase',
-    color: C.muted,
-    marginBottom: 8,
-  },
-  title: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: 24,
-    lineHeight: 30,
-    letterSpacing: -0.3,
-    color: C.ink,
-    marginBottom: 8,
-    textAlign: 'left',
-  },
-  sub: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 14,
-    lineHeight: 21,
-    color: '#6F6F6A',
-  },
-  note: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12.5,
-    lineHeight: 19,
-    color: C.muted,
-    marginTop: 14,
-  },
+  // Headings/M H-5 (Montserrat 18/24) + Body/M B-2 — Figma 17115:27598/27600.
+  title: { ...textStyles.MH5, color: '#333333', marginBottom: 4, textAlign: 'left' },
+  sub: { ...textStyles.MB2, color: '#7B7B7B' },
+  note: { ...textStyles.B3, color: '#333333', textAlign: 'center', marginTop: 12 },
+  hint: { ...textStyles.B4, color: '#9A9A9A', textAlign: 'center', marginTop: 8 },
 
   bigIcon: {
     width: 64,
@@ -1176,91 +1350,106 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
 
-  list: { marginTop: 20 },
+  // ── Requirement cards (Figma 17114:26905) ──
+  list: { marginTop: 24, gap: 12 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: C.hairline,
-    borderRadius: 12,
-    paddingVertical: 11,
+    borderColor: '#EEEEEE',
+    borderRadius: 20,
+    paddingVertical: 16,
     paddingHorizontal: 12,
-    marginBottom: 8,
   },
   rowIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 99,
-    backgroundColor: '#F0F0EC',
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#F7F7F7',
     alignItems: 'center',
     justifyContent: 'center',
   },
   rowIconDone: { backgroundColor: C.doneTint },
   rowBody: { flex: 1, minWidth: 0 },
-  rowTitle: { fontFamily: ff('Inter', '600'), fontSize: 14, color: C.ink },
+  rowTitle: { ...textStyle('MB2', '700'), color: '#333333' },
   rowTitleDim: { color: C.faint },
-  rowSub: { fontFamily: ff('Inter', '400'), fontSize: 11.5, color: C.faint, marginTop: 2 },
+  rowSub: { ...textStyles.B3, color: '#333333' },
 
   pill: {
-    borderRadius: 99,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: '#F0F0EC',
+    paddingVertical: 4,
+    backgroundColor: '#EEEEEE',
   },
-  pillLater: { backgroundColor: C.warnTint },
-  pillDone: { backgroundColor: C.doneTint },
-  pillText: { fontFamily: ff('Inter', '700'), fontSize: 10, color: C.muted },
+  pillLater: { backgroundColor: C.warnTint, borderColor: C.warnTint },
+  pillDone: { backgroundColor: C.doneTint, borderColor: C.doneTint },
+  pillText: { ...textStyles.B4, color: '#333333' },
   pillTextLater: { color: C.warn },
   pillTextDone: { color: '#1F7A4D' },
 
-  backdropHint: {
-    marginTop: 18,
-    fontFamily: ff('Inter', '400'),
-    fontSize: 13,
-    lineHeight: 20,
-    color: C.faint,
-  },
   illustration: {
     marginTop: 20,
     borderWidth: 1.5,
     borderStyle: 'dashed',
     borderColor: '#D8D8D2',
-    borderRadius: 14,
+    borderRadius: 16,
     backgroundColor: C.surface,
     paddingVertical: 30,
     paddingHorizontal: 24,
     alignItems: 'center',
     gap: 10,
   },
-  illustrationText: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12.5,
-    lineHeight: 19,
-    color: C.faint,
-    textAlign: 'center',
-  },
+  illustrationText: { ...textStyles.B3, color: C.faint, textAlign: 'center' },
 
-  amountCard: {
-    marginTop: 20,
-    backgroundColor: C.surface,
+  // ── Deposit (Figma 17115:27201) ──
+  tripCard: {
+    marginTop: 16,
     borderWidth: 1,
-    borderColor: C.hairline,
-    borderRadius: 14,
-    paddingVertical: 22,
-    alignItems: 'center',
+    borderColor: '#EEEEEE',
+    backgroundColor: '#FAFAFC',
   },
+  tripCardBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 6,
+    borderRadius: 16,
+  },
+  tripCardImg: { width: 112, height: 80, borderRadius: 8, backgroundColor: '#EEEEEE' },
+  tripCardBody: { flex: 1, gap: 4 },
+  tripCardTitle: { ...textStyle('MB2', '700'), color: '#333333' },
+  tripCardMeta: { ...textStyles.B3, color: '#7B7B7B' },
+  tripCardDates: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  amountCard: {
+    marginTop: 24,
+    padding: 12,
+    gap: 15,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: C.surface,
+  },
+  amountLabel: { ...textStyle('MB2', '700'), color: '#7B7B7B' },
+  // Size/4xl 32 bold, -1 tracking (Figma 17115:27470).
   amountBig: {
     fontFamily: ff('Inter', '700'),
-    fontSize: 34,
-    letterSpacing: -0.8,
-    color: C.ink,
+    fontSize: 32,
+    letterSpacing: -1,
+    color: '#333333',
+    textAlign: 'center',
+    paddingTop: 8,
+    paddingBottom: 24,
   },
-  amountCap: { fontFamily: ff('Inter', '400'), fontSize: 12, color: C.faint, marginTop: 4 },
+  amountDivider: { height: 1, backgroundColor: '#EEEEEE', marginTop: -15 },
+  amountRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -7 },
+  amountRowLabel: { ...textStyles.MB2, color: '#7B7B7B' },
+  amountRowValue: { ...textStyles.MB2, color: '#212121' },
 
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
-  metaText: { fontFamily: ff('Inter', '500'), fontSize: 12.5, color: C.muted },
+  metaText: { ...textStyles.B3, color: C.muted },
 
   calloutWarn: {
     flexDirection: 'row',
@@ -1271,49 +1460,37 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
   },
-  calloutWarnText: {
-    flex: 1,
-    fontFamily: ff('Inter', '400'),
-    fontSize: 12.5,
-    lineHeight: 19,
-    color: '#7A5A0A',
-  },
+  calloutWarnText: { flex: 1, ...textStyles.B3, color: '#7A5A0A' },
 
-  footer: {
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: C.hairline,
-    backgroundColor: C.bg,
-  },
+  // ── Footer + buttons — the app's one primary CTA (Figma "Main Button"). ──
+  footer: { paddingHorizontal: 30, paddingTop: 10, backgroundColor: C.bg },
   btn: {
-    height: 50,
-    borderRadius: 99,
-    backgroundColor: C.ink,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#212121',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnAccent: { backgroundColor: C.accent },
-  btnDisabled: { opacity: 0.6 },
-  btnText: { fontFamily: ff('Inter', '700'), fontSize: 15, color: '#FFFFFF' },
+  btnDisabled: { opacity: 0.45 },
+  btnText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, color: '#FFFFFF' },
   btnOutline: {
-    height: 50,
-    borderRadius: 99,
+    height: 56,
+    borderRadius: 12,
     backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: '#CFCFCF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 9,
+    marginTop: 10,
   },
-  btnOutlineText: { fontFamily: ff('Inter', '600'), fontSize: 15, color: C.ink },
+  btnOutlineText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, color: '#333333' },
 
   confirmRow: {
-    height: 50,
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
   },
-  confirmText: { fontFamily: ff('Inter', '500'), fontSize: 14, color: C.muted },
+  confirmText: { ...textStyles.MB2, color: C.muted },
 });

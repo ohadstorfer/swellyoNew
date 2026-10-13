@@ -96,6 +96,7 @@ import { WhenSheetContent } from '../../components/trips/sheets/WhenSheetContent
 import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
 import { TripIcon } from '../../components/trips/tripIcons';
+import { textStyle, textStyles } from '../../theme/typography';
 import { formatFileSize } from '../../utils/videoValidation';
 import {
   createRequirements,
@@ -122,6 +123,7 @@ import { useOperatorSetup } from '../../hooks/trips/useOperatorSetup';
 import { CancellationPolicySheet } from '../../components/settings/CancellationPolicySheet';
 import {
   PRESET_LABEL,
+  effectiveRules,
   rulesToWire,
   summarise,
   type CancellationPolicy,
@@ -161,9 +163,10 @@ import {
 } from '../../components/trips/sheets/IncludesSheets';
 import { supabase } from '../../config/supabase';
 import { AudienceCard, type AudienceCardStatus } from '../../components/trips/AudienceCard';
-import { WizardInfoOverlay } from '../../components/trips/WizardInfoOverlay';
 import { Images } from '../../assets/images';
 import { WaveSheetContent } from '../../components/trips/sheets/WaveSheetContent';
+import { OperatorStayCard } from '../../components/trips/create/OperatorStayCard';
+import { PackingListEditor } from '../../components/trips/create/PackingListEditor';
 
 // -----------------------------------------------------------------------------
 // Local types / constants
@@ -199,7 +202,10 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 // key of the initial state, so without it TripsScreen would still OFFER to
 // resume a v6 draft and then silently restore nothing.
 // v7 -> v8: Flow C payment mode — paymentMode + depositAmount, in the budget step.
-export const WIZARD_STATE_VERSION = 8;
+// v8 -> v9: Flow C — the two stay certifications on the Trip Vibe step
+// (stokeCertified, ciSurfConservation) and the guest packing list on the
+// Requirements step (suggestedPackingOn, suggestedPacking).
+export const WIZARD_STATE_VERSION = 9;
 
 // Step KEYS — flat step list. Preview is the final step (publishes directly).
 type StepKey =
@@ -267,12 +273,30 @@ const SHORT_BOARD_LABEL: Record<SurfStyle, string> = {
 type AudienceCardKey = 'levels' | 'boards' | 'wave' | 'age';
 const AUDIENCE_ORDER: AudienceCardKey[] = ['levels', 'boards', 'wave', 'age'];
 
-// One-time nudge shown the first time the host opens the Surf level card. The
-// goal: stop strong surfers from just picking their own level — these choices
-// describe the crew they want to travel with, not themselves.
-const AUDIENCE_INTRO_TITLE = 'Pick for the GROUP, not yourself';
-const AUDIENCE_INTRO_MESSAGE =
-  'These choices decide who can request to join - not your level. Who do you actually want to surf with?';
+// Age range is optional — the host can publish without opening that card.
+const AUDIENCE_REQUIRED: AudienceCardKey[] = ['levels', 'boards', 'wave'];
+
+// Heading + paragraph above the cards. It follows the card the host is on, and
+// falls back to the age copy once the three required cards are set
+// (Figma 17020:25795 / 26242 / 26454 / 26666).
+const AUDIENCE_HEADER: Record<AudienceCardKey, { title: string; body: string }> = {
+  levels: {
+    title: 'Surf Level of Members',
+    body: 'Select the skill level range of surfers who would align with your trip.',
+  },
+  boards: {
+    title: 'Board Style',
+    body: 'Let your customers know what kind of surfer this trip is for by selecting the types of boards this trip is for. You can select multiple types of boards if desired.',
+  },
+  wave: {
+    title: 'The Wave',
+    body: 'Tell your guests what kind of waves they should expect to be riding. Always good to seek growth in our surfing journey but it sucks to be out of your depth after dropping dough.',
+  },
+  age: {
+    title: 'Who is it for?',
+    body: 'Age ranges on trips can matter to some, but not to all. If you want to place an age range you can, good to know my crew are all into the same vibe ya know!?',
+  },
+};
 
 const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
   villa: 'Villa',
@@ -287,7 +311,7 @@ const ACCOMMODATION_LABEL: Record<AccommodationKind, string> = {
 };
 
 const WAVE_SHAPE_TITLE: Record<WaveShapeKind, string> = {
-  soft: 'Mellow',
+  soft: 'Soft',
   wally: 'Standing',
   barrel: 'Barrel',
 };
@@ -396,6 +420,10 @@ interface WizardState extends Record<string, unknown> {
   accommodationUrl: string;
   accommodationImageUri: string | null;
 
+  // Flow C only — the two certification questions under the stay form.
+  stokeCertified: boolean;
+  ciSurfConservation: boolean;
+
   // Flow B — "About you" leader step.
   hostDestFamiliarity: DestinationFamiliarity | null;
   hostStayFamiliarity: StayFamiliarity | null;
@@ -429,6 +457,12 @@ interface WizardState extends Record<string, unknown> {
   // CURRENT waiver document, so with no document the requirement can never
   // reach `approved`.
   waiverFile: { uri: string; name: string; size: number } | null;
+  // "Add A Packing List For Guests" — the items the operator suggests guests
+  // pack (shown to them tagged "Admin suggested"). Item names, in order: the
+  // same shape as group_trips.personal_gear_host_suggestion. Switching the row
+  // off keeps the list in the draft, it just is not written.
+  suggestedPackingOn: boolean;
+  suggestedPacking: string[];
 
   // Step 6 — preview
   visibility: Visibility;
@@ -482,6 +516,8 @@ const INITIAL_STATE: WizardState = {
   accommodationName: '',
   accommodationUrl: '',
   accommodationImageUri: null,
+  stokeCertified: false,
+  ciSurfConservation: false,
   hostDestFamiliarity: null,
   hostStayFamiliarity: null,
   hostLeadNote: '',
@@ -502,6 +538,8 @@ const INITIAL_STATE: WizardState = {
   requirementKinds: [...FIXED_DOCUMENT_KINDS],
   requirementTiming: { ...DEFAULT_TIMING },
   waiverFile: null,
+  suggestedPackingOn: false,
+  suggestedPacking: [],
   visibility: 'public',
 };
 
@@ -757,6 +795,9 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardS
         : null),
     },
     waiverFile: null,
+    // Inert in edit mode too — the list is edited in ManageSuggestedGearScreen.
+    suggestedPackingOn: false,
+    suggestedPacking: [],
     ageMin: trip.age_min != null ? String(trip.age_min) : '',
     ageMax: trip.age_max != null ? String(trip.age_max) : '',
     skillLevels,
@@ -789,6 +830,8 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardS
     accommodationName: trip.accommodation_name ?? '',
     accommodationUrl: trip.accommodation_url ?? '',
     accommodationImageUri: trip.accommodation_image_url ?? null,
+    stokeCertified: trip.stoke_certified === true,
+    ciSurfConservation: trip.ci_surf_conservation === true,
     hostDestFamiliarity: trip.host_destination_familiarity ?? null,
     hostStayFamiliarity: trip.host_stay_familiarity ?? null,
     hostLeadNote: trip.host_lead_note ?? '',
@@ -942,10 +985,9 @@ const rowStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   label: {
-    fontFamily: FONT_INTER,
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.inkBody,
+    // Body/B-3 with a bold override, text/m-01 (Figma 17317:28386).
+    ...textStyle('B3', '700'),
+    color: '#333333',
     marginRight: 44,
     flexShrink: 0,
   },
@@ -978,6 +1020,8 @@ const rowStyles = StyleSheet.create({
     color: COLORS.textPlaceholder,
   },
   placeholderAccent: {
+    // Body/B-4 10/17 (Figma 17317:28388).
+    ...textStyles.B4,
     color: '#05BCD3',
   },
   placeholderOptional: {
@@ -1400,6 +1444,27 @@ const formatStayProgress = (state: WizardState): string => {
 // =============================================================================
 // Component
 // =============================================================================
+/**
+ * The refund schedule as rows for the Pricing card (Figma 17114:26849):
+ * "60+ days before — Full refund", then the tail "Under 60 days — No refund".
+ * Built from the policy's real rules, so the card can never promise something
+ * the refund maths will not do.
+ */
+function refundRows(p: CancellationPolicy): { when: string; refund: string; none: boolean }[] {
+  const rules = [...effectiveRules(p)].sort((a, b) => b.daysBefore - a.daysBefore);
+  if (rules.length === 0) return [{ when: 'Any time', refund: 'No refund', none: true }];
+  const out = rules.map(r => ({
+    when: `${r.daysBefore}+ days before`,
+    refund: r.refundPct >= 100 ? 'Full refund' : r.refundPct <= 0 ? 'No refund' : `${r.refundPct}% back`,
+    none: r.refundPct <= 0,
+  }));
+  const last = rules[rules.length - 1];
+  if (last.daysBefore > 0) {
+    out.push({ when: `Under ${last.daysBefore} days`, refund: 'No refund', none: true });
+  }
+  return out;
+}
+
 export interface CreateTripFlowAProps {
   hostId: string | null;
   onCreated: () => void;
@@ -1472,9 +1537,11 @@ export default function CreateTripFlowA({
   // Flow C is the "fully-planned" flow: exact dates only (no months toggle) and
   // a fixed per-person price + rich "What's included" instead of the AI budget.
   const isFixedFlow = effectiveStyle === 'C';
-  // B and C both lock in a specific stay — no Yes/No gate, the stay card is
-  // always shown and its details are required. Only A uses the gate.
-  const requiresSpecificStay = isLeaderFlow || isFixedFlow;
+  // Only B (Captain) locks in a specific stay — no Yes/No gate, the stay card
+  // is always shown and its details are required. A and C (operator) use the
+  // gate: an operator may publish before the stay is booked (Ohad, 1 Oct 2026,
+  // Figma 17020:28966 — the operator Trip Vibe screen has the "NO" option).
+  const requiresSpecificStay = isLeaderFlow;
   // B and C both show the "About you" step (host profile + familiarity + lead
   // note). Only A skips it.
   const hasAboutYou = isLeaderFlow || isFixedFlow;
@@ -1524,6 +1591,22 @@ export default function CreateTripFlowA({
   const effectivePolicy: CancellationPolicy =
     state.cancellation ?? operatorSetup.settings.policy;
 
+  // Did the host pick a specific stay? B always has one. A answers the Yes/No
+  // gate. C has no gate any more (Figma 17317:28362): the stay form sits on the
+  // step itself and is REQUIRED — name, link and photo, all three (Ohad,
+  // 9 Oct). An operator sells a place to sleep; "still looking" is not an
+  // answer they get. Read through this one name so validation, the preview and
+  // the save cannot disagree.
+  const hasStayInfo =
+    !!state.accommodationName.trim() ||
+    !!state.accommodationUrl.trim() ||
+    !!state.accommodationImageUri;
+  const staySelected: boolean | null = requiresSpecificStay
+    ? true
+    : isFixedFlow
+      ? true
+      : state.accommodationLocked;
+
   // ---- Validation registry ------------------------------------------------
   const { errors, setError, clearErrors, firstErrorField } = useFieldErrors<FieldKey>();
 
@@ -1570,27 +1653,6 @@ export default function CreateTripFlowA({
     },
     [setError],
   );
-
-  // First tap on the Surf level card pops a one-time "this is about the group"
-  // reminder before the sheet opens. Skipped in edit/resume (already past intro).
-  const [showAudienceIntro, setShowAudienceIntro] = useState(false);
-  const audienceIntroSeenRef = useRef(editMode || resumeDraft);
-
-  // Opening the Surf level card: show the intro on the very first tap, then open
-  // the levels sheet once it's dismissed. Every later tap opens the sheet directly.
-  const handleSurfLevelPress = useCallback(() => {
-    if (!audienceIntroSeenRef.current) {
-      setShowAudienceIntro(true);
-      return;
-    }
-    setOpenSheet('levels');
-  }, []);
-
-  const dismissAudienceIntro = useCallback(() => {
-    audienceIntroSeenRef.current = true;
-    setShowAudienceIntro(false);
-    setOpenSheet('levels');
-  }, []);
 
   // ---- Dirty tracking (drives discard-confirm prompt) ---------------------
   const [hasBeenTouched, setHasBeenTouched] = useState(false);
@@ -1879,10 +1941,11 @@ export default function CreateTripFlowA({
 
     switch (step) {
       case 'audience': {
-        // Must open + set all four cards before advancing — every card has a
-        // valid default, so without this the host could skip straight past.
-        if (!AUDIENCE_ORDER.every(k => audienceDone.has(k))) {
-          fail('audience', 'Tap through all four to continue');
+        // Must open + set the three required cards before advancing — every
+        // card has a valid default, so without this the host could skip
+        // straight past. Age range is optional.
+        if (!AUDIENCE_REQUIRED.every(k => audienceDone.has(k))) {
+          fail('audience', 'Set surf level, board style and the wave to continue');
         }
         // One-sided (only min OR only max) is valid — interpreted as "no
         // upper limit" / "no lower limit". Both empty is also valid ("Any").
@@ -1915,12 +1978,13 @@ export default function CreateTripFlowA({
       }
       case 'vibez': {
         if (!state.accommodationKind) fail('accommodationKind', 'Pick an accommodation type');
-        // Flow B & C always have a specific stay — details required, no gate.
-        if (!requiresSpecificStay && state.accommodationLocked === null) {
+        // Flow B always has a specific stay — details required, no gate.
+        // Flow C has no gate either — its stay form is inline and optional.
+        if (!requiresSpecificStay && !isFixedFlow && state.accommodationLocked === null) {
           fail('accommodationGate', 'Choose yes or no');
         }
         const stayError = validateStay({
-          specificStaySelected: requiresSpecificStay || state.accommodationLocked === true,
+          specificStaySelected: staySelected === true,
           name: state.accommodationName,
           url: state.accommodationUrl,
           imageUrl: state.accommodationImageUri,
@@ -2042,6 +2106,7 @@ export default function CreateTripFlowA({
     budgetEstimate,
     isLeaderFlow,
     isFixedFlow,
+    staySelected,
     audienceDone,
     clearErrors,
     setError,
@@ -2116,9 +2181,9 @@ export default function CreateTripFlowA({
         heroUrl = heroRes.url;
       }
 
-      // Accommodation photo upload (only when host locked in a stay). Flow B & C
-      // always have a specific stay (no Yes/No gate), so it's always committed.
-      const accommodationCommitted = requiresSpecificStay || state.accommodationLocked === true;
+      // Accommodation photo upload (only when host locked in a stay). Flow B
+      // always has a specific stay (no Yes/No gate), so it's always committed.
+      const accommodationCommitted = staySelected === true;
 
       // Host credibility fields (B & C have the "About you" step; null for A).
       // Familiarity is Flow B only — an operator is never asked (§2), so C
@@ -2134,6 +2199,24 @@ export default function CreateTripFlowA({
             host_stay_familiarity: null,
             host_lead_note: null,
           };
+      // The two certification answers — operator trips only. A/B never send
+      // the keys at all, so they do not depend on the columns existing.
+      // In edit mode a `false` is only written when the trip row actually
+      // carried the column: a trip object that came without it (the feed RPCs
+      // do not return these) must not overwrite a stored `true`.
+      const certFields: Pick<UpdateGroupTripInput, 'stoke_certified' | 'ci_surf_conservation'> = {};
+      if (isFixedFlow) {
+        if (!initialTrip || initialTrip.stoke_certified !== undefined || state.stokeCertified) {
+          certFields.stoke_certified = state.stokeCertified;
+        }
+        if (
+          !initialTrip ||
+          initialTrip.ci_surf_conservation !== undefined ||
+          state.ciSurfConservation
+        ) {
+          certFields.ci_surf_conservation = state.ciSurfConservation;
+        }
+      }
       let accommodationImageUrl: string | null = null;
       if (accommodationCommitted && state.accommodationImageUri) {
         if (isRemoteUrl(state.accommodationImageUri)) {
@@ -2298,7 +2381,8 @@ export default function CreateTripFlowA({
           target_surf_styles: state.surfStyles.length ? state.surfStyles : ['all'],
           // Whether the host picked a specific stay (the step-3 Yes/No gate).
           // Guaranteed non-null by the time this saves (vibez-step validation).
-          specific_stay_selected: requiresSpecificStay ? true : state.accommodationLocked,
+          specific_stay_selected: staySelected,
+          ...certFields,
           ...leaderFields,
           // All trips are public — no visibility UI. Always write 'public'.
           visibility: 'public',
@@ -2373,12 +2457,18 @@ export default function CreateTripFlowA({
 
           // Whether the host picked a specific stay (the step-3 Yes/No gate).
           // Guaranteed non-null by the time this saves (vibez-step validation).
-          specific_stay_selected: requiresSpecificStay ? true : state.accommodationLocked,
+          specific_stay_selected: staySelected,
+          ...certFields,
           ...leaderFields,
           // All trips are public — no visibility UI. Always write 'public'.
           visibility: 'public',
 
-          personal_gear_host_suggestion: [],
+          // The guest packing list from the Requirements step (Flow C). Empty
+          // for A/B, and for an operator who left the row switched off.
+          personal_gear_host_suggestion:
+            isFixedFlow && state.suggestedPackingOn
+              ? state.suggestedPacking.map(n => n.trim()).filter(Boolean)
+              : [],
         };
         const trip = await createGroupTrip(hostId, input);
 
@@ -2515,6 +2605,7 @@ export default function CreateTripFlowA({
     hostingStyle,
     isLeaderFlow,
     isFixedFlow,
+    staySelected,
     startDateObj,
     endDateObj,
     resolveBudget,
@@ -2640,6 +2731,7 @@ export default function CreateTripFlowA({
               editors already let them change it the minute the trip is live
               and a wizard that refuses what the next screen allows just makes
               them publish first and fix it after. */}
+          <Text style={localStyles.reqFieldLabel}>Required option</Text>
           <View style={localStyles.timingRow}>
             {pinned ? (
               /* One flat pill, not two with one disabled. A greyed-out "They
@@ -2691,68 +2783,18 @@ export default function CreateTripFlowA({
               not a flat ±7. Operators think in named intervals, and the gap
               that matters near departure (a day, three days) is not the gap
               that matters months out. Same control the post-publish editors
-              give them; a wizard that moved in sevens and an editor that
-              snapped through notches were two different deadlines to learn. */}
+              give them. A trip published nine days out cannot carry a
+              14-days-before deadline — the stepper blocks it. */}
           {timing.skippable ? (
-            <View style={localStyles.daysRow}>
-              {(() => {
-                // Fewer days before = a LATER date, so this direction can never
-                // walk a deadline into the past. Only the end of the scale
-                // stops it.
-                const minusBlocked = isDeadlineAtEnd(timing.daysBefore, -1);
-                return (
-                  <Pressable
-                    onPress={() =>
-                      setTiming(kind, { daysBefore: stepDeadline(timing.daysBefore, -1) })
-                    }
-                    disabled={minusBlocked}
-                    hitSlop={8}
-                    style={({ pressed }) => [
-                      localStyles.stepBtn,
-                      minusBlocked && localStyles.stepBtnOff,
-                      pressed && localStyles.stepBtnPressed,
-                    ]}
-                  >
-                    <Ionicons name="remove" size={16} color="#212121" />
-                  </Pressable>
-                );
-              })()}
-              <View style={localStyles.daysLabel}>
-                <Text style={localStyles.daysValue}>
-                  {timing.daysBefore === 1
-                    ? '1 day before the trip'
-                    : `${timing.daysBefore} days before the trip`}
-                </Text>
-                <Text style={localStyles.daysDate}>{deadlineDateLabel(timing.daysBefore)}</Text>
-              </View>
-              {/* ⚠️ PLUS MEANS EARLIER. The scale is days BEFORE departure, so
-                  it runs backwards against the calendar and this is the only
-                  button that can walk a deadline off the back of today.
-                  Blocked when it would — an operator may not SET a deadline
-                  that has already gone, here or on the dashboard. It can
-                  genuinely happen in the wizard: a trip published nine days
-                  out cannot carry a 14-days-before deadline. */}
-              {(() => {
-                const plusBlocked =
-                  isDeadlineAtEnd(timing.daysBefore, 1) ||
-                  deadlineStepBlocked(timing.daysBefore, 1, state.startDateISO);
-                return (
-                  <Pressable
-                    onPress={() =>
-                      setTiming(kind, { daysBefore: stepDeadline(timing.daysBefore, 1) })
-                    }
-                    disabled={plusBlocked}
-                    hitSlop={8}
-                    style={({ pressed }) => [
-                      localStyles.stepBtn,
-                      plusBlocked && localStyles.stepBtnOff,
-                      pressed && localStyles.stepBtnPressed,
-                    ]}
-                  >
-                    <Ionicons name="add" size={16} color="#212121" />
-                  </Pressable>
-                );
-              })()}
+            <View style={localStyles.reqField}>
+              <Text style={localStyles.reqFieldLabel}>Can skip until</Text>
+              {renderDeadlineStepper({
+                daysBefore: timing.daysBefore,
+                startDateISO: state.startDateISO,
+                onChange: daysBefore => setTiming(kind, { daysBefore }),
+                footnote: due =>
+                  `From ${due} this ${isPayKind(kind) ? 'payment' : 'document'} will be required`,
+              })}
             </View>
           ) : (
             <Text style={localStyles.timingHint}>
@@ -2859,7 +2901,7 @@ export default function CreateTripFlowA({
                   trying it. */}
               <View style={localStyles.reqHeader} accessibilityRole="text">
                 <View style={localStyles.reqIconWrap}>
-                  <TripIcon name="currency-dollar-circle" size={22} color="#212121" />
+                  <TripIcon name="currency-dollar-circle" size={18} color="#333333" />
                 </View>
                 <View style={localStyles.reqBody}>
                   <Text style={localStyles.reqTitle}>{c.operatorTitle}</Text>
@@ -2918,9 +2960,9 @@ export default function CreateTripFlowA({
               >
                 <View style={localStyles.reqIconWrap}>
                   {kind === 'passport' ? (
-                    <TripIcon name="passport" size={22} color="#212121" strokeWidth={1.5} />
+                    <TripIcon name="passport" size={18} color="#333333" strokeWidth={1.5} />
                   ) : (
-                    <Ionicons name={REQ_ICON[kind]} size={21} color="#212121" />
+                    <Ionicons name={REQ_ICON[kind]} size={18} color="#333333" />
                   )}
                 </View>
                 <View style={localStyles.reqBody}>
@@ -2933,7 +2975,7 @@ export default function CreateTripFlowA({
                     space there would read as "off but somehow expanded". It is
                     just not a control. */}
                 <View style={[localStyles.reqCheck, on && localStyles.reqCheckOn]}>
-                  {on ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                  {on ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
                 </View>
               </Pressable>
 
@@ -3000,8 +3042,8 @@ export default function CreateTripFlowA({
                             pressed && localStyles.waiverPickBtnPressed,
                           ]}
                         >
-                          <Ionicons name="cloud-upload-outline" size={18} color="#212121" />
-                          <Text style={localStyles.waiverPickText}>Upload a PDF</Text>
+                          <Ionicons name="cloud-upload-outline" size={24} color="#333333" />
+                          <Text style={localStyles.waiverPickText}>Upload PDF</Text>
                         </Pressable>
                       )}
 
@@ -3023,13 +3065,60 @@ export default function CreateTripFlowA({
           );
         })}
 
+        {/* The guest packing list (Figma 17098:23607, Block 8). Not a document
+            requirement — it never becomes an organized_trip_requirements row.
+            It is the list of items the operator SUGGESTS guests pack, written
+            to group_trips.personal_gear_host_suggestion on publish and shown to
+            guests tagged "Admin suggested". Same card and same open-on-select
+            behaviour as the rows above, so it reads as one more choice. */}
+        <View
+          style={[localStyles.reqCard, state.suggestedPackingOn && localStyles.reqCardOn]}
+        >
+          <Pressable
+            onPress={() => update('suggestedPackingOn', !state.suggestedPackingOn)}
+            style={({ pressed }) => [
+              localStyles.reqHeader,
+              pressed &&
+                (state.suggestedPackingOn
+                  ? localStyles.reqHeaderPressedOn
+                  : localStyles.reqHeaderPressed),
+            ]}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: state.suggestedPackingOn }}
+          >
+            <View style={localStyles.reqIconWrap}>
+              <Ionicons name="list-outline" size={18} color="#333333" />
+            </View>
+            <View style={localStyles.reqBody}>
+              <Text style={localStyles.reqTitle}>Add A Packing List For Guests</Text>
+              <Text style={localStyles.reqSub}>Provide a Packing List for your guests</Text>
+            </View>
+            <View
+              style={[localStyles.reqCheck, state.suggestedPackingOn && localStyles.reqCheckOn]}
+            >
+              {state.suggestedPackingOn ? (
+                <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+              ) : null}
+            </View>
+          </Pressable>
+
+          {state.suggestedPackingOn ? (
+            <FadeInView duration={180} translateY={4} style={localStyles.reqExpand}>
+              <View style={localStyles.reqDivider} />
+              <PackingListEditor
+                items={state.suggestedPacking}
+                onChange={next => update('suggestedPacking', next)}
+              />
+            </FadeInView>
+          ) : null}
+        </View>
+
         {/* Meta text, pulled away from the list. Two gray paragraphs sitting at
             the same 12px rhythm as the cards read as more list items; the extra
             top margin says "this is a footnote, not another choice". */}
         <View style={localStyles.reqMeta}>
           {state.requirementKinds.includes('passport') ? (
             <View style={localStyles.reqNote}>
-              <Ionicons name="lock-closed-outline" size={14} color="#7B7B7B" />
               <Text style={localStyles.reqNoteText}>
                 Only you and the traveler can see their documents. We delete every file
                 within 30 days after the trip ends.
@@ -3057,18 +3146,24 @@ export default function CreateTripFlowA({
       return AUDIENCE_ORDER.indexOf(key) === activeIdx ? 'active' : 'locked';
     };
 
+    const header = AUDIENCE_HEADER[activeIdx === -1 ? 'age' : AUDIENCE_ORDER[activeIdx]];
+
     return (
       <View style={localStyles.audienceStack}>
+        <View style={localStyles.audienceHeader}>
+          <Text style={localStyles.audienceHeaderTitle}>{header.title}</Text>
+          <Text style={localStyles.audienceHeaderBody}>{header.body}</Text>
+        </View>
         <AudienceCard
-          title="Surf level"
+          title="Surf Level"
           description="Select the level of surfing your trip will be built for."
           chips={levelChips(state.skillLevels)}
           image={Images.whoIsItFor.surfLevel}
           status={statusFor('levels')}
-          onPress={handleSurfLevelPress}
+          onPress={() => setOpenSheet('levels')}
         />
         <AudienceCard
-          title="Board Types"
+          title="Board Style"
           description="Select the range of boards your group will be riding."
           chips={styleChips(state.surfStyles)}
           image={Images.whoIsItFor.boardTypes}
@@ -3370,10 +3465,67 @@ export default function CreateTripFlowA({
   const renderVibezStep = () => {
     const lockedAnswer = state.accommodationLocked;
     const canToggle = !editMode;
-    const hasStayInfo =
-      !!state.accommodationName.trim() ||
-      !!state.accommodationUrl.trim() ||
-      !!state.accommodationImageUri;
+
+    // Flow C (operator) — Figma 17317:28362. Two rows, then the stay form
+    // inline with the two certification questions. No "How it works" row and
+    // no Yes/No gate: an empty stay form IS the "not booked yet" answer.
+    if (isFixedFlow) {
+      const clearStayError = () => {
+        if (errors.specificStay) setError('specificStay', null);
+      };
+      return (
+        <View>
+          <View style={localStyles.summaryGroup}>
+            <SummaryRow
+              label="Trip Vibe"
+              value={formatTagsSummary(state.tripVibes, TRIP_VIBE_OPTIONS)}
+              onPress={() => setOpenSheet('vibe')}
+              noTopDivider
+              placeholderAccent
+              icon={<TripIcon name="sun-setting-03" size={18} />}
+            />
+            <SummaryRow
+              label="Stay Type"
+              value={state.accommodationKind ? ACCOMMODATION_LABEL[state.accommodationKind] : ''}
+              onPress={() => setOpenSheet('stayType')}
+              error={errors.accommodationKind ?? undefined}
+              placeholderAccent
+              icon={<TripIcon name="home-03" size={18} />}
+            />
+          </View>
+
+          <View style={localStyles.groupTopGap}>
+            <OperatorStayCard
+              name={state.accommodationName}
+              url={state.accommodationUrl}
+              photoUri={state.accommodationImageUri}
+              stokeCertified={state.stokeCertified}
+              ciSurfConservation={state.ciSurfConservation}
+              onChangeName={next => {
+                update('accommodationName', next);
+                clearStayError();
+              }}
+              onChangeUrl={next => {
+                update('accommodationUrl', next);
+                clearStayError();
+              }}
+              onPickPhoto={async () => {
+                const uri = await pickImage([4, 3]);
+                if (uri) {
+                  update('accommodationImageUri', uri);
+                  clearStayError();
+                }
+              }}
+              onRemovePhoto={() => update('accommodationImageUri', null)}
+              onToggleStoke={() => update('stokeCertified', !state.stokeCertified)}
+              onToggleCi={() => update('ciSurfConservation', !state.ciSurfConservation)}
+              onFieldFocus={handleFieldFocus}
+              error={errors.specificStay}
+            />
+          </View>
+        </View>
+      );
+    }
 
     return (
       <View>
@@ -3403,7 +3555,7 @@ export default function CreateTripFlowA({
           />
         </View>
 
-        {/* Specific-stay: B & C always have one (no gate); A uses the Yes/No gate. */}
+        {/* Specific-stay: B always has one (no gate); A and C use the Yes/No gate. */}
         {requiresSpecificStay ? (
           <>
             <Text style={[localStyles.fieldLabel, localStyles.groupTopGap]}>Your stay</Text>
@@ -3450,6 +3602,48 @@ export default function CreateTripFlowA({
             // the sheet to view/edit the stay details. No card respects the lock.
             const tapDisabled = opt.key === false ? !canToggle : false;
             const dimmed = tapDisabled && !selected;
+            // Once the stay is added, the stay IS the answer — the card drops
+            // its "Yes" header and shows only the photo + name/link pill
+            // (Figma 17020:23857). Tapping it re-opens the stay sheet.
+            if (opt.key === true && selected && hasStayInfo) {
+              return (
+                <TouchableOpacity
+                  key="stay"
+                  activeOpacity={0.85}
+                  onPress={() => setOpenSheet('specificStay')}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Your stay: ${
+                    state.accommodationName.trim() || 'Your stay'
+                  }. Tap to edit.`}
+                  style={[localStyles.gateCardRow, localStyles.stayChosenCard]}
+                >
+                  <View style={localStyles.stayPreview}>
+                    {state.accommodationImageUri ? (
+                      <Image
+                        source={{ uri: state.accommodationImageUri }}
+                        style={localStyles.stayPreviewPhoto}
+                        resizeMode="cover"
+                      />
+                    ) : null}
+                    <View style={localStyles.stayPreviewInfo}>
+                      <View style={localStyles.stayPreviewIconCircle}>
+                        <TripIcon name="home-03" size={18} color={COLORS.inkBody} />
+                      </View>
+                      <View style={localStyles.stayPreviewTextCol}>
+                        <Text style={localStyles.stayPreviewName} numberOfLines={1}>
+                          {state.accommodationName.trim() || 'Your stay'}
+                        </Text>
+                        {state.accommodationUrl.trim() ? (
+                          <Text style={localStyles.stayPreviewUrl} numberOfLines={1}>
+                            {state.accommodationUrl.trim()}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            }
             return (
               <TouchableOpacity
                 key={String(opt.key)}
@@ -3495,34 +3689,6 @@ export default function CreateTripFlowA({
                     ) : null}
                   </View>
                 </View>
-
-                {/* Stay preview — nested inside the Yes card once details are added. */}
-                {opt.key === true && selected && hasStayInfo ? (
-                  <View style={localStyles.stayPreview}>
-                    {state.accommodationImageUri ? (
-                      <Image
-                        source={{ uri: state.accommodationImageUri }}
-                        style={localStyles.stayPreviewPhoto}
-                        resizeMode="cover"
-                      />
-                    ) : null}
-                    <View style={localStyles.stayPreviewInfo}>
-                      <View style={localStyles.stayPreviewIconCircle}>
-                        <TripIcon name="home-03" size={18} color={COLORS.inkBody} />
-                      </View>
-                      <View style={localStyles.stayPreviewTextCol}>
-                        <Text style={localStyles.stayPreviewName} numberOfLines={1}>
-                          {state.accommodationName.trim() || 'Your stay'}
-                        </Text>
-                        {state.accommodationUrl.trim() ? (
-                          <Text style={localStyles.stayPreviewUrl} numberOfLines={1}>
-                            {state.accommodationUrl.trim()}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </View>
-                  </View>
-                ) : null}
               </TouchableOpacity>
             );
           })}
@@ -3673,22 +3839,86 @@ export default function CreateTripFlowA({
     );
   };
 
-  // The real date a deadline lands on. Months-only trips have no exact start
-  // date, so there is nothing honest to show — say so instead of inventing
-  // one. Shared by the Pricing step's "Final payment" stepper and the
-  // Requirements step's timing controls: two copies of "which date is that"
-  // would drift.
-  const deadlineDateLabel = (daysBefore: number) => {
+  // The "N days before the trip" stepper — Figma 17108:26354: one white pill,
+  // two round grey buttons, the value in the middle, and the real date in a
+  // line under it. Shared by Pricing's payment deadline and every skippable
+  // requirement, so the two can never look or step differently.
+  //
+  // ⚠️ PLUS MEANS EARLIER. The scale is days BEFORE departure, so it runs
+  // backwards against the calendar and "+" is the only button that can walk a
+  // deadline off the back of today. Blocked when it would — an operator may
+  // not SET a deadline that has already gone, here or on the dashboard.
+  const renderDeadlineStepper = (opts: {
+    daysBefore: number;
+    /** Start date used to block "+" from landing in the past. */
+    startDateISO: string | null;
+    onChange: (daysBefore: number) => void;
+    /** The line under the pill, given the formatted due date. */
+    footnote: (due: string) => string;
+    minusLabel?: string;
+    plusLabel?: string;
+  }) => {
+    const { daysBefore } = opts;
+    // Fewer days before = a LATER date, so "−" can never reach the past. Only
+    // the end of the DEADLINE_STEPS scale stops it.
+    const minusBlocked = isDeadlineAtEnd(daysBefore, -1);
+    const plusBlocked =
+      isDeadlineAtEnd(daysBefore, 1) || deadlineStepBlocked(daysBefore, 1, opts.startDateISO);
     const due = resolveDeadlineDate(
       state.datesMode === 'exact' ? state.startDateISO : null,
       daysBefore,
     );
-    if (!due) return 'Set exact dates to see the date';
-    return due.toLocaleDateString(undefined, {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
+    return (
+      <>
+        <View style={localStyles.daysRow}>
+          <Pressable
+            onPress={() => opts.onChange(stepDeadline(daysBefore, -1))}
+            disabled={minusBlocked}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={opts.minusLabel ?? 'Move the deadline closer to the trip'}
+            style={({ pressed }) => [
+              localStyles.stepBtn,
+              minusBlocked && localStyles.stepBtnOff,
+              pressed && localStyles.stepBtnPressed,
+            ]}
+          >
+            <Ionicons name="remove" size={20} color={minusBlocked ? '#BDBDBD' : '#333333'} />
+          </Pressable>
+          <View style={localStyles.daysLabel}>
+            <Text style={localStyles.daysValue}>
+              {daysBefore === 1 ? '1 day before the trip' : `${daysBefore} days before the trip`}
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => opts.onChange(stepDeadline(daysBefore, 1))}
+            disabled={plusBlocked}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={opts.plusLabel ?? 'Move the deadline earlier'}
+            style={({ pressed }) => [
+              localStyles.stepBtn,
+              plusBlocked && localStyles.stepBtnOff,
+              pressed && localStyles.stepBtnPressed,
+            ]}
+          >
+            <Ionicons name="add" size={20} color={plusBlocked ? '#BDBDBD' : '#333333'} />
+          </Pressable>
+        </View>
+        {/* Months-only trips have no start date — say so, never invent one. */}
+        <Text style={localStyles.daysDate}>
+          {due
+            ? opts.footnote(
+                due.toLocaleDateString(undefined, {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                }),
+              )
+            : 'Set exact dates to see the date'}
+        </Text>
+      </>
+    );
   };
 
   const renderPricingStep = () => {
@@ -3724,19 +3954,14 @@ export default function CreateTripFlowA({
     return (
       <View>
         {renderCurrencyPicker()}
-        <Text style={localStyles.fieldLabel}>
-          Price per person · {operatorCurrency}
-        </Text>
-        <View style={localStyles.priceRow}>
-          <View style={localStyles.priceIconBubble}>
-            <TripIcon name="currency-dollar-circle" size={22} color={COLORS.inkBody} />
-          </View>
+        {/* Figma 17108:26160 — a plain title, then one field that carries its
+            own currency: "USD 3000". The currency is part of the number, so it
+            sits inside the box rather than in the title. */}
+        <Text style={localStyles.priceSectionTitle}>Price per traveler</Text>
+        <View style={[localStyles.moneyField, !!errors.price && localStyles.inputError]}>
+          <Text style={localStyles.moneyCurrency}>{operatorCurrency}</Text>
           <TextInput
-            style={[
-              localStyles.input,
-              { flex: 1 },
-              !!errors.price && localStyles.inputError,
-            ]}
+            style={localStyles.moneyInput}
             value={state.costPerPerson}
             onChangeText={t => {
               update('costPerPerson', t.replace(/[^0-9]/g, ''));
@@ -3746,13 +3971,14 @@ export default function CreateTripFlowA({
             placeholderTextColor={COLORS.textPlaceholder}
             keyboardType="number-pad"
             maxLength={6}
+            accessibilityLabel={`Price per traveler in ${operatorCurrency}`}
           />
         </View>
         {errors.price ? <Text style={localStyles.errorText}>{errors.price}</Text> : null}
 
         {isFixedFlow && (
           <>
-            <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
+            <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
               Getting paid
             </Text>
             <View style={localStyles.summaryGroup}>
@@ -3795,22 +4021,18 @@ export default function CreateTripFlowA({
               <>
                 <ConnectStripeCard />
 
-                <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
-                  Deposit · {operatorCurrency}
+                <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
+                  Deposit
                 </Text>
-                <Text style={localStyles.helper}>
+                <Text style={[localStyles.priceHelper, { marginBottom: 8 }]}>
                   Leave this blank to take one single payment.
                 </Text>
-                <View style={localStyles.priceRow}>
-                  <View style={localStyles.priceIconBubble}>
-                    <TripIcon name="currency-dollar-circle" size={22} color={COLORS.inkBody} />
-                  </View>
+                <View
+                  style={[localStyles.moneyField, !!errors.deposit && localStyles.inputError]}
+                >
+                  <Text style={localStyles.moneyCurrency}>{operatorCurrency}</Text>
                   <TextInput
-                    style={[
-                      localStyles.input,
-                      { flex: 1 },
-                      !!errors.deposit && localStyles.inputError,
-                    ]}
+                    style={localStyles.moneyInput}
                     value={state.depositAmount}
                     onChangeText={t => {
                       update('depositAmount', t.replace(/[^0-9]/g, ''));
@@ -3835,87 +4057,32 @@ export default function CreateTripFlowA({
                 (managed) or not exist at all (offline), and operators
                 published trips without ever seeing that a deadline was set
                 for them. */}
-            <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>
+            <Text style={[localStyles.deadlineLabel, localStyles.groupTopGap]}>
               Payment deadline
             </Text>
-            <Text style={localStyles.helper}>
-              {state.paymentMode === 'managed'
-                ? 'Travelers must finish paying by this date.'
-                : "Shown in each traveler's plan: pay you the full amount by this date."}
-            </Text>
-            {/* Same DEADLINE_STEPS scale as the Requirements step and both
-                post-publish editors — see `stepDeadline`. This one used to
-                move in flat sevens, which is how an operator could set a
-                payment deadline the dashboard's own stepper would refuse. */}
-            <View style={localStyles.daysRow}>
-              {(() => {
-                const minusBlocked = isDeadlineAtEnd(balanceTiming.daysBefore, -1);
-                return (
-                  <Pressable
-                    onPress={() =>
-                      setBalanceDays(stepDeadline(balanceTiming.daysBefore, -1))
-                    }
-                    disabled={minusBlocked}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Move the payment deadline closer to the trip"
-                    style={({ pressed }) => [
-                      localStyles.stepBtn,
-                      minusBlocked && localStyles.stepBtnOff,
-                      pressed && localStyles.stepBtnPressed,
-                    ]}
-                  >
-                    <Ionicons name="remove" size={16} color="#212121" />
-                  </Pressable>
-                );
-              })()}
-              <View style={localStyles.daysLabel}>
-                <Text style={localStyles.daysValue}>
-                  {balanceTiming.daysBefore === 1
-                    ? '1 day before the trip'
-                    : `${balanceTiming.daysBefore} days before the trip`}
-                </Text>
-                <Text style={localStyles.daysDate}>
-                  {deadlineDateLabel(balanceTiming.daysBefore)}
-                </Text>
-              </View>
-              {/* ⚠️ PLUS MEANS EARLIER — days BEFORE departure runs backwards
-                  against the calendar, so this is the only direction that can
-                  land the deadline in the past. */}
-              {(() => {
-                const plusBlocked =
-                  isDeadlineAtEnd(balanceTiming.daysBefore, 1) ||
-                  deadlineStepBlocked(
-                    balanceTiming.daysBefore,
-                    1,
-                    state.datesMode === 'exact' ? state.startDateISO : null,
-                  );
-                return (
-                  <Pressable
-                    onPress={() => setBalanceDays(stepDeadline(balanceTiming.daysBefore, 1))}
-                    disabled={plusBlocked}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Move the payment deadline earlier"
-                    style={({ pressed }) => [
-                      localStyles.stepBtn,
-                      plusBlocked && localStyles.stepBtnOff,
-                      pressed && localStyles.stepBtnPressed,
-                    ]}
-                  >
-                    <Ionicons name="add" size={16} color="#212121" />
-                  </Pressable>
-                );
-              })()}
-            </View>
+            {renderDeadlineStepper({
+              daysBefore: balanceTiming.daysBefore,
+              startDateISO: state.datesMode === 'exact' ? state.startDateISO : null,
+              onChange: setBalanceDays,
+              minusLabel: 'Move the payment deadline closer to the trip',
+              plusLabel: 'Move the payment deadline earlier',
+              footnote: due =>
+                state.paymentMode === 'managed'
+                  ? `Travelers must finish paying by ${due}`
+                  : `Travelers pay you the full amount by ${due}`,
+            })}
           </>
         )}
 
-        <Text style={[localStyles.sectionTitle, localStyles.groupTopGap]}>What's included</Text>
-        <Text style={localStyles.helper}>
+        <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
+          What’s included
+        </Text>
+        <Text style={localStyles.priceHelper}>
           Tap each to set what the price covers. Everything here is optional.
         </Text>
-        <View style={[localStyles.summaryGroup, { marginTop: 12 }]}>
+        {/* One list: the fixed categories, the operator's own items, and the
+            "+ Add an inclusion" row closing it (Figma 17112:26407). */}
+        <View style={[localStyles.summaryGroup, { marginTop: 16 }]}>
           {rows.map((r, i) => (
             <SummaryRow
               key={r.key}
@@ -3928,53 +4095,37 @@ export default function CreateTripFlowA({
               icon={<Ionicons name={r.icon} size={18} color={COLORS.inkBody} />}
             />
           ))}
+          {customItems.map((item, i) => (
+            <SummaryRow
+              key={`custom-${i}`}
+              label={item.title.trim() || 'Untitled'}
+              value={item.description?.trim() || ''}
+              placeholder="Tap to edit"
+              onPress={() => {
+                setCustomEditIndex(i);
+                setOpenSheet('incCustom');
+              }}
+              icon={<Ionicons name="sparkles-outline" size={18} color={COLORS.inkBody} />}
+            />
+          ))}
+          <View style={rowStyles.divider} />
+          <Pressable
+            onPress={() => {
+              const next = [...customItems, { title: '', description: '' }];
+              setInclusions({ custom: next });
+              setCustomEditIndex(next.length - 1);
+              setOpenSheet('incCustom');
+            }}
+            style={({ pressed }) => [
+              localStyles.addInclusionRow,
+              pressed && localStyles.addInclusionRowPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Add an inclusion"
+          >
+            <Text style={localStyles.addInclusionText}>+ Add an inclusion</Text>
+          </Pressable>
         </View>
-
-        <Text style={[localStyles.fieldLabel, localStyles.fieldTopGap]}>Add your own</Text>
-        {customItems.length > 0 ? (
-          <View style={[localStyles.summaryGroup, { marginTop: 12 }]}>
-            {customItems.map((item, i) => (
-              <SummaryRow
-                key={i}
-                label={item.title.trim() || 'Untitled'}
-                value={item.description?.trim() || ''}
-                placeholder="Tap to edit"
-                onPress={() => {
-                  setCustomEditIndex(i);
-                  setOpenSheet('incCustom');
-                }}
-                noTopDivider={i === 0}
-              />
-            ))}
-          </View>
-        ) : null}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => {
-            const next = [...customItems, { title: '', description: '' }];
-            setInclusions({ custom: next });
-            setCustomEditIndex(next.length - 1);
-            setOpenSheet('incCustom');
-          }}
-          style={[localStyles.gateCardRow, localStyles.stayGateCard]}
-          accessibilityRole="button"
-          accessibilityLabel="Add your own inclusion"
-        >
-          <View style={localStyles.gateCardInner}>
-            <View style={localStyles.stayIconBubble}>
-              <Ionicons name="sparkles-outline" size={24} color={COLORS.inkBody} />
-            </View>
-            <View style={localStyles.gateTextCol}>
-              <Text style={localStyles.stayGateTitle}>
-                {customItems.length > 0 ? 'Add another' : 'Add an inclusion'}
-              </Text>
-              <Text style={localStyles.gateRowSubtitle}>
-                Anything extra the price covers.
-              </Text>
-            </View>
-            <Ionicons name="add" size={24} color="#05BCD3" />
-          </View>
-        </TouchableOpacity>
 
         {/* Cancellation policy — last on Pricing, because it is a term of sale
             like the price, not a requirement like a passport. Pre-filled from
@@ -3982,18 +4133,48 @@ export default function CreateTripFlowA({
 
             Changing it here changes THIS TRIP ONLY. The operator's default is
             never written from the wizard — an operator pricing one unusual trip
-            must not silently re-terms every future one. */}
+            must not silently re-terms every future one.
+
+            The refund rows are built from the policy's real rules
+            (`effectiveRules`), never typed copy — the words once drifted from
+            the rules (see PRESET_LABEL). */}
+        <View style={[localStyles.cancelPolicyHead, localStyles.groupTopGap]}>
+          <Text style={localStyles.priceSectionTitle}>Cancellation Policy</Text>
+          <Pressable
+            onPress={() => setOpenSheet('cancellation')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Change the cancellation policy"
+          >
+            <Text style={localStyles.cancelPolicyChange}>Change</Text>
+          </Pressable>
+        </View>
         <View style={localStyles.cancelPolicyCard}>
-          <View style={localStyles.cancelPolicyHead}>
-            <Text style={localStyles.cancelPolicyLabel}>Cancellation policy</Text>
-            <Pressable onPress={() => setOpenSheet('cancellation')} hitSlop={8}>
-              <Text style={localStyles.cancelPolicyChange}>Change</Text>
-            </Pressable>
+          <View style={localStyles.cancelPolicyTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={localStyles.cancelPolicyValue}>
+                {PRESET_LABEL[effectivePolicy.preset]}
+              </Text>
+              <Text style={localStyles.cancelPolicySub}>{summarise(effectivePolicy)}</Text>
+            </View>
+            <View style={[localStyles.gateCheckbox, localStyles.gateCheckboxOn]}>
+              <MaterialCommunityIcons name="check-bold" size={14} color="#FFFFFF" />
+            </View>
           </View>
-          <Text style={localStyles.cancelPolicyValue}>
-            {PRESET_LABEL[effectivePolicy.preset]}
-          </Text>
-          <Text style={localStyles.cancelPolicySub}>{summarise(effectivePolicy)}</Text>
+          <View style={localStyles.cancelPolicyDivider} />
+          {refundRows(effectivePolicy).map(r => (
+            <View key={r.when} style={localStyles.cancelPolicyRow}>
+              <Text style={localStyles.cancelPolicyWhen}>{r.when}</Text>
+              <Text
+                style={[
+                  localStyles.cancelPolicyRefund,
+                  { color: r.none ? '#FF5367' : '#2BCCBD' },
+                ]}
+              >
+                {r.refund}
+              </Text>
+            </View>
+          ))}
           <Text style={localStyles.cancelPolicyFoot}>
             Travelers see this when they pay. You refund from your own Stripe
             account.
@@ -4335,20 +4516,13 @@ export default function CreateTripFlowA({
       waveSizeMin: state.waveSizeMin,
       waveSizeMax: state.waveSizeMax,
       waveShapeLabel: state.waveShape ? WAVE_SHAPE_TITLE[state.waveShape] : null,
-      specificStaySelected: requiresSpecificStay ? true : state.accommodationLocked,
+      specificStaySelected: staySelected,
       accommodationKindLabel: state.accommodationKind
         ? ACCOMMODATION_LABEL[state.accommodationKind]
         : null,
-      accommodationName:
-        requiresSpecificStay || state.accommodationLocked
-          ? state.accommodationName || null
-          : null,
-      accommodationImageUri:
-        requiresSpecificStay || state.accommodationLocked ? state.accommodationImageUri : null,
-      accommodationUrl:
-        requiresSpecificStay || state.accommodationLocked
-          ? state.accommodationUrl || null
-          : null,
+      accommodationName: staySelected ? state.accommodationName || null : null,
+      accommodationImageUri: staySelected ? state.accommodationImageUri : null,
+      accommodationUrl: staySelected ? state.accommodationUrl || null : null,
       costPerPerson:
         isFixedFlow && state.costPerPerson
           ? toPreviewUsd(parseInt(state.costPerPerson, 10))
@@ -4562,14 +4736,6 @@ export default function CreateTripFlowA({
         {renderStep()}
       </CreateTripWizardChrome>
 
-      {/* One-time "this is about the group" reminder (first Surf level tap). */}
-      <WizardInfoOverlay
-        visible={showAudienceIntro}
-        title={AUDIENCE_INTRO_TITLE}
-        message={AUDIENCE_INTRO_MESSAGE}
-        onDismiss={dismissAudienceIntro}
-      />
-
       {/* ------- Sheets ------- */}
 
       {/* Step 1 sheets */}
@@ -4596,7 +4762,7 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'wave'}
         title="The Wave"
-        subtitle="Pick the shape and size"
+        subtitle="You can select more than one"
         largeTitle
         titleAlign="left"
         hideHeaderDivider
@@ -5057,47 +5223,43 @@ const localStyles = StyleSheet.create({
   // gaps inside it, or six cards read as one undifferentiated wall.
   reqStack: { gap: 14 },
   reqCard: {
-    borderRadius: 16,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E4E4E4',
+    borderColor: '#EEEEEE',
     backgroundColor: '#FFFFFF',
-    // Lets the expanded section's full-bleed divider stop at the rounded corner.
+    // Lets the press tint stop at the rounded corner.
     overflow: 'hidden',
   },
-  reqCardOn: { borderColor: '#05BCD3', backgroundColor: '#F4FDFE' },
+  reqCardOn: { borderColor: '#05BCD3' },
   reqHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    padding: 16,
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
   },
   reqHeaderPressed: { backgroundColor: '#F4F4F4' },
-  reqHeaderPressedOn: { backgroundColor: '#E7F7F9' },
-  reqExpand: { paddingHorizontal: 16, paddingBottom: 16, gap: 12 },
+  reqHeaderPressedOn: { backgroundColor: '#F7FCFD' },
+  reqExpand: { paddingHorizontal: 12, paddingBottom: 16, gap: 8 },
   reqDivider: {
     height: 1,
-    // Negative margins bleed it to the card edges, so it reads as a seam in one
-    // card rather than a border around a nested box.
-    marginHorizontal: -16,
-    marginBottom: 4,
-    backgroundColor: 'rgba(5,188,211,0.16)',
+    marginBottom: 8,
+    backgroundColor: '#EEEEEE',
   },
   reqIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F3F3F3',
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#F7F7F7',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reqBody: { flex: 1, gap: 3 },
+  reqBody: { flex: 1 },
+  // MB2 bold 14/18 + B3 12/18 (Figma 17108:25495 — the export's 18 is desktop).
   reqTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#212121',
+    ...textStyle('MB2', '700'),
+    color: '#333333',
   },
-  reqSub: { fontFamily: FONT_INTER, fontSize: 12, lineHeight: 17, color: '#7B7B7B' },
+  reqSub: { ...textStyles.B3, color: '#333333' },
   // Same treatment ManageRequirementsSheet gives a pay row's amount, so the
   // card reads identically before and after publish.
   reqPayAmount: {
@@ -5108,30 +5270,40 @@ const localStyles = StyleSheet.create({
     marginTop: 2,
   },
   reqCheck: {
-    width: 22,
-    height: 22,
-    borderRadius: 7,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#D5D7DA',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 2,
   },
   reqCheckOn: { backgroundColor: '#05BCD3', borderColor: '#05BCD3' },
   // Timing control inside a selected requirement card.
-  timingRow: { flexDirection: 'row', gap: 8 },
+  reqField: { gap: 8, marginTop: 8 },
+  reqFieldLabel: { ...textStyle('B3', '700'), color: '#333333', paddingTop: 4 },
+  timingRow: {
+    flexDirection: 'row',
+    padding: 2,
+    borderRadius: 8,
+    backgroundColor: '#F7F7F7',
+  },
   timingPill: {
     flex: 1,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#E4E4E4',
+    height: 32,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
   },
-  timingPillOn: { backgroundColor: '#212121', borderColor: '#212121' },
-  timingPillText: { fontFamily: FONT_INTER, fontSize: 12, fontWeight: '600', color: '#555555' },
+  timingPillOn: {
+    backgroundColor: '#333333',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  timingPillText: { ...textStyles.B3, color: '#A0A0A0' },
   timingPillTextOn: { color: '#FFFFFF' },
   timingHint: { fontFamily: FONT_INTER, fontSize: 11, lineHeight: 16, color: '#9A9A9A' },
   // The stepper gets its own white inset so it visibly belongs to "They can
@@ -5139,33 +5311,28 @@ const localStyles = StyleSheet.create({
   daysRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 12,
+    padding: 4,
+    borderRadius: 30,
     borderWidth: 1,
-    borderColor: '#E7F1F3',
+    borderColor: '#EEEEEE',
     backgroundColor: '#FFFFFF',
   },
   stepBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    padding: 12,
+    borderRadius: 99,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3F3F3',
+    backgroundColor: '#F7F7F7',
   },
-  stepBtnPressed: { backgroundColor: '#E6E6E6', transform: [{ scale: 0.94 }] },
-  stepBtnOff: { borderColor: '#F0F0F0', backgroundColor: '#FAFAFA' },
+  stepBtnPressed: { backgroundColor: '#EDEDED', transform: [{ scale: 0.94 }] },
+  stepBtnOff: { backgroundColor: '#FAFAFA' },
   daysLabel: { flex: 1, alignItems: 'center' },
-  daysValue: { fontFamily: FONT_INTER, fontSize: 13, fontWeight: '600', color: '#212121' },
-  daysDate: { fontFamily: FONT_INTER, fontSize: 11, color: '#7B7B7B', marginTop: 1 },
+  daysValue: { ...textStyle('MB2', '700'), color: '#333333', textAlign: 'center' },
+  daysDate: { ...textStyles.B3, color: '#333333', textAlign: 'center' },
   waiverBox: { gap: 8 },
   waiverLabel: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#212121',
+    ...textStyle('B3', '700'),
+    color: '#333333',
   },
   waiverInput: {
     minHeight: 110,
@@ -5185,24 +5352,38 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    height: 48,
-    borderRadius: 12,
+    gap: 4,
+    height: 54,
+    borderRadius: 16,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: '#D5D7DA',
+    borderColor: '#CFCFCF',
     backgroundColor: '#FFFFFF',
   },
   waiverPickBtnPressed: { backgroundColor: '#F6F6F6', transform: [{ scale: 0.985 }] },
-  waiverPickText: { fontFamily: FONT_INTER, fontSize: 14, fontWeight: '600', color: '#212121' },
+  waiverPickText: { ...textStyle('MB2', '700'), color: '#333333' },
   cancelPolicyCard: {
-    marginTop: 12,
-    padding: 14,
-    borderRadius: 14,
+    marginTop: 16,
+    padding: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#E4E4E4',
+    borderColor: '#CFCFCF',
     backgroundColor: '#FFFFFF',
   },
+  cancelPolicyTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingBottom: 16,
+  },
+  cancelPolicyDivider: { height: 1, backgroundColor: '#EEEEEE', marginBottom: 16 },
+  cancelPolicyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  cancelPolicyWhen: { ...textStyles.B3, color: '#333333' },
+  cancelPolicyRefund: { ...textStyle('B3', '700') },
   cancelPolicyHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -5217,31 +5398,21 @@ const localStyles = StyleSheet.create({
     color: '#7B7B7B',
   },
   cancelPolicyChange: {
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    fontWeight: '600',
+    ...textStyle('B3', '700'),
     color: '#05BCD3',
   },
   cancelPolicyValue: {
-    marginTop: 8,
-    fontFamily: FONT_INTER,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#212121',
+    ...textStyle('MB2', '700'),
+    color: '#333333',
   },
   cancelPolicySub: {
-    marginTop: 2,
-    fontFamily: FONT_INTER,
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#7B7B7B',
+    ...textStyles.B3,
+    color: '#333333',
   },
   cancelPolicyFoot: {
-    marginTop: 8,
-    fontFamily: FONT_INTER,
-    fontSize: 11.5,
-    lineHeight: 16,
-    color: '#9A9A9A',
+    marginTop: 4,
+    ...textStyles.B4,
+    color: '#7B7B7B',
   },
   waiverFileRow: {
     flexDirection: 'row',
@@ -5259,7 +5430,7 @@ const localStyles = StyleSheet.create({
   waiverReplace: { fontFamily: FONT_INTER, fontSize: 13, fontWeight: '600', color: '#05BCD3' },
   waiverError: { fontFamily: FONT_INTER, fontSize: 11, color: '#C4361E' },
   waiverHint: { fontFamily: FONT_INTER, fontSize: 11, lineHeight: 16, color: '#9A9A9A' },
-  reqMeta: { marginTop: 10, gap: 10 },
+  reqMeta: { marginTop: 4, gap: 0 },
   reqNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -5268,16 +5439,14 @@ const localStyles = StyleSheet.create({
   },
   reqNoteText: {
     flex: 1,
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 17,
-    color: '#7B7B7B',
+    ...textStyles.B3,
+    color: '#333333',
+    textAlign: 'center',
   },
   reqFooter: {
-    fontFamily: FONT_INTER,
-    fontSize: 12,
-    lineHeight: 17,
-    color: '#9A9A9A',
+    ...textStyles.B3,
+    color: '#333333',
+    textAlign: 'center',
     paddingHorizontal: 4,
   },
 
@@ -5295,6 +5464,15 @@ const localStyles = StyleSheet.create({
     gap: 16,
     marginHorizontal: 4,
   },
+  // Figma 17020:25796 — title is Size/lg 16 bold (the export's 20 is the desktop
+  // mode), body is Body/B-3. 30 under the block = the 16 stack gap + 14.
+  audienceHeader: {
+    gap: 16,
+    paddingHorizontal: 4,
+    marginBottom: 14,
+  },
+  audienceHeaderTitle: { ...textStyle('MB1', '700'), color: '#333333' },
+  audienceHeaderBody: { ...textStyles.B3, color: '#7B7B7B' },
   // Step 1 top row — Surf Level + Board Style side-by-side. Gap matches the
   // cardStack vertical gap so the rhythm reads as a clean grid.
   topRow: {
@@ -5565,6 +5743,44 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
   },
 
+  // Flow C — Pricing step (Figma 17108:25831). Titles are MB2 bold 14/18 (the
+  // export's bold 18 is desktop); the field carries its own currency.
+  priceSectionTitle: {
+    ...textStyle('MB2', '700'),
+    color: '#333333',
+    marginBottom: 8,
+  },
+  priceHelper: { ...textStyles.B3, color: '#333333' },
+  deadlineLabel: { ...textStyle('B3', '700'), color: '#333333', marginBottom: 8 },
+  moneyField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 56,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: '#FFFFFF',
+  },
+  moneyCurrency: { ...textStyles.MB2, color: '#333333' },
+  moneyInput: {
+    flex: 1,
+    height: '100%',
+    ...textStyle('MB1', '700'),
+    lineHeight: undefined,
+    color: '#333333',
+    paddingVertical: 0,
+  },
+  addInclusionRow: {
+    minHeight: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+  },
+  addInclusionRowPressed: { backgroundColor: '#F8FAFB' },
+  addInclusionText: { ...textStyles.H6, color: '#05BCD3' },
+
   // Flow C — fixed price input with a $ prefix.
   priceRow: {
     flexDirection: 'row',
@@ -5779,11 +5995,10 @@ const localStyles = StyleSheet.create({
   },
 
   // Accommodation gate — full-width stacked cards (Figma node 12635:3734)
+  // Body/M B-1 bold — Size/lg 16 (Figma 17020:23843; the export's 20 is the
+  // desktop mode).
   gateSectionTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
+    ...textStyle('MB1', '700'),
     color: COLORS.inkBody,
     marginBottom: 4,
   },
@@ -5858,10 +6073,7 @@ const localStyles = StyleSheet.create({
     gap: 4,
   },
   gateRowTitle: {
-    fontFamily: FONT_INTER,
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
+    ...textStyle('MB1', '700'),
     color: COLORS.inkBody,
   },
   gateRowSubtitle: {
@@ -5916,19 +6128,22 @@ const localStyles = StyleSheet.create({
     flex: 1,
     paddingRight: 4,
   },
+  // B-3 bold (Size/s 12) + B-4 (Size/xs 10) — Figma 17020:23912/23913.
   stayPreviewName: {
-    fontFamily: FONT_INTER,
-    fontSize: 16,
-    lineHeight: 18,
-    fontWeight: '700',
+    ...textStyle('B3', '700'),
     color: '#0A0A0A',
   },
   stayPreviewUrl: {
-    fontFamily: FONT_INTER,
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: '400',
+    ...textStyles.B4,
     color: '#05BCD3',
+  },
+  // The chosen stay on its own (no "Yes" header): rounder card, tighter
+  // sides so the photo runs nearly edge to edge (Figma 17020:23857).
+  stayChosenCard: {
+    borderRadius: 32,
+    borderColor: '#05BCD3',
+    paddingHorizontal: 10,
+    paddingVertical: 12,
   },
 
   // Max-participants stepper — square −/+ buttons flanking a wide "Any" pill.

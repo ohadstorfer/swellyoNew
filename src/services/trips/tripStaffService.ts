@@ -18,6 +18,7 @@
  */
 import { supabase } from '../../config/supabase';
 import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
+import { staffInviteUrl } from '../../constants/inviteLinks';
 
 /**
  * The six tiers. Order matters for display only — never for permission checks.
@@ -73,10 +74,22 @@ export interface TripStaffMember {
   country_from: string | null;
   /** True when they have an account but have not accepted the invite yet. */
   pending: boolean;
+  /**
+   * The operator marked them as local to the trip area — the "Local Crew"
+   * count on the overview. `organized_trip_staff.is_local`
+   * (20261002000000_staff_is_local.sql). False until that migration runs.
+   */
+  isLocal: boolean;
 }
 
-const STAFF_COLUMNS =
-  'id, trip_id, user_id, role_key, display_name, photo_url, title, bio, invited_at, accepted_at';
+/**
+ * `*`, not a column list: `is_local` only exists once
+ * 20261002000000_staff_is_local.sql is applied, and naming a column the live
+ * table does not have makes PostgREST 400 the whole read — the crew section
+ * would vanish for every trip. `*` reads it when it is there and simply
+ * omits it when it is not, so `isLocal` falls back to false.
+ */
+const STAFF_COLUMNS = '*';
 
 /**
  * The jobs an operator picks from when introducing a crew member.
@@ -165,6 +178,7 @@ export async function listTripStaff(tripId: string): Promise<TripStaffMember[]> 
         photo_url: profile?.profile_image_url ?? r.photo_url ?? null,
         country_from: profile?.country_from ?? null,
         pending: !!r.user_id && !r.accepted_at,
+        isLocal: r.is_local === true,
       };
     })
     .sort((a, b) => TIER_ORDER.indexOf(a.role_key) - TIER_ORDER.indexOf(b.role_key));
@@ -190,8 +204,11 @@ export async function addTripStaff(params: {
   photoUrl?: string;
   title?: string;
   bio?: string;
+  /** Local to the trip area. Only sent when true — see setStaffLocal. */
+  isLocal?: boolean;
 }): Promise<void> {
-  const { tripId, operatorId, roleKey, userId, displayName, photoUrl, title, bio } = params;
+  const { tripId, operatorId, roleKey, userId, displayName, photoUrl, title, bio, isLocal } =
+    params;
   if (!userId && !displayName?.trim()) {
     throw new Error('A staff member needs either an account or a name.');
   }
@@ -208,7 +225,24 @@ export async function addTripStaff(params: {
     // A Listed credit has nobody to accept, so it is live immediately.
     // An account has to accept before trip_staff_can() will match them.
     accepted_at: userId ? null : new Date().toISOString(),
+    // Omitted unless true, so adding a crew member keeps working on a database
+    // that has not had 20261002000000 applied yet.
+    ...(isLocal ? { is_local: true } : {}),
   });
+  if (error) throw error;
+}
+
+/**
+ * Mark a crew member as local to the trip area, or not. The operator's call:
+ * `ots_write` (staff.manage) lets them UPDATE the row, and
+ * `guard_staff_self_edit` stops a crew member setting it on themselves.
+ * Fails until 20261002000000_staff_is_local.sql is applied (no column).
+ */
+export async function setStaffLocal(staffId: string, isLocal: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('organized_trip_staff')
+    .update({ is_local: isLocal })
+    .eq('id', staffId);
   if (error) throw error;
 }
 
@@ -319,6 +353,7 @@ export async function fetchMyStaffRow(tripId: string): Promise<TripStaffMember |
     photo_url: (data.photo_url as string | null) ?? null,
     country_from: null,
     pending: !data.accepted_at,
+    isLocal: data.is_local === true,
   };
 }
 
@@ -433,9 +468,6 @@ export async function revokeTripStaff(staffId: string): Promise<void> {
 // sends it over WhatsApp, and the recipient identifies themselves by signing
 // in. See the migration header for the full reasoning.
 
-/** Matches the domain the shipped invite links already use (AppContent). */
-const INVITE_BASE = 'https://swellyo-invite.netlify.app/';
-
 export interface StaffInvitePreview {
   trip_id: string;
   trip_title: string | null;
@@ -468,6 +500,8 @@ export async function createStaffInviteLink(params: {
   /** The line travelers read under their name. Copied onto the staff row when
    *  the link is used — see 20260813170000_staff_profile_for_travelers.sql. */
   bio?: string;
+  /** Local to the trip area — copied onto the staff row on accept. */
+  isLocal?: boolean;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('create_staff_invite', {
     p_trip_id: params.tripId,
@@ -475,9 +509,12 @@ export async function createStaffInviteLink(params: {
     p_title: params.title?.trim() || null,
     p_requirement_ids: params.requirementIds ?? [],
     p_bio: params.bio?.trim() || null,
+    // Only sent when true: before 20261002000000 the RPC has no such
+    // parameter, and an unknown named argument fails the whole call.
+    ...(params.isLocal ? { p_is_local: true } : {}),
   });
   if (error) throw error;
-  return `${INVITE_BASE}?staff=${data as string}`;
+  return staffInviteUrl(data as string);
 }
 
 /**
@@ -569,6 +606,8 @@ export async function inviteStaffMember(params: {
   requirementIds?: string[];
   /** See createStaffInviteLink. */
   bio?: string;
+  /** See createStaffInviteLink. */
+  isLocal?: boolean;
 }): Promise<void> {
   const { error } = await supabase.rpc('invite_staff_member', {
     p_trip_id: params.tripId,
@@ -577,6 +616,8 @@ export async function inviteStaffMember(params: {
     p_title: params.title?.trim() || null,
     p_requirement_ids: params.requirementIds ?? [],
     p_bio: params.bio?.trim() || null,
+    // See createStaffInviteLink — only sent when true.
+    ...(params.isLocal ? { p_is_local: true } : {}),
   });
   if (error) throw error;
 }

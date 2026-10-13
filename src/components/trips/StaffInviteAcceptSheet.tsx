@@ -94,14 +94,17 @@ export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: 
       const outstanding = await fetchMyStaffRequirements(tripId)
         .then(rows => rows.some(r => !r.fulfilled))
         .catch(() => false);
+      // No onClose() after this, and no setAccepting(false): both callers'
+      // onAccepted already dismiss the sheet by clearing the token it is
+      // mounted behind, so this component is gone by the next line. Calling
+      // onClose too ran the caller's teardown twice, and the old `finally`
+      // left a state write on an unmounted component.
       onAccepted(tripId, outstanding);
-      onClose();
     } catch (e) {
       showErrorAlert("Couldn't join", e, 'This invite may have already been used.');
-    } finally {
       setAccepting(false);
     }
-  }, [token, onAccepted, onClose]);
+  }, [token, onAccepted]);
 
   // One shape for wrong / spent / revoked / expired. The server does not tell
   // them apart either — otherwise a stale link becomes a way to probe which

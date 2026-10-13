@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Easing,
   Platform,
   TextInput,
   KeyboardAvoidingView,
@@ -17,6 +18,8 @@ import {
   Share,
   RefreshControl,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Reanimated, { FadeIn, FadeInUp, FadeInDown, useReducedMotion } from 'react-native-reanimated';
@@ -73,7 +76,7 @@ import {
   type SurfStyle,
   type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
-import { type TripDetailVM, BOARD_SHORT } from '../../components/trips/TripDetailView';
+import { type TripDetailVM, BOARD_SHORT, formatDateRange } from '../../components/trips/TripDetailView';
 import { TripDetailViewRedesigned, HERO_SLIDE_MS } from '../../components/trips/TripDetailViewRedesigned';
 import {
   EditTextSheet,
@@ -108,7 +111,14 @@ import { useTripCrew, useTripCapabilities } from '../../hooks/trips/useTripCapab
 import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
 import { fetchMyStaffRow, ensureOperatorOnCrew } from '../../services/trips/tripStaffService';
 import { StaffSelfProfileSheet } from '../../components/trips/StaffSelfProfileSheet';
-import { formatOperatorAmount, type CurrencyCode } from '../../utils/currency';
+import {
+  formatOperatorAmount,
+  formatTripPrice,
+  formatTripPriceRange,
+  type CurrencyCode,
+} from '../../utils/currency';
+import { useViewer } from '../../hooks/useViewer';
+import { textStyle, textStyles } from '../../theme/typography';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
 import { hapticMedium, hapticLight, hapticSuccess, hapticError } from '../../utils/haptics';
 import { toWidthThumbUrl } from '../../services/media/thumbnails';
@@ -242,6 +252,8 @@ interface TripDetailScreenProps {
   /** "View all" on the Members section / Overview Participants row pushes the full
    *  Members list (permission layers resolved inside that screen). */
   onViewAllMembers?: () => void;
+  /** Open the "Active Requests" page — the Dashboard's Join Request card. */
+  onOpenJoinRequests?: () => void;
   /** "View all" on the Group Gear preview pushes the full Packing & Gear list. */
   onViewAllGroupGear?: () => void;
   onViewAllYourGear?: () => void;
@@ -298,7 +310,7 @@ const formatDestination = (trip: GroupTrip): string =>
   'Destination TBD';
 
 const WAVE_SHAPE_LABEL: Record<WaveShapeKind, string> = {
-  soft: 'Mellow',
+  soft: 'Soft',
   wally: 'Standing',
   barrel: 'Barreling',
 };
@@ -457,10 +469,14 @@ type PaymentsCache = {
 };
 
 // ---------------------------------------------------------------------------
-export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenPayments, onOpenNotifications, onOpenTrip, initialFocus, initialChat, focusNonce, onViewAllUpdates, onViewAllMembers, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
+export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOperatorTrip, onViewUserProfile, onOpenPayments, onOpenNotifications, onOpenTrip, initialFocus, initialChat, focusNonce, onViewAllUpdates, onViewAllMembers, onOpenJoinRequests, onViewAllGroupGear, onViewAllYourGear, onManageSuggestedGear, onManageGroupGear, onOpenCommitment, onMessageUser, onStartOnboarding, onOpenStaffPaperwork }: TripDetailScreenProps) {
   const { user: contextUser } = useOnboarding();
   const { profile } = useUserProfile();
   const insets = useSafeAreaInsets();
+  const viewer = useViewer();
+  // Filled by the overview: opens "What's included" / "About this estimate"
+  // when the price in the bottom join bar is tapped.
+  const priceDetailsRef = useRef<(() => void) | null>(null);
   const currentUserId = contextUser?.id?.toString() ?? null;
   const queryClient = useQueryClient();
 
@@ -1400,15 +1416,13 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
       }
       if (tab === 'chat') {
         setChatSearchOpen(false);
-        // From the Overview with its cover in view: play the same slide-out
-        // Dashboard and Plan get, on the page you are looking at, and swap in
-        // the chat once the tab bar has reached the top. The chat's own bar
-        // sits exactly there, so the swap does not move anything.
-        // Skipped when the cover is already gone (scrolled away, or coming
-        // from Dashboard/Plan), on a locked trip (its banner sits above the
+        // With the cover in view: slide it out on the page you are looking
+        // at, and swap in the chat once the tab bar has reached the top. The
+        // chat's own bar sits exactly there, so the swap does not move anything.
+        // Skipped when the cover is already scrolled away, on a locked trip
+        // (its banner sits above the
         // tabs, so they would jump at the swap), and with Reduce Motion.
-        const slideHero =
-          activeTab === 'overview' && !toggleStuck && !isLockedForTabs && !reduceMotion;
+        const slideHero = !toggleStuck && !isLockedForTabs && !reduceMotion;
         if (slideHero) {
           setAnimateHero(true);
           setActiveTab('chat');
@@ -1430,31 +1444,22 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
       if (activeTab === 'chat') {
         // Leaving the chat: the page remounts at the top. Back to the Overview
         // it mounts with the cover collapsed and slides it back in — the mirror
-        // of leaving. Dashboard/Plan keep it collapsed, so they just land.
+        // of leaving.
         setChatSearchOpen(false);
         setChatBodyVisible(false);
         scrollY.setValue(0);
         setToggleStuck(false);
-        const revealHero = tab === 'overview' && !isLockedForTabs && !reduceMotion;
+        const revealHero = !isLockedForTabs && !reduceMotion;
         setHeroRevealFromChat(revealHero);
         setAnimateHero(revealHero);
         setActiveTab(tab);
         return;
       }
-      // Dashboard and Plan are the tabs that put the hero away.
-      const collapsesHero = tab === 'plan' || tab === 'dashboard';
+      // Overview, Dashboard and Plan all keep the cover, so nothing slides.
       // Tapped from the sticky clone, deep in the page: go back to the top
       // first, so the new tab starts at its beginning rather than mid-way down.
-      if (toggleStuck) {
-        scrollRef.current?.scrollTo({ y: 0, animated: false });
-        // You had already scrolled the cover away, so jumping to the top and
-        // THEN playing it out flashes a hero you were not looking at. Land on
-        // Plan/Dashboard with it already gone; coming back to Overview still
-        // reveals it, which reads as the tab bringing the cover back.
-        setAnimateHero(!collapsesHero);
-      } else {
-        setAnimateHero(true);
-      }
+      if (toggleStuck) scrollRef.current?.scrollTo({ y: 0, animated: false });
+      setAnimateHero(false);
       setActiveTab(tab);
     },
     [activeTab, toggleStuck, scrollY, isLockedForTabs, reduceMotion],
@@ -1480,15 +1485,17 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
 
   // Flip the sticky toggle on/off only as the scroll crosses the toggle's resting
   // Y (not every frame) — the clone's opacity itself is driven natively below.
-  useEffect(() => {
-    const id = scrollY.addListener(({ value }) => {
-      // Same threshold as the clone's opacity below (`max(toggleY, 1)`), so it
-      // takes touches exactly when it is visible.
-      const next = toggleYRef.current !== null && value >= Math.max(toggleYRef.current, 1);
-      setToggleStuck(prev => (prev !== next ? next : prev));
-    });
-    return () => scrollY.removeListener(id);
-  }, [scrollY]);
+  // Read straight off the scroll event rather than from a JS listener on
+  // `scrollY`. That value is driven natively, and a listener on it is the one
+  // link here that can go quiet without anything looking wrong: the clone
+  // stays visible (its opacity is native) but never takes touches.
+  const handleScrollJs = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const value = e.nativeEvent.contentOffset.y;
+    // Same threshold as the clone's opacity below (`max(toggleY, 1)`), so it
+    // takes touches exactly when it is visible.
+    const next = toggleYRef.current !== null && value >= Math.max(toggleYRef.current, 1);
+    setToggleStuck(prev => (prev !== next ? next : prev));
+  }, []);
 
   // Analytics: "active in this trip today" (chart C). Throttled per (user, trip).
   useEffect(() => {
@@ -3211,9 +3218,64 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
     ] as (TripMenuEntry | false)[]
   ).filter(Boolean) as TripMenuEntry[];
 
+  // ── Top of the screen (Figma 17488:27975) ─────────────────────────────────
+  // The dark bar floats over the page instead of sitting above it. On the
+  // Overview the cover runs to the top edge with round buttons on it; those
+  // scroll away with the cover and the bar slides in behind them. Dashboard
+  // and Plan keep the cover too. Chat has none, so the bar is simply there. A
+  // cancelled or
+  // ended trip opens with a banner, not the cover, so it keeps the bar too.
+  const topBarH = insets.top + TOP_BAR_H;
+  const coverReachesTop = !isLocked;
+  const heroIsCollapsed = activeTab === 'chat' || heroRevealFromChat;
+  const coverControls = (
+    <>
+      <TouchableOpacity
+        onPress={onBack}
+        style={styles.coverBtn}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+      >
+        <Ionicons name="chevron-back" size={24} color="#222B30" />
+      </TouchableOpacity>
+      <View style={styles.coverActions}>
+        <TouchableOpacity
+          onPress={handleShare}
+          style={styles.coverBtn}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel="Share trip"
+        >
+          <Ionicons name="share-social-outline" size={24} color="#222B30" />
+        </TouchableOpacity>
+        {currentUserId ? <NotificationCenter userId={currentUserId} onCover /> : null}
+        <TouchableOpacity
+          onPress={() => setMenuVisible(true)}
+          style={styles.coverBtn}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel="Trip options"
+        >
+          {cancelling || completing ? (
+            <ActivityIndicator size="small" color="#222B30" style={styles.coverSpinner} />
+          ) : (
+            <Ionicons name="ellipsis-vertical" size={24} color="#222B30" />
+          )}
+        </TouchableOpacity>
+      </View>
+    </>
+  );
+
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
-      <Header
+    <SafeAreaView style={styles.root} edges={[]}>
+      <TripTopBar
+        scrollY={scrollY}
+        height={topBarH}
+        topInset={insets.top}
+        pinned={!coverReachesTop || (showChat && chatBodyVisible)}
+        collapsed={heroIsCollapsed}
+        animate={animateHero && !reduceMotion}
         onBack={onBack}
         title={trip.title || 'Trip'}
         rightAction={
@@ -3237,6 +3299,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
               )}
             </TouchableOpacity>
           </View>
+        
         }
       />
 
@@ -3254,7 +3317,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
         // header and the chat fills the rest, down to the bottom edge (the
         // composer pads the home indicator itself). Outside the KAV below —
         // the chat does its own keyboard padding and must not get it twice.
-        <View style={styles.chatTabRoot}>
+        <View style={[styles.chatTabRoot, { paddingTop: topBarH }]}>
           {!chatSearchOpen && (
             <View style={styles.chatTabBar}>
               <TripTabToggle
@@ -3306,13 +3369,17 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
             onRefresh={handleRefresh}
             tintColor="#7B7B7B"
             colors={['#05BCD3']}
+            progressViewOffset={topBarH}
           />
         }
         scrollEventThrottle={16}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
+          listener: handleScrollJs,
         })}
       >
+        {/* No cover at the top edge: clear the floating bar. */}
+        {!coverReachesTop && <View style={{ height: topBarH }} />}
         {isCancelled && (
           <View style={styles.cancelledBanner}>
             <Ionicons name="alert-circle-outline" size={18} color="#C0392B" />
@@ -3322,12 +3389,29 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
 
         {!isCancelled && isLocked && (
           <View style={styles.endedBanner}>
-            <Ionicons name="checkmark-done-outline" size={18} color="#445" />
-            <Text style={styles.endedText}>
-              {isCompleted
-                ? 'This trip has been completed. The chat stays open in the Chat tab.'
-                : 'This trip has ended. The chat stays open in the Chat tab.'}
-            </Text>
+            <View style={styles.endedIcon}>
+              <Ionicons name="flag-outline" size={18} color="#05BCD3" />
+            </View>
+            <View style={styles.endedTextCol}>
+              <Text style={styles.endedTitle}>
+                {isCompleted ? 'Trip completed' : 'This trip has ended'}
+              </Text>
+              <Text style={styles.endedSub}>
+                {canSeeChat ? 'The group chat stays open.' : 'Thanks for checking it out.'}
+              </Text>
+            </View>
+            {canSeeChat ? (
+              <Pressable
+                onPress={() => handleTabChange('chat')}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Open the group chat"
+                style={({ pressed }) => [styles.endedChatBtn, pressed && styles.endedChatBtnPressed]}
+              >
+                <Ionicons name="chatbubble-ellipses-outline" size={14} color="#222B30" />
+                <Text style={styles.endedChatBtnText}>Chat</Text>
+              </Pressable>
+            ) : null}
           </View>
         )}
 
@@ -3352,6 +3436,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
                 }
               : undefined
           }
+          priceDetailsRef={priceDetailsRef}
           crew={crewQuery.data ?? []}
           onViewAllCrew={canManageCrew ? () => setStaffSheetVisible(true) : undefined}
           onEditTrip={canEditOperatorTrip ? () => onEditOperatorTrip?.(trip.id) : undefined}
@@ -3392,7 +3477,12 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
                   // Y is relative to the white header zone, which starts at the
                   // top of the scroll content (no banners while the toggle shows),
                   // so this equals the scroll offset where it reaches the header.
-                  const y = e.nativeEvent.layout.y;
+                  // The bar floats over the top of the page, so the toggle
+                  // meets it one bar-height sooner.
+                  const y = Math.max(
+                    e.nativeEvent.layout.y - (coverReachesTop ? topBarH : 0),
+                    0,
+                  );
                   toggleYRef.current = y;
                   // Debounced: while the hero slides away this fires every
                   // frame, and each setState re-renders the whole screen. The
@@ -3407,9 +3497,14 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
             ) : null
           }
           bodyHidden={bodyReplaced || activeTab === 'chat'}
-          // Dashboard, Plan and Chat slide the cover + countdown away (Ohad,
-          // 14 Sep). Chat only passes through here while the slide plays.
-          heroCollapsed={bodyReplaced || activeTab === 'chat' || heroRevealFromChat}
+          // Only Chat slides the cover away, and it only passes through here
+          // while the slide plays. Dashboard and Plan keep the cover and swap
+          // the card to a countdown (Figma 17488:28466).
+          heroCollapsed={heroIsCollapsed}
+          heroCardCountdown={bodyReplaced}
+          heroCollapsedHeight={coverReachesTop ? topBarH : 0}
+          heroTopInset={coverReachesTop ? insets.top : 0}
+          heroControls={coverReachesTop ? coverControls : undefined}
           animateHeroCollapse={animateHero}
           // Members who have the Plan tab now see the participants there (Figma
           // 13455-38686), so drop the Overview Participants row for them. Locked
@@ -3444,6 +3539,10 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
                     o => o.slug === trip.host_destination_familiarity,
                   )?.label ?? null
                 : null,
+              // The operator's two answers from the create flow. `=== true`:
+              // null means "never asked", and that draws no row.
+              stokeCertified: trip.stoke_certified === true,
+              ciSurfConservation: trip.ci_surf_conservation === true,
               stayFamiliarityLabel: trip.host_stay_familiarity
                 ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === trip.host_stay_familiarity)
                     ?.label ?? null
@@ -3493,11 +3592,14 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
                 setReviewWaiting(false);
                 setReviewOpen(true);
               }}
-              // Requests are decided on the Members screen — the same gate the
-              // Plan's "Requests pending" link used.
+              // Requests have their own page (Figma 17776-48934). Falls back to
+              // the Members screen, which still lists them, for a caller that
+              // has not wired the page.
               pendingRequestCount={pendingRequests.length}
               onOpenJoinRequests={
-                (isHost || can('trip.edit')) && !isLocked ? onViewAllMembers : undefined
+                (isHost || can('trip.edit')) && !isLocked
+                  ? (onOpenJoinRequests ?? onViewAllMembers)
+                  : undefined
               }
             />
           </View>
@@ -3513,6 +3615,98 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
             admin updates → Packing & Gear. Operational/host sections (join
             requests, breakdown, destructive actions) stay below — they're not
             in the Figma frames and live only here, not in Overview. */}
+
+        {/* Traveler's Plan order (Figma 17488-28466): what they owe, then what
+            they still have to do, then who is going. Both blocks are
+            traveler-only, so on the Dashboard and on a peer trip nothing
+            renders here and the page still opens on Members. */}
+        {/* Payment — the traveler's money summary, at the bottom of Plan:
+            paid-so-far against their total, and one "Pay now" that can also
+            pay just part of what's left (PayAmountSheet). Needs a known price:
+            with no price set nothing is owed yet, and a "$0" summary under a
+            Pay button reads as "this trip is free". */}
+        {!canSeeDashboard &&
+          !isHost &&
+          trip?.payment_mode === 'managed' &&
+          payRows.length > 0 &&
+          travelerTotalUsd != null && (
+            <View style={styles.planSection} onLayout={registerSection('payment')}>
+              <PaymentSection
+                totalUsd={travelerTotalUsd}
+                paidUsd={totalPaidUsd}
+                payState={payState}
+                steps={paySteps}
+                refundedUsd={paymentsQuery.data?.refunds.totalUsd ?? 0}
+                lastRefundAt={paymentsQuery.data?.refunds.lastAt ?? null}
+                refundCount={paymentsQuery.data?.refunds.count ?? 0}
+                onPayNow={handlePayNow}
+              />
+            </View>
+          )}
+
+        {/* The offline sibling: the operator collects outside the app, so
+            there is no progress and no button — but "pay the full amount by
+            then" is still the Plan's job to say. Only when the operator set a
+            deadline: older offline trips said nothing about money here, and
+            they should keep saying nothing rather than all grow a card. */}
+        {!canSeeDashboard &&
+          !isHost &&
+          trip?.hosting_style === 'C' &&
+          trip?.payment_mode === 'offline' &&
+          trip?.offline_payment_due_days_before != null &&
+          trip?.cost_per_person != null && (
+            <View style={styles.planSection} onLayout={registerSection('payment')}>
+              <OfflinePaymentNote
+                totalUsd={trip.cost_per_person}
+                dueDateISO={
+                  resolveDeadlineDate(
+                    trip.start_date ?? null,
+                    trip.offline_payment_due_days_before,
+                  )?.toISOString() ?? null
+                }
+                dueDaysBefore={trip.offline_payment_due_days_before}
+                operatorName={participants.find(p => p.role === 'host')?.name ?? null}
+              />
+            </View>
+          )}
+
+        {/* Open tasks — documents and the other things this trip asks for.
+            Renders only when this trip actually
+            asks for a document — which is no peer trip, because the DB refuses
+            to create a passport requirement on one. */}
+        {/* Traveler-facing only. The host's review summary used to render here
+            in `mode="host"`; it moved to the Dashboard tab, which is where
+            everything about running the trip now lives. Plan is what the
+            traveler sees — including for an operator who wants to check what
+            they are asking people to do.
+
+            `canSeeDashboard`, not `isHost`: a host of a PEER trip has no
+            Dashboard tab, so their documents card has to stay right here or it
+            would vanish with nowhere to go. */}
+        {documentRows.length > 0 && !canSeeDashboard && (
+          <View style={styles.planSection} onLayout={registerSection('documents')}>
+            <TripDocumentsCard
+              rows={documentRows}
+              mode={isHost ? 'host' : 'member'}
+              pendingReviewCount={reviewQuery.data?.totalToReview ?? 0}
+              travelersDone={travelersFinished}
+              travelerCount={reviewTravelers.length}
+              onPressRow={handlePressDocumentRow}
+              /* The whole queue, so every focus has to be cleared. This card
+                 and the Dashboard's entry points are mutually exclusive today
+                 (`!canSeeDashboard` above), so no stale focus can actually
+                 reach here — but the day that stops being true, a leftover
+                 `reviewWaiting` would silently open the wrong screen. */
+              onReviewAll={() => {
+                setReviewFocusUserId(null);
+                setReviewFocusRequirementId(null);
+                setReviewWaiting(false);
+                setReviewOpen(true);
+              }}
+              onManage={canManageRequirements ? openManageRequirements : undefined}
+            />
+          </View>
+        )}
 
         {/* 1) Members — moved here from the Overview body (members-only;
             non-members still see the simpler Participants row in Overview). */}
@@ -3533,37 +3727,16 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
             passportIds={
               showDashboard && (isHost || can('docs.view')) ? docsApprovedIds : undefined
             }
-            memberPressLabel={
-              showDashboard && (isHost || can('docs.view')) ? 'manage' : 'profile'
-            }
             onMemberPress={
-              // On the Dashboard a member is someone you are RUNNING the trip
-              // for, so tapping them opens what the web dashboard's traveler
-              // page opens: their documents, money, medical and the actions —
-              // not their Swellyo profile, which is a tap further in from the
-              // identity row at the top of that screen (Ohad, 16 Sep).
-              //
-              // Only for people the review actually covers. The host and any
-              // staff are not travelers, so `reviewData` has no row for them
-              // and a focused review screen would come up empty — they keep
-              // the profile, which is the only thing there is to show.
-              showDashboard && (isHost || can('docs.view'))
-                ? userId => {
-                    if (userId === currentUserId) return;
-                    if (reviewData.some(r => r.userId === userId)) {
-                      setReviewFocusUserId(userId);
-                      setReviewFocusRequirementId(null);
-                      setReviewWaiting(false);
-                      setReviewOpen(true);
-                      return;
-                    }
-                    onViewUserProfile?.(userId);
+              // On the Dashboard the avatars are a headcount, not a way in: the
+              // only path to a person is "View all" → the members list → their
+              // traveler page (Ohad, 9 Oct). Everywhere else an avatar opens
+              // that person's Swellyo profile.
+              showDashboard || !onViewUserProfile
+                ? undefined
+                : userId => {
+                    if (userId !== currentUserId) onViewUserProfile(userId);
                   }
-                : onViewUserProfile
-                  ? userId => {
-                      if (userId !== currentUserId) onViewUserProfile(userId);
-                    }
-                  : undefined
             }
           />
         </View>
@@ -3616,33 +3789,25 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
           </View>
         )}
 
-        {/* 3) Packing & Gear — Group Gear + Your Gear */}
+        {/* 3) Packing lists. There is no shared "group gear" any more (Ohad,
+            9 Oct): the host has the list they suggest to guests and their own
+            list; a traveler has one list — the host's suggestions, tagged
+            "Admin suggested", plus whatever they add themselves. */}
         <View style={styles.planSection} onLayout={registerSection('gear')}>
-          {/* Dashboard: "What should members pack?" is in the Figma; Group Gear
-              and the host's own gear are kept under it (Ohad, 14 Sep). */}
-          {isHost && showDashboard && (
+          {isHost && (
             <View onLayout={registerSection('members-gear')}>
               <YourGearCard
                 rows={gearAllRows}
                 totalCount={gearTotalCount}
                 mode="suggestions"
+                title={showDashboard ? 'Guests Packing List' : undefined}
+                subtitle={showDashboard ? 'List Items Your Guest Should Pack' : undefined}
                 onOpen={onManageSuggestedGear ?? (() => {})}
                 onToggleItem={() => {}}
                 onAddItem={!isCancelled ? (onManageSuggestedGear ?? undefined) : undefined}
               />
             </View>
           )}
-          <GroupGearCard
-            items={gearItems}
-            isHost={isHost}
-            isApprovedMember={isApprovedMember}
-            currentUserId={currentUserId}
-            onPressItem={item => setGearItemSheetItem(item)}
-            onManage={onManageGroupGear ?? (() => setManageSheetVisible(true))}
-            onAddItem={() => setAddGroupGearSheetOpen(true)}
-            onRequestItem={() => setRequestSheetVisible(true)}
-            onViewAll={onViewAllGroupGear}
-          />
           <View onLayout={registerSection('your-gear')}>
             <YourGearCard
               rows={gearAllRows}
@@ -3661,21 +3826,6 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
               }
             />
           </View>
-          {/* Host only — a separate section for the gear the host suggests that
-              members pack for themselves (kept apart from the host's own gear).
-              On the Dashboard it leads the gear block instead (see above). */}
-          {isHost && !showDashboard && (
-            <View onLayout={registerSection('members-gear')}>
-              <YourGearCard
-                rows={gearAllRows}
-                totalCount={gearTotalCount}
-                mode="suggestions"
-                onOpen={onManageSuggestedGear ?? (() => {})}
-                onToggleItem={() => {}}
-                onAddItem={!isCancelled ? (onManageSuggestedGear ?? undefined) : undefined}
-              />
-            </View>
-          )}
         </View>
 
         {/* 3.5) Staff: their own paperwork, surfaced in Plan where a traveler's
@@ -3704,113 +3854,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
           </View>
         )}
 
-        {/* 4) Documents (v1: passport image). Placed after Packing & Gear so the
-            Figma order above stays intact. Renders only when this trip actually
-            asks for a document — which is no peer trip, because the DB refuses
-            to create a passport requirement on one. */}
-        {/* Traveler-facing only. The host's review summary used to render here
-            in `mode="host"`; it moved to the Dashboard tab, which is where
-            everything about running the trip now lives. Plan is what the
-            traveler sees — including for an operator who wants to check what
-            they are asking people to do.
-
-            `canSeeDashboard`, not `isHost`: a host of a PEER trip has no
-            Dashboard tab, so their documents card has to stay right here or it
-            would vanish with nowhere to go. */}
-        {documentRows.length > 0 && !canSeeDashboard && (
-          <View style={styles.planSection} onLayout={registerSection('documents')}>
-            <TripDocumentsCard
-              rows={documentRows}
-              mode={isHost ? 'host' : 'member'}
-              pendingReviewCount={reviewQuery.data?.totalToReview ?? 0}
-              travelersDone={travelersFinished}
-              travelerCount={reviewTravelers.length}
-              onPressRow={handlePressDocumentRow}
-              /* The whole queue, so every focus has to be cleared. This card
-                 and the Dashboard's entry points are mutually exclusive today
-                 (`!canSeeDashboard` above), so no stale focus can actually
-                 reach here — but the day that stops being true, a leftover
-                 `reviewWaiting` would silently open the wrong screen. */
-              onReviewAll={() => {
-                setReviewFocusUserId(null);
-                setReviewFocusRequirementId(null);
-                setReviewWaiting(false);
-                setReviewOpen(true);
-              }}
-              onManage={canManageRequirements ? openManageRequirements : undefined}
-            />
-          </View>
-        )}
-
-        {/* Payment — the traveler's money summary, at the bottom of Plan:
-            paid-so-far against their total, and one "Pay now" that can also
-            pay just part of what's left (PayAmountSheet). Needs a known price:
-            with no price set nothing is owed yet, and a "$0" summary under a
-            Pay button reads as "this trip is free". */}
-        {!canSeeDashboard &&
-          !isHost &&
-          trip?.payment_mode === 'managed' &&
-          payRows.length > 0 &&
-          travelerTotalUsd != null && (
-            <View style={styles.planSection} onLayout={registerSection('payment')}>
-              <PaymentSection
-                totalUsd={travelerTotalUsd}
-                paidUsd={totalPaidUsd}
-                payState={payState}
-                steps={paySteps}
-                refundedUsd={paymentsQuery.data?.refunds.totalUsd ?? 0}
-                lastRefundAt={paymentsQuery.data?.refunds.lastAt ?? null}
-                refundCount={paymentsQuery.data?.refunds.count ?? 0}
-                onPayNow={handlePayNow}
-              />
-            </View>
-          )}
-
-        {/* The offline sibling: the operator collects outside the app, so
-            there is no progress and no button — but "pay the full amount by
-            then" is still the Plan's job to say. Only when the operator set a
-            deadline: older offline trips said nothing about money here, and
-            they should keep saying nothing rather than all grow a card. */}
-        {!canSeeDashboard &&
-          !isHost &&
-          trip?.hosting_style === 'C' &&
-          trip?.payment_mode === 'offline' &&
-          trip?.offline_payment_due_days_before != null &&
-          trip?.cost_per_person != null && (
-            <View style={styles.planSection} onLayout={registerSection('payment')}>
-              <OfflinePaymentNote
-                totalUsd={trip.cost_per_person}
-                dueDateISO={
-                  resolveDeadlineDate(
-                    trip.start_date ?? null,
-                    trip.offline_payment_due_days_before,
-                  )?.toISOString() ?? null
-                }
-                dueDaysBefore={trip.offline_payment_due_days_before}
-                operatorName={participants.find(p => p.role === 'host')?.name ?? null}
-              />
-            </View>
-          )}
-
         {/* ---- Operational sections (kept at the bottom of Plan; not in Figma) ---- */}
-
-        {/* Gear suggestions (host) — review members' "suggest item" submissions.
-            Only shown when there are pending suggestions to act on. */}
-        {isHost && gearRequests.length > 0 && (
-          <View style={styles.planSection} onLayout={registerSection('gear-requests')}>
-            <TouchableOpacity
-              style={styles.gearReqsBadge}
-              onPress={() => setRequestsSheetVisible(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="notifications-outline" size={16} color="#222B30" />
-              <Text style={styles.gearReqsBadgeText}>
-                {`${gearRequests.length} pending gear ${gearRequests.length === 1 ? 'suggestion' : 'suggestions'}`}
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color="#222B30" />
-            </TouchableOpacity>
-          </View>
-        )}
 
         {/* Pending requests + member management now live in the full Members
             view ("View all" / "Requests pending" on the Members section). */}
@@ -3855,6 +3899,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
           style={[
             styles.stickyToggle,
             {
+              top: topBarH,
               opacity: scrollY.interpolate({
                 inputRange: [Math.max(toggleY - 1, 0), Math.max(toggleY, 1)],
                 outputRange: [0, 1],
@@ -3873,7 +3918,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
           "Connect to …" button). The overlay fades scroll content into the
           background behind the button; the button itself keeps its own
           colour + label. */}
-      {stickyCtaVisible && (
+      {stickyCtaVisible && !showJoinCta && (
         <View style={styles.ctaOverlay} pointerEvents="none">
           {/* Plain white fade (mirrors the profile "Connect to …" overlay) —
               content dissolves into the background behind the button. A blurred
@@ -3889,19 +3934,59 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
 
       {/* Join flow (non-host, non-member, active trip). Fades in because it
           mounts only after membership resolves — a pop would read as a glitch. */}
-      {showJoinCta && (
-        <Reanimated.View
-          entering={FadeInUp.duration(220)}
-          style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}
-        >
-          <CtaButton
-            myRequest={myRequest}
-            isFull={isFull}
-            onRequest={handleRequestToJoin}
-            onWithdraw={handleWithdraw}
-          />
-        </Reanimated.View>
-      )}
+      {showJoinCta && trip && (() => {
+        // Figma 17157:26510 — a solid bar: the price and dates on the left,
+        // "Drop In" (the join request) on the right. Same price the overview
+        // used to show in its Price card.
+        const barVM = buildTripDetailVM(
+          trip,
+          participants.length,
+          participants.find(p => p.role === 'host') ?? null,
+        );
+        const pricing = {
+          budget_currency: barVM.budgetCurrency,
+          budget_fx_rate: barVM.budgetFxRate,
+        };
+        const price =
+          barVM.costPerPerson != null
+            ? formatTripPrice(barVM.costPerPerson, pricing, viewer)
+            : formatTripPriceRange(barVM.budgetMin ?? null, barVM.budgetMax ?? null, pricing, viewer);
+        const dates = formatDateRange(barVM);
+        return (
+          <Reanimated.View
+            entering={FadeInUp.duration(220)}
+            style={[styles.joinBar, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}
+          >
+            <Pressable
+              onPress={() => priceDetailsRef.current?.()}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={price ? `${price}. See what is included` : undefined}
+              style={({ pressed }) => [styles.joinBarPrice, pressed && { opacity: 0.6 }]}
+            >
+              {price ? (
+                <Text style={styles.joinBarAmount} numberOfLines={1}>
+                  {price}
+                </Text>
+              ) : null}
+              {dates ? (
+                <Text style={styles.joinBarDates} numberOfLines={1}>
+                  {dates}
+                </Text>
+              ) : null}
+            </Pressable>
+            <View style={styles.joinBarCta}>
+              <CtaButton
+                myRequest={myRequest}
+                isFull={isFull}
+                onRequest={handleRequestToJoin}
+                onWithdraw={handleWithdraw}
+                compact
+              />
+            </View>
+          </Reanimated.View>
+        );
+      })()}
 
       {/* Approved, but not in yet. The one affordance that separates them from
           someone who never asked to join. */}
@@ -4600,18 +4685,84 @@ const Header: React.FC<{ onBack: () => void; title?: string; rightAction?: React
   </View>
 );
 
+/** Height of the dark bar under the status bar: 8 + 36 + 12. */
+const TOP_BAR_H = 56;
+/** Scroll offset at which the cover's photo has gone under the bar: the photo
+ *  is 340 below the status bar and the card covers its last 61. */
+const COVER_GONE_Y = 340 - 61 - TOP_BAR_H;
+
+/**
+ * The dark title bar, floating over the page. `pinned` keeps it in place.
+ * Otherwise it sits above the screen while the cover is in view and slides
+ * down as the cover scrolls away, or when a tab puts the cover away
+ * (`collapsed`, in step with the cover's own slide).
+ */
+const TripTopBar: React.FC<{
+  scrollY: Animated.Value;
+  height: number;
+  topInset: number;
+  pinned: boolean;
+  collapsed: boolean;
+  animate: boolean;
+  onBack: () => void;
+  title?: string;
+  rightAction?: React.ReactNode;
+}> = ({ scrollY, height, topInset, pinned, collapsed, animate, onBack, title, rightAction }) => {
+  const collapse = useRef(new Animated.Value(collapsed ? 1 : 0)).current;
+  useEffect(() => {
+    const toValue = collapsed ? 1 : 0;
+    if (!animate) {
+      collapse.setValue(toValue);
+      return;
+    }
+    const anim = Animated.timing(collapse, {
+      toValue,
+      duration: HERO_SLIDE_MS,
+      easing: Easing.bezier(0.77, 0, 0.175, 1),
+      useNativeDriver: true,
+    });
+    anim.start();
+    return () => anim.stop();
+  }, [collapsed, animate, collapse]);
+  const shown = useMemo(
+    () =>
+      Animated.add(
+        scrollY.interpolate({
+          inputRange: [Math.max(COVER_GONE_Y - TOP_BAR_H, 0), COVER_GONE_Y],
+          outputRange: [0, 1],
+          extrapolate: 'clamp',
+        }),
+        collapse,
+      ).interpolate({ inputRange: [0, 1], outputRange: [-height, 0], extrapolate: 'clamp' }),
+    [scrollY, collapse, height],
+  );
+  return (
+    <Animated.View
+      style={[
+        styles.topBar,
+        { paddingTop: topInset, transform: [{ translateY: pinned ? 0 : shown }] },
+      ]}
+    >
+      <Header onBack={onBack} title={title} rightAction={rightAction} />
+    </Animated.View>
+  );
+};
+
 const CtaButton: React.FC<{
   myRequest: GroupTripJoinRequest | null;
   isFull: boolean;
   onRequest: () => void;
   onWithdraw: () => void;
-}> = ({ myRequest, isFull, onRequest, onWithdraw }) => {
+  /** Inside the bottom join bar: 50 tall, radius 12 (Figma 17157:26517). */
+  compact?: boolean;
+}> = ({ myRequest, isFull, onRequest, onWithdraw, compact }) => {
+  const sizeStyle = compact ? styles.ctaBtnCompact : null;
   // Trip is full and the user hasn't already got a request in flight → show a
   // non-pressable "Trip full" state instead of letting them request a spot that
   // can't be granted. Pending requesters keep their pending/withdraw row.
   if (isFull && myRequest?.status !== 'pending') {
     return (
-      <View style={[styles.ctaBtn, styles.ctaPending]}>
+      <View style={[styles.ctaBtn, sizeStyle, styles.ctaPending]}>
         <Ionicons name="people" size={18} color="#555" />
         <Text style={styles.ctaPendingText}>Trip full</Text>
       </View>
@@ -4622,7 +4773,7 @@ const CtaButton: React.FC<{
     // pending request (no confirm sheet — same tap that sent it cancels it).
     return (
       <Pressable
-        style={({ pressed }) => [styles.ctaBtn, styles.ctaRequested, pressed && styles.ctaPressed]}
+        style={({ pressed }) => [styles.ctaBtn, sizeStyle, styles.ctaRequested, pressed && styles.ctaPressed]}
         onPress={onWithdraw}
       >
         <Text style={styles.ctaPrimaryText}>Requested</Text>
@@ -4636,7 +4787,7 @@ const CtaButton: React.FC<{
       <View style={styles.ctaDeclinedRow}>
         <Text style={styles.ctaDeclinedNote}>Your last request was declined.</Text>
         <Pressable
-          style={({ pressed }) => [styles.ctaBtn, styles.ctaPrimary, pressed && styles.ctaPressed]}
+          style={({ pressed }) => [styles.ctaBtn, sizeStyle, styles.ctaPrimary, pressed && styles.ctaPressed]}
           onPress={onRequest}
         >
           <Text style={styles.ctaPrimaryText}>Request again</Text>
@@ -4647,10 +4798,11 @@ const CtaButton: React.FC<{
   // No request yet, or withdrawn → allow new request
   return (
     <Pressable
-      style={({ pressed }) => [styles.ctaBtn, styles.ctaPrimary, pressed && styles.ctaPressed]}
+      style={({ pressed }) => [styles.ctaBtn, sizeStyle, styles.ctaPrimary, pressed && styles.ctaPressed]}
       onPress={onRequest}
     >
-      <Text style={styles.ctaPrimaryText}>Request to join</Text>
+      {/* "Drop In" is the join request (Ohad, 2 Oct 2026 — Figma 17157:26517). */}
+      <Text style={styles.ctaPrimaryText}>Drop In</Text>
     </Pressable>
   );
 };
@@ -4669,6 +4821,21 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     backgroundColor: '#212121',
   },
+  // Floats over the page; above the sticky tab clone (zIndex 20).
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 30,
+    elevation: 8,
+    backgroundColor: '#212121',
+  },
+  // Round buttons on the cover — Figma 17488:27979: 24px icon, 10 padding,
+  // white at 70%.
+  coverBtn: { padding: 10, borderRadius: 48, backgroundColor: 'rgba(255,255,255,0.7)' },
+  coverActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  coverSpinner: { width: 24, height: 24 },
   backBtn: { padding: 4 },
   headerTitle: {
     fontSize: 18,
@@ -4939,6 +5106,29 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   ctaPrimary: { backgroundColor: '#212121' },
+  ctaBtnCompact: { height: 50, borderRadius: 12 },
+  // Bottom join bar (Figma 17157:26510): white, hairline on top.
+  joinBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 24,
+    paddingTop: 24,
+    paddingLeft: 32,
+    paddingRight: 16,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#CFCFCF',
+  },
+  joinBarPrice: { flexShrink: 1 },
+  // Body/M B-1 bold + B-3 (get_variable_defs 17157:26514/26516).
+  joinBarAmount: { ...textStyle('MB1', '700'), color: '#333333' },
+  joinBarDates: { ...textStyles.B3, color: '#7B7B7B' },
+  joinBarCta: { width: 189, marginLeft: 'auto' },
   // Subtle press feedback — same scale dip used on the other trip buttons.
   ctaPressed: { transform: [{ scale: 0.97 }], opacity: 0.9 },
   ctaChat: { backgroundColor: '#05BCD3' },
@@ -4968,18 +5158,42 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   cancelledText: { color: '#C0392B', fontSize: 13, fontWeight: '500', flex: 1 },
+  // Ended / completed trip: a calm card, not a warning — the trip went fine.
   endedBanner: {
     marginHorizontal: 16,
     marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#EEF1F3',
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
-  endedText: { color: '#445', fontSize: 13, fontWeight: '500', flex: 1 },
+  endedIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: '#E6F8FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  endedTextCol: { flex: 1 },
+  endedTitle: { ...textStyle('B3', '700'), color: '#222B30' },
+  endedSub: { ...textStyles.B3, color: '#7B7B7B' },
+  endedChatBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#F5F5F5',
+  },
+  // Press feedback: a small scale-down, so the tap feels heard.
+  endedChatBtnPressed: { transform: [{ scale: 0.97 }], opacity: 0.85 },
+  endedChatBtnText: { ...textStyle('B3', '700'), color: '#222B30' },
   manageBtnDisabled: { opacity: 0.6 },
 
   packingHeader: {

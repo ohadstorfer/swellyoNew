@@ -3,6 +3,7 @@ import { STRIPE_LIVEMODE } from './tripPaymentsService';
 import { messagingService } from '../messaging/messagingService';
 import { logEvent } from '../analytics/eventLogger';
 import type { PriceInclusions } from './priceInclusions';
+import { groupTripInviteUrl } from '../../constants/inviteLinks';
 
 export type HostingStyle = 'A' | 'B' | 'C';
 export type SurfLevel = 'beginner' | 'intermediate' | 'advanced' | 'pro' | 'all';
@@ -190,6 +191,12 @@ export interface GroupTrip {
   // (Renamed from accommodation_status — May 2026. See migration
   // 20260531000001_rename_accommodation_status_to_specific_stay_selected.sql)
   specific_stay_selected: boolean | null;
+
+  // Operator Trip Vibe step — the two stay certification answers. Optional for
+  // the same reason as cancellation_preset: the feed RPCs don't return them.
+  // Null = never asked. Migration 20261009000000_trip_stay_certifications.sql.
+  stoke_certified?: boolean | null;
+  ci_surf_conservation?: boolean | null;
 
   // Flow B ("I'm the leader") credibility fields. Null for Flow A/C.
   host_destination_familiarity: DestinationFamiliarity | null;
@@ -541,8 +548,7 @@ export async function setTripDestination(
  * the swellyo:// scheme; AppContent's Linking listener opens the trip.
  */
 export function getGroupTripInviteUrl(tripId: string): string {
-  const base = 'https://swellyo-invite.netlify.app';
-  return `${base}/?grouptrip=${encodeURIComponent(tripId)}`;
+  return groupTripInviteUrl(tripId);
 }
 
 // ---------------------------------------------------------------------------
@@ -661,6 +667,8 @@ export async function exploreFeed(
     console.error('[groupTripsService] exploreFeed error:', error);
     throw error;
   }
+  // The rows carry the Explore card's level + vibe (`target_surf_levels`,
+  // `trip_vibes`) since migration 20261012000000_explore_feed_card_tags.
   return (data || []).map((row: any) => normalizeTrip(row) as ExploreFeedRow);
 }
 

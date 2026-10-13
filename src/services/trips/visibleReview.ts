@@ -2,7 +2,7 @@
  * The document review as somebody WITHOUT `medical.view` is allowed to see it.
  *
  * A Manager has no `medical.view` (since 24 Aug, 20260824000000), and RLS
- * refuses them `organized_trip_medical_forms`. `fetchTripReview` therefore
+ * refuses them `organized_trip_personal_info`. `fetchTripReview` therefore
  * reads every traveler's medical form as not filled in — a FALSE ZERO, not a
  * hidden row. On 9 Sep 2026 the web dashboard showed a Manager "Medical form
  * 0/1" on a trip where it was 1/1, and "1/6 approved" on a traveler at 2/6.

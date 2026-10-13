@@ -35,6 +35,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { PdfRendererView } from '../filePreview/pdfRenderer';
 import { FilePreviewShell } from '../filePreview/FilePreviewShell';
 import { ff } from '../../theme/fonts';
+import { textStyle, textStyles } from '../../theme/typography';
 import { supabase } from '../../config/supabase';
 import {
   fetchWaiver,
@@ -270,14 +271,15 @@ export const WaiverStepInline: React.FC<{
 const styles = StyleSheet.create({
   root: { flex: 1 },
 
+  // Figma 17115:27687 — white document card, radius 16, #EEE hairline.
   pdfFrame: {
     flex: 1,
-    marginTop: 14,
-    borderRadius: 12,
+    marginTop: 16,
+    borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: C.hairline,
+    borderColor: '#EEEEEE',
   },
   pdf: { flex: 1, backgroundColor: C.surface },
   expandBtn: {
@@ -305,11 +307,11 @@ const styles = StyleSheet.create({
 
   centre: {
     flex: 1,
-    marginTop: 14,
-    borderRadius: 12,
+    marginTop: 16,
+    borderRadius: 16,
     backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: C.hairline,
+    borderColor: '#EEEEEE',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
@@ -329,13 +331,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  agreeBlock: { paddingTop: 14 },
-  signing: { fontFamily: ff('Inter', '600'), fontSize: 14, color: C.ink },
+  agreeBlock: { paddingTop: 16 },
+  // MB2 bold + B3 (Figma 17115:27704 — the export's bold 18 is desktop).
+  signing: { ...textStyle('MB2', '700'), color: '#333333', paddingHorizontal: 8 },
   input: {
-    height: 46,
-    borderRadius: 10,
+    height: 56,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: '#CFCFCF',
     backgroundColor: C.surface,
     paddingHorizontal: 14,
     fontFamily: ff('Inter', '400'),
@@ -343,22 +346,22 @@ const styles = StyleSheet.create({
     color: C.ink,
   },
   legal: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 11.5,
-    lineHeight: 17,
-    color: C.muted,
-    marginTop: 6,
-    marginBottom: 12,
+    ...textStyles.B3,
+    color: '#333333',
+    paddingHorizontal: 8,
+    marginBottom: 24,
   },
+  // The app's one primary CTA (onboarding "Next", MedicalFormSheet "Save").
   primaryBtn: {
-    height: 50,
-    borderRadius: 99,
-    backgroundColor: C.accent,
+    height: 56,
+    marginHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: '#212121',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnDisabled: { opacity: 0.5 },
-  primaryBtnText: { fontFamily: ff('Inter', '700'), fontSize: 15, color: '#FFFFFF' },
+  btnDisabled: { opacity: 0.45 },
+  primaryBtnText: { fontFamily: ff('Montserrat', '600'), fontSize: 16, color: '#FFFFFF' },
 
   agreedBox: {
     flexDirection: 'row',

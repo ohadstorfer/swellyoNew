@@ -4,6 +4,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Alert, AppState, Keyboard, Linking, Platform, Pressable, StyleSheet, View, TouchableOpacity, Text as RNText } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
+import { INVITE_CLIPBOARD_PREFIX } from '../constants/inviteLinks';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { OnboardingWelcomeScreen } from '../screens/OnboardingWelcomeScreen';
 import { OnboardingStep1Screen, OnboardingData } from '../screens/OnboardingStep1Screen';
@@ -14,6 +16,10 @@ import { OnboardingStep4DestinationsScreen } from '../screens/OnboardingStep4Des
 import { OnboardingStep5BudgetScreen } from '../screens/OnboardingStep5BudgetScreen';
 import { OnboardingStep6LifestyleScreen } from '../screens/OnboardingStep6LifestyleScreen';
 import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScreen';
+import {
+  OnboardingInterstitialScreen,
+  type OnboardingInterstitialKind,
+} from '../screens/OnboardingInterstitialScreen';
 import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 // TripPlanningChatScreen (Swelly) renders as the SwellyChat card in RootNavigator now.
 import RootNavigator from '../navigation/RootNavigator';
@@ -56,6 +62,9 @@ import { useOnboarding } from '../context/OnboardingContext';
 import { analyticsService } from '../services/analytics/analyticsService';
 import { logEvent } from '../services/analytics/eventLogger';
 import Constants from 'expo-constants';
+
+/** Set the first time we look for a deferred invite, so we only ever look once. */
+const DEFERRED_INVITE_CHECKED_KEY = 'deferredInviteChecked';
 
 const APP_OPENED_THROTTLE_MS = 30 * 60 * 1000; // 30 minutes
 const APP_OPENED_STORAGE_KEY_PREFIX = 'last_app_open_logged_'; // suffix is the user id so different users on the same device don't block each other
@@ -116,6 +125,9 @@ export const AppContent: React.FC = () => {
   const [isSavingStep1, setIsSavingStep1] = useState(false);
   const [isSavingStep2, setIsSavingStep2] = useState(false);
   const [showVideoUploadStep, setShowVideoUploadStep] = useState(false);
+  // Pelican pause between onboarding sections: 'surf' sits in front of step 3,
+  // 'travel' in front of step 6. Not persisted — a relaunch resumes on the step.
+  const [interstitial, setInterstitial] = useState<OnboardingInterstitialKind | null>(null);
   const [isSavingStep3, setIsSavingStep3] = useState(false);
   const [isSavingStep4, setIsSavingStep4] = useState(false);
   const [isSavingStep5, setIsSavingStep5] = useState(false);
@@ -147,6 +159,23 @@ export const AppContent: React.FC = () => {
     tripId: string;
     focus?: TripDetailFocus | null;
   } | null>(null);
+  // Surftrip-card open from an invite link. Same mount-safe queue as
+  // requestedTripCard, and for the same reason: the invite resolver runs the
+  // moment auth + onboarding complete, which on a cold start is BEFORE the root
+  // stack mounts. pushRootCard is a silent no-op until then, and the resolver
+  // cleared the pending invite regardless — so the user joined the surftrip and
+  // landed on the default tab with the link already consumed.
+  const [requestedSurftripCard, setRequestedSurftripCard] = useState<
+    RootStackParamList['SurftripCard'] | null
+  >(null);
+  // Crew paperwork open after accepting a crew invite. Queued rather than
+  // pushed for a second reason on top of the cold-start one: it used to fire in
+  // the same tick as the accept sheet's Modal unmounting, and StaffPaperwork's
+  // upload rows open OS pickers — a picker opened while a Modal is tearing down
+  // is the PHPicker hang (see StaffInviteAcceptSheet's own comment).
+  const [requestedStaffPaperwork, setRequestedStaffPaperwork] = useState<
+    RootStackParamList['StaffPaperwork'] | null
+  >(null);
   const { getCurrentConversationId, conversations: messagingConversations, refreshConversations } = useMessaging();
   
   // State to track session validation
@@ -241,13 +270,51 @@ export const AppContent: React.FC = () => {
     initSessionBridge();
   }, []);
 
+  // Deferred deep link: an invite that went through the store.
+  //
+  // The store strips the query string, so a user who did not have the app yet
+  // used to arrive with the invite gone and land on the default tab — they had
+  // been invited to a specific trip and the app had no idea which. The invite
+  // site parks the params on the clipboard before bouncing to the store (see
+  // `stashInvite` in swellyo-invite-redirect/index.html); this claims them.
+  //
+  // Runs AT MOST ONCE per install, only when there is no launch URL to use
+  // instead, and only when the clipboard actually holds a string. Reading the
+  // clipboard shows a system paste banner on iOS, so it must never become a
+  // routine thing we do on launch.
+  const claimDeferredInvite = useCallback(async () => {
+    try {
+      if (await AsyncStorage.getItem(DEFERRED_INVITE_CHECKED_KEY)) return;
+      // Written first: a crash mid-claim must not re-prompt on every launch.
+      await AsyncStorage.setItem(DEFERRED_INVITE_CHECKED_KEY, '1');
+      // hasStringAsync does NOT raise the paste banner — it keeps the banner
+      // to the one case where there is actually something to read.
+      if (!(await Clipboard.hasStringAsync())) return;
+      const raw = await Clipboard.getStringAsync();
+      if (!raw || !raw.startsWith(INVITE_CLIPBOARD_PREFIX)) return;
+      // Same param shapes as a real link, so the existing parser handles it.
+      parseInviteFromUrl(`swellyo://?${raw.slice(INVITE_CLIPBOARD_PREFIX.length)}`);
+      // Consume it, so a later paste into a chat is not the raw invite blob.
+      await Clipboard.setStringAsync('');
+    } catch (e) {
+      console.warn('[AppContent] deferred invite claim failed:', e);
+    }
+  }, [parseInviteFromUrl]);
+
   // Native: getInitialURL on cold start + 'url' event for warm start.
   useEffect(() => {
     if (Platform.OS === 'web') return;
     let active = true;
     Linking.getInitialURL()
       .then(initial => {
-        if (active) parseInviteFromUrl(initial);
+        if (!active) return;
+        if (initial) {
+          parseInviteFromUrl(initial);
+          return;
+        }
+        // No launch URL. Either an ordinary open, or an invite that lost its
+        // params to the store on the way here.
+        void claimDeferredInvite();
       })
       .catch(err => console.warn('[AppContent] getInitialURL failed:', err));
 
@@ -258,10 +325,16 @@ export const AppContent: React.FC = () => {
       active = false;
       sub.remove();
     };
-  }, [parseInviteFromUrl]);
+  }, [parseInviteFromUrl, claimDeferredInvite]);
 
   // Hydrate any persisted pending invite from a previous session (e.g. user
   // tapped link, app cold-booted, signup flow began, then was killed).
+  // Functional updates, not `if (!pendingX)`: this effect has [] deps, so a
+  // plain guard reads the value captured at mount (always null) and can never
+  // see an invite parsed meanwhile. getInitialURL() and this read are two
+  // independent promises — whichever landed second won, so a stale stored
+  // invite could overwrite the link the user had just tapped. `prev ?? stored`
+  // makes the fresh link always win.
   useEffect(() => {
     let cancelled = false;
     AsyncStorage.getItem('pendingSurftripInvite')
@@ -269,8 +342,8 @@ export const AppContent: React.FC = () => {
         if (cancelled || !raw) return;
         try {
           const parsed = JSON.parse(raw);
-          if (parsed?.groupId && !pendingInviteGroupId) setPendingInviteGroupId(parsed.groupId);
-          if (parsed?.token && !pendingInviteToken) setPendingInviteToken(parsed.token);
+          if (parsed?.groupId) setPendingInviteGroupId(prev => prev ?? parsed.groupId);
+          if (parsed?.token) setPendingInviteToken(prev => prev ?? parsed.token);
         } catch {
           // ignore
         }
@@ -305,7 +378,10 @@ export const AppContent: React.FC = () => {
         if (pendingInviteToken) {
           const result = await acceptSurftripInvite(pendingInviteToken);
           if (result.outcome === 'joined' || result.outcome === 'already_member') {
-            pushRootCard('ChatCard', {
+            // Queued, not pushed: see requestedSurftripCard's declaration. The
+            // chat queue already exists for push-notification taps.
+            setRequestedTab('trips');
+            setRequestedChatCard({
               conversationId: result.conversation_id,
               otherUserId: '',
               otherUserName: '',
@@ -314,7 +390,7 @@ export const AppContent: React.FC = () => {
               surftripId: result.group_id,
             });
           } else if (result.outcome === 'open_detail') {
-            pushRootCard('SurftripCard', { groupId: result.group_id });
+            openSurftripCard(result.group_id);
           } else if (result.outcome === 'group_full') {
             Alert.alert('Surftrip is full', 'This group has reached its member limit.');
           } else {
@@ -322,18 +398,29 @@ export const AppContent: React.FC = () => {
           }
         } else if (pendingInviteGroupId) {
           // Tokenless legacy link — just open the detail screen.
-          pushRootCard('SurftripCard', { groupId: pendingInviteGroupId });
+          openSurftripCard(pendingInviteGroupId);
         }
       } catch (e: any) {
         console.warn('[AppContent] acceptSurftripInvite failed:', e);
         Alert.alert('Could not open invite', friendlyErrorMessage(e, 'Please try again.'));
       } finally {
+        // Safe to clear unconditionally now. Every branch above either handed
+        // the destination to a mount-safe queue (which survives until the root
+        // stack exists) or showed a terminal alert. It was NOT safe before:
+        // pushRootCard is a silent no-op until the navigator is ready, so a
+        // cold-start invite was accepted on the server and then thrown away
+        // here, leaving the user a member of a trip they could not find.
         setPendingInviteGroupId(null);
         setPendingInviteToken(null);
         AsyncStorage.removeItem('pendingSurftripInvite').catch(() => {});
         inviteResolverRef.current = false;
       }
     })();
+    // openSurftripCard is stable (useCallback []) and declared later in the
+    // component — putting it in this dep array would evaluate it during render,
+    // before initialization (TDZ crash). Same reasoning as the group-trip
+    // resolver below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingInviteToken, pendingInviteGroupId, user, isComplete, isDemoUser]);
 
   // ----- Group-trip invite link (native only) -----
@@ -343,7 +430,7 @@ export const AppContent: React.FC = () => {
     AsyncStorage.getItem('pendingGroupTripInvite')
       .then(raw => {
         if (cancelled || !raw) return;
-        if (!pendingTripInviteId) setPendingTripInviteId(raw);
+        setPendingTripInviteId(prev => prev ?? raw);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -385,7 +472,7 @@ export const AppContent: React.FC = () => {
     AsyncStorage.getItem('pendingStaffInvite')
       .then(raw => {
         if (cancelled || !raw) return;
-        if (!pendingStaffToken) setPendingStaffToken(raw);
+        setPendingStaffToken(prev => prev ?? raw);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -594,6 +681,12 @@ export const AppContent: React.FC = () => {
         // Every group-trip push (queue dispatcher + legacy trip_join_request)
         // carries tripId — deep-link to that trip, landing on the tab/section
         // that matches the notification type (stage/decision refine it).
+        // "You skipped your destinations" — about the profile, no trip. Opens
+        // the editor on that section, same as tapping its bell row.
+        if (payload.type === 'profile_destinations_missing') {
+          openProfileEditor('destinations');
+          return;
+        }
         if (payload.tripId) {
           openTripCard(
             payload.tripId,
@@ -911,6 +1004,7 @@ export const AppContent: React.FC = () => {
       // Soft Top (id: 3) skips step 2 and goes directly to step 3
       if (data.boardType === 3) {
         updateFormData({ surfLevel: 0 });
+        setInterstitial('surf');
         setCurrentStep(3);
       } else {
         // Navigate immediately — headless player warms AVPlayer's cache in background.
@@ -924,6 +1018,7 @@ export const AppContent: React.FC = () => {
       // Still allow navigation even if save fails
       if (data.boardType === 3) {
         updateFormData({ surfLevel: 0 });
+        setInterstitial('surf');
         setCurrentStep(3);
       } else {
         setCurrentStep(2);
@@ -1028,9 +1123,11 @@ export const AppContent: React.FC = () => {
         await onboardingService.saveStep5Budget(data.travel_type);
       }
       logEvent('onboarding_step_5', { userId: user?.id });
+      setInterstitial('travel');
       setCurrentStep(6);
     } catch (error) {
       console.error('Error in Step 5 (budget) Next:', error);
+      setInterstitial('travel');
       setCurrentStep(6);
     } finally {
       setIsSavingStep5(false);
@@ -1139,6 +1236,12 @@ export const AppContent: React.FC = () => {
 
   const [showProfile, setShowProfile] = useState(false);
   const [showProfileEditor, setShowProfileEditor] = useState(false);
+  // Section the editor opens scrolled to (skipped-destinations reminder).
+  const [profileEditorFocus, setProfileEditorFocus] = useState<'destinations' | null>(null);
+  const openProfileEditor = useCallback((focus?: 'destinations') => {
+    setProfileEditorFocus(focus ?? null);
+    setShowProfileEditor(true);
+  }, []);
   const { profile: currentUserSurfer, refresh: refreshUserProfile } = useUserProfile();
 
   // Reconcile the tutorial "seen" flag with the DB once the profile loads.
@@ -1203,6 +1306,17 @@ export const AppContent: React.FC = () => {
   }, []);
   const handleRequestedTripCardConsumed = useCallback(() => setRequestedTripCard(null), []);
   const handleRequestedChatCardConsumed = useCallback(() => setRequestedChatCard(null), []);
+  // Open a surftrip as a card. Trips tab first for the same reason openTripCard
+  // does it: backing out of the card lands somewhere sensible.
+  const openSurftripCard = useCallback((groupId: string) => {
+    setRequestedTab('trips');
+    setRequestedSurftripCard({ groupId });
+  }, []);
+  const openStaffPaperwork = useCallback((params: RootStackParamList['StaffPaperwork']) => {
+    setRequestedStaffPaperwork(params);
+  }, []);
+  const handleRequestedSurftripCardConsumed = useCallback(() => setRequestedSurftripCard(null), []);
+  const handleRequestedStaffPaperworkConsumed = useCallback(() => setRequestedStaffPaperwork(null), []);
   const handleTabChange = useCallback((tab: NavKey) => {
     // Ref-only: update bookkeeping without re-rendering AppContent.
     if (activeTabRef.current !== tab) {
@@ -1759,11 +1873,13 @@ export const AppContent: React.FC = () => {
 
   const handleVideoUploadSkip = () => {
     setShowVideoUploadStep(false);
+    setInterstitial('surf');
     setCurrentStep(3);
   };
 
   const handleVideoUploadNext = () => {
     setShowVideoUploadStep(false);
+    setInterstitial('surf');
     setCurrentStep(3);
   };
 
@@ -2295,6 +2411,9 @@ export const AppContent: React.FC = () => {
       onOpenTripDetail: handleOpenTripDetailFromChat,
       onOpenSurftripDetail: handleOpenSurftripDetail,
     },
+    profileEditor: {
+      open: openProfileEditor,
+    },
     profileCard: {
       onMessage: stableHandlers.onStartConversation,
     },
@@ -2330,6 +2449,10 @@ export const AppContent: React.FC = () => {
     },
     requestedChatCard,
     onRequestedChatCardConsumed: handleRequestedChatCardConsumed,
+    requestedSurftripCard,
+    onRequestedSurftripCardConsumed: handleRequestedSurftripCardConsumed,
+    requestedStaffPaperwork,
+    onRequestedStaffPaperworkConsumed: handleRequestedStaffPaperworkConsumed,
     tripsProps: {
       onBack: () => requestTab('lineup'),
     },
@@ -2353,6 +2476,10 @@ export const AppContent: React.FC = () => {
     handleRequestedTripCardConsumed,
     requestedChatCard,
     handleRequestedChatCardConsumed,
+    requestedSurftripCard,
+    handleRequestedSurftripCardConsumed,
+    requestedStaffPaperwork,
+    handleRequestedStaffPaperworkConsumed,
     handleOpenGroupChat,
     handleOpenTripDetailFromChat,
     handleOpenSurftripDetail,
@@ -2469,8 +2596,12 @@ export const AppContent: React.FC = () => {
             across tab switches). barSuppressed hides it under overlays. */}
         <ProfileEditPanel
           visible={showProfileEditor}
-          onClose={() => setShowProfileEditor(false)}
+          onClose={() => {
+            setShowProfileEditor(false);
+            setProfileEditorFocus(null);
+          }}
           surfer={currentUserSurfer}
+          focus={profileEditorFocus}
         />
         {/* Crew invite. Mounted only once a token is pending, so the peek RPC
             never fires on an ordinary launch. */}
@@ -2482,9 +2613,14 @@ export const AppContent: React.FC = () => {
             onAccepted={(tripId, hasPaperwork) => {
               clearStaffInvite();
               openTripCard(tripId);
-              // Pushed ON TOP of the trip, so backing out of the paperwork
+              // Queued ON TOP of the trip, so backing out of the paperwork
               // leaves them on the trip they just joined rather than nowhere.
-              if (hasPaperwork) pushRootCard('StaffPaperwork', { tripId });
+              // Both go through queues so they land in order; an imperative
+              // push here raced the trip card (which is queued) and arrived
+              // UNDER it, and it fired in the same tick clearStaffInvite()
+              // unmounted this sheet's Modal — the picker-vs-Modal-teardown
+              // hang StaffInviteAcceptSheet warns about.
+              if (hasPaperwork) openStaffPaperwork({ tripId });
             }}
           />
         )}
@@ -2601,6 +2737,25 @@ export const AppContent: React.FC = () => {
       <OnboardingWelcomeScreen
         onNext={() => setCurrentStep(1)}
         onBack={handleWelcomeBack}
+      />
+    );
+  }
+
+  // "Yewww!" in front of step 3, "Let's Get Viby" in front of step 6 — full-bleed
+  // like step 0, so they render on their own instead of through the scaffold.
+  if (
+    (interstitial === 'surf' && currentStep === 3) ||
+    (interstitial === 'travel' && currentStep === 6)
+  ) {
+    return (
+      <OnboardingInterstitialScreen
+        kind={interstitial}
+        onNext={() => setInterstitial(null)}
+        onBack={() => {
+          setInterstitial(null);
+          if (interstitial === 'surf') handleStep3Back();
+          else handleStep6Back();
+        }}
       />
     );
   }

@@ -39,6 +39,7 @@ import { getSurfLevelVideoFromStorage } from '../services/media/videoService';
 import { getVideoPreloadStatus } from '../services/media/videoPreloadService';
 import { getCachedVideoUri } from '../services/media/videoCacheService';
 import { toWidthThumbUrl } from '../services/media/thumbnails';
+import { getResolvedCoverUrl, setResolvedCoverUrl } from '../services/media/coverImageCache';
 import { getCountryFlag } from '../utils/countryFlags';
 import { getDisplayLabelAndFlagKey } from '../utils/destinationDisplay';
 import { uploadProfileImage, uploadProfileVideoS3 } from '../services/storage/storageService';
@@ -273,7 +274,10 @@ const ProfileCoverBackground: React.FC<{
   useEffect(() => {
     setFailed(false);
   }, [uri]);
-  const src = uri ? (failed ? uri : thumb) : null;
+  // Already resolved (prefetched at login, or a previous open)? Go straight to
+  // the URL that works instead of probing the thumbnail again.
+  const known = getResolvedCoverUrl(uri);
+  const src = uri ? (known ?? (failed ? uri : thumb)) : null;
   return (
     <View style={style}>
       <ExpoImage
@@ -282,7 +286,10 @@ const ProfileCoverBackground: React.FC<{
         contentFit="cover"
         cachePolicy="memory-disk"
         onError={() => {
-          if (!failed && uri && thumb !== uri) setFailed(true);
+          if (!failed && uri && thumb !== uri) {
+            setResolvedCoverUrl(uri, uri);
+            setFailed(true);
+          }
         }}
       />
       {children}

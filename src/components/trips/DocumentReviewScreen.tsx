@@ -31,7 +31,7 @@
  * signed URL per row and a decrypted copy in the image cache, which is exactly
  * what the private bucket exists to prevent.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,8 @@ import {
   Alert,
   ActivityIndicator,
   StatusBar,
+  BackHandler,
+  useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
@@ -55,6 +57,8 @@ import { DOC_ICON } from './plan/PlanSections';
 import { DocumentViewer } from './DocumentViewer';
 import { RejectDocumentSheet } from './RejectDocumentSheet';
 import { PressableScale } from './PressableScale';
+import { BottomSheetShell } from '../BottomSheetShell';
+import { textStyle, textStyles } from '../../theme/typography';
 import { ff } from '../../theme/fonts';
 import { plural } from './dashboard/dashboardFormat';
 import {
@@ -335,6 +339,14 @@ export const DocumentReviewScreen: React.FC<{
    * so existing host callers do not change.
    */
   canApprove?: boolean;
+  /**
+   * 'modal' (default) presents this as its own full-screen Modal. 'screen'
+   * draws the same thing as a plain view, for a caller that is already a card
+   * on the navigation stack (TripTravelerScreen) — a Modal that opens the
+   * moment a card lands is two transitions for one tap. `visible` should be
+   * `true` there; leaving is the caller's `onClose`.
+   */
+  presentation?: 'modal' | 'screen';
 }> = ({
   visible,
   onClose,
@@ -349,8 +361,10 @@ export const DocumentReviewScreen: React.FC<{
   renderTravelerExtras,
   renderOverlay,
   canApprove = true,
+  presentation = 'modal',
 }) => {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   // ONE piece of state for level 2, not three booleans. Level 2 is a person, a
   // requirement, or the waiting queue — exactly one at a time — and a union
   // makes "exactly one" the type's problem rather than three setters that have
@@ -682,6 +696,27 @@ export const DocumentReviewScreen: React.FC<{
     else setLevel2(null);
   }, [detail, level2, close]);
 
+  // Android back, innermost first: the reject sheet, then the full-screen
+  // file, then one level up.
+  const hardwareBack = rejecting
+    ? () => setRejecting(null)
+    : viewing
+      ? () => setViewing(null)
+      : goBack;
+
+  // As a card on the stack there is no Modal to hand back presses to, and the
+  // navigator would pop the whole card out from under an open document.
+  useEffect(() => {
+    if (presentation !== 'screen') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      hardwareBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [presentation, hardwareBack]);
+
+  const sheetContent = useRef<{ title: string; body: React.ReactNode } | null>(null);
+
 
   const handleApprove = useCallback(async () => {
     const item = detailRow?.item;
@@ -734,11 +769,19 @@ export const DocumentReviewScreen: React.FC<{
     setDetail({ userId, requirementId: item.requirementId });
   }, []);
 
+  /**
+   * One requirement, opened from the Documents list, is a bottom sheet over
+   * that list (Figma 17776-49731) — the operator is glancing at who sent it,
+   * not going somewhere. Opened directly (`root`, e.g. from a notification)
+   * there is no list underneath, so it stays a full page.
+   */
+  const requirementAsSheet = level2?.kind === 'requirement' && level2.root !== true;
+
   const headerTitle = detailRow
     ? detailRow.traveler.name ?? 'Traveler'
     : waitingMode
       ? 'Waiting for you'
-      : openRequirement
+      : openRequirement && !requirementAsSheet
         ? openRequirement.title
         : openTraveler
           ? openTraveler.name ?? 'Traveler'
@@ -766,25 +809,31 @@ export const DocumentReviewScreen: React.FC<{
   const footer =
     detailRow && canApprove && isUploadDecidable(detailRow.item) ? detailRow.item.state : null;
 
-  return (
+  // The sheet keeps drawing the last requirement while it slides away —
+  // `level2` is already null by then, and an empty sheet closing looks broken.
+  if (requirementAsSheet && openRequirement && requirementRows) {
+    sheetContent.current = {
+      title: openRequirement.title,
+      body: (
+        <RequirementPeople
+          rows={requirementRows}
+          filter={filter}
+          onFilter={setFilter}
+          onOpen={row => openItem(row.item, row.traveler.userId)}
+          // Pay rows are refused by the server; see remindRequirement.
+          onRemind={canApprove && openRequirement.reqType !== 'pay' ? remindOne : undefined}
+          reminded={Object.fromEntries(
+            Object.entries(reminded)
+              .filter(([k]) => k.startsWith(`${openRequirement.requirementId}:`))
+              .map(([k, v]) => [k.split(':')[1], v]),
+          )}
+        />
+      ),
+    };
+  }
+
+  const layers = (
     <>
-      <Modal
-        visible={visible}
-        animationType="slide"
-        // Android back, innermost first. The viewer and the reject sheet are
-        // LAYERS inside this Modal, not Modals of their own, so this is the only
-        // handler they get — without the two extra branches, back would close the
-        // whole review screen out from under an open document.
-        onRequestClose={
-          rejecting
-            ? () => setRejecting(null)
-            : viewing
-            ? () => setViewing(null)
-            : goBack // goBack steps out of level 3 first
-        }
-        statusBarTranslucent
-        {...(Platform.OS === 'android' ? { navigationBarTranslucent: true } : {})}
-      >
         <View style={styles.root}>
           {/* The dark header runs up under the status bar. */}
           <View style={[styles.statusBarFill, { height: insets.top }]} />
@@ -795,7 +844,7 @@ export const DocumentReviewScreen: React.FC<{
             topInset={0}
             onBack={goBack}
             right={
-              requirementExport.length > 0 && openRequirement ? (
+              requirementExport.length > 0 && openRequirement && !requirementAsSheet ? (
                 <HeaderPill
                   label={
                     exportingZip?.startsWith(`req:${openRequirement.requirementId}`)
@@ -885,7 +934,7 @@ export const DocumentReviewScreen: React.FC<{
                   )}
                 </View>
               ) : /* ── Level 2b: one requirement, everyone ───────────────── */
-              openRequirement && requirementRows ? (
+              openRequirement && requirementRows && !requirementAsSheet ? (
                 <RequirementPeople
                   rows={requirementRows}
                   filter={filter}
@@ -1132,15 +1181,111 @@ export const DocumentReviewScreen: React.FC<{
           onSend={handleReject}
         />
 
+        {/* One requirement's people, as a sheet over the Documents list. A
+            LAYER (`inline`) for the same reason as the two above. Hidden while a
+            file is open on level 3, and back again when the operator returns. */}
+        <BottomSheetShell
+          inline
+          visible={requirementAsSheet && !detail}
+          onClose={() => setLevel2(null)}
+        >
+          {({ panHandlers }) => (
+            <View
+              style={[
+                styles.reqSheet,
+                { maxHeight: windowHeight * 0.82, paddingBottom: Math.max(insets.bottom, 16) },
+              ]}
+            >
+              <View style={styles.reqSheetHead} {...panHandlers}>
+                <View style={styles.reqSheetHandle} />
+                <View style={styles.reqSheetTitleRow}>
+                  <Text style={styles.reqSheetTitle} numberOfLines={1}>
+                    {sheetContent.current?.title ?? ''}
+                  </Text>
+                  {requirementAsSheet && requirementExport.length > 0 && openRequirement ? (
+                    <Pressable
+                      hitSlop={8}
+                      disabled={!!exportingZip}
+                      onPress={() =>
+                        runExport(
+                          requirementExport,
+                          `${openRequirement.title} (${requirementExport.length})`,
+                          `req:${openRequirement.requirementId}`,
+                        )
+                      }
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.reqSheetLink}>
+                        {exportingZip?.startsWith(`req:${openRequirement.requirementId}`)
+                          ? `Packaging ${exportingZip.split(':')[2] ?? ''}…`
+                          : 'Export all'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.reqSheetBody}
+              >
+                {sheetContent.current?.body ?? null}
+              </ScrollView>
+            </View>
+          )}
+        </BottomSheetShell>
+
         {/* The caller's own layers, over everything above. Same rules. */}
         {renderOverlay?.()}
-      </Modal>
     </>
+  );
+
+  if (presentation === 'screen') return <View style={styles.screenShell}>{layers}</View>;
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      // Android back, innermost first. The viewer and the reject sheet are
+      // LAYERS inside this Modal, not Modals of their own, so this is the only
+      // handler they get — without the two extra branches, back would close the
+      // whole review screen out from under an open document.
+      onRequestClose={hardwareBack}
+      statusBarTranslucent
+      {...(Platform.OS === 'android' ? { navigationBarTranslucent: true } : {})}
+    >
+      {layers}
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#FAFAFA' },
+  screenShell: { flex: 1 },
+  // One requirement's people, as a sheet over the Documents list.
+  reqSheet: {
+    backgroundColor: '#FAFAFA',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  reqSheetHead: { paddingHorizontal: 16, paddingBottom: 12 },
+  reqSheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#E4E4E4',
+    marginTop: 10,
+    marginBottom: 14,
+  },
+  reqSheetTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  reqSheetTitle: { ...textStyle('MB1', '700'), color: '#333333', flexShrink: 1 },
+  reqSheetLink: { ...textStyles.MB2, color: '#05BCD3' },
+  reqSheetBody: { paddingHorizontal: 16, paddingBottom: 8 },
   statusBarFill: { backgroundColor: '#212121' },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 60 },
   footerInner: { paddingHorizontal: 40, gap: 16, alignItems: 'stretch' },

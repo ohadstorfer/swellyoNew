@@ -9,10 +9,8 @@ import {
   RefreshControl,
   Modal,
   Alert,
-  ScrollView,
   Platform,
   Dimensions,
-  Animated,
   NativeSyntheticEvent,
   NativeScrollEvent,
   InteractionManager,
@@ -30,9 +28,9 @@ import {
   GroupTrip,
   HostingStyle,
   MyTripsBuckets,
+  SurfLevel,
   TripCardMeta,
 } from '../../services/trips/groupTripsService';
-import { TRIP_CHOOSER, TRIP_TYPE_PILL, TRIP_TYPE_TAG } from '../../services/trips/tripVocabulary';
 import { BUDGET_THRESHOLD } from '../../services/trips/exploreFilterPredicates';
 import { COUNTRY_NAMES } from '../../data/countryNames';
 import {
@@ -52,6 +50,11 @@ import { OperatorSetupBanner } from '../../components/trips/OperatorSetupBanner'
 import { useOperatorSetup } from '../../hooks/trips/useOperatorSetup';
 import { pushRootCard } from '../../navigation/navigationRef';
 import { ff, fs } from '../../theme/fonts';
+import { fontSize, textStyle, textStyles } from '../../theme/typography';
+import { LinearGradient } from 'expo-linear-gradient';
+import BottomSheetShell from '../../components/BottomSheetShell';
+import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
+import { ExploreSwipeDeck, DECK_PEEK } from '../../components/trips/ExploreSwipeDeck';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
 import NoTripsEmptyState from '../../components/trips/NoTripsEmptyState';
 import { FadeInView } from '../../components/FadeInView';
@@ -69,7 +72,7 @@ import { getStorageThumbUrl } from '../../services/media/imageService';
 import { toWidthThumbUrl } from '../../services/media/thumbnails';
 import Thumb from '../../components/Thumb';
 import { neighbourHeroUrls, neighbourAvatarUrls } from './deckPrefetch';
-import { isNearEnd, isAppend } from './exploreDeckPagination';
+import { isNearEnd } from './exploreDeckPagination';
 import Reanimated, {
   Easing,
   Extrapolation,
@@ -81,20 +84,7 @@ import Reanimated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-// Hosting-style chooser content. Lifted out of CreateTripWizard so the chooser
-// can live inline on the Create tab and the wizard becomes a pure router.
-const HOSTING_STYLE_OPTIONS: {
-  key: HostingStyle;
-  title: string;
-  desc: string;
-  image: number; // placeholder thumbnail (any local asset)
-}[] = [
-  { key: 'A', ...TRIP_CHOOSER.A, image: Images.createTrip.plannedTogether },
-  { key: 'B', ...TRIP_CHOOSER.B, image: Images.createTrip.hosted },
-  { key: 'C', ...TRIP_CHOOSER.C, image: Images.createTrip.tripOperator },
-];
-
-export type TripsTab = 'explore' | 'my' | 'create';
+export type TripsTab = 'explore' | 'my';
 
 interface TripsScreenProps {
   onBack: () => void;
@@ -113,7 +103,6 @@ const TripsHeaderTabs: React.FC<{
   const tabs: { key: TripsTab; label: string }[] = [
     { key: 'my', label: 'My Trips' },
     { key: 'explore', label: 'Explore' },
-    { key: 'create', label: 'Create' },
   ];
   return (
     <View style={styles.tabsRow}>
@@ -189,9 +178,10 @@ type TripCardStatus = 'upcoming' | 'requested' | 'completed';
 
 const STATUS_BADGE: Record<
   TripCardStatus,
-  { bg: string; icon: keyof typeof Ionicons.glyphMap; label: string }
+  // `tripIcon` wins when set — Figma's own glyph, where we have it traced.
+  { bg: string; icon: keyof typeof Ionicons.glyphMap; tripIcon?: TripIconName; label: string }
 > = {
-  upcoming: { bg: '#84EBB4', icon: 'briefcase-outline', label: 'Upcoming' },
+  upcoming: { bg: '#84EBB4', icon: 'briefcase-outline', tripIcon: 'luggage-02', label: 'Upcoming' },
   requested: { bg: '#FFB443', icon: 'chatbox-ellipses-outline', label: 'Requested' },
   completed: { bg: '#F7F7F7', icon: 'checkmark-circle-outline', label: 'Completed' },
 };
@@ -300,7 +290,7 @@ const TripCard: React.FC<{
             <Text style={styles.cardTitle} numberOfLines={1}>
               {trip.title?.trim() || formatDestination(trip)}
             </Text>
-            <Text style={styles.cardDesc} numberOfLines={1}>
+            <Text style={styles.cardDesc} numberOfLines={2}>
               {formatDestination(trip)}
             </Text>
           </View>
@@ -337,7 +327,11 @@ const TripCard: React.FC<{
       {/* Status badge */}
       <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
         <View style={styles.statusIcon}>
-          <Ionicons name={badge.icon} size={18} color="#0A0A0A" />
+          {badge.tripIcon ? (
+            <TripIcon name={badge.tripIcon} size={18} color="#0A0A0A" strokeWidth={1} />
+          ) : (
+            <Ionicons name={badge.icon} size={18} color="#0A0A0A" />
+          )}
         </View>
         <View style={styles.statusTextRow}>
           <Text style={styles.statusLabel}>{badge.label}</Text>
@@ -349,19 +343,20 @@ const TripCard: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// Filter pills (My Trips) — All / Upcoming (n) / Requested (n) / Completed (n)
+// Filter pills (My Trips, Figma 17029:25735) — All / Upcoming (n) / Completed (n).
+// No "Requested": My Trips is operator-only now, and operators do not request
+// to join. A pending trip, if one exists, still shows under All.
 // ---------------------------------------------------------------------------
-type TripFilter = 'all' | 'upcoming' | 'requested' | 'completed';
+type TripFilter = 'all' | 'upcoming' | 'completed';
 
 const TripFilterBar: React.FC<{
   active: TripFilter;
-  counts: { upcoming: number; requested: number; completed: number };
+  counts: { upcoming: number; completed: number };
   onChange: (f: TripFilter) => void;
 }> = ({ active, counts, onChange }) => {
   const items: { key: TripFilter; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'upcoming', label: `Upcoming (${counts.upcoming})` },
-    { key: 'requested', label: `Requested (${counts.requested})` },
     { key: 'completed', label: `Completed (${counts.completed})` },
   ];
   return (
@@ -379,8 +374,6 @@ const TripFilterBar: React.FC<{
           >
             <Text
               numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.85}
               style={[styles.filterText, isActive ? styles.filterTextActive : styles.filterTextInactive]}
             >
               {it.label}
@@ -393,18 +386,11 @@ const TripFilterBar: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// Explore card (Figma 12506:16019) — richer than My Trips: trip-type pill,
-// price, dates, spots-left and occupancy instead of a personal status badge.
+// Explore card (Figma 17779:51085) — a white frame holding the photo (level +
+// vibe pills on top, title / place / dates / who's going at the bottom) and,
+// under it, the host and the price. It has no touch handling of its own: the
+// swipe deck owns the gestures, tap included.
 // ---------------------------------------------------------------------------
-const TRIP_TYPE: Record<
-  HostingStyle,
-  { label: string; icon: keyof typeof Ionicons.glyphMap }
-> = {
-  A: { label: TRIP_TYPE_PILL.A, icon: 'people-outline' },
-  B: { label: TRIP_TYPE_PILL.B, icon: 'star-outline' },
-  C: { label: TRIP_TYPE_PILL.C, icon: 'briefcase-outline' },
-};
-
 const formatTripPrice = (trip: GroupTrip, viewer: Viewer): string | null => {
   if (trip.cost_per_person != null) {
     return formatTripPriceIn(trip.cost_per_person, trip, viewer);
@@ -412,24 +398,84 @@ const formatTripPrice = (trip: GroupTrip, viewer: Viewer): string | null => {
   return formatTripPriceRange(trip.budget_min, trip.budget_max, trip, viewer);
 };
 
+const LEVEL_RANK: SurfLevel[] = ['beginner', 'intermediate', 'advanced', 'pro'];
+const LEVEL_FULL: Record<string, string> = {
+  beginner: 'Beginner',
+  intermediate: 'Intermediate',
+  advanced: 'Advanced',
+  pro: 'Pro',
+};
+const LEVEL_SHORT: Record<string, string> = {
+  beginner: 'Beg',
+  intermediate: 'Int',
+  advanced: 'Adv',
+  pro: 'Pro',
+};
+
+/** ['intermediate','advanced'] → "Intermediate - Adv". Null when the host set none. */
+const formatLevelRange = (levels: SurfLevel[] | null | undefined): string | null => {
+  const all = levels ?? [];
+  const picked = LEVEL_RANK.filter(l => all.includes(l));
+  if (picked.length === 0) return all.includes('all') ? 'All levels' : null;
+  if (picked.length === LEVEL_RANK.length) return 'All levels';
+  if (picked.length === 1) return LEVEL_FULL[picked[0]];
+  return `${LEVEL_FULL[picked[0]]} - ${LEVEL_SHORT[picked[picked.length - 1]]}`;
+};
+
+// The vibe pill's own wording, in the Figma's title case ("Surf Focused",
+// 17779:51097). The create flow's labels are full sentences
+// ("Surf-focused - wake up early, surf a lot") and do not fit a pill.
+const VIBE_PILL: Record<string, string> = {
+  improve_surf: 'Improve Surfing',
+  surf_focused: 'Surf Focused',
+  explore: 'Surf + Explore',
+  vacation: 'Vacation Style',
+};
+
+const formatVibe = (trip: GroupTrip): string | null => {
+  const slug = trip.trip_vibes?.[0];
+  return slug ? VIBE_PILL[slug] ?? null : null;
+};
+
+// Card geometry. The frame pads the photo by 8 on every side and leaves a
+// fixed 64px row under it for the host and the price; only the photo scales.
+const EX_FRAME_PAD = 8;
+const EX_INFO_H = 64;
+const EX_IMAGE_RATIO = 408 / 328; // photo height / width
+const EX_CARD_MAX_W = 344;
+// Only a genuinely short phone goes below the design width, and never far.
+const EX_CARD_MIN_W = 300;
+const EX_SIDE_MARGIN = 24;
+// Room kept free under the stack for the floating nav bar: the bar's top edge
+// sits ~91px above the bottom of the screen.
+const EX_NAV_RESERVE = 92;
+const exploreCardHeight = (w: number) =>
+  Math.round((w - EX_FRAME_PAD * 2) * EX_IMAGE_RATIO) + EX_INFO_H + EX_FRAME_PAD * 3;
+const exploreCardWidthForHeight = (h: number) =>
+  Math.floor((h - EX_INFO_H - EX_FRAME_PAD * 3) / EX_IMAGE_RATIO) + EX_FRAME_PAD * 2;
+
+const exploreCardLabel = (trip: GroupTrip): string => {
+  const headline = trip.title || formatDestination(trip);
+  const location = formatDestination(trip);
+  const place = trip.title && location !== headline ? `, ${location}` : '';
+  return `${headline}${place}, ${formatTripDates(trip)}`;
+};
+
 const ExploreTripCard: React.FC<{
   trip: GroupTrip;
   meta?: TripCardMeta;
-  onPress?: () => void;
-  userId?: string | null;
-}> = ({ trip, meta, onPress, userId }) => {
+}> = React.memo(({ trip, meta }) => {
   const viewer = useViewer();
-  const type = TRIP_TYPE[trip.hosting_style] ?? TRIP_TYPE.A;
-  const typeTag = TRIP_TYPE_TAG[trip.hosting_style] ?? TRIP_TYPE_TAG.A;
+  const reduceMotion = useReducedMotion();
   const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
-  const spotsLeft = max != null ? Math.max(0, max - count) : null;
   const occupancy = max != null ? `${count}/${max}` : `${count}`;
   const price = formatTripPrice(trip, viewer);
+  const level = formatLevelRange(trip.target_surf_levels);
+  const vibe = formatVibe(trip);
 
-  // Tiny (~24px) transform thumbnail used as a blur-up placeholder. Supabase
-  // image transforms are enabled (already used in NotificationCenter). For
+  // Tiny (~24px) transform thumbnail used as a blur-up placeholder. For
   // non-Supabase hero URLs getStorageThumbUrl returns the URL unchanged, so we
   // pass no placeholder and fall back to the plain fade.
   const heroThumb = useMemo(() => {
@@ -441,129 +487,60 @@ const ExploreTripCard: React.FC<{
   const location = formatDestination(trip);
   const showLocation = !!trip.title && !!location && location !== headline;
 
-  const queryClient = useQueryClient();
-  const reduceMotion = useReducedMotion();
-
   return (
-    <TouchableOpacity
-      style={styles.exCard}
-      activeOpacity={onPress ? 0.9 : 1}
-      onPress={onPress}
-      onPressIn={() => queryClient.prefetchQuery({
-        queryKey: tripsKeys.detail(trip.id),
-        queryFn: ({ signal }) => fetchTripCore(trip.id, userId ?? null, signal),
-        gcTime: TRIP_DETAIL_GC_MS,
-      })}
-      accessibilityRole="button"
-      accessibilityLabel={`${headline}${showLocation ? ', ' + location : ''}, ${formatTripDates(trip)}${spotsLeft != null ? `, ${spotsLeft} spots left` : ''}`}
-      disabled={!onPress}
-    >
-      {trip.hero_image_url ? (
-        <Thumb
-          uri={trip.hero_image_url}
-          widthPx={HERO_THUMB_PX}
-          placeholder={heroThumb ? { uri: heroThumb } : undefined}
-          placeholderContentFit="cover"
-          style={styles.cardImageBg}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          recyclingKey={trip.id}
-          transition={reduceMotion ? 0 : 150}
-        />
-      ) : (
-        <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
-          <Ionicons name="image-outline" size={32} color="#B0B0B0" />
-        </View>
-      )}
-
-      {/* Host row (top-left) */}
-      <View style={styles.hostRow}>
-        {meta?.hostAvatar ? (
+    <View style={styles.exFrame}>
+      <View style={styles.exImage}>
+        {trip.hero_image_url ? (
           <Thumb
-            uri={meta.hostAvatar}
-            size={AVATAR_THUMB_PX}
-            style={styles.hostAvatar}
+            uri={trip.hero_image_url}
+            widthPx={HERO_THUMB_PX}
+            placeholder={heroThumb ? { uri: heroThumb } : undefined}
+            placeholderContentFit="cover"
+            style={styles.cardImageBg}
             contentFit="cover"
             cachePolicy="memory-disk"
+            transition={reduceMotion ? 0 : 150}
           />
         ) : (
-          <View style={[styles.hostAvatar, styles.hostAvatarPlaceholder]}>
-            <Ionicons name="person" size={18} color="#FFFFFF" />
+          <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
+            <Ionicons name="image-outline" size={32} color="#B0B0B0" />
           </View>
         )}
-        {!!meta?.hostName && (
-          <Text style={styles.hostName} numberOfLines={1}>
-            {meta.hostName}
-          </Text>
-        )}
-      </View>
 
-      {/* Trip-type tag (top-right) — one flat colour per hosting style
-          (Crew=white/dark, Captain=cyan/white, Operator=purple/white). */}
-      {/* Approved for an operator trip but not through onboarding — this trip
-          is not theirs yet. Replaces the type tag rather than sitting beside
-          it: what they need to know here is that something is owed, not which
-          flavour of trip it is. */}
-      {trip.member_status === 'onboarding' ? (
-        <View style={[styles.tripTypePill, { backgroundColor: '#FDF6E3' }]}>
-          <Ionicons name="hourglass-outline" size={16} color="#C98A00" />
-          <Text style={[styles.tripTypeLabel, { color: '#C98A00' }]}>Finish onboarding</Text>
-        </View>
-      ) : (
-        <View style={[styles.tripTypePill, { backgroundColor: typeTag.bg }]}>
-          <Ionicons name={type.icon} size={16} color={typeTag.fg} />
-          <Text style={[styles.tripTypeLabel, { color: typeTag.fg }]}>{type.label}</Text>
-        </View>
-      )}
-
-      {/* Noise-glass panel — same layers as the My Trips card (blur 3.5px +
-          black tint + fractalNoise grain). Parent clips the rounded corners. */}
-      <View style={styles.exBottom}>
-        <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={styles.cardGlassTint} pointerEvents="none" />
-        <Image
-          source={NOISE_TEXTURE}
-          style={styles.cardNoise}
-          resizeMode="repeat"
-          pointerEvents="none"
-        />
-        <View style={styles.exContent}>
-          <View style={styles.exHeadings}>
-            <Text style={styles.cardTitle} numberOfLines={2}>
-              {headline}
-            </Text>
-            {showLocation && (
-              <Text style={styles.cardDesc} numberOfLines={1}>
-                {location}
-              </Text>
+        {(level || vibe) && (
+          <View style={styles.exPills}>
+            {!!level && (
+              <View style={styles.exPill}>
+                <Text style={styles.exPillText} numberOfLines={1}>{level}</Text>
+              </View>
+            )}
+            {!!vibe && (
+              <View style={styles.exPill}>
+                <Text style={styles.exPillText} numberOfLines={1}>{vibe}</Text>
+              </View>
             )}
           </View>
+        )}
 
-          <View style={styles.exInfoRow}>
-            <View style={styles.exInfoLeft}>
-              {/* Price ranges ("₪1,700-₪2,500") are wide enough to wrap onto a
-                  second line on narrow cards, which pushes the dates down and
-                  breaks the row. Pin it to one line and let it scale down
-                  instead of wrapping. */}
-              {!!price && (
-                <Text
-                  style={styles.exPrice}
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                >
-                  {price}
-                </Text>
+        {/* Details panel (Figma 17779:51100): the photo blurred behind the
+            text, under a grey wash that is strongest at the bottom and gone at
+            the top. The frame above clips the rounded corners. */}
+        <View style={styles.exPanel}>
+          <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFill} />
+          <LinearGradient
+            colors={['rgba(78,78,78,0)', 'rgba(78,78,78,0.63)']}
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+          />
+          <View style={styles.exPanelContent}>
+            <View style={styles.exRoute}>
+              <Text style={styles.exTitle} numberOfLines={1}>{headline}</Text>
+              {showLocation && (
+                <Text style={styles.exLocation} numberOfLines={1}>{location}</Text>
               )}
-              <Text style={styles.exDates}>{formatTripDates(trip)}</Text>
             </View>
-
-            <View style={styles.exInfoRight}>
-              {spotsLeft != null && (
-                <Text style={styles.exSpots}>
-                  {spotsLeft} spot{spotsLeft === 1 ? '' : 's'} left
-                </Text>
-              )}
+            <View style={styles.exDateRow}>
+              <Text style={styles.exDates} numberOfLines={1}>{formatTripDates(trip)}</Text>
               {(avatars.length > 0 || count > 0) && (
                 <View style={styles.exCluster}>
                   {avatars.length > 0 ? (
@@ -575,262 +552,56 @@ const ExploreTripCard: React.FC<{
                         contentFit="cover"
                         cachePolicy="memory-disk"
                         style={[
-                          styles.clusterAvatar,
-                          i > 0 && styles.clusterAvatarOverlap,
+                          styles.exClusterAvatar,
+                          i > 0 && styles.exClusterOverlap,
                           { zIndex: avatars.length - i },
                         ]}
                       />
                     ))
                   ) : (
-                    <Ionicons name="people" size={16} color="#7B7B7B" style={{ marginLeft: 6 }} />
+                    <Ionicons name="people" size={16} color="#7B7B7B" style={{ marginLeft: 8 }} />
                   )}
-                  <Text style={styles.clusterMore}>{occupancy}</Text>
+                  <Text style={styles.exClusterCount}>{occupancy}</Text>
                 </View>
               )}
             </View>
           </View>
         </View>
       </View>
-    </TouchableOpacity>
-  );
-};
 
-// ---------------------------------------------------------------------------
-// Explore card carousel (Figma 11966:32391).
-// A horizontal snap carousel: each card slides into the center, snaps there with
-// momentum, and is fully bidirectional. The first and last trips are hard bounds
-// (no looping). The centered card is full-size; neighbours peek, slightly smaller
-// and dimmer, driven by the scroll position. The card itself (ExploreTripCard) is
-// unchanged — only its placement + the animation.
-// ---------------------------------------------------------------------------
-const { width: DECK_SCREEN_W } = Dimensions.get('window');
-const DECK_SIDE_SCALE = 0.85; // neighbour cards shrink to this
-// The card width is DERIVED from the gap + peek we want, so both survive on any
-// width: narrow screens just get a slightly smaller card. Capped at 366 so it
-// doesn't balloon on tablets/web (there the peek is simply larger).
-//   • DECK_GAP  — gap between the centred card and the tip. Must exceed the
-//     tilt's corner reach (~16px at 5°) or the rotated corner overlaps.
-//   • DECK_PEEK — guaranteed visible width of the neighbour tip.
-const DECK_GAP = 28;
-const DECK_PEEK = 12;
-const DECK_CARD_W = Math.min(366, DECK_SCREEN_W - 2 * (DECK_GAP + DECK_PEEK));
-const DECK_CARD_H = Math.round((DECK_CARD_W * 384) / 328); // card aspect ratio
-const DECK_ITEM_W = DECK_CARD_W + DECK_GAP; // per-card scroll step (card + gap)
-const DECK_SIDE_PAD = Math.max(0, (DECK_SCREEN_W - DECK_ITEM_W) / 2); // centers ends
-// Centre-pivot scaling pulls a neighbour's inner edge inward by half the width
-// it loses; shift it back so the tip peeks by the layout margin, not less.
-const DECK_SIDE_SHIFT = Math.round(((1 - DECK_SIDE_SCALE) * DECK_CARD_W) / 2);
-const DECK_SIDE_OPACITY = 0.6; // neighbour cards dim to this
-const DECK_SIDE_ROTATION = 5; // deg — neighbours tilt out, straightening into center (Figma rotate-4)
-// Scaling shrinks neighbours about their centre, which lifts their bottom edge.
-// Drop them by half the height lost so their lower edge stays level with the
-// centred card's lower edge.
-const DECK_SIDE_DROP = Math.round((DECK_CARD_H * (1 - DECK_SIDE_SCALE)) / 2) + 6;
-
-const TripDeck: React.FC<{
-  trips: GroupTrip[];
-  meta: Map<string, TripCardMeta>;
-  onOpenTrip: (tripId: string) => void;
-  /** Fires (throttled) while the user swipes the deck sideways. */
-  onUserScroll?: () => void;
-  onEndReachedNearby?: () => void;
-  loadingMore?: boolean;
-  userId?: string | null;
-  /** True when the raw (unfiltered) trip list just grew by a page append —
-   *  the deck keeps its scroll position instead of snapping back to card 0. */
-  isAppendingPage?: boolean;
-}> = ({ trips, meta, onOpenTrip, onUserScroll, onEndReachedNearby, loadingMore, userId, isAppendingPage }) => {
-  const listRef = useRef<FlatList<GroupTrip>>(null);
-  // Drives the per-card scale/opacity interpolation.
-  const scrollX = useRef(new Animated.Value(0)).current;
-  // Last offset at which we notified the parent — keeps the JS callback off
-  // the per-frame scroll path (we only re-fire every 24px of travel).
-  const lastReportedX = useRef(0);
-
-  const queryClient = useQueryClient();
-  const prefetchDetail = useCallback((id: string) => {
-    // Skip while userId is unknown (e.g. mid session-restore): a userId-less
-    // prefetch would cache a detail with myRequest=null that the real open
-    // would then consume, showing a wrong CTA. onPressIn covers that window.
-    if (!userId) return;
-    InteractionManager.runAfterInteractions(() => {
-      queryClient.prefetchQuery({
-        queryKey: tripsKeys.detail(id),
-        // Short gcTime: most viewport-prefetched trips are scrolled past and
-        // never opened — without this each one pinned the cache for 30 min,
-        // growing every invalidateQueries scan (js-thread-freeze-spec.md).
-        // Opening the trip mounts useTripCore, which extends the entry's life.
-        gcTime: 1000 * 60 * 2,
-        queryFn: ({ signal }) => fetchTripCore(id, userId ?? null, signal),
-      });
-    });
-  }, [queryClient, userId]);
-
-  const liveRef = useRef({ trips, meta, prefetchDetail });
-  liveRef.current = { trips, meta, prefetchDetail };
-
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50, minimumViewTime: 150 }).current;
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
-    const { trips: liveTrips, meta: liveMeta, prefetchDetail: livePrefetch } = liveRef.current;
-    for (const v of viewableItems) {
-      const i = v.index;
-      if (i == null) continue;
-      for (let k = i; k <= i + 2; k++) {
-        const t = liveTrips[k];
-        if (t) { livePrefetch(t.id); if (t.hero_image_url) warmHeroThumbs([t.hero_image_url]); }
-      }
-      warmAvatarThumbs(neighbourAvatarUrls(liveTrips, liveMeta, i));
-    }
-  }).current;
-
-  // Reset to the first card when the deck contents are REPLACED (filter change,
-  // realtime reload), but NOT when a page is appended (preserve scroll position).
-  // `isAppendingPage` is computed from the raw list in the parent, so it's correct
-  // even for the filtered Popular deck and the operator subset.
-  useEffect(() => {
-    if (isAppendingPage) return;
-    // `scrollX` is now native-driven (onScroll uses useNativeDriver:true), so
-    // JS may not mutate it via setValue. scrollToOffset(0) makes the native
-    // driver emit a scroll event that resets scrollX to 0 itself.
-    listRef.current?.scrollToOffset({ offset: 0, animated: false });
-  }, [trips, scrollX, isAppendingPage]);
-
-  // Warm the first card + right neighbours as soon as the deck mounts/changes —
-  // heroes AND avatar thumbs, so the whole card appears at once.
-  useEffect(() => {
-    warmHeroThumbs(neighbourHeroUrls(trips, 0));
-    warmAvatarThumbs(neighbourAvatarUrls(trips, meta, 0));
-  }, [trips, meta]);
-
-  const renderItem = useCallback(
-    ({ item, index }: { item: GroupTrip; index: number }) => {
-      const inputRange = [
-        (index - 1) * DECK_ITEM_W,
-        index * DECK_ITEM_W,
-        (index + 1) * DECK_ITEM_W,
-      ];
-      const scale = scrollX.interpolate({
-        inputRange,
-        outputRange: [DECK_SIDE_SCALE, 1, DECK_SIDE_SCALE],
-        extrapolate: 'clamp',
-      });
-      const opacity = scrollX.interpolate({
-        inputRange,
-        outputRange: [DECK_SIDE_OPACITY, 1, DECK_SIDE_OPACITY],
-        extrapolate: 'clamp',
-      });
-      // Tilt: a card to the right of center leans +Nº, to the left −Nº, and
-      // straightens to 0º exactly when centered — interpolated by scroll position.
-      const rotate = scrollX.interpolate({
-        inputRange,
-        outputRange: [`${DECK_SIDE_ROTATION}deg`, '0deg', `-${DECK_SIDE_ROTATION}deg`],
-        extrapolate: 'clamp',
-      });
-      // Compensate for the centre-pivot scale so neighbour bottoms stay aligned
-      // with the centred card's bottom edge.
-      const translateY = scrollX.interpolate({
-        inputRange,
-        outputRange: [DECK_SIDE_DROP, 0, DECK_SIDE_DROP],
-        extrapolate: 'clamp',
-      });
-      // Re-expose the scaled neighbour's inner edge: the right-side neighbour
-      // shifts left, the left-side neighbour shifts right, so each peeks by the
-      // full layout margin (the tip stays visible on any screen width).
-      const translateX = scrollX.interpolate({
-        inputRange,
-        outputRange: [-DECK_SIDE_SHIFT, 0, DECK_SIDE_SHIFT],
-        extrapolate: 'clamp',
-      });
-
-      return (
-        <View style={styles.deckSlot}>
-          <Animated.View style={[styles.deckCard, { transform: [{ translateX }, { translateY }, { scale }, { rotate }], opacity }]}>
-            <ExploreTripCard
-              trip={item}
-              meta={meta.get(item.id)}
-              onPress={() => onOpenTrip(item.id)}
-              userId={userId}
+      <View style={styles.exInfo}>
+        <View style={styles.exHost}>
+          {meta?.hostAvatar ? (
+            <Thumb
+              uri={meta.hostAvatar}
+              size={AVATAR_THUMB_PX}
+              style={styles.exHostAvatar}
+              contentFit="cover"
+              cachePolicy="memory-disk"
             />
-          </Animated.View>
+          ) : (
+            <View style={[styles.exHostAvatar, styles.hostAvatarPlaceholder]}>
+              <Ionicons name="person" size={18} color="#FFFFFF" />
+            </View>
+          )}
+          <View style={styles.exHostText}>
+            <Text style={styles.exHostLabel}>Host</Text>
+            {!!meta?.hostName && (
+              <Text style={styles.exHostName} numberOfLines={1}>{meta.hostName}</Text>
+            )}
+          </View>
         </View>
-      );
-    },
-    [scrollX, meta, onOpenTrip, userId],
-  );
-
-  return (
-    <View style={styles.deckRoot}>
-      <Animated.FlatList
-        ref={listRef}
-        data={trips}
-        keyExtractor={item => item.id}
-        renderItem={renderItem}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        snapToInterval={DECK_ITEM_W}
-        snapToAlignment="start"
-        decelerationRate="fast"
-        disableIntervalMomentum
-        // Virtualization: the deck shows ~1.5 cards, but without these it mounts
-        // and lays out ~10 cards on activation — that Yoga layout spike is what
-        // stutters the bottom-bar pill animation on tab switch. getItemLayout is
-        // already provided, so windowing is exact and cheap.
-        initialNumToRender={2}
-        maxToRenderPerBatch={3}
-        windowSize={3}
-        removeClippedSubviews
-        // 16 (~60 events/s). 1 streamed ~120 JS-thread onScroll events/s on
-        // ProMotion — each calling scrollX.setValue — which saturated the JS
-        // thread and froze the whole app while a deck was on screen. The minor
-        // snap-tail transform clip is an acceptable trade; the proper fix (if it
-        // ever matters) is Animated.event with useNativeDriver so the transform
-        // runs on the UI thread independent of event throttle.
-        scrollEventThrottle={16}
-        getItemLayout={(_, index) => ({
-          length: DECK_ITEM_W,
-          offset: index * DECK_ITEM_W,
-          index,
-        })}
-        // Native-driver scroll: the rotate/scale/opacity/translate transforms run
-        // on the UI thread, so the deck never freezes mid-tilt even when the JS
-        // thread is busy (slow dev build or a stalled frame). The JS `listener`
-        // still fires onUserScroll for the Explore prefetch system.
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          {
-            useNativeDriver: true,
-            listener: (e: any) => {
-              const x = e.nativeEvent.contentOffset.x;
-              if (onUserScroll && Math.abs(x - lastReportedX.current) > 24) {
-                lastReportedX.current = x;
-                onUserScroll();
-              }
-            },
-          },
+        {/* Price ranges ("₪1,700-₪2,500") are wide — keep them on one line and
+            let them scale down instead of wrapping. */}
+        {!!price && (
+          <Text style={styles.exPrice} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+            {price}
+          </Text>
         )}
-        onMomentumScrollEnd={e => {
-          const idx = Math.round(e.nativeEvent.contentOffset.x / DECK_ITEM_W);
-          warmHeroThumbs(neighbourHeroUrls(trips, idx));
-          warmAvatarThumbs(neighbourAvatarUrls(trips, meta, idx));
-          if (isNearEnd(idx, trips.length)) onEndReachedNearby?.();
-        }}
-        ListFooterComponent={loadingMore ? (
-          <ExploreDeckSkeleton />
-        ) : null}
-        contentContainerStyle={[styles.deckContent, { paddingHorizontal: DECK_SIDE_PAD }]}
-        viewabilityConfig={viewabilityConfig}
-        onViewableItemsChanged={onViewableItemsChanged}
-        {...(Platform.OS === 'web' && {
-          style: {
-            overflowX: 'auto' as any,
-            overflowY: 'hidden' as any,
-            WebkitOverflowScrolling: 'touch' as any,
-          } as any,
-        })}
-      />
+      </View>
     </View>
   );
-};
+});
 
 // ---------------------------------------------------------------------------
 // Explore filters (Figma 11966:32392) — month + budget chips.
@@ -908,48 +679,66 @@ const deriveExploreFilterKey = (
   };
 };
 
-const ExploreHeader: React.FC<{
+const ExploreFilterSheet: React.FC<{
+  visible: boolean;
+  onClose: () => void;
   chips: ExploreChip[];
   selected: Set<string>;
   onToggle: (id: string) => void;
   onClear: () => void;
-}> = ({ chips, selected, onToggle, onClear }) => {
-  const allActive = selected.size === 0;
-  return (
-    <View style={styles.exHeader}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.exFilterRow}
-      >
-        <TouchableOpacity
-          style={[styles.exFilterPill, allActive ? styles.exFilterPillActive : styles.exFilterPillInactive]}
-          onPress={onClear}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityState={{ selected: allActive }}
-        >
-          <Text style={allActive ? styles.exFilterTextActive : styles.exFilterTextInactive}>All</Text>
-        </TouchableOpacity>
-        {chips.map(chip => {
-          const active = selected.has(chip.id);
-          return (
-            <TouchableOpacity
-              key={chip.id}
-              style={[styles.exFilterPill, active ? styles.exFilterPillActive : styles.exFilterPillInactive]}
-              onPress={() => onToggle(chip.id)}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-            >
-              <Text style={active ? styles.exFilterTextActive : styles.exFilterTextInactive}>
-                {chip.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+}> = ({ visible, onClose, chips, selected, onToggle, onClear }) => {
+  const insets = useSafeAreaInsets();
+  const group = (kind: ExploreChipKind) => (
+    <View style={styles.fsChips}>
+      {chips.filter(c => c.kind === kind).map(chip => {
+        const active = selected.has(chip.id);
+        return (
+          <TouchableOpacity
+            key={chip.id}
+            style={[styles.fsChip, active ? styles.fsChipActive : styles.fsChipInactive]}
+            onPress={() => onToggle(chip.id)}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+          >
+            <Text style={[styles.fsChipText, active ? styles.fsChipTextActive : styles.fsChipTextInactive]}>
+              {chip.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
+  );
+  return (
+    <BottomSheetShell visible={visible} onClose={onClose}>
+      {({ panHandlers }) => (
+        <View style={[styles.fsSheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+          <View style={styles.fsHandleWrap} {...panHandlers}>
+            <View style={styles.fsHandle} />
+          </View>
+          <View style={styles.fsHeader}>
+            <Text style={styles.fsTitle}>Filters</Text>
+            {selected.size > 0 && (
+              <TouchableOpacity onPress={onClear} hitSlop={8} accessibilityRole="button">
+                <Text style={styles.fsClear}>Clear all</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <Text style={styles.fsGroup}>When</Text>
+          {group('month')}
+          <Text style={styles.fsGroup}>Budget</Text>
+          {group('budget')}
+          <TouchableOpacity
+            style={styles.fsDone}
+            onPress={onClose}
+            activeOpacity={0.9}
+            accessibilityRole="button"
+          >
+            <Text style={styles.fsDoneText}>Show trips</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </BottomSheetShell>
   );
 };
 
@@ -967,12 +756,10 @@ type NavScrollHandler = (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
 
 const ExploreTripsView: React.FC<{
   onOpenTrip: (tripId: string) => void;
-  onNavScroll?: NavScrollHandler;
-  onDeckScroll?: () => void;
   userId: string | null;
-}> = ({ onOpenTrip, onNavScroll, onDeckScroll, userId }) => {
+}> = ({ onOpenTrip, userId }) => {
   // The viewer decides the budget chip label currency; the RPC filter value
-  // itself stays in USD (see deriveExploreFilterKey below).
+  // itself stays in USD (see deriveExploreFilterKey).
   const viewer = useViewer();
 
   // Month chips roll off the device clock; re-derived if the viewer changes
@@ -980,6 +767,7 @@ const ExploreTripsView: React.FC<{
   // budget label follows.
   const chips = useMemo(() => buildExploreChips(new Date(), viewer), [viewer]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const toggleChip = useCallback((id: string) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -998,47 +786,85 @@ const ExploreTripsView: React.FC<{
     () => deriveExploreFilterKey(chips, selected),
     [chips, selected],
   );
+  // New filters = a different list, so the stack starts again from its first card.
+  const resetKey = useMemo(() => JSON.stringify(filterKey), [filterKey]);
 
   // Cached + stale-while-revalidate. The data survives tab switches and
   // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
   // revalidates silently in the background when stale.
   const { trips, meta, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useExploreTrips(filterKey);
-
-  // Pull-to-refresh: drive the spinner ONLY from the user's pull — NOT from
-  // background refetches (the realtime catch-up that fires on first focus,
-  // stale-while-revalidate, etc.). Those must stay silent so we don't flash a
-  // spinner over already-loaded cards on first entry.
-  const [pullRefreshing, setPullRefreshing] = useState(false);
-  const onPullRefresh = useCallback(async () => {
-    setPullRefreshing(true);
-    try { await refetch(); } finally { setPullRefreshing(false); }
-  }, [refetch]);
-
-  // The server already applied the month/budget filters (see explore_feed RPC),
-  // so the loaded pages ARE the filtered result — no client-side month/budget
-  // pass. `filtered` stays as a name so the deck/operator-subset code below is
-  // untouched; non-month/budget client filtering (operatorTrips, style 'C') is
-  // preserved further down.
-  const filtered = trips;
   const hasActiveFilter = selected.size > 0;
 
-  // IMPORTANT: these hooks MUST stay ABOVE the early returns below. Rules of Hooks —
-  // a conditional early return before a hook makes a later render run "fewer hooks
-  // than expected" and crashes the screen. Detect a page APPEND on the RAW
-  // (unfiltered) list, shared by both decks so a background page load preserves scroll.
-  const rawTripsRef = useRef<GroupTrip[]>([]);
-  const isAppendingPage = isAppend(rawTripsRef.current, trips);
-  rawTripsRef.current = trips;
-  // Stable load-more handler shared by both decks (keeps the !isFetchingNextPage guard consistent).
-  const handleLoadMore = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-  const operatorTrips = useMemo(() => filtered.filter(t => t.hosting_style === 'C'), [filtered]);
+  const queryClient = useQueryClient();
+  const liveRef = useRef({ trips, meta });
+  liveRef.current = { trips, meta };
 
-  // Error on cold load (no cached data) — show retry instead of falling through
-  // to the "No trips yet" empty state, which would mislead the user.
+  // Warm what the next swipes will show: hero + avatar thumbs for the cards
+  // behind the front one, and the detail query for the front card and its
+  // neighbour so a tap opens instantly.
+  const warmAround = useCallback((index: number) => {
+    const { trips: live, meta: liveMeta } = liveRef.current;
+    if (live.length === 0) return;
+    warmHeroThumbs(neighbourHeroUrls(live, index));
+    warmAvatarThumbs(neighbourAvatarUrls(live, liveMeta, index));
+    // Skip while userId is unknown (e.g. mid session-restore): a userId-less
+    // prefetch would cache a detail with myRequest=null that the real open
+    // would then consume, showing a wrong CTA.
+    if (!userId) return;
+    InteractionManager.runAfterInteractions(() => {
+      for (let k = 0; k < 2; k++) {
+        const t = live[(index + k) % live.length];
+        if (!t) continue;
+        queryClient.prefetchQuery({
+          queryKey: tripsKeys.detail(t.id),
+          // Short gcTime: most prefetched trips are swiped past and never
+          // opened. Opening one mounts useTripCore, which extends its life.
+          gcTime: 1000 * 60 * 2,
+          queryFn: ({ signal }) => fetchTripCore(t.id, userId, signal),
+        });
+      }
+    });
+  }, [queryClient, userId]);
+
+  useEffect(() => {
+    if (!isLoading) warmAround(0);
+  }, [isLoading, resetKey, warmAround]);
+
+  // The stack loops, so "near the end" only means "ask for the next page if
+  // there is one" — once everything is loaded it simply wraps to the start.
+  const handleTopChange = useCallback((index: number) => {
+    warmAround(index);
+    if (isNearEnd(index, liveRef.current.trips.length) && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [warmAround, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // The card is sized to the space that is actually there: full design width
+  // on a normal phone, smaller on a short one so the whole stack still clears
+  // the floating nav bar.
+  const [area, setArea] = useState({ w: 0, h: 0 });
+  const cardW = area.w === 0
+    ? 0
+    : Math.max(
+        EX_CARD_MIN_W,
+        Math.min(
+          EX_CARD_MAX_W,
+          area.w - EX_SIDE_MARGIN * 2,
+          exploreCardWidthForHeight(area.h - EX_NAV_RESERVE - DECK_PEEK * 2),
+        ),
+      );
+
+  const renderCard = useCallback(
+    (trip: GroupTrip) => <ExploreTripCard trip={trip} meta={meta.get(trip.id)} />,
+    [meta],
+  );
+  const openTrip = useCallback((trip: GroupTrip) => onOpenTrip(trip.id), [onOpenTrip]);
+
+  let body: React.ReactNode = null;
   if (isError && trips.length === 0) {
-    return (
+    // Error on cold load (no cached data) — show retry instead of an empty
+    // state, which would mislead the user.
+    body = (
       <FadeInView style={styles.emptyState}>
         <Ionicons name="cloud-offline-outline" size={48} color="#B0B0B0" />
         <Text style={styles.emptyText}>Couldn't load trips. Check your connection.</Text>
@@ -1047,87 +873,74 @@ const ExploreTripsView: React.FC<{
         </TouchableOpacity>
       </FadeInView>
     );
-  }
-
-  // Empty only once we actually know the CATALOGUE is empty (not while loading,
-  // and not when a filter is what emptied the result — that's handled by the
-  // "No trips match these filters" branch below, which keeps the chips visible).
-  if (trips.length === 0 && !isLoading && !hasActiveFilter) {
-    return (
+  } else if (isLoading) {
+    body = (
+      <FadeInView>
+        <ExploreDeckSkeleton />
+      </FadeInView>
+    );
+  } else if (trips.length === 0) {
+    body = (
       <FadeInView style={styles.emptyState}>
         <Ionicons name="compass-outline" size={48} color="#B0B0B0" />
-        <Text style={styles.emptyText}>No group trips yet. Be the first to create one!</Text>
+        <Text style={styles.emptyText}>
+          {hasActiveFilter ? 'No trips match these filters.' : 'No trips yet. Check back soon.'}
+        </Text>
       </FadeInView>
+    );
+  } else if (cardW > 0) {
+    body = (
+      <ExploreSwipeDeck
+        items={trips}
+        cardWidth={cardW}
+        cardHeight={exploreCardHeight(cardW)}
+        renderCard={renderCard}
+        onOpen={openTrip}
+        onTopChange={handleTopChange}
+        getAccessibilityLabel={exploreCardLabel}
+        resetKey={resetKey}
+      />
     );
   }
 
-  // The title, filter chips and "Popular" heading are static (chips come from the
-  // device clock, not the DB) → render them immediately. Only the swipe-deck card
-  // shows a skeleton while trips load. "Trip Operators" narrows to operator-run
-  // trips (style 'C'). FadeInView wraps ONLY the skeleton branch so the 280ms entry
-  // animation plays during the initial cold load; when cache is warm we use a plain
-  // View. (rawTripsRef / isAppendingPage / handleLoadMore / operatorTrips are declared
-  // above the early returns — see the Rules-of-Hooks note.)
   return (
-    <View style={styles.fillFlex}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.exScrollContent}
-        onScroll={onNavScroll}
-        scrollEventThrottle={16}
-        refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={onPullRefresh} />}
+    <View style={styles.exRoot}>
+      <View style={styles.exTopRow}>
+        <Text style={styles.exploreTitle} numberOfLines={1}>Travel Better Together.</Text>
+        <TouchableOpacity
+          testID="explore-filter-button"
+          style={styles.exFilterBtn}
+          onPress={() => setFiltersOpen(true)}
+          activeOpacity={0.8}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={hasActiveFilter ? `Filters, ${selected.size} on` : 'Filters'}
+        >
+          <TripIcon name="settings-04" size={24} color="#212121" strokeWidth={1} />
+          {hasActiveFilter && (
+            <View style={styles.exFilterBadge}>
+              <Text style={styles.exFilterBadgeText}>{selected.size}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
+      <View
+        style={styles.exDeckArea}
+        onLayout={e => {
+          const { width, height } = e.nativeEvent.layout;
+          setArea(prev => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
+        }}
       >
-        <Text style={styles.exploreTitle}>Discover the world{'\n'}with Swellyo</Text>
-        <ExploreHeader
-          chips={chips}
-          selected={selected}
-          onToggle={toggleChip}
-          onClear={clearChips}
-        />
-        {isLoading ? (
-          <FadeInView>
-            <Text style={styles.exSectionTitle}>Popular</Text>
-            <ExploreDeckSkeleton />
-          </FadeInView>
-        ) : (
-          <>
-            <Text style={styles.exSectionTitle}>Popular</Text>
-            {filtered.length === 0 ? (
-              <View style={styles.filterEmpty}>
-                <Text style={styles.emptyText}>No trips match these filters.</Text>
-              </View>
-            ) : (
-              <>
-                <TripDeck
-                  trips={filtered}
-                  meta={meta}
-                  onOpenTrip={onOpenTrip}
-                  onUserScroll={onDeckScroll}
-                  onEndReachedNearby={handleLoadMore}
-                  loadingMore={isFetchingNextPage}
-                  userId={userId}
-                  isAppendingPage={isAppendingPage}
-                />
-                {operatorTrips.length > 0 && (
-                  <>
-                    <Text style={[styles.exSectionTitle, styles.exSectionTitleStacked]}>Trip Operators</Text>
-                    <TripDeck
-                      trips={operatorTrips}
-                      meta={meta}
-                      onOpenTrip={onOpenTrip}
-                      onUserScroll={onDeckScroll}
-                      onEndReachedNearby={handleLoadMore}
-                      loadingMore={isFetchingNextPage}
-                      userId={userId}
-                      isAppendingPage={isAppendingPage}
-                    />
-                  </>
-                )}
-              </>
-            )}
-          </>
-        )}
-      </ScrollView>
+        {body}
+      </View>
+      <ExploreFilterSheet
+        visible={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        chips={chips}
+        selected={selected}
+        onToggle={toggleChip}
+        onClear={clearChips}
+      />
     </View>
   );
 };
@@ -1149,12 +962,41 @@ const BUCKET_STATUS: Record<'approved' | 'pending' | 'past', TripCardStatus> = {
 const STAGGER_COUNT = 4;
 const STAGGER_MS = 55;
 
+const CreateTripCard: React.FC<{ onPress: () => void }> = ({ onPress }) => (
+  <TouchableOpacity
+    testID="trips-create-trip-card"
+    style={styles.createCard}
+    onPress={onPress}
+    activeOpacity={0.85}
+    accessibilityRole="button"
+    accessibilityLabel="Create a trip. For surf trip operating businesses."
+  >
+    <Image source={Images.createTrip.card} style={styles.createCardThumb} resizeMode="cover" />
+    <View style={styles.createCardRight}>
+      <View style={styles.createCardBody}>
+        <Text style={styles.createCardTitle}>Create a trip</Text>
+        <Text style={styles.createCardDesc}>
+          For surf trip operating businesses.{'\n'}Everything's set
+        </Text>
+      </View>
+      {/* Figma draws this plus at 1.5px on a 24 grid; the icon's own grid is
+          28, so the stroke is scaled to match (1.5 × 28 / 24). */}
+      <TripIcon name="plus" size={24} color="#05BCD3" strokeWidth={1.75} />
+    </View>
+  </TouchableOpacity>
+);
+
 const MyTripsView: React.FC<{
   userId: string | null;
-  onGoCreate: () => void;
+  /** Operators get the "Create a trip" card; everyone else is sent to Explore. */
+  isOperator: boolean;
+  /** False until we know whether they are an operator. */
+  operatorReady: boolean;
+  onCreateTrip: () => void;
+  onExplore: () => void;
   onOpenTrip: (tripId: string) => void;
   onNavScroll?: NavScrollHandler;
-}> = ({ userId, onGoCreate, onOpenTrip, onNavScroll }) => {
+}> = ({ userId, isOperator, operatorReady, onCreateTrip, onExplore, onOpenTrip, onNavScroll }) => {
   // Cached + stale-while-revalidate (see useExploreTrips). Re-entry is instant;
   // pull-to-refresh and post-create/edit invalidation drive background updates.
   const { data, isLoading, isFetching, refetch } = useMyTrips(userId);
@@ -1198,21 +1040,25 @@ const MyTripsView: React.FC<{
   ];
   const counts = {
     upcoming: buckets.approved.length,
-    requested: buckets.pending.length,
     completed: buckets.past.length,
   };
   const visible = filter === 'all' ? tagged : tagged.filter(x => x.status === filter);
 
-  if (isLoading) {
+  // The empty state has two different buttons, so hold the skeleton until we
+  // know which one — otherwise an operator sees "Explore trips" flash first.
+  if (isLoading || (tagged.length === 0 && !operatorReady)) {
     return <MyTripsSkeleton />;
   }
 
   if (tagged.length === 0) {
-    // Figma 14351:29403 — palm illustration, "No trips yet?" and a single
-    // accent CTA into the create flow.
+    // Figma 17029:25489 — palm illustration, "No trips yet?" and one accent
+    // button: operators create a trip, everyone else goes to Explore.
     return (
       <FadeInView style={styles.emptyWrap}>
-        <NoTripsEmptyState onCreate={onGoCreate} />
+        <NoTripsEmptyState
+          variant={isOperator ? 'create' : 'explore'}
+          onPress={isOperator ? onCreateTrip : onExplore}
+        />
       </FadeInView>
     );
   }
@@ -1231,6 +1077,7 @@ const MyTripsView: React.FC<{
       removeClippedSubviews
       ListHeaderComponent={
         <FadeInView>
+          {isOperator && <CreateTripCard onPress={onCreateTrip} />}
           <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
         </FadeInView>
       }
@@ -1271,13 +1118,13 @@ const MyTripsView: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
-// Tab pager — slide + cross-fade between the three tabs
+// Tab pager — slide + cross-fade between the two tabs
 // ---------------------------------------------------------------------------
-// Visual order MUST match the header bar (My Trips · Explore · Create) so the
-// slide direction matches where the user taps. All three panes stay mounted
+// Visual order MUST match the header bar (My Trips · Explore) so the
+// slide direction matches where the user taps. Both panes stay mounted
 // (preserves scroll + react-query state); we only translate the row and
 // cross-fade each pane as it crosses the viewport.
-const TAB_ORDER: TripsTab[] = ['my', 'explore', 'create'];
+const TAB_ORDER: TripsTab[] = ['my', 'explore'];
 const SLIDE_DURATION = 300; // occasional action → snappy (stays at/under ~300ms)
 const SLIDE_EASING = Easing.out(Easing.cubic); // strong ease-out (matches onboarding)
 
@@ -1334,7 +1181,6 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
   const [visited, setVisited] = useState<Record<TripsTab, boolean>>({
     explore: true,
     my: false,
-    create: false,
   });
 
   // --- Tab pager animation -------------------------------------------------
@@ -1354,14 +1200,6 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
   const navControl = navControlProp ?? ownNavControl;
   const handleMyNavScroll = useCallback<NavScrollHandler>(
     e => navControl.onVerticalScroll('my', e),
-    [navControl],
-  );
-  const handleExploreNavScroll = useCallback<NavScrollHandler>(
-    e => navControl.onVerticalScroll('explore', e),
-    [navControl],
-  );
-  const handleCreateNavScroll = useCallback<NavScrollHandler>(
-    e => navControl.onVerticalScroll('create', e),
     [navControl],
   );
 
@@ -1392,24 +1230,13 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
     tx.value = -activeIndex * bodyW;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bodyW]);
-  // Which hosting style the user picked from the inline chooser on the Create
-  // tab. null = chooser visible; non-null = wizard open in the create modal.
+  // The hosting style the wizard is open for. null = wizard closed. Only 'C'
+  // is reachable now — the "Create a trip" card on My Trips, operators only.
   const [pendingStyle, setPendingStyle] = useState<HostingStyle | null>(null);
   const [wizardStarted, setWizardStarted] = useState(false);
   // true when the wizard should load the saved draft (user tapped "Continue" on
   // the resume prompt). Reset to false for a fresh start.
   const [resumeDraft, setResumeDraft] = useState(false);
-
-  // Create chooser (Android): if the 3 role cards overflow the visible area they
-  // get cut off at the bottom. We measure the scroll viewport vs. the content's
-  // natural height and, only when it overflows, switch the cards to a compact
-  // layout so all three fit without scrolling. Screens where they already fit —
-  // iOS and tall Android — are left at their natural sizes. `naturalH` is
-  // recorded only while NOT compact, so it can't oscillate (compact→fits→un-compact).
-  const [chooserVpH, setChooserVpH] = useState(0);
-  const [chooserNaturalH, setChooserNaturalH] = useState(0);
-  const chooserCompact =
-    Platform.OS === 'android' && chooserVpH > 0 && chooserNaturalH > chooserVpH + 2;
 
   const createModalVisible = pendingStyle !== null;
 
@@ -1502,12 +1329,16 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
       <MainHeader
         userId={currentUserId}
         title={<Text style={styles.tripsHeaderTitle}>Trips</Text>}
+        // Figma bar is 59px (17779:51132), not the default 60. The pixel comes
+        // off the bottom so the logo + bell stay level with The Lineup's.
+        spaceBelow={7}
         below={<TripsHeaderTabs active={activeTab} onChange={goToTab} />}
       />
 
-      {/* Above the pager, so it shows on all three tabs — see the component
-          header for why it is not confined to Create. */}
-      {operatorSetup.needsSetup && (
+      {/* My Trips only. That is where the "Create a trip" card it gates lives,
+          and on Explore its ~105px would push the card stack under the nav
+          bar (the stack cannot scroll — it is swiped in every direction). */}
+      {operatorSetup.needsSetup && activeTab === 'my' && (
         <OperatorSetupBanner
           summary={operatorSetup.summary}
           total={operatorSetup.steps.length}
@@ -1526,7 +1357,10 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
             {visited.my ? (
               <MyTripsView
                 userId={currentUserId}
-                onGoCreate={() => goToTab('create')}
+                isOperator={operatorSetup.isOperator}
+                operatorReady={operatorSetup.isReady}
+                onCreateTrip={() => void onPickStyle('C')}
+                onExplore={() => goToTab('explore')}
                 onOpenTrip={openTrip}
                 onNavScroll={handleMyNavScroll}
               />
@@ -1536,83 +1370,10 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
           {/* index 1 — Explore */}
           <TabPane index={1} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
             {visited.explore ? (
-              <ExploreTripsView
-                onOpenTrip={openTrip}
-                onNavScroll={handleExploreNavScroll}
-                onDeckScroll={navControl.collapse}
-                userId={currentUserId}
-              />
+              <ExploreTripsView onOpenTrip={openTrip} userId={currentUserId} />
             ) : null}
           </TabPane>
 
-          {/* index 2 — Create */}
-          <TabPane index={2} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
-            {visited.create ? (
-              <View style={styles.createRoot}>
-                {/* Background photo (Frame 2511): height exactly fills the area
-                    between the header and the bottom of the screen. */}
-                <View style={styles.createBgWrap} pointerEvents="none">
-                  <Image
-                    source={Images.createTrip.background}
-                    style={styles.createBgImage}
-                    resizeMode="cover"
-                  />
-                </View>
-
-                <ScrollView
-                  contentContainerStyle={[styles.chooserScroll, chooserCompact && styles.chooserScrollCompact]}
-                  showsVerticalScrollIndicator={false}
-                  onScroll={handleCreateNavScroll}
-                  scrollEventThrottle={16}
-                  onLayout={e => setChooserVpH(e.nativeEvent.layout.height)}
-                  onContentSizeChange={(_w, h) => {
-                    // Record the natural (uncompressed) content height only while
-                    // NOT compact — see chooserCompact note above.
-                    if (!chooserCompact) setChooserNaturalH(h);
-                  }}
-                >
-                  <Text
-                    style={[styles.chooserHeading, chooserCompact && styles.chooserHeadingCompact]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                  >
-                    Create a surf trip
-                  </Text>
-                  <Text style={[styles.chooserSubheading, chooserCompact && styles.chooserSubheadingCompact]}>
-                    Plan your next adventure and invite{'\n'}surfers to join you
-                  </Text>
-                  {HOSTING_STYLE_OPTIONS.map(opt => (
-                    <TouchableOpacity
-                      key={opt.key}
-                      style={[styles.chooserCard, chooserCompact && styles.chooserCardCompact]}
-                      onPress={() => void onPickStyle(opt.key)}
-                      activeOpacity={0.85}
-                      accessibilityRole="button"
-                      accessibilityLabel={`${opt.title}. ${opt.desc}`}
-                    >
-                      <Image
-                        source={opt.image}
-                        style={[styles.chooserThumb, chooserCompact && styles.chooserThumbCompact]}
-                        resizeMode="cover"
-                      />
-                      <View style={styles.chooserBody}>
-                        <Text style={styles.chooserCardTitle}>{opt.title}</Text>
-                        <Text style={[styles.chooserCardDesc, chooserCompact && styles.chooserCardDescCompact]}>
-                          {opt.desc}
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name="chevron-forward"
-                        size={24}
-                        color="#7B7B7B"
-                        style={styles.chooserChevron}
-                      />
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            ) : null}
-          </TabPane>
         </Reanimated.View>
       </View>
 
@@ -1689,23 +1450,27 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
+  // Figma "Menu tags" (17779:51132): each tab is 42px tall — 12 + 18 label + 12.
+  // The underline is drawn INSIDE that 42 in Figma, but a border adds to the
+  // box here, so each state takes its border off the bottom padding. Without
+  // that (and with the old 4px row padding) the header came out 8px too tall.
   tabsRow: {
     flexDirection: 'row',
-    paddingTop: 4,
   },
   tabBtn: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 12,
-    paddingBottom: 12,
     paddingHorizontal: 8,
   },
   tabBtnActive: {
+    paddingBottom: 8,
     borderBottomWidth: 4,
     borderBottomColor: '#05BCD3',
   },
   tabBtnInactive: {
+    paddingBottom: 10,
     borderBottomWidth: 2,
     borderBottomColor: '#7B7B7B',
   },
@@ -1718,92 +1483,107 @@ const styles = StyleSheet.create({
   // slides between them. Width is set inline once the viewport is measured.
   pagerRow: { flex: 1, flexDirection: 'row' },
 
-  // Explore section title (Figma — Montserrat 24/600, 140% line-height).
-  exploreTitle: {
-    fontFamily: ff('Montserrat', '600'),
-    fontSize: fs(24),
-    fontWeight: Platform.OS === 'web' ? '600' : undefined,
-    includeFontPadding: false,
-    lineHeight: 32,
-    color: '#333',
-    paddingHorizontal: 16,
-    marginTop: 24,
+  // Explore (Figma 17779:50970): title + filter button, then the card stack.
+  exRoot: { flex: 1, backgroundColor: '#FAFAFA' },
+  exTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 20,
+    marginTop: 22,
     marginBottom: 16,
   },
-
-  // Explore body scroll (stacked carousels) + header.
-  // Bottom padding clears the floating nav bar (bar ~82 + 44 bottom gap),
-  // so the last deck/card scrolls fully above it.
-  exScrollContent: { paddingBottom: 150 },
-  exHeader: { paddingTop: 14 },
-  // "Popular" section label above the trips carousel (Figma 11966:32390).
-  exSectionTitle: {
-    fontFamily: ff('Montserrat', '700'),
-    fontSize: fs(18),
+  // Inter Bold 20/24. The node is Body/M B-1, but its Size/lg resolves to 20
+  // on this layer, not the 16 the style has elsewhere — measured on the render.
+  exploreTitle: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: fs(20),
+    lineHeight: 24,
     fontWeight: Platform.OS === 'web' ? '700' : undefined,
     includeFontPadding: false,
-    lineHeight: 24,
     color: '#333333',
-    paddingLeft: 16,
-    marginTop: 14,
-    marginBottom: 26,
+    flexShrink: 1,
   },
-  exSectionTitleStacked: { marginTop: 24 },
-  exFilterRow: {
-    flexDirection: 'row',
-    gap: 11,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  exFilterPill: {
-    minWidth: 38,
-    borderRadius: 11,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+  exFilterBtn: {
+    width: 48,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  exFilterPillActive: { backgroundColor: '#212121' },
-  exFilterPillInactive: {
-    backgroundColor: '#F7F7F7',
-    borderWidth: 1,
-    borderColor: '#EEEEEE',
+  exFilterBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#FF5367',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  exFilterTextActive: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: fs(12),
-    lineHeight: 16,
+  exFilterBadgeText: { ...textStyles.B3, lineHeight: 16, color: '#FFFFFF' },
+  exDeckArea: { flex: 1, alignItems: 'center' },
+
+  // Explore filter sheet.
+  fsSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 16,
+  },
+  fsHandleWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 14 },
+  fsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E4E4E4' },
+  fsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  fsTitle: { ...textStyle('MB1', '700'), color: '#333333' },
+  fsClear: { ...textStyles.MB2, color: '#05BCD3' },
+  fsGroup: { ...textStyle('B3', '700'), color: '#7B7B7B', marginTop: 20, marginBottom: 10 },
+  fsChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  fsChip: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  fsChipActive: { backgroundColor: '#212121', borderWidth: 1, borderColor: '#212121' },
+  fsChipInactive: { backgroundColor: '#F7F7F7', borderWidth: 1, borderColor: '#EEEEEE' },
+  fsChipText: { ...textStyles.B3 },
+  fsChipTextActive: { color: '#FFFFFF' },
+  fsChipTextInactive: { color: '#333333' },
+  fsDone: {
+    marginTop: 28,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: '#212121',
+  },
+  fsDoneText: {
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: fs(fontSize.lg),
+    lineHeight: 22,
+    fontWeight: Platform.OS === 'web' ? '600' : undefined,
     includeFontPadding: false,
     color: '#FFFFFF',
   },
-  exFilterTextInactive: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: fs(12),
-    lineHeight: 16,
-    includeFontPadding: false,
-    color: '#333333',
-  },
 
-  // paddingBottom clears the floating nav bar (see exScrollContent)
+
   listContent: { paddingHorizontal: 16, paddingBottom: 150, flexGrow: 1 },
 
-  // Filter pills (My Trips). All four must fit on one row without scrolling:
-  // chips shrink (flexShrink) and the label auto-fits its font (adjustsFontSizeToFit)
-  // on narrow screens, so nothing overflows or truncates.
+  // Filter pills (My Trips, Figma 17029:25735): three hug-width pills packed to
+  // the left, 11 apart. Each is 33 tall — 8 + 17 line + 8.
   filterRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: 22,
     marginBottom: 28,
     marginHorizontal: 6,
-    gap: 6,
+    gap: 11,
   },
   filterPill: {
-    flexShrink: 1,
+    minWidth: 42,
     borderRadius: 12,
-    paddingHorizontal: 9,
-    paddingVertical: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1813,15 +1593,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#EEEEEE',
   },
-  filterText: { fontFamily: ff('Inter', '400'), fontSize: fs(12), lineHeight: 16, textAlign: 'center', includeFontPadding: false },
+  // Body/B-4 — Size/xs resolves to 10 on the pill instances (17029:25736/7).
+  filterText: { fontFamily: ff('Inter', '400'), fontSize: fs(10), lineHeight: 17, textAlign: 'center', includeFontPadding: false },
   filterTextActive: { color: '#FFFFFF' },
   filterTextInactive: { color: '#333333' },
   filterEmpty: { alignItems: 'center', justifyContent: 'center', paddingVertical: 48 },
 
   // Trip card (Figma): photo with overlaid host/title/avatars + status badge.
+  // Figma 17029:25623: 350 wide on a 393 frame, 10 of padding round the photo.
   card: {
     backgroundColor: '#FFFFFF',
     borderRadius: 32,
+    padding: 10,
+    marginHorizontal: 5,
     marginBottom: 16,
     gap: 12,
     shadowColor: '#000000',
@@ -1851,21 +1635,18 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   hostAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 1.5,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
     borderColor: '#FFFFFF',
     backgroundColor: '#3A3A3A',
   },
   hostAvatarPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   hostName: {
     flex: 1,
-    fontFamily: ff('Inter', '600'),
+    ...textStyles.MB2,
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: Platform.OS === 'web' ? '600' : 700,
-    includeFontPadding: false,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -1876,8 +1657,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 96,
-    justifyContent: 'flex-end',
+    // The glass hugs its text (Figma 14382:56288): 88 tall with a one-line
+    // description, taller when the description wraps. It was a fixed 120 before,
+    // so a short card had ~32px of empty glass above the title.
+    minHeight: 88,
     overflow: 'hidden',
   },
   // Black tint over the blur (Figma glass: rgba(0,0,0,0.2) + the blur's 0.1).
@@ -1893,7 +1676,6 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   cardTextContent: {
-    justifyContent: 'flex-end',
     paddingTop: 8,
     paddingRight: 16,
     paddingBottom: 24,
@@ -1901,22 +1683,15 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cardTitle: {
-    fontFamily: ff('Montserrat', '700'),
+    ...textStyles.H4,
     color: '#FFFFFF',
-    fontSize: fs(25),
-    lineHeight: 34,
-    fontWeight: Platform.OS === 'web' ? '700' : undefined,
-    includeFontPadding: false,
     textShadowColor: 'rgba(0,0,0,0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   },
   cardDesc: {
-    fontFamily: ff('Inter', '400'),
+    ...textStyles.MB2,
     color: '#FFFFFF',
-    fontSize: fs(15),
-    lineHeight: 20,
-    includeFontPadding: false,
     // Reserve room for the bottom-right participant cluster so the description
     // truncates a touch earlier instead of running behind the badge. The title
     // sits above the cluster, so only the description needs the inset.
@@ -1928,20 +1703,22 @@ const styles = StyleSheet.create({
 
   avatarCluster: {
     position: 'absolute',
-    right: 12,
-    bottom: 14,
+    right: 11,
+    bottom: 11,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F7F7F7',
     borderRadius: 56,
-    paddingVertical: 0,
-    paddingLeft: 0,
-    paddingRight: 7,
+    borderWidth: 1,
+    borderColor: '#CFCFCF',
+    paddingVertical: 1,
+    paddingLeft: 1,
+    paddingRight: 8,
   },
   clusterAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#DDDDDD',
     borderWidth: 1,
     borderColor: '#FFFFFF',
@@ -1951,17 +1728,15 @@ const styles = StyleSheet.create({
     shadowRadius: 2.5,
     elevation: 3,
   },
-  clusterAvatarOverlap: { marginLeft: -20 },
+  clusterAvatarOverlap: { marginLeft: -16 },
   avatarClusterTight: { paddingRight: 0 },
   avatarClusterCount: { gap: 4, paddingLeft: 8 },
+  // Headings/H-7 for size and line height (12/16); the layer overrides the
+  // weight to Regular.
   clusterMore: {
-    marginLeft: 1,
-    fontFamily: ff('Montserrat', '400'),
-    fontSize: fs(14),
-    lineHeight: 18,
+    marginLeft: 2,
+    ...textStyle('H7', '400'),
     color: '#7B7B7B',
-    fontWeight: '400',
-    includeFontPadding: false,
   },
 
   statusBadge: {
@@ -1985,86 +1760,109 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingRight: 8,
+    gap: 8,
   },
-  statusLabel: { fontFamily: ff('Inter', '500'), color: '#0A0A0A', fontSize: fs(13), lineHeight: 19, fontWeight: Platform.OS === 'web' ? '500' : undefined, includeFontPadding: false },
-  statusDate: { fontFamily: ff('Inter', '500'), color: '#4A5565', fontSize: fs(13), lineHeight: 19, fontWeight: Platform.OS === 'web' ? '500' : undefined, includeFontPadding: false },
+  statusLabel: { ...textStyles.B3, color: '#0A0A0A' },
+  statusDate: { ...textStyles.B3, color: '#4A5565', flexShrink: 1 },
 
-  // Explore snap-carousel (Figma 11966:32391) — centered card, peeking neighbours.
-  deckRoot: {
-    height: DECK_CARD_H + 12,
-    justifyContent: 'flex-start',
+  // Explore card (Figma 17779:51085): white frame, photo, host + price row.
+  exFrame: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
+    padding: EX_FRAME_PAD,
+    gap: EX_FRAME_PAD,
+    shadowColor: '#3E3E3E',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6,
   },
-  deckContent: {
-    alignItems: 'flex-start',
-  },
-  deckSlot: {
-    width: DECK_ITEM_W,
-    height: DECK_CARD_H,
+  exImage: { flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: '#F2F2F2' },
+  exPills: { position: 'absolute', top: 20, left: 8, right: 8, flexDirection: 'row', gap: 8 },
+  // Figma 17779:51090 — 33 tall: 8 + the 17 line + 8.
+  exPill: {
+    backgroundColor: 'rgba(255,255,255,0.6)',
+    borderRadius: 32,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  deckCard: {
-    width: DECK_CARD_W,
-    height: DECK_CARD_H,
-  },
-
-  // Explore card — single full-bleed image with overlaid info (Figma 12506:16019).
-  exCard: {
-    width: '100%',
-    aspectRatio: 328 / 384,
-    borderRadius: 24,
     overflow: 'hidden',
-    marginBottom: 16,
-    backgroundColor: '#F2F2F2',
+    flexShrink: 1,
   },
-  tripTypePill: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  // Body/M B-2 — Size/md (14px), weight 400, line-height Size/xl (18).
-  tripTypeLabel: { fontFamily: ff('Inter', '400'), fontSize: fs(14), lineHeight: 18, fontWeight: Platform.OS === 'web' ? '400' : undefined, includeFontPadding: false },
-  exBottom: {
+  exPillText: { ...textStyles.B4, color: '#333333' },
+  exPanel: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
+    height: '39%',
+    justifyContent: 'flex-end',
     overflow: 'hidden',
   },
-  exContent: {
-    paddingTop: 8,
-    paddingRight: 16,
-    paddingBottom: 24,
-    paddingLeft: 16,
-    gap: 12,
+  exPanelContent: { paddingLeft: 20, paddingRight: 16, paddingVertical: 16, gap: 9 },
+  exRoute: { gap: 4 },
+  // "H6.2" in Figma — Inter Bold 20/24, a fixed size with no Size/* variable.
+  exTitle: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: fs(20),
+    lineHeight: 24,
+    fontWeight: Platform.OS === 'web' ? '700' : undefined,
+    includeFontPadding: false,
+    color: '#FFFFFF',
   },
-  exHeadings: { gap: 1 },
-  exInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  exInfoLeft: { gap: 8, flexShrink: 1, marginTop: 6 },
-  exPrice: { fontFamily: ff('Inter', '600'), color: '#FFFFFF', fontSize: fs(22), lineHeight: 26, fontWeight: Platform.OS === 'web' ? '600' : undefined, includeFontPadding: false },
-  exDates: { fontFamily: ff('Inter', '400'), color: '#FFFFFF', fontSize: fs(17), lineHeight: 24, includeFontPadding: false },
-  exInfoRight: { alignItems: 'flex-end', gap: 8 },
-  exSpots: { fontFamily: ff('Inter', '400'), color: '#FFFFFF', fontSize: fs(15), lineHeight: 20, fontWeight: '400', includeFontPadding: false },
+  exLocation: { ...textStyles.MB2, color: '#FFFFFF' },
+  exDateRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  exDates: { ...textStyles.MB1, color: '#FFFFFF', flexShrink: 1 },
   exCluster: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F7F7F7',
     borderRadius: 56,
-    paddingVertical: 0,
-    paddingLeft: 0,
+    paddingLeft: 1,
+    paddingVertical: 1,
     paddingRight: 8,
+  },
+  exClusterAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#DDDDDD' },
+  exClusterOverlap: { marginLeft: -16 },
+  // Headings/H-7 for size and line height (12/16), but the layer overrides the
+  // weight to Regular — the style alone would draw it bold.
+  exClusterCount: { ...textStyle('H7', '400'), color: '#7B7B7B', marginLeft: 4 },
+  exInfo: {
+    height: EX_INFO_H,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingTop: 8,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+  },
+  exHost: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  exHostAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    backgroundColor: '#B0B0B0',
+  },
+  exHostText: { flexShrink: 1 },
+  exHostLabel: { ...textStyle('B3', '700'), color: '#333333' },
+  exHostName: { ...textStyles.MB2, color: '#333333' },
+  // "H3.2" in Figma — Inter Bold, Size/3xl, line height 24.
+  exPrice: {
+    fontFamily: ff('Inter', '700'),
+    fontSize: fs(fontSize['3xl']),
+    lineHeight: 28,
+    fontWeight: Platform.OS === 'web' ? '700' : undefined,
+    includeFontPadding: false,
+    color: '#333333',
+    // A price range is wide; it may shrink its font, but not squeeze the host
+    // name down to an initial.
+    maxWidth: '58%',
+    textAlign: 'right',
   },
 
   fillFlex: { flex: 1 },
@@ -2083,127 +1881,34 @@ const styles = StyleSheet.create({
   // illustration + CTA sit centred.
   emptyWrap: { flex: 1 },
 
-  // Inline hosting-style chooser (moved out of CreateTripWizard).
-  createRoot: { flex: 1 },
-  createBgWrap: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-    alignItems: 'center',
-  },
-  // Fills the area between the header and the screen bottom edge-to-edge;
-  // the photo's ratio is nearly identical to the phone's content area, so
-  // `cover` crops imperceptibly.
-  createBgImage: {
-    width: '100%',
-    height: '100%',
-    transform: [{ translateY: 20 }],
-  },
-  chooserScroll: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 32,
-  },
-  // Compact overrides (Android only, applied when the 3 cards would overflow):
-  // trims vertical whitespace + slightly smaller thumb / line-height so all
-  // three fit without scrolling. No font-size or text truncation changes.
-  chooserScrollCompact: {
-    paddingTop: 4,
-    paddingBottom: 14,
-  },
-  chooserHeading: {
-    fontFamily: ff('Inter', '600'),
-    // Native: big starting size; adjustsFontSizeToFit shrinks it so the single
-    // line always spans the 60%-width container. Web has no font auto-fit, so
-    // it gets a fixed size that fits one line on typical widths.
-    fontSize: Platform.OS === 'web' ? 36 : 24,
-    // Weight is baked into the family on native (Inter-SemiBold). Setting
-    // fontWeight there makes Android synth-bold on top → heavier than iOS. So
-    // only web (which uses the CSS family) needs the numeric weight.
-    fontWeight: Platform.OS === 'web' ? '600' : 700,
-    // Android adds extra vertical font padding by default → text block reads
-    // bigger than iOS. Remove it (no-op on iOS/web) so sizing matches.
-    includeFontPadding: false,
-    color: '#333333',
-    width: '64%',
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  chooserHeadingCompact: {
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  chooserSubheading: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '400',
-    includeFontPadding: false,
-    color: '#333333',
-    marginBottom: 32,
-  },
-  chooserSubheadingCompact: {
-    marginBottom: 14,
-  },
-  chooserCard: {
+  // "Create a trip" card on My Trips — operators only (Figma 17779:50948).
+  createCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
     minHeight: 94,
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#2BCCBD',
     paddingLeft: 12,
     paddingRight: 6,
     paddingVertical: 12,
-    marginBottom: 16,
+    marginTop: 22,
+    // With the filter row's own top margin this is the 30 Figma leaves below.
+    marginBottom: 8,
     shadowColor: '#596E7C',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 3,
   },
-  chooserCardCompact: {
-    minHeight: 80,
-    marginBottom: 10,
-    paddingVertical: 9,
-  },
-  chooserThumb: {
-    width: 84,
-    height: 70,
-    borderRadius: 8,
-    backgroundColor: '#EEF2F4',
-  },
-  chooserThumbCompact: {
-    width: 76,
-    height: 62,
-  },
-  chooserBody: {
-    flex: 1,
-    gap: 4,
-  },
-  chooserCardTitle: {
-    fontFamily: ff('Inter', '700'),
-    fontSize: fs(18),
-    lineHeight: 22,
-    // Native weight is baked into Inter-Bold; a numeric fontWeight would make
-    // Android synth-bold on top (heavier than iOS). Web needs it though.
-    fontWeight: Platform.OS === 'web' ? '700' : undefined,
-    includeFontPadding: false,
-    color: '#333333',
-  },
-  chooserCardDesc: {
-    fontFamily: ff('Inter', '400'),
-    fontSize: fs(12),
-    lineHeight: 18,
-    fontWeight: '400',
-    includeFontPadding: false,
-    color: '#333333',
-  },
-  chooserCardDescCompact: {
-    lineHeight: 16,
-  },
-  chooserChevron: {
-    marginRight: 4,
-  },
+  createCardThumb: { width: 84, height: 70, borderRadius: 8, backgroundColor: '#EEF2F4' },
+  // Text and plus sit 8 apart; the photo is 16 from them (the card's gap).
+  createCardRight: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 4 },
+  createCardBody: { flex: 1, gap: 8 },
+  createCardTitle: { ...textStyle('MB2', '700'), color: '#333333' },
+  createCardDesc: { ...textStyles.B3, color: '#333333' },
 
   modalRoot: { flex: 1, backgroundColor: '#FFFFFF' },
   modalHeader: {

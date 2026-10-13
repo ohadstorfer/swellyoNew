@@ -6,7 +6,10 @@ import { Images } from '../../assets/images';
 
 /**
  * Empty state for the Trips tab › My Trips — shown when the user is in no trips.
- * Figma: Frame 39420 (14351:29403).
+ * Figma: 17029:25489.
+ *
+ * Two variants, one layout. Only operators can create a trip, so everyone else
+ * gets the same button pointing at Explore instead.
  *
  * Sizes come from the Figma variables (Headings/M H-3 = Montserrat Bold 24/1.2,
  * Body/B-3 = Inter 400 12/18), NOT from the flattened px in the code export.
@@ -32,7 +35,26 @@ function PlusCircleIcon() {
   );
 }
 
-export default function NoTripsEmptyState({ onCreate }: { onCreate: () => void }) {
+const COPY = {
+  create: {
+    body: 'Create or join a trip and start your surf adventure.',
+    button: 'Create your first trip',
+    testID: 'trips-empty-create-button',
+  },
+  explore: {
+    body: 'Join a trip and start your surf adventure.',
+    button: 'Explore trips',
+    testID: 'trips-empty-explore-button',
+  },
+} as const;
+
+interface NoTripsEmptyStateProps {
+  variant: keyof typeof COPY;
+  onPress: () => void;
+}
+
+export default function NoTripsEmptyState({ variant, onPress }: NoTripsEmptyStateProps) {
+  const copy = COPY[variant];
   return (
     <View style={styles.container}>
       <Image
@@ -46,20 +68,20 @@ export default function NoTripsEmptyState({ onCreate }: { onCreate: () => void }
           <Text style={styles.title}>No trips yet?</Text>
           <Text style={styles.body}>
             Your next wave is waiting.{'\n'}
-            Create or join a trip and start your surf adventure.
+            {copy.body}
           </Text>
         </View>
 
         <TouchableOpacity
-          testID="trips-empty-create-button"
+          testID={copy.testID}
           style={styles.button}
           activeOpacity={0.9}
-          onPress={onCreate}
+          onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel="Create your first trip"
+          accessibilityLabel={copy.button}
         >
-          <PlusCircleIcon />
-          <Text style={styles.buttonText}>Create your first trip</Text>
+          {variant === 'create' && <PlusCircleIcon />}
+          <Text style={styles.buttonText}>{copy.button}</Text>
         </TouchableOpacity>
       </View>
     </View>

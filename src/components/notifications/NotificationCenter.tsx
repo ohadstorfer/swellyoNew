@@ -49,6 +49,7 @@ import { StaffInviteAcceptSheet } from '../trips/StaffInviteAcceptSheet';
 import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
+import { TripIcon } from '../trips/tripIcons';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 interface Props {
@@ -56,6 +57,9 @@ interface Props {
   userId: string | null;
   /** Render a bare bell (no dark circle) to sit next to other plain header icons. */
   bare?: boolean;
+  /** Over a photo instead of the dark header: a dark 24px bell in a round
+   *  translucent-white button (the trip cover's buttons). */
+  onCover?: boolean;
 }
 
 interface PanelProps {
@@ -68,6 +72,9 @@ interface PanelProps {
    * trip lands on the still-open panel.
    */
   onOpenTrip?: (tripId: string, focus?: TripDetailFocus) => void;
+  /** Tap on the skipped-destinations reminder: the profile editor, on its
+   *  destinations section. */
+  onOpenProfileDestinations?: () => void;
 }
 
 // Strong ease-out (emil): starts fast, feels responsive.
@@ -95,7 +102,7 @@ type Decision = 'approved' | 'declined';
  * Self-contained: owns its badge fetch + realtime subscription. Must render
  * inside a navigator screen (all headers are).
  */
-export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) => {
+export const NotificationCenter: React.FC<Props> = ({ userId, bare = false, onCover = false }) => {
   const [unread, setUnread] = useState(0);
 
   // Badge count: on mount, on every focus regain (the panel marks rows read
@@ -138,13 +145,20 @@ export const NotificationCenter: React.FC<Props> = ({ userId, bare = false }) =>
   return (
     <TouchableOpacity
       testID="notifications-bell-button"
-      style={bare ? [styles.bellButton, styles.bellButtonBare] : styles.bellButtonLineup}
+      style={
+        onCover
+          ? styles.bellButtonCover
+          : bare
+            ? [styles.bellButton, styles.bellButtonBare]
+            : styles.bellButtonLineup
+      }
       onPress={openPanel}
       activeOpacity={0.7}
       accessibilityLabel="Notifications"
       accessibilityRole="button"
     >
-      <Ionicons name="notifications-outline" size={30} color="#FFFFFF" />
+      {/* Figma's own bell (17001:19242) — 24px, 1.5px stroke. */}
+      <TripIcon name="notifications" size={24} color={onCover ? '#222B30' : '#FFFFFF'} strokeWidth={1.5} />
       {unread > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
@@ -169,6 +183,8 @@ const TRIPLESS_PRESSABLE: ReadonlySet<string> = new Set([
   // its whole job is to be tapped — the screen it opens is where the operator
   // reopens Stripe.
   'operator_stripe_action_needed',
+  // About the profile, not a trip — tapping it is how they add a destination.
+  'profile_destinations_missing',
 ]);
 
 function isPressableRow(n: NotificationRow, canOpenTrip: boolean): boolean {
@@ -183,7 +199,12 @@ function isPressableRow(n: NotificationRow, canOpenTrip: boolean): boolean {
  * wired to groupTripsService. Trips opened from rows push ON TOP — back
  * returns here.
  */
-export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOpenTrip }) => {
+export const NotificationsPanel: React.FC<PanelProps> = ({
+  userId,
+  onClose,
+  onOpenTrip,
+  onOpenProfileDestinations,
+}) => {
   const insets = useSafeAreaInsets();
 
   const [items, setItems] = useState<NotificationRow[]>([]);
@@ -368,10 +389,16 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
         pushRootCard('OperatorSetup', undefined);
         return;
       }
+      // Skipped destinations → the profile editor, on the destinations
+      // section, where the "add" button is.
+      if (n.type === 'profile_destinations_missing') {
+        onOpenProfileDestinations?.();
+        return;
+      }
       if (!onOpenTrip || !n.trip_id) return;
       onOpenTrip(n.trip_id, tripFocusForNotification(n.type, n.data));
     },
-    [onOpenTrip]
+    [onOpenTrip, onOpenProfileDestinations]
   );
 
   // The decision just changed trip state behind react-query's back — refresh any
@@ -573,7 +600,7 @@ export const NotificationsPanel: React.FC<PanelProps> = ({ userId, onClose, onOp
               <View style={styles.headerSpacer} />
               {/* Decorative — mirrors the bell that opened this panel (matches Figma). */}
               <View style={styles.headerBell} pointerEvents="none">
-                <Ionicons name="notifications-outline" size={24} color="#FFFFFF" />
+                <TripIcon name="notifications" size={24} color="#FFFFFF" strokeWidth={1.5} />
                 <View style={styles.headerBellDot} />
               </View>
             </View>
@@ -983,6 +1010,12 @@ const styles = StyleSheet.create({
   // Bell matches the existing headerButton (36x36 #333 circle).
   bellButtonBare: {
     backgroundColor: 'transparent',
+  },
+  // Figma 17488:27984 — 24px icon, 10 padding, white at 70%.
+  bellButtonCover: {
+    padding: 10,
+    borderRadius: 48,
+    backgroundColor: 'rgba(255,255,255,0.7)',
   },
   bellButton: {
     width: 36,
