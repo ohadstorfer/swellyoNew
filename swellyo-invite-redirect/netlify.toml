@@ -17,13 +17,44 @@
 [build]
   publish = "."
 
+# ---------------------------------------------------------------------------
+# The association files are served from `well-known/` (NO leading dot) and
+# rewritten onto the real `/.well-known/` paths below.
+#
+# Why: the dot-folder was in git and the deploy was current, yet both files
+# 404'd in production while /swellyo-logo.png (same directory, same commit)
+# served fine — the dot-folder never made it into the deployed bundle. Universal
+# Links and App Links were dead for every invite link as a result. A normal
+# directory cannot be silently dropped by a folder upload, so the dot-folder is
+# no longer load-bearing. It is kept on disk only as a fallback.
+#
+# status = 200 is a REWRITE, not a redirect. Apple refuses an AASA served behind
+# a 3xx; a rewrite is invisible to the client, which sees a plain 200.
+# force = true makes the rewrite win even if the dot-folder does get deployed,
+# so there is exactly one source of truth.
+# ---------------------------------------------------------------------------
+[[redirects]]
+  from = "/.well-known/apple-app-site-association"
+  to = "/well-known/apple-app-site-association"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/.well-known/assetlinks.json"
+  to = "/well-known/assetlinks.json"
+  status = 200
+  force = true
+
 # Rewrites the link-preview (Open Graph) tags per trip. For ?grouptrip=<id>
 # links it swaps the default Swellyo logo for that trip's cover photo + title;
-# everything else (and real users) pass through untouched. Needs the
-# SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars set on this Netlify site.
-[[edge_functions]]
-  path = "/"
-  function = "invite-preview"
+# everything else (and real users) pass through untouched.
+#
+# og-inject registers itself through its own inline `config.path = "/"`, so it
+# needs no declaration here. It uses the anon key + the
+# get_group_trip_invite_preview RPC, which filters cancelled/private trips.
+# The old `invite-preview` function was deleted: it selected destination_country
+# and destination_area, dropped by migration 20260531000002, so it 400'd on
+# every request and always fell through to the default logo preview.
 
 [[headers]]
   for = "/.well-known/apple-app-site-association"
@@ -32,5 +63,17 @@
 
 [[headers]]
   for = "/.well-known/assetlinks.json"
+  [headers.values]
+    Content-Type = "application/json"
+
+# The rewrite targets need the same content type — headers are matched against
+# the path actually served, which for a rewrite is the destination path.
+[[headers]]
+  for = "/well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+
+[[headers]]
+  for = "/well-known/assetlinks.json"
   [headers.values]
     Content-Type = "application/json"

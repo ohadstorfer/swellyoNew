@@ -41,6 +41,21 @@
         <data android:scheme="swellyo"/>
         <data android:scheme="exp+swellyo"/>
       </intent-filter>
+      <!-- Android App Links for invite links (group trip, surftrip, crew).
+           Mirrors `android.intentFilters` in app.json, which on its own does
+           NOTHING here: the production EAS profile replaces prebuildCommand
+           with an echo (eas.json), so these committed native folders ship
+           as-is and app.json's filters are never generated. Without this
+           block every invite link opened in Chrome instead of the app.
+           autoVerify makes Android fetch
+           https://swellyo-invite.netlify.app/.well-known/assetlinks.json —
+           keep the SHA-256 fingerprints there in step with the signing keys. -->
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="swellyo-invite.netlify.app"/>
+      </intent-filter>
       <intent-filter>
         <action android:name="android.intent.action.SEND"/>
         <category android:name="android.intent.category.DEFAULT"/>

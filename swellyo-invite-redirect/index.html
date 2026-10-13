@@ -131,61 +131,140 @@
       var PLAY_STORE = "https://play.google.com/store/apps/details?id=com.swellyo.app";
       var MARKETING  = "https://www.swellyo.com";
 
-      var ua = (navigator.userAgent || "").toLowerCase();
-      var isIOS = /iphone|ipad|ipod/.test(ua);
-      var isAndroid = /android/.test(ua);
+      // How long to wait for the app to take over before giving up on it.
+      var SCHEME_WAIT_MS = 1500;
+      // If we cancelled the fallback (page blurred) but the user is still
+      // looking at this page some time later, the app never actually opened.
+      var REARM_WAIT_MS = 1200;
+      // Nothing resolved at all — never leave the user on a spinner forever.
+      var HARD_TIMEOUT_MS = 8000;
 
-      // Forward the surftrip params from this URL into the app via the
-      // custom scheme. The native Linking listener (AppContent.tsx) parses
-      // the query string and resolves the invite.
+      var ua = navigator.userAgent || "";
+      var uaLower = ua.toLowerCase();
+      // iPadOS 13+ in its default "desktop" mode reports a Mac UA. The touch
+      // point count is what separates a real Mac from an iPad pretending.
+      var isIPadDesktop = /macintosh/.test(uaLower) && (navigator.maxTouchPoints || 0) > 1;
+      var isIOS = /iphone|ipad|ipod/.test(uaLower) || isIPadDesktop;
+      var isAndroid = /android/.test(uaLower);
+
+      // Forward the invite params from this URL into the app via the custom
+      // scheme. The native Linking listener (AppContent.tsx) parses the query
+      // string and resolves the invite. Params in use: grouptrip, surftrip +
+      // t, staff.
       var query = (window.location.search || "").replace(/^\?/, "");
       var schemeUrl = query ? "swellyo://?" + query : "swellyo://";
+
+      // The store strips the query, so an invite does not survive an install.
+      // Park it on the clipboard instead; the app reads it once on first
+      // launch and resolves the invite from there (deferred deep link).
+      // Must stay in sync with the reader in src/components/AppContent.tsx.
+      var CLIPBOARD_PREFIX = "swellyo-invite:";
+      function stashInvite() {
+        if (!query) return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            // Fire and forget. Without transient activation iOS rejects this,
+            // which is why the Continue handler calls it from inside a click.
+            navigator.clipboard.writeText(CLIPBOARD_PREFIX + query).catch(function () {});
+          }
+        } catch (e) { /* clipboard unavailable — the link still works, just not deferred */ }
+      }
 
       var storeUrl;
       if (isIOS) storeUrl = APP_STORE;
       else if (isAndroid) storeUrl = PLAY_STORE;
-      else storeUrl = MARKETING;
-      window.__swellyoDest = storeUrl;
+      else storeUrl = MARKETING + (query ? "/?" + query : "");
+      window.__swellyoStore = storeUrl;
 
-      // Desktop: skip scheme attempt, go straight to marketing.
+      // Desktop: no app to open. Hand the invite params to the web app rather
+      // than dropping them on the floor.
       if (!isIOS && !isAndroid) {
+        // Keep the CTA working with the query attached, in case the automatic
+        // replace below is blocked.
+        window.__swellyoContinue = function (el) { el.href = storeUrl; return true; };
         requestAnimationFrame(function () { window.location.replace(storeUrl); });
         return;
       }
 
-      // Mobile flow: try the custom scheme first. If the app is installed,
-      // it intercepts the navigation (page becomes hidden) and we cancel
-      // the fallback. If nothing happens within 1500ms, redirect to store.
-      // This works even when Universal Links don't fire (in-app browsers
-      // like WhatsApp, or iOS swcd cache issues).
-      var fired = false;
+      // Mobile flow: try the custom scheme first. If the app is installed it
+      // intercepts the navigation (the page goes hidden) and we cancel the
+      // fallback. Otherwise we send them to the store.
+      // This path still matters with Universal Links working, because in-app
+      // browsers (WhatsApp, Instagram) do not honour them.
+      var navigated = false;
       var fallbackTimer = null;
-      function fireStore() {
-        if (fired) return;
-        fired = true;
+      var hardTimer = null;
+
+      function goStore() {
+        if (navigated) return;
+        navigated = true;
+        clearTimers();
+        stashInvite();
         window.location.replace(storeUrl);
+      }
+      function clearTimers() {
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
+        if (hardTimer) { clearTimeout(hardTimer); hardTimer = null; }
+      }
+      function armFallback(ms) {
+        if (navigated || fallbackTimer) return;
+        fallbackTimer = setTimeout(goStore, ms);
       }
       function cancelFallback() {
         if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
       }
+
+      // Losing focus means the app probably took over — stop the store bounce.
+      // But "probably" is not "definitely": a system alert, a pulled-down
+      // notification shade, or an interrupted scheme handoff all blur the page
+      // too. If we come back and are still here, the app did not open, so
+      // re-arm. Previously this cancel was permanent and the page could sit on
+      // the spinner forever with no way out.
       document.addEventListener("visibilitychange", function () {
         if (document.hidden) cancelFallback();
+        else armFallback(REARM_WAIT_MS);
       });
       window.addEventListener("pagehide", cancelFallback);
       window.addEventListener("blur", cancelFallback);
+      window.addEventListener("focus", function () { armFallback(REARM_WAIT_MS); });
+
+      // Backstop: whatever happens above, this page resolves to something.
+      hardTimer = setTimeout(goStore, HARD_TIMEOUT_MS);
+
+      // Best effort before the automatic attempt — on Android this succeeds,
+      // on iOS it needs the Continue click (see the handler below).
+      stashInvite();
 
       requestAnimationFrame(function () {
-        fallbackTimer = setTimeout(fireStore, 1500);
+        armFallback(SCHEME_WAIT_MS);
         try {
           window.location.replace(schemeUrl);
         } catch (e) {
-          fireStore();
+          goStore();
         }
       });
+
+      // The Continue button is the ONLY handoff iOS reliably honours, because
+      // it carries a real user gesture — the automatic location.replace above
+      // is routinely ignored. So it must aim at the APP, not the store; it
+      // used to be rewritten to the store URL, which is what guaranteed a
+      // store bounce for users who already had the app installed.
+      window.__swellyoContinue = function (el) {
+        stashInvite();          // inside the click = the activation iOS wants
+        el.href = schemeUrl;
+        navigated = false;      // this is a fresh attempt
+        clearTimers();
+        armFallback(SCHEME_WAIT_MS);
+        hardTimer = setTimeout(goStore, HARD_TIMEOUT_MS);
+        return true;            // let the browser follow el.href
+      };
     })();
   </script>
   <noscript>
-    <meta http-equiv="refresh" content="0; url=https://www.swellyo.com" />
+    <!-- No meta-refresh here on purpose. It used to bounce to swellyo.com
+         immediately, which threw the invite away, and markup cannot read the
+         query string to forward it. Without JS the user sees the page and the
+         Continue link, which is strictly better than a silent redirect. -->
   </noscript>
 </head>
 <body>
@@ -200,7 +279,7 @@
     </div>
 
     <div>
-      <a class="cta" href="https://www.swellyo.com" onclick="if(window.__swellyoDest){this.href=window.__swellyoDest}">
+      <a class="cta" href="https://www.swellyo.com" onclick="return window.__swellyoContinue ? window.__swellyoContinue(this) : true">
         Continue
       </a>
     </div>
