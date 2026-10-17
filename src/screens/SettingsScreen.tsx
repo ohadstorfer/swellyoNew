@@ -37,8 +37,10 @@ import {
 } from '../services/trips/operatorSettingsService';
 import { PRESET_LABEL, summarise } from '../services/trips/cancellationPolicy';
 import { pushRootCard } from '../navigation/navigationRef';
+import { TripIcon } from '../components/trips/tripIcons';
 
-// Settings menu icons
+// Settings menu icons. The PNGs are 1px outlines in #222B30; the rows without
+// a PNG use TripIcon at size 24, strokeWidth 1 (the default) to match them.
 const iconPrivacyPreferences = require('../assets/icons/privacy-preferences.png');
 const iconTermsOfService = require('../assets/icons/terms-of-service.png');
 const iconPrivacyPolicy = require('../assets/icons/privacy-policy.png');
@@ -301,7 +303,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowCurrency(true)}>
-            <Ionicons name="cash-outline" size={22} color="#333" style={styles.menuIcon} />
+            <TripIcon name="bank-note-01" size={24} />
             <Text style={styles.menuRowText}>Currency</Text>
             <Text style={styles.menuRowValue}>
               {storedCurrency ? storedCurrency : `Auto (${effectiveCurrency})`}
@@ -320,7 +322,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
 
           {isAdmin && (
             <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowAnalytics(true)}>
-              <Ionicons name="stats-chart-outline" size={22} color="#333" style={styles.menuIcon} />
+              <TripIcon name="bar-chart-01" size={24} />
               <Text style={styles.menuRowText}>Analytics (admin)</Text>
             </TouchableOpacity>
           )}
@@ -334,7 +336,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               <Text style={styles.sectionTitle}>Operator</Text>
 
               <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowStripe(v => !v)}>
-                <Ionicons name="card-outline" size={22} color="#333" style={styles.menuIcon} />
+                <TripIcon name="credit-card-01" size={24} strokeWidth={0.75} />
                 <Text style={styles.menuRowText}>Payments (Stripe)</Text>
                 <Ionicons
                   name={showStripe ? 'chevron-up' : 'chevron-down'}
@@ -358,7 +360,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               )}
 
               <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowOpCurrency(true)}>
-                <Ionicons name="pricetag-outline" size={22} color="#333" style={styles.menuIcon} />
+                <TripIcon name="tag-01" size={24} />
                 <Text style={styles.menuRowText}>Default price currency</Text>
                 <Text style={styles.menuRowValue}>
                   {opSettings.defaultCurrency ?? `Auto (${effectiveCurrency})`}
@@ -366,7 +368,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowPolicy(true)}>
-                <Ionicons name="document-text-outline" size={22} color="#333" style={styles.menuIcon} />
+                <TripIcon name="file-06" size={24} />
                 <Text style={styles.menuRowText}>Cancellation policy</Text>
                 <Text style={styles.menuRowValue}>{PRESET_LABEL[opSettings.policy.preset]}</Text>
               </TouchableOpacity>
@@ -383,7 +385,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
                 activeOpacity={0.7}
                 onPress={() => pushRootCard('OperatorSetup', undefined)}
               >
-                <Ionicons name="briefcase-outline" size={22} color="#333" style={styles.menuIcon} />
+                <TripIcon name="briefcase-01" size={24} />
                 <Text style={styles.menuRowText}>Waiver, insurance & agreement</Text>
                 <Ionicons name="chevron-forward" size={16} color="#9A9A9A" />
               </TouchableOpacity>
@@ -394,7 +396,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
           <View style={styles.menuSectionDivider} />
 
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={handleSwitchAccount}>
-            <Ionicons name="swap-horizontal-outline" size={22} color="#333" style={styles.menuIcon} />
+            <TripIcon name="switch-horizontal-01" size={24} />
             <Text style={styles.menuRowText}>Switch account</Text>
           </TouchableOpacity>
 
@@ -407,7 +409,7 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
             {isLoggingOut ? (
               <ActivityIndicator size="small" color="#E5484D" style={styles.menuIcon} />
             ) : (
-              <Ionicons name="log-out-outline" size={22} color="#E5484D" style={styles.menuIcon} />
+              <TripIcon name="log-out-01" size={24} color="#E5484D" />
             )}
             <Text style={[styles.menuRowText, styles.logoutText]}>Log out</Text>
           </TouchableOpacity>

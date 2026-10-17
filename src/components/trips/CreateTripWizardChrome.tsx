@@ -210,18 +210,16 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
   }, [stepIndex]);
 
   // -------- Status bar style — white text on dark header, dark on light bg --------
+  // Goes through RN's StatusBar stack (push/pop), not setBarStyle: the imperative
+  // call skips the stack's bookkeeping, so RN could later believe the bar was white
+  // while iOS still showed black icons. Popping restores whatever is underneath.
   useEffect(() => {
-    if (Platform.OS === 'ios') {
-      StatusBar.setBarStyle(hideHeader ? 'dark-content' : 'light-content', true);
-    }
-    return () => {
-      if (Platform.OS === 'ios') {
-        // Restore the app-wide default (white icons on the dark tops elsewhere).
-        // Resetting to dark-content here used to leak black status-bar icons into
-        // the next screen.
-        StatusBar.setBarStyle('light-content', true);
-      }
-    };
+    if (Platform.OS !== 'ios') return;
+    const entry = StatusBar.pushStackEntry({
+      barStyle: hideHeader ? 'dark-content' : 'light-content',
+      animated: true,
+    });
+    return () => StatusBar.popStackEntry(entry);
   }, [hideHeader]);
 
   const headerPaddingTop = Math.max(insets.top, 0) + HEADER_PADDING_TOP_BASE;

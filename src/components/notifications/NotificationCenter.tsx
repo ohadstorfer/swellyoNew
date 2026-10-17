@@ -50,6 +50,7 @@ import { queryClient } from '../../lib/queryClient';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { ff } from '../../theme/fonts';
 import { TripIcon } from '../trips/tripIcons';
+import { HeaderLogoIcon } from '../HeaderLogoIcon';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 
 interface Props {
@@ -738,7 +739,14 @@ const NotificationAvatar: React.FC<{
   tripUrl?: string | null;
   initial: string;
   icon: string;
-}> = ({ actorUrl, tripUrl, initial, icon }) => {
+  /** No person and no trip behind it — the sender is Swellyo itself. */
+  fromSwellyo?: boolean;
+}> = ({ actorUrl, tripUrl, initial, icon, fromSwellyo }) => {
+  // Swellyo's own messages wear the logo, the way a person's wear their photo.
+  // A bare glyph in a gray circle read as "no avatar loaded", not as a sender.
+  if (fromSwellyo && !actorUrl && !tripUrl) {
+    return <HeaderLogoIcon size={AVATAR} />;
+  }
   const actorThumb = getStorageThumbUrl(actorUrl, THUMB_PX);
   const tripThumb = getStorageThumbUrl(tripUrl, THUMB_PX);
 
@@ -846,6 +854,7 @@ const NotificationItem: React.FC<ItemProps> = ({
         tripUrl={d.trip_image_url}
         initial={initial}
         icon={r.icon}
+        fromSwellyo={!n.actor_id && !n.trip_id}
       />
       <View style={styles.rowBody}>
         <View style={styles.rowTitleLine}>

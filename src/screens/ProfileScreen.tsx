@@ -30,6 +30,7 @@ import { GalleryPermissionOverlay } from '../components/GalleryPermissionOverlay
 import { Text as RNText } from 'react-native';
 import { colors, spacing, typography } from '../styles/theme';
 import { ff, fs } from '../theme/fonts';
+import { textStyle } from '../theme/typography';
 import { NotificationCenter } from '../components/notifications/NotificationCenter';
 import { supabaseDatabaseService, SupabaseSurfer } from '../services/database/supabaseDatabaseService';
 import { supabase } from '../config/supabase';
@@ -2991,13 +2992,12 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
               <View style={styles.lifestyleTitleContainer}>
                 <Text style={styles.lifestyleTitle}>Lifestyle</Text>
               </View>
-              <View style={styles.lifestyleContainerWrapper}>
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  style={styles.lifestyleScrollView}
-                  contentContainerStyle={styles.lifestyleContainer}
-                >
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.lifestyleScrollView}
+                contentContainerStyle={styles.lifestyleContainer}
+              >
                 {lifestyleKeywords.slice(0, 6).map((keyword, index) => {
                   const rawSaved = profileData.lifestyle_image_urls?.[keyword];
                   const savedUrl = (typeof rawSaved === 'string' && rawSaved.trim() !== '') ? rawSaved.trim() : null;
@@ -3050,16 +3050,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
                           </View>
                         )}
                       </View>
-                      {/* Label vertically centered in the gap between the
-                          image and the card bottom. */}
                       <View style={styles.lifestyleLabelWrap}>
-                        <Text style={styles.lifestyleLabel}>{keyword}</Text>
+                        <Text style={styles.lifestyleLabel} numberOfLines={1}>{keyword}</Text>
                       </View>
                     </View>
                   );
                 })}
-                </ScrollView>
-              </View>
+              </ScrollView>
             </View>
           )}
 
@@ -4560,103 +4557,86 @@ const styles = StyleSheet.create({
   destinationProgressEmpty: {
     backgroundColor: '#E4E4E4',
   },
+  // Figma 17766:45628 — no outer card: the title sits on the page and each
+  // keyword is its own small white card on the Card Shadow (0 0 24 #00000017).
   lifestyleSectionWrapper: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    paddingLeft: 16,
-    paddingTop: 8,
-    paddingBottom: 0, // collapse so label area extends to the visible card bottom
-    gap: 8,
     width: '100%',
-    marginTop: 0,
-    marginLeft: 0,
-    // Shadow: 0px 2px 16px 0px rgba(89,110,124,0.15)
-    ...Platform.select({
-      ios: {
-        shadowColor: '#596E7C',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 16,
-      },
-      android: {
-        elevation: 4,
-      },
-      web: {
-        boxShadow: '0px 2px 16px 0px rgba(89, 110, 124, 0.15)',
-      },
-    }),
+    gap: 16,
   },
   lifestyleTitleContainer: {
-    marginBottom: 0,
-    marginTop: 8,
-  },
-  lifestyleTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
-    lineHeight: 24,
-    color: colors.black,
-  },
-  lifestyleContainerWrapper: {
-    height: 140, // image (107) + label area (33) — label area now reaches the
-    // visible bottom of the white card (paddingBottom on section is 0).
-    overflow: 'hidden',
     width: '100%',
   },
+  lifestyleTitle: {
+    ...textStyle('MB1', '700'),
+    color: '#333333',
+  },
+  // Bleeds 16px past the 361 column so the row scrolls to the screen edge, and
+  // pads 12px top/bottom so the ScrollView does not clip the card shadows.
   lifestyleScrollView: {
-    marginTop: 0,
+    marginHorizontal: -16,
+    marginVertical: -12,
+    alignSelf: 'stretch',
   },
   lifestyleContainer: {
     flexDirection: 'row',
-    gap: 12.613,
-    paddingRight: 16,
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   lifestyleItem: {
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 6,
+    gap: 8,
     alignItems: 'center',
-    gap: 0,
-    marginBottom: 0,
-    width: 140, // match image container so the label wraps cleanly under it
-    height: '100%', // fill the container so the label can center vertically
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.09,
+        shadowRadius: 12,
+      },
+      android: {
+        shadowColor: '#000000',
+        elevation: 3,
+      },
+      web: {
+        boxShadow: '0px 0px 24px 0px rgba(0, 0, 0, 0.09)',
+      },
+    }),
   },
-  // Vertically centers the label in the space between image and card bottom.
   lifestyleLabelWrap: {
-    flex: 1,
-    width: '100%',
+    width: 90,
     alignItems: 'center',
     justifyContent: 'center',
   },
   lifestyleImageContainer: {
-    width: 140,
-    height: 107,
-    borderRadius: 4,
+    width: 90,
+    height: 92,
+    borderRadius: 6,
     overflow: 'hidden',
     backgroundColor: colors.white,
   },
   lifestyleImage: {
     width: '100%',
     height: '100%',
-    borderRadius: 4,
   },
   lifestyleImagePlaceholder: {
     width: '100%',
     height: '100%',
-    borderRadius: 4,
-    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // Figma gives this label a bare 9px / 18 line height — no size variable.
   lifestyleLabel: {
-    fontSize: 12.61,
-    fontWeight: '400',
-    fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : undefined,
+    fontFamily: ff('Inter', '400'),
+    fontSize: fs(9),
+    lineHeight: 18,
+    ...(Platform.OS === 'web' && { fontWeight: '400' as const }),
+    includeFontPadding: false,
     color: '#333333',
     textAlign: 'center',
     textTransform: 'capitalize',
-    width: '100%',
-    // Removed manual lineHeight/marginTop — let the parent flex container do
-    // the centering with the font's natural line metrics.
-    ...(Platform.OS === 'android' && { includeFontPadding: false }),
-    ...(Platform.OS === 'android' && { textAlignVertical: 'center' }),
   },
   uploadLoadingOverlay: {
     position: 'absolute',

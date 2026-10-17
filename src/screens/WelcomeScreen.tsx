@@ -968,7 +968,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                     style={welcomeStyles.termsLink}
                     onPress={() => Linking.openURL(TERMS_URL)}
                   >
-                    Terms of Service
+                    Terms of Use
                   </RNText>
                   {' '}and{' '}
                   <RNText
@@ -980,15 +980,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
                 </RNText>
               </TouchableOpacity>
 
-              {/* OpenAI Disclaimer */}
-              <View style={welcomeStyles.disclaimerRow}>
-                <View style={welcomeStyles.infoIcon}>
-                  <RNText style={welcomeStyles.infoIconText}>i</RNText>
-                </View>
-                <RNText style={welcomeStyles.disclaimerText}>
-                  Swellyo uses OpenAI to power our surf partner matching and profile creation.
-                </RNText>
-              </View>
+              {/* AI Disclaimer */}
+              <RNText style={welcomeStyles.disclaimerText}>
+                Swellyo uses AI to match you with surf partners.{'\n'}
+                Your profile data is processed securely and never used to train AI models.
+              </RNText>
             </View>
             )}
 
@@ -1455,29 +1451,8 @@ const welcomeStyles = StyleSheet.create({
     fontWeight: '700',
     textDecorationLine: 'underline',
   },
-  disclaimerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  infoIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255, 255, 255, 0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoIconText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 11,
-    fontWeight: '700',
-    fontStyle: 'italic',
-    marginTop: -1,
-  },
   disclaimerText: {
-    flex: 1,
+    textAlign: 'center',
     color: '#FFFFFF',
     fontSize: 16,
     fontFamily: Platform.OS === 'web' ? 'Inter, sans-serif' : 'Inter',

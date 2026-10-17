@@ -52,6 +52,7 @@ import { pushRootCard } from '../../navigation/navigationRef';
 import { ff, fs } from '../../theme/fonts';
 import { fontSize, textStyle, textStyles } from '../../theme/typography';
 import { LinearGradient } from 'expo-linear-gradient';
+import MaskedView from '@react-native-masked-view/masked-view';
 import BottomSheetShell from '../../components/BottomSheetShell';
 import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
 import { ExploreSwipeDeck, DECK_PEEK } from '../../components/trips/ExploreSwipeDeck';
@@ -442,10 +443,13 @@ const formatVibe = (trip: GroupTrip): string | null => {
 const EX_FRAME_PAD = 8;
 const EX_INFO_H = 64;
 const EX_IMAGE_RATIO = 408 / 328; // photo height / width
-const EX_CARD_MAX_W = 344;
+// The design is a 344 card on a 393 screen. The card keeps that share of the
+// width, so it grows on a Max phone instead of stopping at 344.
+const EX_CARD_WIDTH_SHARE = 344 / 393;
+// Ceiling for tablets and wide web windows.
+const EX_CARD_MAX_W = 420;
 // Only a genuinely short phone goes below the design width, and never far.
 const EX_CARD_MIN_W = 300;
-const EX_SIDE_MARGIN = 24;
 // Room kept free under the stack for the floating nav bar: the bar's top edge
 // sits ~91px above the bottom of the screen.
 const EX_NAV_RESERVE = 92;
@@ -524,9 +528,23 @@ const ExploreTripCard: React.FC<{
 
         {/* Details panel (Figma 17779:51100): the photo blurred behind the
             text, under a grey wash that is strongest at the bottom and gone at
-            the top. The frame above clips the rounded corners. */}
+            the top. The frame above clips the rounded corners. The blur is
+            faded in through a gradient mask too — a bare BlurView ends in a
+            hard line across the photo. Same pairing as OnboardingChrome. */}
         <View style={styles.exPanel}>
-          <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFill} />
+          <MaskedView
+            style={StyleSheet.absoluteFill}
+            pointerEvents="none"
+            maskElement={
+              <LinearGradient
+                colors={['transparent', '#000000']}
+                locations={[0, 0.45]}
+                style={StyleSheet.absoluteFill}
+              />
+            }
+          >
+            <BlurView intensity={18} tint="dark" style={StyleSheet.absoluteFill} />
+          </MaskedView>
           <LinearGradient
             colors={['rgba(78,78,78,0)', 'rgba(78,78,78,0.63)']}
             style={StyleSheet.absoluteFill}
@@ -839,9 +857,9 @@ const ExploreTripsView: React.FC<{
     }
   }, [warmAround, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // The card is sized to the space that is actually there: full design width
-  // on a normal phone, smaller on a short one so the whole stack still clears
-  // the floating nav bar.
+  // The card is sized to the space that is actually there: the design's share
+  // of the width (so it grows on a Max phone), smaller on a short one so the
+  // whole stack still clears the floating nav bar.
   const [area, setArea] = useState({ w: 0, h: 0 });
   const cardW = area.w === 0
     ? 0
@@ -849,7 +867,7 @@ const ExploreTripsView: React.FC<{
         EX_CARD_MIN_W,
         Math.min(
           EX_CARD_MAX_W,
-          area.w - EX_SIDE_MARGIN * 2,
+          Math.round(area.w * EX_CARD_WIDTH_SHARE),
           exploreCardWidthForHeight(area.h - EX_NAV_RESERVE - DECK_PEEK * 2),
         ),
       );
@@ -962,6 +980,10 @@ const BUCKET_STATUS: Record<'approved' | 'pending' | 'past', TripCardStatus> = {
 const STAGGER_COUNT = 4;
 const STAGGER_MS = 55;
 
+// Accounts that keep BOTH the setup banner and the "Create a trip" card while
+// their operator setup is unfinished — Ohad's, so he can test the two together.
+const KEEP_CREATE_CARD_DURING_SETUP = new Set(['ecaaa678-974a-4641-895a-12cf12e74599']);
+
 const CreateTripCard: React.FC<{ onPress: () => void }> = ({ onPress }) => (
   <TouchableOpacity
     testID="trips-create-trip-card"
@@ -992,11 +1014,13 @@ const MyTripsView: React.FC<{
   isOperator: boolean;
   /** False until we know whether they are an operator. */
   operatorReady: boolean;
+  /** Operators only, and not while "Finish your setup" is showing — one or the other. */
+  showCreateCard: boolean;
   onCreateTrip: () => void;
   onExplore: () => void;
   onOpenTrip: (tripId: string) => void;
   onNavScroll?: NavScrollHandler;
-}> = ({ userId, isOperator, operatorReady, onCreateTrip, onExplore, onOpenTrip, onNavScroll }) => {
+}> = ({ userId, isOperator, operatorReady, showCreateCard, onCreateTrip, onExplore, onOpenTrip, onNavScroll }) => {
   // Cached + stale-while-revalidate (see useExploreTrips). Re-entry is instant;
   // pull-to-refresh and post-create/edit invalidation drive background updates.
   const { data, isLoading, isFetching, refetch } = useMyTrips(userId);
@@ -1077,7 +1101,7 @@ const MyTripsView: React.FC<{
       removeClippedSubviews
       ListHeaderComponent={
         <FadeInView>
-          {isOperator && <CreateTripCard onPress={onCreateTrip} />}
+          {showCreateCard && <CreateTripCard onPress={onCreateTrip} />}
           <TripFilterBar active={filter} counts={counts} onChange={setFilter} />
         </FadeInView>
       }
@@ -1359,6 +1383,14 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
                 userId={currentUserId}
                 isOperator={operatorSetup.isOperator}
                 operatorReady={operatorSetup.isReady}
+                // `complete` is false while setup is still loading, so the card
+                // cannot flash and then swap for the banner on a cold start.
+                showCreateCard={
+                  operatorSetup.complete ||
+                  (operatorSetup.isOperator &&
+                    !!currentUserId &&
+                    KEEP_CREATE_CARD_DURING_SETUP.has(currentUserId))
+                }
                 onCreateTrip={() => void onPickStyle('C')}
                 onExplore={() => goToTab('explore')}
                 onOpenTrip={openTrip}

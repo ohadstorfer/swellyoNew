@@ -17,6 +17,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { queryClient } from './src/lib/queryClient';
 import { useAppFonts } from './src/theme/fonts';
+import { resyncStatusBar } from './src/utils/statusBarResync';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
 
@@ -103,6 +104,9 @@ export default Sentry.wrap(function App() {
     if (Platform.OS === 'web') return;
     const sub = AppState.addEventListener('change', status => {
       focusManager.setFocused(status === 'active');
+      // System prompts / pickers can leave the iOS status bar black behind RN's
+      // back; re-send the stack's style whenever we come back to the front.
+      if (status === 'active') resyncStatusBar();
     });
     return () => sub.remove();
   }, []);
