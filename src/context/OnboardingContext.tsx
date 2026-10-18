@@ -339,14 +339,17 @@ export const OnboardingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setIsComplete(parsed.isComplete);
         }
         
-        // Only restore step 0 (OnboardingWelcomeScreen) if:
-        // 1. Not on swelly_chat route
-        // 2. There's a user (logged in)
-        // 3. Onboarding is not complete
-        // Otherwise, default to STEP_WELCOME (WelcomeScreen)
+        // A signed-in user who left onboarding unfinished starts again at step 0
+        // (OnboardingWelcomeScreen), whatever step they stopped on. Their answers
+        // are still in formData, so the steps after it come back filled in.
+        // Not on the swelly_chat route; everyone else keeps the old behaviour.
         if (!isOnSwellyChatRoute) {
-          if (hasUser && !isOnboardingComplete && parsed.currentStep === 0) {
-            // User is logged in and needs onboarding, restore step 0
+          if (
+            hasUser &&
+            !isOnboardingComplete &&
+            parsed.currentStep !== undefined &&
+            parsed.currentStep >= 0
+          ) {
             setCurrentStep(0);
           } else if (parsed.currentStep !== undefined && parsed.currentStep > 0) {
             // Restore other steps (1-5) if they exist
