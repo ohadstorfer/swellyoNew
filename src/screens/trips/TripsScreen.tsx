@@ -892,11 +892,12 @@ const ExploreTripsView: React.FC<{
       </FadeInView>
     );
   } else if (isLoading) {
-    body = (
+    // Same footprint as the real deck below, so nothing moves when it lands.
+    body = cardW > 0 ? (
       <FadeInView>
-        <ExploreDeckSkeleton />
+        <ExploreDeckSkeleton cardWidth={cardW} cardHeight={exploreCardHeight(cardW)} />
       </FadeInView>
-    );
+    ) : null;
   } else if (trips.length === 0) {
     body = (
       <FadeInView style={styles.emptyState}>

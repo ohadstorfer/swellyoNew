@@ -1,12 +1,15 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, Platform } from 'react-native';
+import { View, StyleSheet, Animated, Platform, StyleProp, ViewStyle } from 'react-native';
 
 /**
  * Shimmer animation component for skeleton loaders
  * Works on iOS, Android, and Web (Expo Web)
  * Respects reduced motion preferences
  */
-export const Shimmer: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const Shimmer: React.FC<{ children: React.ReactNode; style?: StyleProp<ViewStyle> }> = ({
+  children,
+  style,
+}) => {
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   const [reducedMotion, setReducedMotion] = React.useState(false);
 
@@ -71,7 +74,7 @@ export const Shimmer: React.FC<{ children: React.ReactNode }> = ({ children }) =
       });
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, style]}>
       {children}
       <Animated.View
         style={[

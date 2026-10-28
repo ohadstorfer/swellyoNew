@@ -2910,12 +2910,22 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   };
 
   // -------------------------------------------------------------------------
+  // The skeleton draws the Overview with its cover under the status bar, so
+  // its one real control is the cover's back button.
+  const skeletonBack = (
+    <TouchableOpacity
+      onPress={onBack}
+      style={styles.coverBtn}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="Back"
+    >
+      <Ionicons name="chevron-back" size={24} color="#222B30" />
+    </TouchableOpacity>
+  );
   if (coreQuery.isLoading && !coreQuery.data) {
     return (
-      <SafeAreaView style={styles.root} edges={['top']}>
-        <Header onBack={onBack} />
-        <TripDetailSkeleton />
-      </SafeAreaView>
+      <TripDetailSkeleton topInset={insets.top} leading={skeletonBack} />
     );
   }
 
@@ -2935,10 +2945,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // Still in-flight but trip is null (no placeholder seed available) — show skeleton.
   if (!trip) {
     return (
-      <SafeAreaView style={styles.root} edges={['top']}>
-        <Header onBack={onBack} />
-        <TripDetailSkeleton />
-      </SafeAreaView>
+      <TripDetailSkeleton topInset={insets.top} leading={skeletonBack} />
     );
   }
 

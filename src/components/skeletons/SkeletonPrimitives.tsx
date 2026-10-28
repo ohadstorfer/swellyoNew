@@ -10,6 +10,9 @@ interface SkeletonBaseProps {
   height?: number;
   borderRadius?: number;
   style?: ViewStyle;
+  /** Style for the shimmer's clipping wrapper — e.g. absoluteFill, so a block
+   *  can fill a parent whose size is only known at layout. */
+  containerStyle?: ViewStyle;
 }
 
 export const SkeletonBase: React.FC<SkeletonBaseProps> = ({
@@ -17,9 +20,10 @@ export const SkeletonBase: React.FC<SkeletonBaseProps> = ({
   height = 20,
   borderRadius = 4,
   style,
+  containerStyle,
 }) => {
   return (
-    <Shimmer>
+    <Shimmer style={containerStyle}>
       <View
         style={[
           {
