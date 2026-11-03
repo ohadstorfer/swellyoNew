@@ -77,6 +77,7 @@ import {
   type WaveShapeKind,
 } from '../../services/trips/groupTripsService';
 import { type TripDetailVM, BOARD_SHORT, formatDateRange } from '../../components/trips/TripDetailView';
+import { normalizeItinerary } from '../../services/trips/itinerary';
 import { TripDetailViewRedesigned, HERO_SLIDE_MS } from '../../components/trips/TripDetailViewRedesigned';
 import {
   EditTextSheet,
@@ -108,6 +109,7 @@ import { TripStaffSheet } from '../../components/trips/TripStaffSheet';
 import { travelerCounts } from '../../components/trips/dashboard/dashboardWork';
 import { CrewCards } from '../../components/trips/CrewSection';
 import { useTripCrew, useTripCapabilities } from '../../hooks/trips/useTripCapabilities';
+import { buildTripRoleLabels, authorLabel } from '../../components/trips/tripRoleLabels';
 import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
 import { fetchMyStaffRow, ensureOperatorOnCrew } from '../../services/trips/tripStaffService';
 import { StaffSelfProfileSheet } from '../../components/trips/StaffSelfProfileSheet';
@@ -217,6 +219,7 @@ import {
 } from '../../services/trips/pendingPaymentStore';
 import { isTripHost } from '../../utils/tripRole';
 import { useUserProfile } from '../../context/UserProfileContext';
+import { askForNotifications } from '../../services/notifications/notificationAsks';
 
 interface TripDetailScreenProps {
   tripId: string;
@@ -325,6 +328,7 @@ const buildTripDetailVM = (
   host?: EnrichedParticipant | null,
 ): TripDetailVM => ({
   heroImageUri: trip.hero_image_url || null,
+  itinerary: normalizeItinerary(trip.itinerary),
   title: trip.title,
   destinationLabel:
     trip.destination?.short_label ||
@@ -356,6 +360,10 @@ const buildTripDetailVM = (
   accommodationName: trip.accommodation_name,
   accommodationImageUri: trip.accommodation_image_url,
   accommodationUrl: trip.accommodation_url,
+  // The operator's two answers from the create flow. `=== true`: null means
+  // "never asked", and that draws no row on the stay card.
+  ciSurfConservation: trip.ci_surf_conservation === true,
+  stokeCertified: trip.stoke_certified === true,
   costPerPerson: trip.cost_per_person,
   priceInclusions: trip.price_inclusions,
   budgetMin: trip.budget_min,
@@ -922,6 +930,14 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // Same `hosting_style === 'C'` inline as above, for the same TDZ reason.
   const crewQuery = useTripCrew(tripId, trip?.hosting_style === 'C');
 
+  // Names + roles for the trip chat's sender labels and the admin updates'
+  // author line. See tripRoleLabels.ts.
+  const tripRoleLabels = useMemo(
+    () => buildTripRoleLabels(participants, crewQuery.data ?? [], trip?.hosting_style === 'C'),
+    [participants, crewQuery.data, trip?.hosting_style],
+  );
+  const chatSenderRoles = tripRoleLabels.roles;
+
   /**
    * What THIS viewer was asked for as crew. Empty for everyone else — the RPC
    * joins on their own staff row, so a traveler or a stranger gets nothing and
@@ -1071,7 +1087,9 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   const [personalItemDraft, setPersonalItemDraft] = useState('');
   const [savingPersonalItem, setSavingPersonalItem] = useState(false);
   // Overview = public read-only facts; Plan = interactive (members only).
-  const [activeTab, setActiveTab] = useState<TripTab>('overview');
+  // A chat deep link (Messages list, push, banner) opens ON the Chat tab, so
+  // the Overview never flashes first while the trip and membership load.
+  const [activeTab, setActiveTab] = useState<TripTab>(() => (initialFocus === 'chat' ? 'chat' : 'overview'));
   // Host-only inline edit sheets (Figma admin view): cover / about-host / description / dates / accommodation.
   const [editSheet, setEditSheet] = useState<
     'cover' | 'about' | 'description' | 'dates' | 'accommodation' | null
@@ -1138,8 +1156,15 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   const isOnboardingTraveler = useMemo(
     () =>
       !!currentUserId &&
-      participants.some(p => p.user_id === currentUserId && p.status === 'onboarding'),
-    [participants, currentUserId]
+      // Never the trip's own host. On an operator trip the host's participant
+      // row is born 'onboarding' too (enforce_participant_status sets it on
+      // every user INSERT), which showed operators "Start onboarding" on their
+      // own trip in the 21 Oct test.
+      !isHost &&
+      participants.some(
+        p => p.user_id === currentUserId && p.role !== 'host' && p.status === 'onboarding',
+      ),
+    [participants, currentUserId, isHost]
   );
 
   /**
@@ -1279,6 +1304,10 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
     isHost || isApprovedMember || can('chat.participate') || !!chatMembership.data?.isMember;
   // Settled enough to decide a deep link: an error falls back to the other rules.
   const chatMembershipKnown = !!chatMembership.data || chatMembership.isError || !currentUserId;
+  // Opened on the Chat tab and not yet sure the viewer may see it: keep the
+  // tab until we know. If they can't, the tab drops and the Overview shows.
+  const chatFocusPending = initialFocus === 'chat' && !(trip && membershipKnown && chatMembershipKnown);
+  const chatTabAvailable = canSeeChat || chatFocusPending;
   // Joining, leaving or being removed changes the chat row on the server (a
   // trigger does it). Re-read it when the trip says membership moved, so a
   // removal flips the Chat tab to read-only without a restart.
@@ -1318,8 +1347,8 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
       : canSeePlan
         ? ['overview', 'plan']
         : ['overview'];
-    return canSeeChat ? [...base, 'chat'] : base;
-  }, [canSeePlan, canSeeDashboard, canSeeChat]);
+    return chatTabAvailable ? [...base, 'chat'] : base;
+  }, [canSeePlan, canSeeDashboard, chatTabAvailable]);
 
   // A tab that stops being available must not leave the screen showing nothing
   // — losing host rights, or the trip locking, would otherwise strand the
@@ -1364,6 +1393,11 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // focus effect scrolls once the target exists. 'your-gear' is nested inside
   // the 'gear' section, so its absolute Y is the sum of both.
   const scrollRef = useRef<ScrollView>(null);
+  // Live offset on the JS side, since `scrollY` below is driven natively.
+  const scrollOffsetRef = useRef(0);
+  const revealBy = useCallback((dy: number) => {
+    scrollRef.current?.scrollTo({ y: scrollOffsetRef.current + dy, animated: true });
+  }, []);
   // Sticky Overview/Plan toggle: track scroll position and the toggle's resting
   // Y so a clone can clip under the black header once the real one scrolls past.
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -1382,7 +1416,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // The Chat tab has no hero of its own, so the slide plays on the scroll page
   // first and the chat body mounts after it (see handleTabChange). `true` once
   // the chat is really on screen; lags `activeTab` by the slide.
-  const [chatBodyVisible, setChatBodyVisible] = useState(false);
+  const [chatBodyVisible, setChatBodyVisible] = useState(() => initialFocus === 'chat');
   const chatRevealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (chatRevealTimer.current) clearTimeout(chatRevealTimer.current);
@@ -1467,7 +1501,9 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // Chat tab state: the params a deep link brought, a key that remounts the
   // chat when a new deep link arrives, the ⋮ "Search chat" trigger, and
   // whether search is open (it stands in for the tab bar).
-  const [chatParams, setChatParams] = useState<TripChatParams | null>(null);
+  const [chatParams, setChatParams] = useState<TripChatParams | null>(() =>
+    initialFocus === 'chat' ? initialChat ?? null : null,
+  );
   const [chatMountKey, setChatMountKey] = useState(0);
   const [chatSearchKey, setChatSearchKey] = useState(0);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -1564,12 +1600,18 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // this same card is asked again (openTripChat), so it re-applies. Anyone who
   // cannot see the tab stays on the Overview, with no error.
   const appliedChatFocusRef = useRef<string | null>(null);
+  // The first chat focus was already applied by the initial state (the screen
+  // mounted on the Chat tab), so remounting the chat for it would only flash.
+  const chatOpenedOnMountRef = useRef(initialFocus === 'chat');
   useEffect(() => {
     if (initialFocus !== 'chat' || !trip || !membershipKnown || !chatMembershipKnown) return;
     const token = `${tripId}:${focusNonce ?? 0}`;
     if (appliedChatFocusRef.current === token) return;
     appliedChatFocusRef.current = token;
+    const openedOnMount = chatOpenedOnMountRef.current;
+    chatOpenedOnMountRef.current = false;
     if (!canSeeChat) return;
+    if (openedOnMount) return;
     Keyboard.dismiss();
     scrollY.setValue(0);
     setToggleStuck(false);
@@ -1665,6 +1707,8 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
         tripsKeys.detail(tripId),
         prev => (prev ? { ...prev, myRequest: newReq } : prev)
       );
+      // The host's answer arrives as a push — the moment to ask for one.
+      askForNotifications('trip_request');
     } catch (e: any) {
       // Roll back so the CTA reflects reality (write never committed).
       queryClient.setQueryData<import('../../hooks/trips/useTripDetail').TripCoreData>(
@@ -2925,7 +2969,38 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   );
   if (coreQuery.isLoading && !coreQuery.data) {
     return (
-      <TripDetailSkeleton topInset={insets.top} leading={skeletonBack} />
+      initialFocus === 'chat' ? (
+        <SafeAreaView style={styles.root} edges={['top']}>
+          <Header onBack={onBack} />
+          <View style={styles.chatTabLoading}>
+            <ActivityIndicator color="#7B7B7B" />
+          </View>
+        </SafeAreaView>
+      ) : (
+        <TripDetailSkeleton topInset={insets.top} leading={skeletonBack} />
+      )
+    );
+  }
+
+  // Load failed (timeout, expired session, server error) after react-query's
+  // retries. Not the same as "deleted" — say so, and let them try again.
+  if (!trip && coreQuery.isError) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top']}>
+        <Header onBack={onBack} />
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>Couldn't load this trip. Check your connection.</Text>
+          <Pressable
+            onPress={() => coreQuery.refetch()}
+            disabled={coreQuery.isFetching}
+            hitSlop={8}
+            style={({ pressed }) => [styles.loadRetryButton, pressed && styles.loadRetryButtonPressed]}
+            accessibilityRole="button"
+          >
+            <Text style={styles.loadRetryText}>{coreQuery.isFetching ? 'Loading…' : 'Try again'}</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -2945,7 +3020,16 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // Still in-flight but trip is null (no placeholder seed available) — show skeleton.
   if (!trip) {
     return (
-      <TripDetailSkeleton topInset={insets.top} leading={skeletonBack} />
+      initialFocus === 'chat' ? (
+        <SafeAreaView style={styles.root} edges={['top']}>
+          <Header onBack={onBack} />
+          <View style={styles.chatTabLoading}>
+            <ActivityIndicator color="#7B7B7B" />
+          </View>
+        </SafeAreaView>
+      ) : (
+        <TripDetailSkeleton topInset={insets.top} leading={skeletonBack} />
+      )
     );
   }
 
@@ -3017,7 +3101,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // on a peer trip's cover stays "Edit cover".
   const canEditOperatorTrip =
     (isTripOwner || can('trip.edit')) && !!isOperatorTrip && !isLocked && !!onEditOperatorTrip;
-  const showChat = canSeeChat && activeTab === 'chat';
+  const showChat = chatTabAvailable && activeTab === 'chat';
   const showPlan = canSeePlan && activeTab === 'plan';
   const showDashboard = canSeeDashboard && activeTab === 'dashboard';
   /** Anything that replaces the Overview body. */
@@ -3345,6 +3429,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
             chat={chatParams}
             searchRequestKey={chatSearchKey}
             onSearchActiveChange={setChatSearchOpen}
+            senderRoles={chatSenderRoles}
             onViewProfile={
               onViewUserProfile
                 ? userId => {
@@ -3382,7 +3467,10 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
         scrollEventThrottle={16}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
-          listener: handleScrollJs,
+          listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+            scrollOffsetRef.current = e.nativeEvent.contentOffset.y;
+            handleScrollJs(e);
+          },
         })}
       >
         {/* No cover at the top edge: clear the floating bar. */}
@@ -3444,6 +3532,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
               : undefined
           }
           priceDetailsRef={priceDetailsRef}
+          onRevealBy={revealBy}
           crew={crewQuery.data ?? []}
           onViewAllCrew={canManageCrew ? () => setStaffSheetVisible(true) : undefined}
           onEditTrip={canEditOperatorTrip ? () => onEditOperatorTrip?.(trip.id) : undefined}
@@ -3546,10 +3635,6 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
                     o => o.slug === trip.host_destination_familiarity,
                   )?.label ?? null
                 : null,
-              // The operator's two answers from the create flow. `=== true`:
-              // null means "never asked", and that draws no row.
-              stokeCertified: trip.stoke_certified === true,
-              ciSurfConservation: trip.ci_surf_conservation === true,
               stayFamiliarityLabel: trip.host_stay_familiarity
                 ? STAY_FAMILIARITY_OPTIONS.find(o => o.slug === trip.host_stay_familiarity)
                     ?.label ?? null
@@ -3778,6 +3863,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
               formatTime={formatRelativeTime}
               onAddUpdate={handleStartAddUpdate}
               onViewAll={onViewAllUpdates}
+              authorFor={id => authorLabel(tripRoleLabels, id)}
             />
           </View>
         )}
@@ -3997,7 +4083,8 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
 
       {/* Approved, but not in yet. The one affordance that separates them from
           someone who never asked to join. */}
-      {showOnboardingCta && (
+      {/* Not on the Chat tab: it floated over the composer's buttons there. */}
+      {showOnboardingCta && activeTab !== 'chat' && (
         <Reanimated.View
           entering={FadeInUp.duration(220)}
           style={[styles.ctaFloat, { bottom: Math.max(insets.bottom, 16) + 12 }]}
@@ -4891,12 +4978,30 @@ const styles = StyleSheet.create({
   menuDivider: { height: 1, backgroundColor: '#ECECEC', marginVertical: 4 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF' },
   errorText: { color: '#7B7B7B' },
+  loadRetryButton: {
+    marginTop: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#222B30',
+  },
+  // Press feedback: a slight shrink so the tap feels heard.
+  loadRetryButtonPressed: { transform: [{ scale: 0.97 }], opacity: 0.9 },
+  loadRetryText: { color: '#FFFFFF', fontFamily: ff('Inter', '600'), fontSize: 14 },
 
   keyboardAvoider: { flex: 1, backgroundColor: '#FAFAFA' },
   scrollContent: { paddingBottom: 24 },
 
   chatTabRoot: {
     flex: 1,
+    backgroundColor: '#F5F5F5',
+  },
+  // Opening on the Chat tab before the trip loads: the chat's own background,
+  // so nothing Overview-shaped shows and then gets swapped out.
+  chatTabLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#F5F5F5',
   },
   // Same white strip the sticky clone uses, but static: it never scrolls.

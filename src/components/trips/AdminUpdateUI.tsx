@@ -88,6 +88,8 @@ const AccordionBody: React.FC<{ text: string; progress: SharedValue<number> }> =
 export const AdminUpdateRow: React.FC<{
   update: AdminUpdate;
   formatTime: (iso: string) => string;
+  /** Who posted it, e.g. "Cam, Operator". Shown before the time. */
+  author?: string;
   /** Host long-press → Edit/Delete menu (Plan tab only). */
   onLongPress?: () => void;
   /** Trailing slot, e.g. the host "Edit" link (Plan tab only). */
@@ -106,7 +108,7 @@ export const AdminUpdateRow: React.FC<{
    *  one-line clamp, no chevron. The icon top-aligns to the first line so tall
    *  cards read like the Figma frame. */
   expanded?: boolean;
-}> = ({ update, formatTime, onLongPress, right, connected, showDivider, open, onToggle, expanded }) => {
+}> = ({ update, formatTime, author, onLongPress, right, connected, showDivider, open, onToggle, expanded }) => {
   const hasDescription = !!update.body?.trim();
   // Three modes:
   //   • expanded (full Updates page)  → body always inline, not tappable.
@@ -156,7 +158,9 @@ export const AdminUpdateRow: React.FC<{
         ) : isAccordion && hasDescription ? (
           <AccordionBody text={update.body!} progress={progress} />
         ) : null}
-        <Text style={connected ? styles.timeLg : styles.time}>{formatTime(update.created_at)}</Text>
+        <Text style={connected ? styles.timeLg : styles.time} numberOfLines={1}>
+          {author ? `${author} · ` : ''}{formatTime(update.created_at)}
+        </Text>
       </View>
       {right}
       {isAccordion && hasDescription ? (

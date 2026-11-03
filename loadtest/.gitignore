@@ -1,0 +1,13 @@
+# Local load-test files. Never commit these.
+tokens.json
+fixtures.json
+results/
+*.log
+# Schema dumps hold production secrets (webhook headers). Keep them in
+# /tmp/swellyo-loadtest, but just in case one lands here:
+schema*.sql
+roles*.sql
+
+# Production run: real ids and results. Never commit.
+prod-context.json
+prod-results/

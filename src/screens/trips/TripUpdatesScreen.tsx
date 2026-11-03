@@ -4,7 +4,7 @@
 // gets a per-card "Edit" link that opens the same AdminUpdateSheet (edit/delete)
 // the Plan tab uses, so editing works from here too (Figma node 13179:8792).
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +25,8 @@ import { updateAdminUpdate, deleteAdminUpdate } from '../../services/trips/group
 import type { AdminUpdate } from '../../services/trips/groupTripsService';
 import { NotificationCenter } from '../../components/notifications/NotificationCenter';
 import { AdminUpdateRow } from '../../components/trips/AdminUpdateUI';
+import { buildTripRoleLabels, authorLabel } from '../../components/trips/tripRoleLabels';
+import { useTripCrew } from '../../hooks/trips/useTripCapabilities';
 import { AdminUpdateSheet } from '../../components/trips/updates/AdminUpdateSheet';
 import { ff } from '../../theme/fonts';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
@@ -80,6 +82,11 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
   const isHost = isTripHost(trip, participants, currentUserId);
   const updatesQuery = useTripAdminUpdates(tripId);
   const updates = updatesQuery.data ?? [];
+  const crewQuery = useTripCrew(tripId, trip?.hosting_style === 'C');
+  const roleLabels = useMemo(
+    () => buildTripRoleLabels(participants, crewQuery.data ?? [], trip?.hosting_style === 'C'),
+    [participants, crewQuery.data, trip?.hosting_style],
+  );
 
   // Host edit — same AdminUpdateSheet (edit/delete) the Plan tab drives, with
   // the same optimistic cache patch so the list updates instantly.
@@ -178,6 +185,7 @@ export default function TripUpdatesScreen({ tripId, onBack }: Props) {
                   update={u}
                   expanded
                   formatTime={formatRelativeTime}
+                  author={authorLabel(roleLabels, u.author_id)}
                   right={
                     isHost ? (
                       <Pressable onPress={() => setEditingUpdateId(u.id)} hitSlop={8}>

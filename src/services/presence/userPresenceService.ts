@@ -73,18 +73,32 @@ class UserPresenceService {
   // Publish side — current user's own presence (presence:user:{me})
   // ===========================================================================
 
-  async trackCurrentUser(): Promise<void> {
+  /**
+   * Start broadcasting "online" + writing last_seen for the signed-in user.
+   * Pass `userId` when the caller already knows it (MessagingProvider does, on
+   * sign-in) — that skips the getUser() round-trip, which could fail and leave
+   * presence off for the whole session. Safe to call more than once.
+   */
+  async trackCurrentUser(userId?: string): Promise<void> {
     if (!isSupabaseConfigured()) {
       console.warn('[UserPresenceService] Supabase not configured');
       return;
     }
-    if (this.isTrackingCurrentUser) return;
+    if (this.isTrackingCurrentUser && (!userId || userId === this.currentUserId)) return;
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      // A different user is being tracked (switch without a full logout).
+      if (this.isTrackingCurrentUser) await this.stopTrackingCurrentUser();
 
-      this.currentUserId = user.id;
+      let id = userId;
+      if (!id) {
+        const { data: { user } } = await supabase.auth.getUser();
+        id = user?.id;
+      }
+      // Re-check after the await: a concurrent call may have started tracking.
+      if (!id || this.isTrackingCurrentUser) return;
+
+      this.currentUserId = id;
       this.isTrackingCurrentUser = true;
 
       await this.ensureOwnChannel();

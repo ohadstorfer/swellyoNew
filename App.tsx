@@ -18,6 +18,7 @@ import { QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { queryClient } from './src/lib/queryClient';
 import { useAppFonts } from './src/theme/fonts';
 import { resyncStatusBar } from './src/utils/statusBarResync';
+import { requestTrackingPermissionWhenActive } from './src/utils/trackingPermission';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
 
@@ -97,6 +98,9 @@ export default Sentry.wrap(function App() {
     analyticsService.initialize();
     registerLogoutHandlers();
   }, []);
+
+  // ATT prompt (iOS). See src/utils/trackingPermission.ts for why it exists.
+  useEffect(() => requestTrackingPermissionWhenActive(), []);
 
   // react-query has no "window focus" in RN, so wire its focusManager to
   // AppState — queries can revalidate when the app returns from background.

@@ -12,6 +12,16 @@
  * supabase channel mock captures the broadcast handlers by event name so the
  * test can fire each ping directly.
  *
+ * Since the JS-thread-freeze fix (e3f8405) the hook subscribes inside
+ * InteractionManager.runAfterInteractions, through acquireTopic
+ * (tripsRealtime.ts). So:
+ *   - runAfterInteractions is stubbed to run its task immediately;
+ *   - acquireTopic creates the channel on a resolved promise, so each test
+ *     awaits flushMicrotasks() before looking for it;
+ *   - acquireTopic keeps lingering channels in module state, and the hook keeps
+ *     its focus-catch-up throttle in module state too — so every test loads
+ *     fresh copies of both (jest.resetModules + require).
+ *
  * Variables referenced inside jest.mock factories are `mock`-prefixed (jest
  * hoists the factories above the imports and only allows mock-prefixed names).
  */
@@ -37,13 +47,15 @@ jest.mock('../../../config/supabase', () => {
         return chan;
       },
       subscribe: () => chan,
+      // acquireTopic waits out 'joining' before removing; anything else is final.
+      state: 'joined',
     };
     return chan;
   };
   return {
     supabase: {
       channel: jest.fn((topic: string) => makeChannel(topic)),
-      removeChannel: jest.fn(),
+      removeChannel: jest.fn(() => Promise.resolve('ok')),
     },
   };
 });
@@ -70,10 +82,17 @@ jest.mock('@tanstack/react-query', () => {
 });
 
 import { QueryClient } from '@tanstack/react-query';
-import { tripsKeys } from '../useTripQueries';
-import { useTripsListRealtime } from '../useTripsListRealtime';
 
 const USER_ID = 'user-123';
+const FIVE_MIN_MS = 5 * 60 * 1000;
+
+let tripsKeys: typeof import('../useTripQueries').tripsKeys;
+let useTripsListRealtime: typeof import('../useTripsListRealtime').useTripsListRealtime;
+
+/** acquireTopic creates the channel on a resolved promise — let it run. */
+const flushMicrotasks = async () => {
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+};
 
 const handlerFor = (topic: string, event: string): MockHandler => {
   const entry = mockChannels.find((c) => c.topic === topic);
@@ -83,22 +102,30 @@ const handlerFor = (topic: string, event: string): MockHandler => {
   return h;
 };
 
+/** Mount the hook (its focus effect) and let the deferred subscribe finish. */
+const mount = async (userId: string | undefined) => {
+  useTripsListRealtime(userId);
+  await flushMicrotasks();
+};
+
 describe('useTripsListRealtime — scoped invalidation', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
+    // Clock at 0 = the module's lastListInvalidateAt starting value, so the
+    // on-focus "invalidate both feeds" catch-up stays inside its 5-min throttle
+    // and does not pollute the single-topic isInvalidated assertions.
+    jest.useFakeTimers({ now: 0 });
 
-    // Prime the module-level focus-catchup throttle so the REAL test mount in
-    // each case skips the on-focus "invalidate both feeds" catch-up (which
-    // would otherwise pollute the single-topic isInvalidated assertions). A
-    // throwaway mount in the same fake-clock tick sets lastListInvalidateAt to
-    // "now", so the test mount falls inside the 5-min throttle window.
-    mockChannels.length = 0;
-    mockQc.client = new QueryClient();
-    useTripsListRealtime(USER_ID);
-    jest.advanceTimersByTime(300); // let the catch-up timers fire on the prime
-    mockFocus.cleanup?.();
+    jest.resetModules();
+    // Run the deferred setup now instead of after a navigation animation.
+    jest
+      .spyOn(require('react-native').InteractionManager, 'runAfterInteractions')
+      .mockImplementation((task: any) => {
+        task();
+        return { cancel: jest.fn() } as any;
+      });
+    ({ tripsKeys } = require('../useTripQueries'));
+    ({ useTripsListRealtime } = require('../useTripsListRealtime'));
 
-    // Now a clean slate for the actual assertion mount.
     mockChannels.length = 0;
     mockFocus.cleanup = undefined;
     mockQc.client = new QueryClient();
@@ -109,11 +136,13 @@ describe('useTripsListRealtime — scoped invalidation', () => {
 
   afterEach(() => {
     mockFocus.cleanup?.();
+    jest.runOnlyPendingTimers();
     jest.useRealTimers();
+    jest.restoreAllMocks();
   });
 
-  it("'trips_list_changed' invalidates ONLY explore, NOT my", () => {
-    useTripsListRealtime(USER_ID);
+  it("'trips_list_changed' invalidates ONLY explore, NOT my", async () => {
+    await mount(USER_ID);
 
     handlerFor('trips-list', 'trips_list_changed')({});
     jest.advanceTimersByTime(300);
@@ -122,8 +151,8 @@ describe('useTripsListRealtime — scoped invalidation', () => {
     expect(mockQc.client!.getQueryState(tripsKeys.my(USER_ID))?.isInvalidated).toBe(false);
   });
 
-  it("'trips_mine_changed' invalidates ONLY ['trips','my',userId], NOT explore", () => {
-    useTripsListRealtime(USER_ID);
+  it("'trips_mine_changed' invalidates ONLY ['trips','my',userId], NOT explore", async () => {
+    await mount(USER_ID);
 
     handlerFor(`trips-mine:${USER_ID}`, 'trips_mine_changed')({});
     jest.advanceTimersByTime(300);
@@ -132,17 +161,42 @@ describe('useTripsListRealtime — scoped invalidation', () => {
     expect(mockQc.client!.getQueryState(tripsKeys.explore)?.isInvalidated).toBe(false);
   });
 
-  it('opens an explore channel and (with a userId) a mine channel', () => {
-    useTripsListRealtime(USER_ID);
+  it('opens an explore channel and (with a userId) a mine channel', async () => {
+    await mount(USER_ID);
     const topics = mockChannels.map((c) => c.topic);
     expect(topics).toContain('trips-list');
     expect(topics).toContain(`trips-mine:${USER_ID}`);
   });
 
-  it('opens no mine channel when userId is undefined', () => {
-    useTripsListRealtime(undefined);
+  it('opens no mine channel when userId is undefined', async () => {
+    await mount(undefined);
     const topics = mockChannels.map((c) => c.topic);
     expect(topics).toContain('trips-list');
     expect(topics.some((t) => t.startsWith('trips-mine:'))).toBe(false);
+  });
+
+  it('opens the channels only once interactions settle', async () => {
+    const { InteractionManager } = require('react-native');
+    let runDeferred: (() => void) | null = null;
+    (InteractionManager.runAfterInteractions as jest.Mock).mockImplementation((task: any) => {
+      runDeferred = task;
+      return { cancel: jest.fn() };
+    });
+
+    await mount(USER_ID);
+    expect(mockChannels).toHaveLength(0);
+
+    runDeferred!();
+    await flushMicrotasks();
+    expect(mockChannels.map((c) => c.topic)).toContain('trips-list');
+  });
+
+  it('refreshes both feeds on focus once the 5-min throttle has passed', async () => {
+    jest.setSystemTime(FIVE_MIN_MS + 1);
+    await mount(USER_ID);
+    jest.advanceTimersByTime(300);
+
+    expect(mockQc.client!.getQueryState(tripsKeys.explore)?.isInvalidated).toBe(true);
+    expect(mockQc.client!.getQueryState(tripsKeys.my(USER_ID))?.isInvalidated).toBe(true);
   });
 });

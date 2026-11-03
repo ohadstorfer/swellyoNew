@@ -31,16 +31,21 @@ export type ConversationAction =
  *
  * Used as both the list sort key and the freshness comparator. Folding in
  * last_message.created_at matters because a server read can carry a STALE
- * updated_at (sendMessage's conversations.updated_at touch is fire-and-forget)
+ * updated_at (the old client touch was fire-and-forget; a server trigger sets
+ * it now, but the guard stays in case any read still lags)
  * while last_message is already fresh — recency must not regress just because
  * one of the two signals lagged.
  */
 export const conversationRecency = (c: Conversation): number => {
   const updatedMs = c.updated_at ? new Date(c.updated_at).getTime() : 0;
-  const messageMs = c.last_message?.created_at ? new Date(c.last_message.created_at).getTime() : 0;
   const updated = Number.isNaN(updatedMs) ? 0 : updatedMs;
-  const message = Number.isNaN(messageMs) ? 0 : messageMs;
-  return Math.max(updated, message);
+  return Math.max(updated, lastMessageMs(c));
+};
+
+/** Timestamp of the conversation's preview message in epoch ms, 0 if none. */
+const lastMessageMs = (c: Conversation): number => {
+  const ms = c.last_message?.created_at ? new Date(c.last_message.created_at).getTime() : 0;
+  return Number.isNaN(ms) ? 0 : ms;
 };
 
 /**
@@ -186,11 +191,15 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
       // Update updated_at in place — do NOT reorder.
       // Reordering lives exclusively on NEW_MESSAGE so the list mirrors WhatsApp
       // behavior: a conversation only bubbles up when its last_message changes.
-      // If conversations.updated_at is bumped server-side (e.g. sendMessage's
-      // trailing conversations update) without a paired messages INSERT reaching
-      // this client, we don't want to move the conv up with a stale preview.
+      // If conversations.updated_at is bumped server-side (the message insert
+      // trigger) without a paired messages INSERT reaching this client, we
+      // don't want to move the conv up with a stale preview.
+      // Compare instants, not strings: this event and NEW_MESSAGE can format the
+      // same time differently (+00:00 vs Z), and each list change is a re-render.
       const conv = state[index];
-      if (conv.updated_at === updatedAt) return state;
+      if (conv.updated_at && new Date(conv.updated_at).getTime() === new Date(updatedAt).getTime()) {
+        return state;
+      }
       const newList = [...state];
       newList[index] = { ...conv, updated_at: updatedAt };
       return newList;
@@ -397,8 +406,9 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
       // 3. DO NOT copy this pattern elsewhere - use O(n) move-to-top for real-time updates
       //
       // FRESHNESS GUARD — why this isn't a blind "server wins":
-      // The server read can LAG a just-sent optimistic update. sendMessage()'s
-      // conversations.updated_at touch is fire-and-forget, so the broadcast that
+      // The server read can LAG a just-sent optimistic update. The old client
+      // updated_at touch was fire-and-forget (a server trigger sets it now; the
+      // guard stays in case any read still lags), so the broadcast that
       // triggers this sync (it fires for the sender too) can SELECT a stale
       // updated_at (pre-send) even though last_message is already fresh. Letting
       // `server` overwrite the optimistic updated_at, then re-sorting, would drop
@@ -419,7 +429,11 @@ export const conversationReducer = (state: Conversation[], action: ConversationA
         // read — preserve local recency + preview so the send isn't reverted.
         if (conversationRecency(local) > conversationRecency(server)) {
           merged.updated_at = local.updated_at;
-          merged.last_message = local.last_message ?? server.last_message;
+          // Local can be fresher on updated_at alone (CONVERSATION_UPDATED moves
+          // it with no message), so choose the preview by the message's own time.
+          if (lastMessageMs(server) <= lastMessageMs(local)) {
+            merged.last_message = local.last_message ?? server.last_message;
+          }
         }
         // READ-STATE GUARD (mirror of the recency guard, for unread_count).
         // The server computes unread from conversation_members.last_read_at, but

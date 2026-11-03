@@ -209,8 +209,10 @@ export const getCountryImageFromPexels = async (countryName: string): Promise<st
     if (response.ok) {
       const data = await response.json();
       if (data.photos && data.photos.length > 0) {
-        // Return a small/medium size image (src.medium is 350x350, good for thumbnails)
-        return data.photos[0].src.small || data.photos[0].src.tiny || data.photos[0].src.medium;
+        // This URL gets cached to S3 forever as the shared country image, so take
+        // `large` (940px wide). `small` is ~130px tall and looks blurry on the card.
+        const src = data.photos[0].src;
+        return src.large || src.medium || src.small;
       }
     }
   } catch (error) {

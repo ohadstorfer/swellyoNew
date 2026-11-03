@@ -996,6 +996,9 @@ const SWIPE_DISMISS_DISTANCE = SWIPE_SCREEN_WIDTH * 0.3;
 const SWIPE_DISMISS_VELOCITY = 800;
 const SWIPE_ANIMATION_DURATION = 220;
 
+// Hawaiian islands / towns that show up in area[] when the state is missing.
+const HAWAII_AREA_RE = /\b(hawaii|maui|o['ʻ]?ahu|kaua['ʻ]?i|big island|kona|hilo|honolulu|waikiki|haleiwa|lahaina|paia|moloka['ʻ]?i|lana['ʻ]?i)\b/i;
+
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, onMessage, onContinueEdit, onEdit, onSettings, fromOnboardingChat = false, onSaveAndGoToConversations, noTransition = false, suppressConnectAnalytics = false, swipeBackDisabled = false, reviewRequest }) => {
   const insets = useSafeAreaInsets();
   // Join-request review footer — which action is in flight (disables both).
@@ -2328,7 +2331,11 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
         }) ?? '')
       : '';
     const displayName = areaToShow ? `${primaryLocation}, ${areaToShow}` : primaryLocation;
-    const locationForAssets = isUSA && state ? state : flagKey;
+    // Many Hawaii trips are saved as plain "United States" with the island only
+    // in area[] (e.g. "Maui"). Use the Hawaii photo for those, not the generic US one.
+    const isHawaiiArea = isUSA && !state && areas.some((a: any) =>
+      HAWAII_AREA_RE.test(String(a ?? '')));
+    const locationForAssets = isUSA && state ? state : isHawaiiArea ? 'Hawaii' : flagKey;
     const countryImageUrl = getCountryImageFromStorage(locationForAssets);
     const pexelsImageUrl = pexelsImages[locationForAssets] || null;
     const countryFlagUrl = getCountryFlag(locationForAssets);

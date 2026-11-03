@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { supabaseFetchWithTimeout } from '../utils/supabaseFetchWithTimeout';
 
 // Get Supabase credentials from environment variables
@@ -128,6 +128,7 @@ if (SUPABASE_URL && SUPABASE_ANON_KEY && validateUrl(SUPABASE_URL)) {
 
 export const supabase: SupabaseClient = supabaseClient!;
 
+
 // Helper function to check if Supabase is properly configured
 export const isSupabaseConfigured = (): boolean => {
   return !!(SUPABASE_URL && SUPABASE_ANON_KEY && 
@@ -137,6 +138,21 @@ export const isSupabaseConfigured = (): boolean => {
     validateUrl(SUPABASE_URL) &&
     supabaseClient !== null);
 };
+
+// Supabase's React Native guide: auth-js cannot tell when a mobile app goes to
+// the background, so the app must start/stop the refresh timer itself.
+// startAutoRefresh() also runs a refresh check right away on resume, so an
+// access token that expired while the app was in the background is renewed
+// before the screens refetch. Without it, a tester on 21 Oct 2026 came back
+// from the background and sent ~1 minute of requests with no user (401s,
+// realtime channels refused) until the token was renewed.
+if (Platform.OS !== 'web' && supabaseClient && isSupabaseConfigured()) {
+  if (AppState.currentState === 'active') supabaseClient.auth.startAutoRefresh();
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') supabaseClient?.auth.startAutoRefresh();
+    else supabaseClient?.auth.stopAutoRefresh();
+  });
+}
 
 // Log configuration status in development
 if (__DEV__) {

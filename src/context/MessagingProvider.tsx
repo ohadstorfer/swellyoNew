@@ -698,18 +698,20 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   const lastSyncRef = useRef<number>(0);
 
   // Handle reconnect sync (subscription-aware)
-  const handleReconnect = useCallback(async () => {
+  const handleReconnect = useCallback(async (opts?: { force?: boolean }) => {
     try {
       const now = Date.now();
       const lastSync = await getLastSyncTimestamp();
       const syncAge = now - lastSync;
       lastSyncRef.current = lastSync;
-      
+
       // Only sync if:
       // 1. Subscription is unhealthy, OR
-      // 2. Last sync was >10 minutes ago (time-based fallback)
+      // 2. Last sync was >10 minutes ago (time-based fallback), OR
+      // 3. `force` — the user-inbox channel just came back after a failure,
+      //    so events were missed no matter how "healthy" the rest looks.
       // Note: Explicit reconnect events from subscription status callback always trigger sync
-      if (subscriptionHealthyRef.current && syncAge < 10 * 60 * 1000) {
+      if (!opts?.force && subscriptionHealthyRef.current && syncAge < 10 * 60 * 1000) {
         // Skip - subscription is healthy and recent sync
         return;
       }
@@ -1023,15 +1025,24 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
   // off above in broadcast mode). Open chats are still handled by the per-conv
   // broadcast in subscribeToMessages; this drives list/unread for non-open chats
   // and surfaces brand-new conversations. Inert in 'legacy' and 'shadow'.
+  //
+  // Keyed on the signed-in user (OnboardingContext), not a one-shot getUser()
+  // at mount. The provider mounts before sign-in, so a user who signed up or
+  // logged in during the session never got an inbox channel — no list updates
+  // and no in-app banners until the app was killed (14 of 18 testers on
+  // 21 Oct 2026 signed up mid-test). A failed getUser() at mount had the same
+  // effect. Now it subscribes when a user appears, tears down on sign-out /
+  // user switch, and subscribeToUserInbox retries a failed join by itself.
+  const inboxUserId = user?.id ? String(user.id) : null;
   useEffect(() => {
     if (getRealtimeMode() !== 'broadcast') return;
-    let unsub: (() => void) | null = null;
+    if (!inboxUserId) return;
     let debounce: ReturnType<typeof setTimeout> | null = null;
     const pendingConvIds = new Set<string>();
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
-      unsub = messagingService.subscribeToUserInbox(user.id, (intent) => {
+    const unsub = messagingService.subscribeToUserInbox(
+      inboxUserId,
+      (intent) => {
         if (intent.kind === 'leave') {
           dispatch({ type: 'REMOVE_CONVERSATION', payload: { conversationId: intent.conversationId } });
           return;
@@ -1045,19 +1056,50 @@ export function MessagingProvider({ children }: { children: React.ReactNode }) {
           pendingConvIds.clear();
           handleInboxChange(ids);
         }, 400);
-      });
-    }).catch((e) => {
-      // With the global fetch timeout (2026-07-23) a hung getUser now rejects
-      // instead of hanging forever — swallow it or it's an unhandled rejection.
-      // Consequence: inbox subscribe silently skipped this session.
-      console.warn('[MessagingProvider] getUser failed; inbox subscribe skipped:', e?.message);
-    });
+      },
+      // Back after a failed join: catch up on what changed while it was down.
+      () => { void handleReconnect({ force: true }); },
+    );
 
     return () => {
       if (debounce) clearTimeout(debounce);
-      if (unsub) unsub();
+      unsub();
     };
-  }, [handleInboxChange]);
+  }, [inboxUserId, handleInboxChange, handleReconnect]);
+
+  // Presence ("online" dot, last seen) — same story as the inbox: it was only
+  // started by a one-shot getUser() at mount, so a user who signed in later
+  // showed as offline to everyone until the app was restarted. Start it on
+  // sign-in. Stopping stays with logout (utils/logout.ts) and provider unmount;
+  // stopping on `null` here could race a session that is still being restored.
+  useEffect(() => {
+    if (!inboxUserId) return;
+    userPresenceService.trackCurrentUser(inboxUserId).catch((error) => {
+      console.error('[MessagingProvider] Error starting presence tracking:', error);
+    });
+  }, [inboxUserId]);
+
+  // The mount effect below loads the conversation list once, at app start.
+  // For someone who signs in AFTER that (new signup, re-login) the list stayed
+  // empty, and the banner pass in handleInboxChange skips any conversation
+  // that was not already in the list — so their first message per chat never
+  // bannered. Load the list when a user appears and the list is still empty
+  // (a returning user whose list is already there costs nothing extra).
+  const listLoadedForUserRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const prev = listLoadedForUserRef.current;
+    if (prev === undefined || !inboxUserId || inboxUserId === prev) {
+      // First run (the mount effect already loads), signed out, or same user.
+      listLoadedForUserRef.current = inboxUserId;
+      return;
+    }
+    // A load is still running (e.g. the mount load) — decide when it ends,
+    // so we never run two loads at once.
+    if (loading) return;
+    listLoadedForUserRef.current = inboxUserId;
+    if (conversationsRef.current.length > 0) return;
+    void loadConversations(0);
+  }, [inboxUserId, loading, loadConversations]);
 
   // Set up subscription
   useEffect(() => {

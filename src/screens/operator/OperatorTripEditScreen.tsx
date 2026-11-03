@@ -844,6 +844,10 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <EditRow label="Stay type" onPress={() => setSheet('stayType')} />
           <EditRow label="Your stay" onPress={() => setSheet('stay')} />
           <EditRow label="About you" onPress={() => setSheet('aboutYou')} />
+          <EditRow
+            label="Itinerary"
+            onPress={() => navigation.navigate('OperatorEditItinerary', { tripId })}
+          />
         </EditSection>
 
         {/* Both rows open the SAME sheet (see its comment below). They carry

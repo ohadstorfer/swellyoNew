@@ -58,8 +58,8 @@ jest.mock('../../../config/supabase', () => ({
 import { messagingService } from '../messagingService';
 
 const seedHappyPathFixtures = () => {
-  mockAuthSession = { access_token: 't' };
   mockAuthUser = { id: 'me' };
+  mockAuthSession = { access_token: 't', user: mockAuthUser };
   mockTableQueues['conversation_members'] = [
     // q3: my memberships
     { data: [{ conversation_id: 'c1' }, { conversation_id: 'c2' }], error: null },
@@ -186,8 +186,8 @@ describe('getConversations characterization', () => {
   });
 
   it('returns empty when the user has no conversation memberships', async () => {
-    mockAuthSession = { access_token: 't' };
     mockAuthUser = { id: 'me' };
+    mockAuthSession = { access_token: 't', user: mockAuthUser };
     mockTableQueues['conversation_members'] = [{ data: [], error: null }];
     const result = await messagingService.getConversations(50, 0);
     expect(result).toEqual({ conversations: [], hasMore: false });

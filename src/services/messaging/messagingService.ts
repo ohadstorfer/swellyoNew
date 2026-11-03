@@ -1,6 +1,8 @@
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 import { getRealtimeMode, conversationTopic, userInboxTopic } from './realtimeMode';
 import { withTimeout } from './withTimeout';
+import { getSessionUser } from '../auth/sessionUser';
+import { askForNotifications } from '../notifications/notificationAsks';
 
 /**
  * Messaging Service
@@ -710,6 +712,28 @@ class MessagingService {
   }
 
   /**
+   * The current user's rows in a conversation matching these client_ids. Used
+   * to check whether an upload that looks dead really landed on the server.
+   */
+  async getOwnMessagesByClientIds(conversationId: string, clientIds: string[]): Promise<Message[]> {
+    if (!isSupabaseConfigured()) {
+      throw new Error('Supabase is not configured');
+    }
+    const uid = await this.getCachedUserId();
+    if (!uid || clientIds.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from('messages')
+      .select(MESSAGE_COLS_WITH_REACTIONS)
+      .eq('conversation_id', conversationId)
+      .eq('sender_id', uid)
+      .in('client_id', clientIds);
+
+    if (error) throw error;
+    return (data ?? []).map((msg) => foldEmbeddedReactions(msg, uid)) as Message[];
+  }
+
+  /**
    * Get messages updated since a specific timestamp (version-aware sync)
    * @param conversationId - The conversation ID
    * @param lastSyncTimestamp - Timestamp to fetch messages updated after
@@ -1101,13 +1125,14 @@ class MessagingService {
         data = inserted as Message;
       }
 
-      // Fire-and-forget: bounded, and never blocks the send return. The message
-      // is already inserted; updated_at is non-critical recency metadata.
-      withTimeout(
-        supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId),
-        10000,
-        'send-touch'
-      ).catch((e) => console.warn('[messagingService] updated_at touch failed:', e));
+      // No conversations.updated_at touch here: the server moves it on every
+      // message insert (trigger trg_touch_conversation_on_message_insert). A
+      // client touch only worked for owners/admins under RLS anyway.
+
+      // A reply is coming — ask for push now if it is not on. The popup's own
+      // gates (permission, weekly per-moment cooldown, daily cap) make this
+      // safe to call on every send.
+      askForNotifications('message_sent');
 
       return data;
     } catch (error) {
@@ -1152,11 +1177,6 @@ class MessagingService {
         console.warn('[messagingService] postSystemMessage insert failed:', error);
         return;
       }
-
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
     } catch (e) {
       console.warn('[messagingService] postSystemMessage error:', e);
     }
@@ -1199,11 +1219,6 @@ class MessagingService {
       throw error;
     }
 
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversationId);
-
     return data as Message;
   }
 
@@ -1236,12 +1251,6 @@ class MessagingService {
         .single();
 
       if (error) throw error;
-
-      // Update conversation's updated_at
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
 
       return data;
     } catch (error) {
@@ -1276,14 +1285,6 @@ class MessagingService {
         .single();
 
       if (error) throw error;
-
-      // Update conversation's updated_at
-      if (data) {
-        await supabase
-          .from('conversations')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', data.conversation_id);
-      }
 
       return data;
     } catch (error) {
@@ -1355,12 +1356,6 @@ class MessagingService {
         data = existing as Message;
       }
 
-      // Update conversation's updated_at (best-effort).
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
       return data;
     } catch (error) {
       console.error('Error creating image message with metadata:', error);
@@ -1425,11 +1420,6 @@ class MessagingService {
       if (fetchErr) throw fetchErr;
       data = existing as Message;
     }
-
-    await supabase
-      .from('conversations')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', conversationId);
 
     return data;
   }
@@ -1520,11 +1510,6 @@ class MessagingService {
         data = existing as Message;
       }
 
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
       return data;
     } catch (error) {
       console.error('Error creating video message with metadata:', error);
@@ -1599,11 +1584,6 @@ class MessagingService {
         data = existing as Message;
       }
 
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
       return data;
     } catch (error) {
       console.error('Error creating audio message with metadata:', error);
@@ -1639,11 +1619,6 @@ class MessagingService {
 
       if (error) throw error;
 
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
       return data;
     } catch (error) {
       console.error('Error creating video message:', error);
@@ -1677,13 +1652,6 @@ class MessagingService {
         .single();
 
       if (error) throw error;
-
-      if (data) {
-        await supabase
-          .from('conversations')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', data.conversation_id);
-      }
 
       return data;
     } catch (error) {
@@ -1730,11 +1698,6 @@ class MessagingService {
 
       if (error) throw error;
 
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
       return data;
     } catch (error) {
       console.error('Error creating audio message:', error);
@@ -1771,13 +1734,6 @@ class MessagingService {
         .single();
 
       if (error) throw error;
-
-      if (data) {
-        await supabase
-          .from('conversations')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', data.conversation_id);
-      }
 
       return data;
     } catch (error) {
@@ -2034,7 +1990,7 @@ class MessagingService {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getSessionUser();
       if (!user) {
         console.log('[messagingService] No user - auth guard will handle redirect');
         throw new Error('Not authenticated'); // Still throw for type safety, but auth guard will catch
@@ -2193,7 +2149,7 @@ class MessagingService {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { data: existing, error: readErr } = await supabase
@@ -2223,7 +2179,7 @@ class MessagingService {
    */
   async getMuteUntil(conversationId: string): Promise<Date | null> {
     if (!isSupabaseConfigured()) return null;
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return null;
 
     const { data, error } = await supabase
@@ -2443,20 +2399,90 @@ class MessagingService {
    * message changes. Maps each event to an intent via the pure mapper. This is a
    * standalone subscription (not wired into the provider here — see Task 8).
    */
-  subscribeToUserInbox(userId: string, onInbox: (intent: InboxIntent) => void): () => void {
-    const channel = supabase
-      .channel(userInboxTopic(userId), { config: { private: true } })
-      .on('broadcast', { event: 'inbox_change' }, ({ payload }) => {
-        const intent = inboxEventToIntent(payload as InboxEvent);
-        if (intent) onInbox(intent);
-      })
-      .subscribe((status) => {
-        if (status === 'CHANNEL_ERROR') {
-          console.warn('[MessagingService] user-inbox channel CHANNEL_ERROR for', userId);
+  /**
+   * The user-inbox channel drives the chat list AND the in-app "new message"
+   * banner, so it must not stay dead.
+   *  - CHANNEL_ERROR / TIMED_OUT: realtime-js (phoenix) already rejoins the
+   *    same channel on its own, with the current access token. We only note
+   *    the failure, so `onRecovered` can run a catch-up on the next SUBSCRIBED.
+   *  - CLOSED by the server (not by us): phoenix drops the channel and does
+   *    not rejoin, so we re-create it after a short backoff (2 s doubling,
+   *    capped at 60 s).
+   * Unsubscribing removes every channel this call created, including one
+   * waiting to be re-created, and the handler ignores replaced channels.
+   */
+  subscribeToUserInbox(
+    userId: string,
+    onInbox: (intent: InboxIntent) => void,
+    onRecovered?: () => void,
+  ): () => void {
+    type Channel = ReturnType<typeof supabase.channel>;
+    let stopped = false;
+    let channel: Channel | null = null;
+    let retired: Channel | null = null; // server-closed, removed before re-create
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    let hadFailure = false;
+
+    const connect = () => {
+      if (stopped) return;
+      const ch: Channel = supabase
+        .channel(userInboxTopic(userId), { config: { private: true } })
+        .on('broadcast', { event: 'inbox_change' }, ({ payload }) => {
+          if (stopped || channel !== ch) return;
+          const intent = inboxEventToIntent(payload as InboxEvent);
+          if (intent) onInbox(intent);
+        });
+      channel = ch;
+      ch.subscribe((status) => {
+        // Ignore callbacks from a channel we already replaced or removed.
+        if (stopped || channel !== ch) return;
+        if (status === 'SUBSCRIBED') {
+          attempt = 0;
+          if (hadFailure) {
+            hadFailure = false;
+            onRecovered?.();
+          }
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn(`[MessagingService] user-inbox channel ${status} for ${userId} (realtime-js rejoins)`);
+          hadFailure = true;
+        } else if (status === 'CLOSED') {
+          console.warn(`[MessagingService] user-inbox channel closed by server for ${userId}, re-creating`);
+          hadFailure = true;
+          recreate();
         }
       });
+    };
+
+    const recreate = () => {
+      if (stopped || retryTimer) return;
+      const delay = Math.min(60_000, 2_000 * 2 ** attempt);
+      attempt += 1;
+      retired = channel;
+      channel = null;
+      retryTimer = setTimeout(async () => {
+        retryTimer = null;
+        // Remove it first: supabase.channel() hands back an existing channel
+        // with the same topic instead of making a new one.
+        const old = retired;
+        retired = null;
+        if (old) {
+          try { await supabase.removeChannel(old); } catch { /* already gone */ }
+        }
+        connect();
+      }, delay);
+    };
+
+    connect();
     return () => {
-      supabase.removeChannel(channel);
+      stopped = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+      for (const ch of [channel, retired]) {
+        if (ch) supabase.removeChannel(ch);
+      }
+      channel = null;
+      retired = null;
     };
   }
 
@@ -3054,7 +3080,7 @@ class MessagingService {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getSessionUser();
       if (!user) {
         throw new Error('Not authenticated');
       }
@@ -3105,12 +3131,6 @@ class MessagingService {
 
       if (updateError) throw updateError;
 
-      // Update conversation's updated_at
-      await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
       return updatedMessage;
     } catch (error) {
       console.error('Error editing message:', error);
@@ -3130,7 +3150,7 @@ class MessagingService {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getSessionUser();
       if (!user) {
         console.error('[messagingService] User not authenticated');
         throw new Error('Not authenticated');
@@ -3198,23 +3218,6 @@ class MessagingService {
 
       console.log('[messagingService] Message soft deleted successfully', { messageId });
 
-      // Update conversation's updated_at
-      console.log('[messagingService] Updating conversation timestamp', { conversationId });
-      const { error: conversationUpdateError } = await supabase
-        .from('conversations')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
-      if (conversationUpdateError) {
-        console.error('[messagingService] Error updating conversation timestamp', {
-          conversationId,
-          error: conversationUpdateError,
-        });
-        // Don't throw - conversation update is not critical
-      } else {
-        console.log('[messagingService] Conversation timestamp updated', { conversationId });
-      }
-
       console.log('[messagingService] deleteMessage completed successfully', { messageId, conversationId });
     } catch (error) {
       console.error('[messagingService] Error in deleteMessage:', error);
@@ -3264,8 +3267,10 @@ class MessagingService {
     // `conversation_id=eq.<id>` filter, so the RLS evaluation scope stays
     // proportional to the user's own conversations instead of the whole table.
     //
-    // This channel now only listens to `public.conversations` UPDATEs, which
-    // is ~1 row per conversation and harmless at table scope.
+    // This channel now only listens to `public.conversations` UPDATEs. The
+    // server touches updated_at on every message insert, so this is ~1 row per
+    // message at table scope: cheap at today's volume, but it grows with
+    // messages x connected clients.
     const channel = supabase
       .channel('conversations_list')
       .on(
@@ -3382,17 +3387,24 @@ class MessagingService {
       const lastSyncDate = new Date(lastSync).toISOString();
 
       // Get conversations updated since lastSync
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getSessionUser();
       if (!user) {
         return [];
       }
 
       // Get all conversations where user is a member
       // Departed rows are dropped — see getConversations.
-      const { data: membershipData, error: membershipError } = await supabase
+      // Restricted mode (one inbox broadcast, on every member's device) only
+      // needs the named rows — the conversations query below intersects with
+      // restrictToConversationIds anyway, so the result is identical.
+      let membershipQuery = supabase
         .from('conversation_members')
         .select('*')
         .eq('user_id', user.id);
+      if (restrictToConversationIds && restrictToConversationIds.length > 0) {
+        membershipQuery = membershipQuery.in('conversation_id', restrictToConversationIds);
+      }
+      const { data: membershipData, error: membershipError } = await membershipQuery;
 
       if (membershipError) throw membershipError;
 
@@ -3501,7 +3513,7 @@ class MessagingService {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase
@@ -3525,7 +3537,7 @@ class MessagingService {
     if (!isSupabaseConfigured()) {
       throw new Error('Supabase is not configured');
     }
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase

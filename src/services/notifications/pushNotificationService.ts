@@ -5,7 +5,22 @@ import Constants from 'expo-constants';
 import { supabase, isSupabaseConfigured } from '../../config/supabase';
 
 /** Result of asking (or checking) whether this device can receive push. */
-export type NotificationPermissionState = 'granted' | 'undetermined' | 'blocked' | 'unavailable';
+export type NotificationPermissionState =
+  | 'granted'
+  | 'provisional'
+  | 'undetermined'
+  | 'blocked'
+  | 'unavailable';
+
+/**
+ * iOS "provisional" authorization: notifications are delivered quietly to
+ * Notification Center (no banner, no sound) without the user ever being asked,
+ * and the full prompt can still be shown later. expo-notifications reports it
+ * as status 'undetermined', so it has to be read from `ios.status`.
+ */
+function isProvisional(perm: Notifications.NotificationPermissionsStatus): boolean {
+  return perm.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+}
 
 export interface NotificationTapPayload {
   type?: string;
@@ -97,9 +112,11 @@ class PushNotificationService {
       // main app — therefore no-op until permission is granted, and pick the
       // token up on the next call after it is. That is also why the early
       // return below stays before `isRegistered` is set.
-      const { status } = await Notifications.getPermissionsAsync();
+      const perm = await Notifications.getPermissionsAsync();
 
-      if (status !== 'granted') {
+      // Provisional counts: APNs hands out a token for it, and the notifications
+      // land quietly in Notification Center until the user upgrades them.
+      if (perm.status !== 'granted' && !isProvisional(perm)) {
         console.log('[PushNotificationService] Permission not granted yet — nothing to register');
         return null;
       }
@@ -204,15 +221,18 @@ class PushNotificationService {
    *  - `unavailable` — web, or a simulator: there is nothing to ask for.
    *  - `undetermined` — never asked. The OS prompt will actually appear.
    *  - `granted` — already on.
+   *  - `provisional` — iOS only: delivered quietly, never asked. The full OS
+   *    prompt can still appear, so it is treated like `undetermined` for asking.
    *  - `blocked` — asked and refused. iOS will NOT show the prompt again, so
    *    the only way back is the system Settings screen.
    */
   async getPermissionState(): Promise<NotificationPermissionState> {
     if (Platform.OS === 'web' || !Device.isDevice) return 'unavailable';
     try {
-      const { status, canAskAgain } = await Notifications.getPermissionsAsync();
-      if (status === 'granted') return 'granted';
-      return canAskAgain ? 'undetermined' : 'blocked';
+      const perm = await Notifications.getPermissionsAsync();
+      if (perm.status === 'granted') return 'granted';
+      if (isProvisional(perm)) return 'provisional';
+      return perm.canAskAgain ? 'undetermined' : 'blocked';
     } catch (error) {
       console.warn('[PushNotificationService] Permission check failed:', error);
       return 'unavailable';
@@ -229,7 +249,7 @@ class PushNotificationService {
    */
   async requestPermission(): Promise<NotificationPermissionState> {
     const state = await this.getPermissionState();
-    if (state !== 'undetermined') {
+    if (state !== 'undetermined' && state !== 'provisional') {
       // Already granted: make sure the token exists (a first grant on an older
       // build, or a write that failed earlier, both land here).
       if (state === 'granted') await this.registerForPushNotifications();
@@ -244,6 +264,30 @@ class PushNotificationService {
     } catch (error) {
       console.warn('[PushNotificationService] Permission request failed:', error);
       return 'blocked';
+    }
+  }
+
+  /**
+   * iOS only: take provisional authorization silently, so the device has a push
+   * token from day one even if the user never answers the popup. No UI appears,
+   * and it does NOT spend the one-shot prompt — requestPermission() can still
+   * show the full one later. No-op anywhere the state is not `undetermined`.
+   */
+  async requestProvisionalPermission(): Promise<NotificationPermissionState> {
+    if (Platform.OS !== 'ios') return this.getPermissionState();
+    const state = await this.getPermissionState();
+    if (state !== 'undetermined') return state;
+
+    try {
+      const perm = await Notifications.requestPermissionsAsync({
+        ios: { allowAlert: true, allowBadge: true, allowSound: true, allowProvisional: true },
+      });
+      if (perm.status !== 'granted' && !isProvisional(perm)) return 'undetermined';
+      await this.registerForPushNotifications();
+      return perm.status === 'granted' ? 'granted' : 'provisional';
+    } catch (error) {
+      console.warn('[PushNotificationService] Provisional request failed:', error);
+      return 'undetermined';
     }
   }
 

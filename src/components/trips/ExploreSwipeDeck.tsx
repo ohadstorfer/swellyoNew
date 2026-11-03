@@ -16,8 +16,8 @@ import Animated, {
 /**
  * Explore card stack (Figma 17779:50970).
  *
- * The front card can be thrown away in ANY direction. A thrown card goes to
- * the back of the list, so the stack never runs out — it loops.
+ * The front card can be thrown up or down, never sideways. A thrown card goes
+ * to the back of the list, so the stack never runs out — it loops.
  *
  * ── Why the top index lives on the UI thread ────────────────────────────────
  * A throw has two halves, so you can SEE where the card went:
@@ -48,6 +48,18 @@ export const DECK_PEEK = 10;
 const THROW_DISTANCE = 110;
 /** A flick this fast (px/s) throws it too, however short the drag was. */
 const THROW_VELOCITY = 800;
+/** A flick only counts if it is at most this many times faster sideways than
+ *  vertically (about 63° off vertical). Stops a sideways flick that drifted
+ *  just enough to start the pan from throwing the card. */
+const MAX_FLICK_SIDEWAYS_RATIO = 2;
+/** Vertical travel that starts the drag… */
+const ACTIVATE_Y = 8;
+/** …unless the finger has gone this far sideways first. With 8 it accepts
+ *  anything up to about 74° off vertical, so a thumb swipe that starts out
+ *  curved still counts. */
+const FAIL_X = 28;
+/** A finger that travels further than this is a swipe, not a tap. */
+const TAP_MAX_DISTANCE = 10;
 const EXIT_MS = 200;
 const EXIT_EASING = Easing.out(Easing.cubic);
 /** The trip back behind the pile. Slower than the exit: this is the half the
@@ -108,34 +120,38 @@ const DeckCard: React.FC<DeckCardProps> = ({
   const active = useSharedValue(false);
   const exiting = useSharedValue(false);
 
+  // Up and down only: a mostly-sideways drag fails the pan, and the card
+  // never moves on X. The fail offset only applies before the pan starts, so
+  // once a drag is going the finger can wander sideways freely.
   const pan = Gesture.Pan()
-    .minDistance(8)
+    .activeOffsetY([-ACTIVATE_Y, ACTIVATE_Y])
+    .failOffsetX([-FAIL_X, FAIL_X])
     .onStart(() => {
       const rel = (((index - topIndex.value) % count) + count) % count;
       active.value = rel === 0 && !exiting.value;
     })
     .onUpdate(e => {
       if (!active.value) return;
-      x.value = e.translationX;
       y.value = e.translationY;
-      drag.value = Math.min(1, Math.hypot(e.translationX, e.translationY) / THROW_DISTANCE);
+      drag.value = Math.min(1, Math.abs(e.translationY) / THROW_DISTANCE);
     })
     .onEnd(e => {
       if (!active.value) return;
       active.value = false;
-      const distance = Math.hypot(e.translationX, e.translationY);
-      const speed = Math.hypot(e.velocityX, e.velocityY);
+      const distance = Math.abs(e.translationY);
+      const speed = Math.abs(e.velocityY);
+      const flicked = speed > THROW_VELOCITY && Math.abs(e.velocityX) <= speed * MAX_FLICK_SIDEWAYS_RATIO;
       // A single card has nowhere to go — it always springs back.
-      const thrown = count > 1 && (distance > THROW_DISTANCE || speed > THROW_VELOCITY);
+      const thrown = count > 1 && (distance > THROW_DISTANCE || flicked);
       if (!thrown) {
         x.value = withSpring(0, SPRING_BACK);
         y.value = withSpring(0, SPRING_BACK);
         drag.value = withSpring(0, SPRING_BACK);
         return;
       }
-      // Leave along the way the finger was heading: mostly the drag itself,
-      // nudged by the release velocity so a curved flick exits where it aimed.
-      const dx = e.translationX + e.velocityX * 0.15;
+      // Leave up or down, the way the finger was heading: mostly the drag
+      // itself, nudged by the release velocity.
+      const dx = 0;
       const dy = e.translationY + e.velocityY * 0.15;
       const len = Math.hypot(dx, dy) || 1;
       const ux = dx / len;
@@ -172,8 +188,11 @@ const DeckCard: React.FC<DeckCardProps> = ({
       );
     });
 
+  // Without maxDistance a tap has no movement limit: a quick sideways swipe
+  // fails the pan, then still counts as a tap and opens the trip.
   const tap = Gesture.Tap()
     .maxDuration(300)
+    .maxDistance(TAP_MAX_DISTANCE)
     .onEnd((_e, success) => {
       if (!success) return;
       const rel = (((index - topIndex.value) % count) + count) % count;

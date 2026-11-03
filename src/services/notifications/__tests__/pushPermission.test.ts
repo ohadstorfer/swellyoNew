@@ -15,6 +15,7 @@ jest.mock('expo-notifications', () => ({
   addPushTokenListener: jest.fn(() => ({ remove: jest.fn() })),
   setNotificationChannelAsync: jest.fn(),
   AndroidImportance: { MAX: 5 },
+  IosAuthorizationStatus: { PROVISIONAL: 3 },
 }));
 
 jest.mock('expo-device', () => ({ isDevice: true }));
@@ -75,6 +76,8 @@ describe('getPermissionState', () => {
     [{ status: 'undetermined', canAskAgain: true }, 'undetermined'],
     // Refused once: iOS will not show the prompt again, so Settings is the only route.
     [{ status: 'denied', canAskAgain: false }, 'blocked'],
+    // iOS provisional is reported as 'undetermined' — only ios.status tells it apart.
+    [{ status: 'undetermined', canAskAgain: true, ios: { status: 3 } }, 'provisional'],
   ])('maps %j to %s', async (permissions, expected) => {
     mockGetPermissions.mockResolvedValue(permissions);
     await expect(pushNotificationService.getPermissionState()).resolves.toBe(expected);
@@ -106,5 +109,51 @@ describe('requestPermission', () => {
 
     await expect(pushNotificationService.requestPermission()).resolves.toBe('blocked');
     expect(mockRequestPermissions).not.toHaveBeenCalled();
+  });
+});
+
+describe('provisional (iOS)', () => {
+  const PROVISIONAL = { status: 'undetermined', canAskAgain: true, ios: { status: 3 } };
+
+  it('registers a token under provisional authorization', async () => {
+    mockGetPermissions.mockResolvedValue(PROVISIONAL);
+    mockGetExpoPushToken.mockResolvedValue({ data: 'ExponentPushToken[abc]' });
+
+    await pushNotificationService.registerForPushNotifications();
+
+    expect(mockGetExpoPushToken).toHaveBeenCalled();
+  });
+
+  it('asks silently for provisional when never asked', async () => {
+    mockGetPermissions
+      .mockResolvedValueOnce({ status: 'undetermined', canAskAgain: true })
+      .mockResolvedValue(PROVISIONAL);
+    mockRequestPermissions.mockResolvedValue(PROVISIONAL);
+    mockGetExpoPushToken.mockResolvedValue({ data: 'ExponentPushToken[abc]' });
+
+    await expect(pushNotificationService.requestProvisionalPermission()).resolves.toBe(
+      'provisional'
+    );
+    expect(mockRequestPermissions).toHaveBeenCalledWith({
+      ios: expect.objectContaining({ allowProvisional: true }),
+    });
+  });
+
+  it('does not touch a device that already answered', async () => {
+    mockGetPermissions.mockResolvedValue({ status: 'denied', canAskAgain: false });
+
+    await expect(pushNotificationService.requestProvisionalPermission()).resolves.toBe('blocked');
+    expect(mockRequestPermissions).not.toHaveBeenCalled();
+  });
+
+  it('still shows the full OS prompt from provisional', async () => {
+    mockGetPermissions
+      .mockResolvedValueOnce(PROVISIONAL)
+      .mockResolvedValue({ status: 'granted', canAskAgain: false });
+    mockRequestPermissions.mockResolvedValue({ status: 'granted' });
+    mockGetExpoPushToken.mockResolvedValue({ data: 'ExponentPushToken[abc]' });
+
+    await expect(pushNotificationService.requestPermission()).resolves.toBe('granted');
+    expect(mockRequestPermissions).toHaveBeenCalledWith();
   });
 });

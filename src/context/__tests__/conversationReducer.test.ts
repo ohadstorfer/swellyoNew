@@ -119,3 +119,52 @@ describe('conversationReducer — sent-message ordering', () => {
     expect(ids(next)).toEqual(['other', 'target']);
   });
 });
+
+describe('conversationReducer — updated_at events from the message insert trigger', () => {
+  it('CONVERSATION_UPDATED returns the same state when only the date format differs', () => {
+    const state: Conversation[] = [conv('target', '2026-07-01T10:03:00.000Z')];
+
+    const next = conversationReducer(state, {
+      type: 'CONVERSATION_UPDATED',
+      payload: { conversationId: 'target', updatedAt: '2026-07-01T10:03:00+00:00' },
+    } as ConversationAction);
+
+    expect(next).toBe(state);
+  });
+
+  it('CONVERSATION_UPDATED still applies a different time', () => {
+    const state: Conversation[] = [conv('target', T3)];
+
+    const next = conversationReducer(state, {
+      type: 'CONVERSATION_UPDATED',
+      payload: { conversationId: 'target', updatedAt: T5 },
+    } as ConversationAction);
+
+    expect(next[0].updated_at).toBe(T5);
+  });
+
+  it('takes the server preview when local is newer only by updated_at', () => {
+    // An event moved local updated_at to T5, but its preview is still m0 @ T0.
+    const state: Conversation[] = [conv('target', T5, msg('m0', 'target', T0))];
+
+    // The lagging server read has an older updated_at, but a newer message.
+    const next = conversationReducer(state, {
+      type: 'SYNC_FROM_SERVER',
+      payload: { conversations: [conv('target', T3, msg('m3', 'target', T3))] },
+    } as ConversationAction);
+
+    expect(next[0].updated_at).toBe(T5);
+    expect(next[0].last_message?.id).toBe('m3');
+  });
+
+  it('keeps the local preview when its message is the newer one', () => {
+    const state: Conversation[] = [conv('target', T5, msg('m5', 'target', T5))];
+
+    const next = conversationReducer(state, {
+      type: 'SYNC_FROM_SERVER',
+      payload: { conversations: [conv('target', T3, msg('m3', 'target', T3))] },
+    } as ConversationAction);
+
+    expect(next[0].last_message?.id).toBe('m5');
+  });
+});

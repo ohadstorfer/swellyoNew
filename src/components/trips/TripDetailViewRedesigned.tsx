@@ -57,6 +57,8 @@ import {
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { CrewCards } from './CrewSection';
 import { StayCertRows } from './overview/StayCertRows';
+import { TripItinerarySection } from './overview/TripItinerarySection';
+import { guestDays } from '../../services/trips/itinerary';
 import { Images } from '../../assets/images';
 import { TripIcon, type TripIconName } from './tripIcons';
 import { textStyle, textStyles } from '../../theme/typography';
@@ -358,6 +360,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   onEditDates,
   onEditAccommodation,
   priceDetailsRef,
+  onRevealBy,
 }) => {
   const viewer = useViewer();
   // What this trip was priced in. A viewer on the same currency sees the
@@ -443,6 +446,8 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
         : `${vm.waveSizeMin}–${vm.waveSizeMax} Feet`
       : null;
 
+  const itineraryDays = guestDays(vm.itinerary ?? [], vm.startDateISO, vm.endDateISO);
+
   const showAccommodation =
     !!vm.accommodationName || !!vm.accommodationKindLabel || vm.specificStaySelected != null;
   // Tapping the stay card opens the host's booking/listing link, if one was set.
@@ -515,12 +520,14 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   // ("Local Guide") is how the Figma names them ("Oscar - Local Guide").
   const hostCrewTitle =
     crew.find(c => c.roleKey === 'operator' && c.title?.trim())?.title?.trim() ?? null;
-  const heroStats: { icon: TripIconName; label: string; value: string }[] = [];
+  // `glyph` is the icon's px size and `slot` the width of its Figma frame
+  // (17480:27525): the bar chart and waves sit in a 20.7 frame, the ruler in 18.
+  const heroStats: { icon: TripIconName; glyph: number; slot: number; label: string; value: string }[] = [];
   if (vm.skillLevels.length > 0)
-    heroStats.push({ icon: 'bar-chart-10', label: 'Level', value: skillLabel });
+    heroStats.push({ icon: 'bar-chart-10', glyph: 16.7, slot: 20.7, label: 'Level', value: skillLabel });
   if (vm.waveShapeLabel)
-    heroStats.push({ icon: 'waves', label: 'Wave type', value: vm.waveShapeLabel });
-  if (waveSizeLabel) heroStats.push({ icon: 'ruler', label: 'Wave Range', value: waveSizeLabel });
+    heroStats.push({ icon: 'waves', glyph: 18.4, slot: 20.7, label: 'Wave type', value: vm.waveShapeLabel });
+  if (waveSizeLabel) heroStats.push({ icon: 'ruler', glyph: 15.7, slot: 18, label: 'Wave Range', value: waveSizeLabel });
 
   // ── The three cards under it (Figma 17157:26177) ──
   // "Local Crew" counts the crew the operator marked local (staff `is_local`).
@@ -727,7 +734,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                     {heroStats.map(st => (
                       <View key={st.label} style={styles.heroStat}>
                         <View style={styles.heroStatIcon}>
-                          <TripIcon name={st.icon} size={20} color={ICON_INK} strokeWidth={1.1} />
+                          <View style={[styles.heroStatGlyph, { width: st.slot }]}>
+                            <TripIcon name={st.icon} size={st.glyph} color={ICON_INK} strokeWidth={1} />
+                          </View>
                         </View>
                         <View style={styles.heroStatText}>
                           <Text style={styles.heroStatLabel}>{st.label}</Text>
@@ -799,6 +808,20 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   Add a description so surfers know what this trip is about.
                 </Text>
               )}
+            </View>
+          ) : null}
+
+          {/* ---- Trip itinerary (Figma 18437:21672, right under About). Hidden
+                  entirely when the operator did not plan any day. ---- */}
+          {itineraryDays.length > 0 ? (
+            <View style={[styles.section, styles.sectionLineBelow]}>
+              <TripItinerarySection
+                days={itineraryDays}
+                startISO={vm.startDateISO}
+                endISO={vm.endDateISO}
+                fallbackPhoto={vm.heroImageUri}
+                onRevealBy={onRevealBy}
+              />
             </View>
           ) : null}
 
@@ -1424,14 +1447,16 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   heroCardTop: { paddingHorizontal: 20, paddingVertical: 10, alignItems: 'center' },
-  // Figma 17488:27997 — the host 48 from the left edge, the stats 48 from the
-  // right. `gap` is only the floor between them on a narrow phone.
+  // Figma 17480:27518 — the host and the stats 81 apart, centred as a group.
+  // On the 358 frame that leaves 48 each side; on a wider phone the extra
+  // width goes to the sides, not between them (space-between pushed the
+  // avatar away from the stats).
   heroCardBottom: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 16,
-    paddingHorizontal: 48,
+    justifyContent: 'center',
+    gap: 81,
+    paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 16,
   },
@@ -1445,6 +1470,10 @@ const styles = StyleSheet.create({
   heroStats: { gap: 8, flexShrink: 1 },
   heroStat: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   heroStatIcon: { padding: 5, borderRadius: 4, backgroundColor: C.surfaceMuted },
+  // The Figma icon frame, with the glyph's own padding inside it. TripIcon
+  // viewBoxes are trimmed to the path, so the glyph is drawn smaller than the
+  // frame; strokeWidth 1 is ~1.15px here, the Figma weight.
+  heroStatGlyph: { height: 20.125, alignItems: 'center', justifyContent: 'center' },
   // flexShrink, not flex: 1 — with no host beside it (planned-together trips)
   // the stats column has no set width, and flex: 1 collapses the text to 0.
   heroStatText: { flexShrink: 1 },

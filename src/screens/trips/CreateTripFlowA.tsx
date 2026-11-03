@@ -167,6 +167,16 @@ import { Images } from '../../assets/images';
 import { WaveSheetContent } from '../../components/trips/sheets/WaveSheetContent';
 import { OperatorStayCard } from '../../components/trips/create/OperatorStayCard';
 import { PackingListEditor } from '../../components/trips/create/PackingListEditor';
+import { ItineraryDayEditor, ItineraryDayList } from '../../components/trips/create/ItineraryEditor';
+import {
+  cleanItinerary,
+  dayLabel,
+  isDayPlanned,
+  tripCalendarDays,
+  uploadItineraryPhotos,
+  upsertDay,
+  type ItineraryDay,
+} from '../../services/trips/itinerary';
 
 // -----------------------------------------------------------------------------
 // Local types / constants
@@ -205,7 +215,8 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 // v8 -> v9: Flow C — the two stay certifications on the Trip Vibe step
 // (stokeCertified, ciSurfConservation) and the guest packing list on the
 // Requirements step (suggestedPackingOn, suggestedPacking).
-export const WIZARD_STATE_VERSION = 9;
+// v9 -> v10: the Flow C Trip itinerary step (itinerary).
+export const WIZARD_STATE_VERSION = 10;
 
 // Step KEYS — flat step list. Preview is the final step (publishes directly).
 type StepKey =
@@ -215,6 +226,7 @@ type StepKey =
   | 'budget'
   | 'aboutYou'
   | 'requirements'
+  | 'itinerary'
   | 'preview';
 // Flow A/C step order. Flow B inserts 'aboutYou' before 'preview' (see `steps`
 // memo in the component) so the destination + stay names exist by the time the
@@ -242,6 +254,7 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
     title: 'What travelers must send',
     subtitle: 'So you can book flights and organise the trip.',
   },
+  itinerary: { title: 'Trip itinerary', subtitle: 'What each day looks like.' },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
 };
 
@@ -464,6 +477,11 @@ interface WizardState extends Record<string, unknown> {
   suggestedPackingOn: boolean;
   suggestedPacking: string[];
 
+  // The Trip itinerary step (Flow C, optional). Only the days the operator
+  // touched, in the same shape as group_trips.itinerary. Photos stay local URIs
+  // until publish.
+  itinerary: ItineraryDay[];
+
   // Step 6 — preview
   visibility: Visibility;
 
@@ -540,6 +558,7 @@ const INITIAL_STATE: WizardState = {
   waiverFile: null,
   suggestedPackingOn: false,
   suggestedPacking: [],
+  itinerary: [],
   visibility: 'public',
 };
 
@@ -798,6 +817,8 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardS
     // Inert in edit mode too — the list is edited in ManageSuggestedGearScreen.
     suggestedPackingOn: false,
     suggestedPacking: [],
+    // Inert in edit mode too — edited in OperatorEditItineraryScreen.
+    itinerary: [],
     ageMin: trip.age_min != null ? String(trip.age_min) : '',
     ageMax: trip.age_max != null ? String(trip.age_max) : '',
     skillLevels,
@@ -1562,9 +1583,19 @@ export default function CreateTripFlowA({
     // publish this lives in ManageRequirementsSheet, opened from the Plan tab's
     // Documents card — it diffs against the stored rows instead of rewriting
     // them, which is what keeps already-uploaded documents attached.
-    if (isFixedFlow && !editMode) middle.push('requirements');
+    //
+    // The itinerary is the same: create only, and edited on its own screen
+    // (OperatorEditItinerary) after publish. Last before Preview, so the dates
+    // and the stay are known and the operator sees it straight away.
+    if (isFixedFlow && !editMode) middle.push('requirements', 'itinerary');
     return [...head, ...middle, ...tail];
   }, [hasAboutYou, isFixedFlow, editMode]);
+
+  const scrollByRef = useRef<((dy: number) => void) | null>(null);
+
+  // The day open in the itinerary step. A working copy, so "Done" is what writes
+  // it into the draft. Not itself in the draft: reopening lands on the day list.
+  const [editingDay, setEditingDay] = useState<ItineraryDay | null>(null);
 
   // ---- Wizard state (draft-backed) ----------------------------------------
   const initialState = useMemo<WizardState>(
@@ -2093,6 +2124,7 @@ export default function CreateTripFlowA({
         }
         return ok;
       }
+      case 'itinerary':
       case 'preview':
         return true;
     }
@@ -2180,6 +2212,20 @@ export default function CreateTripFlowA({
         }
         heroUrl = heroRes.url;
       }
+
+      // Itinerary photos, one at a time. Create only: nothing to upload on an
+      // edit, where this step does not exist. A failure stops the publish like
+      // the hero's does, rather than quietly dropping a photo.
+      const itinerary =
+        isFixedFlow && !editMode
+          ? await uploadItineraryPhotos(cleanItinerary(state.itinerary), async uri => {
+              const res = await uploadTripImage(uri, hostId, 'hero');
+              if (!res.success || !res.url) {
+                throw new Error(res.error || 'Failed to upload itinerary photo');
+              }
+              return res.url;
+            })
+          : [];
 
       // Accommodation photo upload (only when host locked in a stay). Flow B
       // always has a specific stay (no Yes/No gate), so it's always committed.
@@ -2469,6 +2515,10 @@ export default function CreateTripFlowA({
             isFixedFlow && state.suggestedPackingOn
               ? state.suggestedPacking.map(n => n.trim()).filter(Boolean)
               : [],
+
+          // Only when there is one: a client that reaches a database without the
+          // column must still publish every trip that has no itinerary.
+          ...(itinerary.length > 0 ? { itinerary } : {}),
         };
         const trip = await createGroupTrip(hostId, input);
 
@@ -2617,29 +2667,41 @@ export default function CreateTripFlowA({
   // -----------------------------------------------------------------------
   // Primary / secondary button handlers
   // -----------------------------------------------------------------------
+  const closeDayEditor = useCallback(() => {
+    if (!editingDay) return;
+    update('itinerary', upsertDay(state.itinerary, editingDay));
+    setEditingDay(null);
+  }, [editingDay, state.itinerary, update]);
+
   const onPrimary = useCallback(() => {
-    if (step === 'preview') {
+    if (editingDay) {
+      closeDayEditor();
+    } else if (step === 'preview') {
       // Preview is the final step — publish straight into the share screen.
       void handleSubmit();
     } else {
       handleNext();
     }
-  }, [step, handleSubmit, handleNext]);
+  }, [editingDay, closeDayEditor, step, handleSubmit, handleNext]);
 
   const onSecondary = useCallback(() => {
-    if (stepIdx === 0) {
+    if (editingDay) {
+      closeDayEditor();
+    } else if (stepIdx === 0) {
       guardedCancel();
     } else {
       handleBack();
     }
-  }, [stepIdx, guardedCancel, handleBack]);
+  }, [editingDay, closeDayEditor, stepIdx, guardedCancel, handleBack]);
 
   // CTA label per step (per spec).
   const ctaLabel: string = useMemo(() => {
     // Preview is the final action; every other step is just "Next".
+    if (editingDay) return 'Done';
     if (step === 'preview') return editMode ? 'Save changes' : 'Publish';
+    if (step === 'itinerary' && !state.itinerary.some(isDayPlanned)) return 'Skip';
     return 'Next';
-  }, [step, editMode]);
+  }, [step, editMode, editingDay, state.itinerary]);
 
   const meta = STEP_META[step];
   const stepTitle =
@@ -2671,9 +2733,50 @@ export default function CreateTripFlowA({
         return renderAboutYouStep();
       case 'requirements':
         return renderRequirementsStep();
+      case 'itinerary':
+        return renderItineraryStep();
       case 'preview':
         return renderPreviewStep();
     }
+  };
+
+  // -----------------------------------------------------------------------
+  // STEP — TRIP ITINERARY (Flow C only, optional)
+  //
+  // One row per calendar day of the trip. A day opens as a sub-page of this
+  // step: the chrome stays and its title, button and back arrow follow
+  // `editingDay`. Days are generated, not added, because Flow C always has exact
+  // dates.
+  // -----------------------------------------------------------------------
+  const renderItineraryStep = () => {
+    if (editingDay) {
+      return (
+        <ItineraryDayEditor
+          day={editingDay}
+          copyFrom={state.itinerary.filter(d => isDayPlanned(d) && d.day !== editingDay.day)}
+          onChange={setEditingDay}
+          onInputFocus={input => {
+            focusedInputRef.current = input;
+            requestAnimationFrame(() => keyboardScrollRef.current?.());
+          }}
+        />
+      );
+    }
+    return (
+      <ItineraryDayList
+        days={state.itinerary}
+        totalDays={tripCalendarDays(state.startDateISO, state.endDateISO)}
+        startISO={state.startDateISO}
+        endISO={state.endDateISO}
+        onOpenDay={setEditingDay}
+        onRemoveDay={day =>
+          update(
+            'itinerary',
+            state.itinerary.filter(d => d.day !== day),
+          )
+        }
+      />
+    );
   };
 
   // -----------------------------------------------------------------------
@@ -4495,6 +4598,7 @@ export default function CreateTripFlowA({
         : fromTripCurrency(v, previewRate);
     const previewVM: TripDetailVM = {
       heroImageUri: state.heroImageUri,
+      itinerary: isFixedFlow ? state.itinerary : undefined,
       title: state.title || null,
       destinationLabel: state.destination || null,
       startDateISO: state.datesMode === 'exact' ? state.startDateISO : null,
@@ -4572,6 +4676,7 @@ export default function CreateTripFlowA({
     return (
       <TripDetailViewRedesigned
         vm={previewVM}
+        onRevealBy={dy => scrollByRef.current?.(dy)}
         participants={
           hostSurfer
             ? [
@@ -4717,9 +4822,16 @@ export default function CreateTripFlowA({
   return (
     <View style={{ flex: 1 }}>
       <CreateTripWizardChrome
-        stepIndex={stepIdx}
+        // A day is its own page to the chrome, so it slides and scrolls to top.
+        stepIndex={editingDay ? steps.length + editingDay.day : stepIdx}
         stepCount={steps.length}
-        stepTitle={step === 'preview' ? state.title || 'Preview' : stepTitle}
+        stepTitle={
+          editingDay
+            ? dayLabel(state.startDateISO, editingDay.day)
+            : step === 'preview'
+              ? state.title || 'Preview'
+              : stepTitle
+        }
         stepSubtitle={subtitle}
         primaryLabel={ctaLabel}
         secondaryLabel={stepIdx === 0 ? 'Cancel' : 'Back'}
@@ -4727,10 +4839,16 @@ export default function CreateTripFlowA({
         onSecondary={onSecondary}
         onClose={guardedCancel}
         submitting={submitting}
+        primaryDisabled={
+          !!editingDay &&
+          !editingDay.title.trim() &&
+          editingDay.activities.some(a => a.name.trim().length > 0)
+        }
         hideProgress
         flushContent={step === 'preview'}
         focusedInputRef={focusedInputRef}
         keyboardScrollRef={keyboardScrollRef}
+        scrollByRef={scrollByRef}
         suppressKeyboardScroll={openSheet !== null}
       >
         {renderStep()}

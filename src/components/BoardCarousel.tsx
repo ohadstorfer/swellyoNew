@@ -135,6 +135,15 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const [activeVirtualIndex, setActiveVirtualIndex] = useState(initialVirtualIndex);
   const [isScrolling, setIsScrolling] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  // onViewableItemsChanged below is created once (FlatList forbids changing it),
+  // so it must read these through refs. It used to read the state directly,
+  // froze on the first render's `false`, and so overwrote the user's pick in
+  // the middle of a swipe animation — "chose Long board and Short board showed
+  // up" (21 Oct 2026 test).
+  const isScrollingRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  isScrollingRef.current = isScrolling;
+  isDraggingRef.current = isDragging;
   const dragStartOffset = useRef<number>(0); // Track scroll position when drag starts
   const dragStartIndex = useRef<number>(initialVirtualIndex); // Track index when drag starts
   const isControllingScroll = useRef<boolean>(false); // Flag to prevent scroll event loops
@@ -172,7 +181,7 @@ export const BoardCarousel: React.FC<BoardCarouselProps> = ({
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     // Only update viewable items if we're not scrolling and not dragging
     // This prevents automatic movements during user swipes
-    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrolling && !isDragging) {
+    if (viewableItems.length > 0 && viewableItems[0].index !== null && !isScrollingRef.current && !isDraggingRef.current) {
       const virtualIndex = viewableItems[0].index as number;
       setActiveVirtualIndex(virtualIndex);
       

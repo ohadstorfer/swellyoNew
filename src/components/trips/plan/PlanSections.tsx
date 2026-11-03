@@ -484,7 +484,9 @@ export const AdminUpdatesCard: React.FC<{
   /** When provided, "View all" pushes the full Updates screen instead of
    *  expanding inline (Figma node 12933-38189). */
   onViewAll?: () => void;
-}> = ({ updates, isHost, formatTime, onAddUpdate, onViewAll }) => {
+  /** "Cam, Operator" for an author id — who posted each update. */
+  authorFor?: (userId: string) => string | undefined;
+}> = ({ updates, isHost, formatTime, onAddUpdate, onViewAll, authorFor }) => {
   const [expanded, setExpanded] = useState(false);
   // Inline accordion: which update ids are expanded (tap a card to reveal its
   // body in place instead of opening an overlay). Rows toggle independently.
@@ -547,6 +549,7 @@ export const AdminUpdatesCard: React.FC<{
               connected
               showDivider={isHost || i < visible.length - 1}
               formatTime={formatTime}
+              author={authorFor?.(u.author_id)}
               open={openIds.has(u.id)}
               onToggle={() => toggleOpen(u.id)}
             />

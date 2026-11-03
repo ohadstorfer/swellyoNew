@@ -39,6 +39,7 @@ import TripGuestPaymentsScreen from '../screens/trips/TripGuestPaymentsScreen';
 import TripJoinRequestsScreen from '../screens/trips/TripJoinRequestsScreen';
 import TripTravelerScreen from '../screens/trips/TripTravelerScreen';
 import OperatorEditDestinationScreen from '../screens/operator/OperatorEditDestinationScreen';
+import OperatorEditItineraryScreen from '../screens/operator/OperatorEditItineraryScreen';
 import { NotificationsPanel } from '../components/notifications/NotificationCenter';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { ShareToChatScreen } from '../screens/ShareToChatScreen';
@@ -733,10 +734,22 @@ function HomeTabsExtras() {
   // mounted, so a cold-start request waits in AppContent state until then.
   useEffect(() => {
     if (!requestedChatCard) return;
+    // Cold start: leave the request pending until the navigator is ready —
+    // pushRootCard silently no-ops before then, which dropped the chat and
+    // left the user on the chat list. Re-runs when `active` settles.
+    if (!navigationRef.isReady()) return;
+    // Land the tab UNDER the card on the chat list first, so back ends up
+    // there. Done here, in order, rather than via a separate requestTab: a
+    // tab navigate that runs AFTER the push pops the card off the stack.
+    if (active !== 'lineup') {
+      navigationRef.navigate('HomeTabs', { screen: ROUTE_FOR_KEY.lineup });
+    }
     // Trip group chats reroute to the trip's Chat tab.
     pushChatCard(requestedChatCard);
     onRequestedChatCardConsumed();
-  }, [requestedChatCard, onRequestedChatCardConsumed]);
+    // `active` only re-triggers the not-ready case above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedChatCard, onRequestedChatCardConsumed, active]);
 
   // Surftrip-card opens from invite links — same mount-safe pattern again.
   useEffect(() => {
@@ -1044,6 +1057,11 @@ export default function RootNavigator() {
       <RootStack.Screen
         name="OperatorEditTrip"
         component={OperatorTripEditScreen}
+        options={{ presentation: 'card' }}
+      />
+      <RootStack.Screen
+        name="OperatorEditItinerary"
+        component={OperatorEditItineraryScreen}
         options={{ presentation: 'card' }}
       />
       <RootStack.Screen

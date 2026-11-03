@@ -28,6 +28,8 @@ interface Props {
   onSearchActiveChange?: (active: boolean) => void;
   onViewProfile?: (userId: string) => void;
   onBack?: () => void;
+  /** user id → "Operator" / "Guide" / "Instructor", shown next to sender names. */
+  senderRoles?: Record<string, string>;
 }
 
 export const TripChatTab: React.FC<Props> = ({
@@ -41,6 +43,7 @@ export const TripChatTab: React.FC<Props> = ({
   onSearchActiveChange,
   onViewProfile,
   onBack,
+  senderRoles,
 }) => {
   const queryClient = useQueryClient();
   const { setCurrentConversationId } = useMessaging();
@@ -120,6 +123,7 @@ export const TripChatTab: React.FC<Props> = ({
       onSearchActiveChange={onSearchActiveChange}
       onViewProfile={onViewProfile}
       onBack={onBack}
+      senderRoles={senderRoles}
     />
   );
 };

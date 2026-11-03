@@ -1,0 +1,302 @@
+<title>SDSU Test Checklist</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one narrow reading column; groups by status (done → ship → do → product talk); each item is a row with a checkbox, a short fix, and the tester evidence underneath */
+:root {
+  --bg: #f3f6f7;
+  --surface: #ffffff;
+  --ink: #12262e;
+  --muted: #5a6f77;
+  --line: #d6e0e3;
+  --accent: #0d7c8c;
+  --done: #2e7d4f;
+  --ship: #b26b00;
+  --p0: #c2362b;
+  --p1: #c46a12;
+  --p2: #8a7a14;
+  --chip-bg: #e7eef0;
+  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1a1f; --surface: #13252c; --ink: #e3eef1; --muted: #93a9b0; --line: #24404a;
+    --accent: #4cc2d1; --done: #5fc489; --ship: #e8a64a; --p0: #f0776c; --p1: #f0a35a; --p2: #d4c45a;
+    --chip-bg: #1b323b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1a1f; --surface: #13252c; --ink: #e3eef1; --muted: #93a9b0; --line: #24404a;
+  --accent: #4cc2d1; --done: #5fc489; --ship: #e8a64a; --p0: #f0776c; --p1: #f0a35a; --p2: #d4c45a;
+  --chip-bg: #1b323b; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 40px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 36px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--font-display); font-size: clamp(28px, 6vw, 40px); line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-size: 22px; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.lead { color: var(--muted); max-width: 62ch; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; font-family: var(--font-mono); font-size: 12.5px; }
+.stats span { background: var(--chip-bg); padding: 4px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.progress { display: grid; gap: 6px; }
+.bar { height: 8px; background: var(--chip-bg); border-radius: 999px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s ease; }
+.progress small { font-family: var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.callout { border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; color: var(--ink); }
+section { display: grid; gap: 12px; }
+.sec-head { display: grid; gap: 4px; }
+.sec-head p { color: var(--muted); font-size: 14px; }
+.tag { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; font-weight: 500; }
+.tag.done { color: var(--done); } .tag.ship { color: var(--ship); } .tag.todo { color: var(--accent); } .tag.talk { color: var(--muted); }
+ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+label.item { display: grid; grid-template-columns: 22px 1fr; gap: 12px; padding: 14px 16px; cursor: pointer; }
+label.item > div { min-width: 0; display: grid; gap: 4px; }
+input[type="checkbox"] { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+input[type="checkbox"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.title { font-weight: 600; }
+.why { color: var(--muted); font-size: 13.5px; }
+.where { font-family: var(--font-mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.pri { font-family: var(--font-mono); font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; margin-right: 6px; vertical-align: 1px; }
+.pri.p0 { color: var(--p0); } .pri.p1 { color: var(--p1); } .pri.p2 { color: var(--p2); }
+.status { font-size: 13px; padding: 6px 10px; border-radius: 6px; background: var(--chip-bg); color: var(--ink); }
+.status.ok { color: var(--done); }
+li:has(input:checked) .title { text-decoration: line-through; text-decoration-color: var(--muted); color: var(--muted); }
+.talk-list li { padding: 12px 16px; display: grid; gap: 2px; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Test SDSU · 21 oct 2026 · iPhone · build 50</div>
+    <h1>Qué me toca arreglar del test con 16 personas</h1>
+    <p class="lead">Leí el resumen completo de Figma (8 travelers, 5 staff, 3 operators y las notas del SDSU) y lo crucé con los logs y el código. Lo que se ve como "app inestable" fue casi todo una sola cosa: la base de datos se quedó sin memoria entre 01:40 y 01:55 UTC. Eso ya está resuelto. Lo que queda son bugs chicos y concretos.</p>
+    <div class="stats">
+      <span>Travelers 4.4/5 facilidad</span>
+      <span>8/8 se registraron solos</span>
+      <span>5/8 freeze o crash</span>
+      <span>5/8 problemas de chat</span>
+      <span>4/8 push no llegó</span>
+      <span>2/5 staff sin su viaje</span>
+    </div>
+    <div class="progress" aria-live="polite">
+      <div class="bar"><i id="bar"></i></div>
+      <small id="count">0 de 0 hechos</small>
+    </div>
+  </header>
+
+  <p class="callout">El resumen dice "no rediseñar el flujo". Coincido: nadie se trabó entendiendo la app. Se trabaron porque la app no respondía. Prioridad: estabilidad, chat, notificaciones.</p>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag done">Ya hecho y en producción</span>
+      <h2>Lo que ya arreglamos</h2>
+      <p>Esto explica la mayoría de "se congeló", "dejó de cargar", "el chat no cargaba" y "no pude ver perfiles".</p>
+    </div>
+    <ul>
+      <li><label class="item"><input type="checkbox" id="d1" data-default="1"><div>
+        <span class="title">Supabase: base de datos de Nano (0.5 GB) a Micro (1 GB)</span>
+        <span class="why">Causa real del corte: la base entró en swap (~900 MB) y todas las requests hicieron timeout (PGRST003). Gratis con el plan Pro. 21 oct.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="d2" data-default="1"><div>
+        <span class="title">RLS más rápido: 81 policies con auth.uid() en initplan</span>
+        <span class="why">Aplicado en prod el 21 oct. El aviso del advisor desapareció.</span>
+        <span class="where">supabase/migrations/20261021000000_rls_auth_uid_initplan.sql</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="d3" data-default="1"><div>
+        <span class="title">Menos requests por usuario (eran ~17 por minuto)</span>
+        <span class="why">getSession en vez de getUser en el chat, inbox con query acotada, invalidaciones de realtime agrupadas. OTA de iOS el 21 oct.</span>
+        <span class="where">src/services/auth/sessionUser.ts · messagingService.ts · useTripRealtime.ts</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="d4" data-default="1"><div>
+        <span class="title">Prueba de carga en prod con 20, 30 y 50 teléfonos</span>
+        <span class="why">Lectura y chat con realtime: 0 errores, p95 del servidor entre 170 y 370 ms.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="d5" data-default="1"><div>
+        <span class="title">My Trips devuelve también los viajes de Staff (lado DB)</span>
+        <span class="why">"Under my trips I couldn't see it as a staff member". Migración aplicada el 23 oct.</span>
+        <span class="where">supabase/migrations/20261023000000_my_trips_feed_staff.sql</span>
+      </div></label></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag ship">Hecho en código · falta commit y OTA</span>
+      <h2>Arreglado, pero los usuarios todavía no lo tienen</h2>
+      <p>El paso más simple y que más impacto tiene: commitear y sacar una OTA. Antes, seguir PRE_BUILD_CHECKLIST.md.</p>
+    </div>
+    <ul>
+      <li><label class="item"><input type="checkbox" id="s1"><div>
+        <span class="title"><span class="pri p0">P0</span>Mensajes que desaparecen después de enviarlos</span>
+        <span class="why">Al enviar, la lista se recargaba y pisaba el mensaje optimista. Arreglado con mergeLatestWindow en grupos y DMs, con 6 tests.</span>
+        <span class="where">src/services/messaging/messageWindow.ts · DirectGroupChat.tsx · DirectMessageScreen.tsx</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s2"><div>
+        <span class="title"><span class="pri p0">P0</span>Staff ve su viaje en My Trips (lado app)</span>
+        <span class="why">La app agrupa 'staff' igual que 'participant'.</span>
+        <span class="where">src/services/trips/groupTripsService.ts</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s3"><div>
+        <span class="title"><span class="pri p0">P0</span>"This trip is no longer available" cuando era solo un error de carga</span>
+        <span class="why">Ahora muestra "Couldn't load this trip" con "Try again". El operador que vio su viaje "cancelado" vio esto.</span>
+        <span class="where">src/hooks/trips/useTripDetail.ts</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s4"><div>
+        <span class="title"><span class="pri p0">P0</span>"Me deslogueó" al volver del background</span>
+        <span class="why">startAutoRefresh / stopAutoRefresh según AppState, como dice la guía de Supabase para RN. Parcial: no está 100% probado.</span>
+        <span class="where">src/config/supabase.ts</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s5"><div>
+        <span class="title"><span class="pri p1">P1</span>Banners in-app y lista de chats en vivo para usuarios nuevos</span>
+        <span class="why">14 de 18 testers se registraron en el test y nunca tuvieron el canal del inbox. Ahora se suscribe al iniciar sesión.</span>
+        <span class="where">src/context/MessagingProvider.tsx</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s6"><div>
+        <span class="title"><span class="pri p1">P1</span>Punto de "online" para usuarios nuevos</span>
+        <span class="why">La presencia ahora arranca al iniciar sesión, no solo al montar la app.</span>
+        <span class="where">src/services/presence/userPresenceService.ts</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s7"><div>
+        <span class="title"><span class="pri p1">P1</span>Pedir permiso de push en el momento justo (en curso)</span>
+        <span class="why">8 de 18 testers nunca dieron permiso, por eso "la notificación aparecía en la app pero no como push". Ya hay pedidos por contexto (pedí unirte, te aprobaron, mandaste un mensaje) y una fila en Ajustes. Terminar y revisar.</span>
+        <span class="where">src/services/notifications/notificationAsks.ts · useNotificationPermissionPrompt.ts · SettingsScreen.tsx</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="s8"><div>
+        <span class="title">Correr tsc y jest, commitear rutas explícitas, sacar OTA de iOS y Android</span>
+        <span class="why">La OTA del 21 oct fue solo iOS. Hay 8 tests que ya fallaban en HEAD (getConversations.characterization, tripsListRealtime).</span>
+      </div></label></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag todo">Para hacer · simples y claros</span>
+      <h2>Lo que queda en mis manos</h2>
+      <p>Cada uno sale directo de una queja concreta. Ninguno necesita una decisión de producto.</p>
+    </div>
+    <ul>
+      <li><label class="item"><input type="checkbox" id="t1" data-default="1"><div>
+        <span class="title"><span class="pri p0">P0</span>Los mensajes de otros no aparecen hasta salir y entrar</span>
+        <span class="why">syncWithServerInBackground existe pero nadie la llama, y después del segundo CHANNEL_ERROR la pantalla deja de reintentar. Llamarla al reconectar y al volver al foreground.</span>
+        <span class="where">src/services/messaging/messagingService.ts · DirectGroupChat.tsx</span>
+      
+        <span class="status ok">Hecho 26 oct, sin commit: con el canal caído, el chat se trae los mensajes nuevos cada 15 s, y también al volver al primer plano. En grupos y DMs.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t2" data-default="1"><div>
+        <span class="title"><span class="pri p0">P0</span>"Dejó de dejarme mandar mensajes"</span>
+        <span class="why">El composer se bloquea mientras espera un envío (hasta 30 s + 30 s). Dejar escribir y encolar; mostrar el estado en la burbuja.</span>
+        <span class="where">DirectGroupChat.tsx · DirectMessageScreen.tsx</span>
+      
+        <span class="status ok">Hecho 26 oct, sin commit: solo bloquea al crear una conversación nueva. Los envíos van en orden, con 5 s de espera máxima.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t3" data-default="1"><div>
+        <span class="title"><span class="pri p0">P0</span>Mirar los crashes en Sentry</span>
+        <span class="why">"Swellyo crashed" con pop-up y no volvió a abrir (nkai42, trip 2). Buscar el evento del 21 oct entre 00:00 y 02:15 UTC antes de suponer que fue la base.</span>
+      
+        <span class="status ok">Revisado en Sentry el 26 oct. Hubo 3 fatales en el test, cada uno una sola vez. Dos son internos de React Native (Fabric/Yoga y blur) y pasaron al mandar la app a segundo plano durante el corte. El tercero (REACT-NATIVE-T) era el "AI bird": está arreglado en el ítem de Swelly.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t4" data-default="1"><div>
+        <span class="title"><span class="pri p1">P1</span>El operador no tiene que ver el onboarding de traveler en su propio viaje</span>
+        <span class="why">Cam (operador) recibió el aviso de onboarding y el botón azul tapaba el botón del chat. isOnboardingTraveler no mira si sos host o staff; agregar ese guard y esconder el CTA.</span>
+        <span class="where">src/screens/trips/TripDetailScreen.tsx:1143</span>
+      
+        <span class="status ok">Hecho 26 oct. App: sin commit. Base: APLICADO en prod (20261026000000_host_row_not_onboarding.sql). El trigger exime al dueño del viaje y las 5 filas pasaron a active (+1 lugar ocupado en cada viaje, sin notificaciones). Rollback en supabase/rollbacks/.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t5" data-default="1"><div>
+        <span class="title"><span class="pri p1">P1</span>Mostrar quién manda cada mensaje y cada update, con su rol</span>
+        <span class="why">"Who sent updates in the trip", "labels for guide, instructor, yoga teacher". Nombre + chip de rol (Operator / Guide / Staff) en burbujas de chat y en updates del viaje.</span>
+      
+        <span class="status ok">Hecho 26 oct, sin commit: rol al lado del nombre en el chat del viaje, y "Nombre, Rol · hace 2 h" en los updates.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t6"><div>
+        <span class="title"><span class="pri p1">P1</span>Reintentar pushes que fallan con PGRST303 o 5xx</span>
+        <span class="why">Entre 01:49 y 01:53 se perdieron pushes por "JWT issued at future". Un reintento simple o pasar los pushes de mensajes por notification_queue.</span>
+      
+        <span class="status">No lo toqué: fue un síntoma del corte de memoria, y no puedo ver la versión viva de la edge function para compararla.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t7" data-default="1"><div>
+        <span class="title"><span class="pri p1">P1</span>Salida de Swelly cuando se traba</span>
+        <span class="why">Un staff quedó atrapado en el "AI bird" y tuvo que reiniciar. El servidor respondió bien (hasta ~7 s). Falta un botón para salir o un timeout con "reintentar".</span>
+      
+        <span class="status ok">Hecho 26 oct, sin commit. Causa (Sentry REACT-NATIVE-T): el tutorial de Swelly (un Modal) se abría al entrar y el selector de temas 3 s después. iOS no presenta un Modal hermano sobre otro, así que el chat quedaba vacío y sin salida. Ahora el tutorial espera a que no haya otro Modal abierto.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t8"><div>
+        <span class="title"><span class="pri p2">P2</span>Los emojis no cargaban en los mensajes</span>
+        <span class="why">Nota del SDSU. Reproducir en iOS y revisar la fuente o el render del texto.</span>
+      
+        <span class="status">Sin causa en el código (render, envío y reacciones están limpios). Falta un screenshot del tester.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t9" data-default="1"><div>
+        <span class="title"><span class="pri p2">P2</span>Perfil de surf: eligió longboard y salió shortboard</span>
+        <span class="why">Yale, nota del SDSU. Revisar dónde se guarda surfboard_type en el onboarding.</span>
+      
+        <span class="status ok">Hecho 26 oct, sin commit: el carrusel pisaba la elección a mitad del swipe (guards congelados). Arreglado con refs en BoardCarousel.tsx.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t10" data-default="1"><div>
+        <span class="title"><span class="pri p2">P2</span>Mostrar invitaciones de staff pendientes al operador</span>
+        <span class="why">Para que sepa a quién ya invitó. Los invites pendientes ya existen (user_id NULL); es solo mostrarlos.</span>
+      
+        <span class="status ok">Hecho 26 oct, sin commit: sección "Pending invites" en la hoja de Crew (organized_trip_staff_invites, sin leer el token).</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t11" data-default="1"><div>
+        <span class="title"><span class="pri p2">P2</span>"Collect payment" le pidió reconectar Stripe a Cam</span>
+        <span class="why">Revisar en qué estado de Connect quedó su cuenta (hay seis) y si el mensaje explica qué falta.</span>
+      
+        <span class="status ok">Revisado: la cuenta de Cam está completa (cobros y pagos habilitados, sin requisitos). No hay nada que arreglar.</span>
+      </div></label></li>
+      <li><label class="item"><input type="checkbox" id="t12" data-default="1"><div>
+        <span class="title">Antes del próximo test grupal</span>
+        <span class="why">Confirmar el tamaño de compute en Supabase, hacer vacuum de net._http_response (136 MB para 378 filas) y seguir la sección 6 de docs/load-test-slowness-2026-10-21.md.</span>
+      
+        <span class="status ok">Revisado 26 oct: la base está en Micro (256 MB) y net._http_response bajó a 9.5 MB. No hace falta vacuum.</span>
+      </div></label></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <span class="tag talk">No es simple · decisión de producto</span>
+      <h2>Para hablar antes de tocar código</h2>
+      <p>Vienen del test, pero piden definir qué construir, no arreglar un bug.</p>
+    </div>
+    <ul class="talk-list">
+      <li><span class="title">DMs entre staff y travelers del mismo viaje</span><span class="why">Pedido por staff y operadores. Las notas sugieren "message request".</span></li>
+      <li><span class="title">Info operativa del viaje</span><span class="why">Hotel, comidas, vuelos, contactos del staff, itinerario, olas, clima, mapa del alojamiento.</span></li>
+      <li><span class="title">Operador y staff arriba y bien visibles en la página del viaje</span><span class="why">Junto con la certificación Stoke y CI más arriba y en la tarjeta.</span></li>
+      <li><span class="title">Swipe de viajes que parece Tinder</span><span class="why">No queda claro si deslizar es "me interesa" o "no me interesa".</span></li>
+      <li><span class="title">Más guía al crear el viaje</span><span class="why">2 de 3 operadores necesitaron ayuda; descripciones de campos.</span></li>
+      <li><span class="title">Stripe se siente largo; idioma para operadores de afuera</span><span class="why">Posibles barreras de adopción.</span></li>
+    </ul>
+  </section>
+
+  <footer>Fuente: Figma "CSR Swellyo Testing" (nodo 18328:23717), docs/load-test-slowness-2026-10-21.md y el código en la rama ohad, 26 oct 2026. Las tildes que marques se guardan en este navegador.</footer>
+</div>
+
+<script>
+(function () {
+  var KEY = 'sdsu-checklist-v3';
+  var saved = {};
+  try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('input[type="checkbox"]'));
+  function update() {
+    var done = boxes.filter(function (b) { return b.checked; }).length;
+    document.getElementById('count').textContent = done + ' de ' + boxes.length + ' hechos';
+    document.getElementById('bar').style.width = Math.round(done / boxes.length * 100) + '%';
+  }
+  boxes.forEach(function (b) {
+    b.checked = b.id in saved ? !!saved[b.id] : b.dataset.default === '1';
+    b.addEventListener('change', function () {
+      saved[b.id] = b.checked;
+      try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+      update();
+    });
+  });
+  update();
+})();
+</script>

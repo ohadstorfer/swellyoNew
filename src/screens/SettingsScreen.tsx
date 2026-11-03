@@ -11,6 +11,7 @@ import {
   Linking,
   Alert,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +39,21 @@ import {
 import { PRESET_LABEL, summarise } from '../services/trips/cancellationPolicy';
 import { pushRootCard } from '../navigation/navigationRef';
 import { TripIcon } from '../components/trips/tripIcons';
+import {
+  pushNotificationService,
+  type NotificationPermissionState,
+} from '../services/notifications/pushNotificationService';
+import { logEvent } from '../services/analytics/eventLogger';
+
+/** What the Notifications row says on the right. */
+const NOTIFICATION_STATE_LABEL: Record<NotificationPermissionState, string> = {
+  granted: 'On',
+  // iOS provisional: delivered to Notification Center without sound or banner.
+  provisional: 'Quiet',
+  undetermined: 'Off',
+  blocked: 'Off',
+  unavailable: '',
+};
 
 // Settings menu icons. The PNGs are 1px outlines in #222B30; the rows without
 // a PNG use TripIcon at size 24, strokeWidth 1 (the default) to match them.
@@ -63,6 +79,40 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showCurrency, setShowCurrency] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [notifState, setNotifState] = useState<NotificationPermissionState>('unavailable');
+
+  // Re-read on return from the system Settings screen — that is where the
+  // switch lives once the OS prompt is spent, so the row must catch the change.
+  useEffect(() => {
+    const refresh = () => {
+      pushNotificationService.getPermissionState().then(setNotifState).catch(() => {});
+    };
+    refresh();
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, []);
+
+  const handleNotifications = () => {
+    // The OS prompt can still appear: ask in place. Once it is spent (on or
+    // refused), turning it on or off is only possible in the system Settings.
+    if (notifState === 'undetermined' || notifState === 'provisional') {
+      pushNotificationService
+        .requestPermission()
+        .then(result => {
+          setNotifState(result);
+          logEvent('notification_permission_result', {
+            properties: { context: 'settings', source: 'os_prompt', result },
+          });
+        })
+        .catch(() => {});
+      return;
+    }
+    Linking.openSettings().catch(err =>
+      console.warn('[Settings] Could not open system Settings:', err)
+    );
+  };
 
   // ── Operator settings ────────────────────────────────────────────────────
   // Only an account with surfers.operator = true sees any of this. The flag is
@@ -309,6 +359,28 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
               {storedCurrency ? storedCurrency : `Auto (${effectiveCurrency})`}
             </Text>
           </TouchableOpacity>
+
+          {notifState !== 'unavailable' && (
+            <TouchableOpacity
+              style={styles.menuRow}
+              activeOpacity={0.7}
+              onPress={handleNotifications}
+              accessibilityLabel={`Notifications, ${NOTIFICATION_STATE_LABEL[notifState]}`}
+            >
+              <TripIcon name="bell-01" size={24} />
+              <Text style={styles.menuRowText}>Notifications</Text>
+              <Text
+                style={[
+                  styles.menuRowValue,
+                  notifState !== 'granted' && styles.menuRowValueOff,
+                ]}
+              >
+                {notifState === 'granted' || notifState === 'provisional'
+                  ? NOTIFICATION_STATE_LABEL[notifState]
+                  : 'Turn on'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowReportBug(true)}>
             <Image source={iconReportBug} style={styles.menuIcon} resizeMode="contain" />
@@ -577,6 +649,10 @@ const styles = StyleSheet.create({
     fontWeight: '400' as const,
     color: '#7B7B7B',
     lineHeight: 18,
+  },
+  // Notifications not fully on — the value doubles as the call to action.
+  menuRowValueOff: {
+    color: '#0788B0',
   },
   linkText: {
     color: '#0788B0',

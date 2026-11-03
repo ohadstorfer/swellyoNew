@@ -184,6 +184,68 @@ export async function listTripStaff(tripId: string): Promise<TripStaffMember[]> 
     .sort((a, b) => TIER_ORDER.indexOf(a.role_key) - TIER_ORDER.indexOf(b.role_key));
 }
 
+/** An invite that has not been accepted, revoked or expired yet. */
+export interface PendingStaffInvite {
+  id: string;
+  role_key: StaffRoleKey;
+  title: string | null;
+  created_at: string;
+  expires_at: string;
+  /** Set for an in-app invite; null for a shareable link. */
+  invited_user_id: string | null;
+  /** The invited person's name — only known for an in-app invite. */
+  name: string | null;
+  photo_url: string | null;
+}
+
+/**
+ * Invites the operator sent that nobody has accepted yet, newest first.
+ *
+ * Invites live in `organized_trip_staff_invites`, not on the crew table: a crew
+ * row is only created when the invite is accepted. So the crew list alone left
+ * operators guessing whom they had already invited (21 Oct 2026 test).
+ *
+ * Readable by whoever holds `staff.manage` (policy `otsi_operator_all`). The
+ * columns are listed on purpose: `token` is the link's secret and is never read.
+ */
+export async function listPendingStaffInvites(tripId: string): Promise<PendingStaffInvite[]> {
+  const { data, error } = await supabase
+    .from('organized_trip_staff_invites')
+    .select('id, role_key, title, created_at, expires_at, invited_user_id')
+    .eq('trip_id', tripId)
+    .is('accepted_at', null)
+    .is('revoked_at', null)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const rows = data ?? [];
+  const userIds = rows.map(r => r.invited_user_id).filter((id): id is string => !!id);
+  let profiles = new Map<string, { name: string | null; profile_image_url: string | null }>();
+  if (userIds.length > 0) {
+    const { data: surfers, error: surferError } = await supabase
+      .from('surfers')
+      .select('user_id, name, profile_image_url')
+      .in('user_id', userIds);
+    if (surferError) throw surferError;
+    profiles = new Map((surfers ?? []).map(s => [s.user_id, s]));
+  }
+
+  return rows.map(r => {
+    const profile = r.invited_user_id ? profiles.get(r.invited_user_id) : undefined;
+    return {
+      id: r.id,
+      role_key: r.role_key as StaffRoleKey,
+      title: r.title,
+      created_at: r.created_at,
+      expires_at: r.expires_at,
+      invited_user_id: r.invited_user_id,
+      name: profile?.name ?? null,
+      photo_url: profile?.profile_image_url ?? null,
+    };
+  });
+}
+
 /**
  * Add someone to the crew.
  *

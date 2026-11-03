@@ -16,6 +16,7 @@ import {
   Linking,
   Keyboard,
   BackHandler,
+  AppState,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,7 +37,7 @@ import { KeyboardIcon } from '../components/icons/KeyboardIcon';
 import { useAttachPanel } from '../hooks/useAttachPanel';
 import { FileBubble } from '../components/messages/FileBubble';
 import { ContactBubble } from '../components/messages/ContactBubble';
-import { capMessages, MAX_IN_MEMORY_MESSAGES } from '../services/messaging/messageWindow';
+import { capMessages, MAX_IN_MEMORY_MESSAGES, mergeLatestWindow } from '../services/messaging/messageWindow';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
 import { getImageUrl, getStorageThumbUrl } from '../services/media/imageService';
 import { Images } from '../assets/images';
@@ -98,6 +99,7 @@ import {
 import { queryClient } from '../lib/queryClient';
 import { tripsKeys } from '../hooks/trips/useTripQueries';
 import { withTimeout, mediaUploadTimeoutMs } from '../services/messaging/withTimeout';
+import { healDeadUploads, isDeadUpload } from '../services/messaging/deadMediaUploads';
 // Static — the send path must reach the optimistic bubble with ZERO awaits, and
 // this used to arrive via `await import(videoUploadService)`. See videoLimits.ts.
 import { assertVideoWithinLimits } from '../services/messaging/videoLimits';
@@ -483,6 +485,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // notification-open (index 0, below the fold with maintainVisibleContentPosition)
   // wouldn't auto-scroll and the user would have to scroll down to see it.
   const hasUserScrolledRef = useRef(false);
+  // Away from the bottom (same 200px line as isNearBottomRef): show the jump-down
+  // button even with no new messages (WhatsApp). Set from onScroll; React bails
+  // out on the same value.
+  const [showJumpDown, setShowJumpDown] = useState(false);
   // True once we've trimmed the NEWEST messages off the in-memory window (because
   // the user scrolled far up). "Scroll to bottom" must reload the latest window.
   const hasNewerTrimmedRef = useRef(false);
@@ -708,7 +714,8 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (!hasNewerTrimmedRef.current || !currentConversationId) return;
     try {
       const result = await messagingService.getMessages(currentConversationId, 30);
-      setMessages(result.messages);
+      // Merge, don't replace: a just-sent message is not on the server yet.
+      setMessages((prev) => mergeLatestWindow(prev, result.messages));
       setHasMoreMessages(result.hasMore);
       oldestMessageIdRef.current = result.messages[0]?.id ?? null;
       hasNewerTrimmedRef.current = false;
@@ -717,9 +724,17 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       console.warn('[reloadLatestWindow] failed:', e);
     }
   }, [currentConversationId]);
-  // Internal callers (post-send, layout) keep the sync signature; reload is fire-and-forget.
+  // Internal callers (post-send, layout) keep the sync signature. When the newest
+  // messages were trimmed, scroll only AFTER the reload: scrolling the stale window
+  // first lands on its end, then the reload adds the newer rows below and
+  // maintainVisibleContentPosition holds the view above them — not at the bottom.
   const scrollToBottom = useCallback((animated = true) => {
-    void reloadLatestWindow();
+    if (hasNewerTrimmedRef.current) {
+      void reloadLatestWindow().then(() => {
+        requestAnimationFrame(() => scrollToBottomBase(animated));
+      });
+      return;
+    }
     scrollToBottomBase(animated);
   }, [reloadLatestWindow, scrollToBottomBase]);
   // The "Return to latest" pill awaits the reload THEN scrolls, so it lands on the
@@ -775,6 +790,14 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   const [unreadMarker, setUnreadMarker] = useState<{ firstUnreadId: string; count: number } | null>(null);
   const unreadMarkerResolvedRef = useRef<string | null>(null);
   const unreadScrollConsumedRef = useRef<string | null>(null);
+  // Open-at-divider jump: the divider usually sits beyond the render window,
+  // so scrollToIndex fails and converges through estimated-offset hops. The
+  // list stays hidden until it lands, and the hops must not page in history.
+  const unreadJumpUntilRef = useRef(0);
+  const unreadJumpFailedRef = useRef(false);
+  const unreadRevealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unreadRevealFailsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [unreadJumpHidden, setUnreadJumpHidden] = useState(false);
   // True while the window may be NON-contiguous: the loader seeded the
   // provider's newest message ahead of the cached window and the catch-up
   // fetch hasn't filled the gap yet. While set, the divider resolver must not
@@ -783,9 +806,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
   // Reconnect catch-up: detect SUBSCRIBED after a prior disconnect and pull missed messages.
   const wasDisconnectedRef = useRef(false);
   const lastRealtimeEventAtRef = useRef<number>(Date.now());
+  // Latest channel status, read by the polling fallback inside the subscribe effect.
+  const realtimeStatusRef = useRef<RealtimeSubscriptionStatus | null>(null);
   const catchUpInFlightRef = useRef(false);
   // Timers for the staggered post-reconnect catch-up (see scheduleReconnectCatchUp).
   const reconnectCatchUpTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Tail of the in-flight text sends, so overlapping sends reach the server in order.
+  const sendChainRef = useRef<Promise<void>>(Promise.resolve());
 
   // Keep refs in sync so subscription callbacks always see latest values
   useEffect(() => {
@@ -926,8 +953,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     setUnreadMarker(null);
     unreadMarkerResolvedRef.current = null;
     unreadScrollConsumedRef.current = null;
+    unreadJumpUntilRef.current = 0;
+    if (unreadRevealTimerRef.current) clearTimeout(unreadRevealTimerRef.current);
+    if (unreadRevealFailsafeRef.current) clearTimeout(unreadRevealFailsafeRef.current);
+    setUnreadJumpHidden(false);
     seededGapRef.current = false;
     setNewWhileAwayCount(0);
+    setShowJumpDown(false);
   }, [currentConversationId]);
 
   // Fetch MY read watermark from the DB as early as possible (see above).
@@ -977,6 +1009,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       wasDisconnectedRef.current = false;
       lastRealtimeEventAtRef.current = Date.now();
       catchUpInFlightRef.current = false;
+      realtimeStatusRef.current = null;
 
       // Fetch messages that arrived while the WebSocket was down. Supabase Realtime does not
       // replay missed events on reconnect, so cover the gap with a query against Postgres.
@@ -990,6 +1023,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         if (!force && Date.now() - lastRealtimeEventAtRef.current < 10_000) return;
 
         catchUpInFlightRef.current = true;
+        const startedAt = Date.now();
         try {
           // Widen the lookback on the forced path so a message the outbox
           // resent a moment ago is reliably inside the window.
@@ -997,7 +1031,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             ? Date.now() - 60_000
             : lastRealtimeEventAtRef.current - 2000;
           const missed = await messagingService.getMessagesUpdatedSince(convId, since, 50);
-          if (missed.length === 0) return;
+          if (missed.length === 0) {
+            if (!force) lastRealtimeEventAtRef.current = startedAt;
+            return;
+          }
           console.log(`[DirectMessageScreen] catch-up found ${missed.length} missed messages (reconnect path)`);
           if (missed.length === 50) {
             console.warn('[DirectMessageScreen] catch-up hit 50-message limit — older gap may require scroll-up pagination');
@@ -1052,6 +1089,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             }
           },
           onSubscriptionStatus: (status) => {
+            realtimeStatusRef.current = status;
             setRealtimeStatus(status);
             if (status === 'SUBSCRIBED') {
               setRealtimeHealthy(true);
@@ -1135,6 +1173,11 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 }
                 return prev;
               }
+              // The window is parked in older history (reply/search/unread jump, or
+              // the newest end trimmed while scrolled up). Appending would glue this
+              // message right after old ones with everything between missing — and
+              // save that gap to the cache. The jump-down button reloads the latest.
+              if (hasNewerTrimmedRef.current) return prev;
               const appended = [...prev, newMessage];
               // At the bottom: cap by dropping the OLDEST (off-screen top). If the
               // user is scrolled up reading history, leave the array untrimmed.
@@ -1162,7 +1205,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             // scrolled up reading history, an incoming message must not yank them
             // down (and scrollToBottom now reloads the latest window if trimmed).
             // Sending a message keeps you at the bottom, so this still scrolls then.
-            if (isNearBottomRef.current) {
+            if (isNearBottomRef.current && !hasNewerTrimmedRef.current) {
               scrollToBottom();
             } else if (me && newMessage.sender_id !== me) {
               setNewWhileAwayCount((c) => c + 1);
@@ -1303,8 +1346,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
         }
       );
 
+      // Fallback when Realtime is down and does not come back on its own
+      // (21 Oct test: "messages from other members were not popping up").
+      // While the channel is not SUBSCRIBED, pull new rows from Postgres every
+      // 15 s. Also pull once when the app returns to the foreground: iOS can
+      // drop the socket in the background without any status event, so
+      // nothing else would notice the gap.
+      const pollTimer = setInterval(() => {
+        if (realtimeStatusRef.current !== 'SUBSCRIBED') void runReconnectCatchUp();
+      }, 15_000);
+      const appStateSub = AppState.addEventListener('change', (next) => {
+        if (next === 'active') void runReconnectCatchUp();
+      });
+
       return () => {
         unsubscribe();
+        clearInterval(pollTimer);
+        appStateSub.remove();
         setIsTyping(false);
         reconnectCatchUpTimersRef.current.forEach(clearTimeout);
         reconnectCatchUpTimersRef.current = [];
@@ -1422,58 +1480,35 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     };
   }, [currentConversationId]);
 
-  // Heal stuck image uploads left over from a previous session: a cached image
-  // still in 'uploading' with no real URL can never resume → flip it to 'failed'
-  // so it shows Retry/Remove instead of a permanent spinner ghost. Skips uploads
-  // that are genuinely in-flight in THIS session.
+  // Heal media rows nobody is uploading anymore (see deadMediaUploads). Asks the
+  // server first: the upload may have finished after the screen that started it
+  // unmounted, so the row is sent and must not show "Failed to send".
   useEffect(() => {
     const convId = currentConversationId;
     if (!convId) return;
-    const t = setTimeout(() => {
-      setMessages((prev) => {
-        let changed = false;
-        const next = prev.map(m => {
-          // Catch the user's OWN images that have no usable image and aren't
-          // actively uploading — covers both leftover 'uploading' rows from a
-          // killed session AND old pre-fix ghosts (real server rows with null
-          // metadata, upload_state undefined). Never touch received messages,
-          // genuinely in-flight uploads, or already-sent rows.
-          const mine = m.sender_id === currentUserId;
-          const isMedia = m.type === 'image' || m.type === 'video' || m.type === 'audio' || m.type === 'file';
-          // "Has real uploaded media" per type. Video's video_url stays '' until
-          // the MediaConvert Lambda finishes, so its success signal is storage_path
-          // (set the moment the S3 upload + create succeed), NOT video_url.
-          const hasRealMedia =
-            m.type === 'image' ? !!m.image_metadata?.image_url :
-            m.type === 'video' ? !!m.video_metadata?.storage_path :
-            m.type === 'audio' ? !!m.audio_metadata?.audio_url :
-            m.type === 'file' ? !!m.file_metadata?.storage_path :
-            true;
-          // A dead upload from a previous session (still 'uploading' but not in
-          // this session's in-flight set — the local preview may still be cached),
-          // or an old pre-fix ghost (real server row with null metadata,
-          // upload_state undefined). Flip to 'failed' so it shows Retry/Remove;
-          // keep _localPreviewUri so Retry can re-upload. Never touch received,
-          // in-flight, sent, or already-failed rows.
-          if (
-            isMedia &&
-            mine &&
-            !hasRealMedia &&
-            !inFlightUploads.has(m.id) &&
-            m.upload_state !== 'sent' &&
-            m.upload_state !== 'failed'
-          ) {
-            changed = true;
-            return { ...m, upload_state: 'failed' as const, upload_error: 'Upload interrupted' };
-          }
-          return m;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const dead = messagesRef.current.filter(m => isDeadUpload(m, currentUserId, inFlightUploads));
+      if (dead.length === 0) return;
+      const clientIds = dead.flatMap(m => (m.client_id ? [m.client_id] : []));
+      const serverRows = await messagingService
+        .getOwnMessagesByClientIds(convId, clientIds)
+        .catch((err) => {
+          console.warn('[DirectMessageScreen] dead upload lookup failed:', err);
+          return [] as Message[];
         });
-        if (!changed) return prev;
+      if (cancelled) return;
+      setMessages((prev) => {
+        const next = healDeadUploads(prev, serverRows, currentUserId, inFlightUploads);
+        if (next === prev) return prev;
         chatHistoryCache.saveMessages(convId, next).catch(() => {});
         return next;
       });
     }, 800);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [currentConversationId, currentUserId]);
 
   // Mute state derived synchronously from the provider so the menu opens with the
@@ -2308,12 +2343,20 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       }
     }
 
-    setIsLoading(true);
+    // Only creating a new conversation locks the composer. Sending into an
+    // existing one does not (21 Oct test: "it stopped letting me send
+    // messages" — a slow send held the lock for up to 60 s). The outbox entry
+    // and the client_id make overlapping sends safe; sendChainRef keeps them
+    // in order without making the user wait.
+    setIsLoading(false);
 
-    if (!targetConversationId) {
-      setIsLoading(false);
-      return;
-    }
+    if (!targetConversationId) return;
+
+    // Take this send's place in line now, synchronously, so two quick taps
+    // keep their order even though the outbox write below is async.
+    const previousSend = sendChainRef.current;
+    let releaseSend!: () => void;
+    sendChainRef.current = new Promise<void>((resolve) => { releaseSend = resolve; });
 
     // Persist the send intent BEFORE attempting the network call. If the app
     // is killed mid-send or the request fails, the outbox will retry on the
@@ -2330,6 +2373,10 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     } catch (err) {
       console.warn('[DirectMessageScreen] outbox enqueue failed (proceeding anyway):', err);
     }
+
+    // Wait for the previous send, but never longer than 5 s: a stuck send must
+    // not hold every later message (the outbox retries the stuck one anyway).
+    await Promise.race([previousSend, new Promise<void>((r) => setTimeout(r, 5000))]);
 
     // 3. Send message to server (replace optimistic message with real one)
     try {
@@ -2397,7 +2444,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
       // bookkeeping; the entry stays enqueued.
       messageOutbox.markFailed(clientId, error).catch(() => {});
     } finally {
-      setIsLoading(false);
+      releaseSend();
     }
   };
 
@@ -4503,6 +4550,29 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     if (sentSinceOpen) setUnreadMarker(null);
   }, [messages, unreadMarker, currentUserId]);
 
+  const revealAfterUnreadJump = useCallback((delay: number) => {
+    if (unreadRevealTimerRef.current) clearTimeout(unreadRevealTimerRef.current);
+    unreadRevealTimerRef.current = setTimeout(() => {
+      unreadJumpUntilRef.current = 0;
+      if (unreadRevealFailsafeRef.current) clearTimeout(unreadRevealFailsafeRef.current);
+      setUnreadJumpHidden(false);
+    }, delay);
+  }, []);
+
+  // Re-reads the divider's index on every attempt: live arrivals insert at
+  // index 0 of the inverted list and shift it while the jump converges.
+  const scrollToUnreadDivider = useCallback(() => {
+    const index = displayRowsRef.current.findIndex((r) => r.kind === 'unread-divider');
+    if (index === -1) {
+      revealAfterUnreadJump(0);
+      return;
+    }
+    // onScrollToIndexFailed fires synchronously inside scrollToIndex.
+    unreadJumpFailedRef.current = false;
+    flatListRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false });
+    if (!unreadJumpFailedRef.current) revealAfterUnreadJump(80);
+  }, [revealAfterUnreadJump]);
+
   // Open at first unread (WhatsApp behavior): once the divider row exists,
   // position it near the top of the viewport — but only once per conversation
   // and only if it isn't already visible near the bottom.
@@ -4514,19 +4584,22 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
     unreadScrollConsumedRef.current = currentConversationId;
     if (index < 4) return; // divider already on-screen at the bottom
     const count = unreadMarker.count;
+    // Un-pin now, not after the delay: a live message arriving in between
+    // must not animate the list to the bottom right before we jump away.
+    hasUserScrolledRef.current = true;
+    isNearBottomRef.current = false;
+    unreadJumpUntilRef.current = Date.now() + 2000;
+    setUnreadJumpHidden(true);
+    if (unreadRevealFailsafeRef.current) clearTimeout(unreadRevealFailsafeRef.current);
+    unreadRevealFailsafeRef.current = setTimeout(() => revealAfterUnreadJump(0), 2000);
     setTimeout(() => {
-      flatListRef.current?.scrollToIndex({ index, viewPosition: 0.9, animated: false });
-      // We're now positioned up at the divider, not at the bottom: un-pin so a
-      // live incoming message increments the badge instead of yanking the user
-      // down mid-read.
-      hasUserScrolledRef.current = true;
-      isNearBottomRef.current = false;
+      scrollToUnreadDivider();
       // WhatsApp: opening positioned up at the divider shows the jump-down
       // badge with the unread count. If the jump actually landed near the
       // bottom (few unread), the resulting onScroll clears it immediately.
       setNewWhileAwayCount((c) => Math.max(c, count));
-    }, 300);
-  }, [unreadMarker, displayRows, currentConversationId]);
+    }, 100);
+  }, [unreadMarker, displayRows, currentConversationId, scrollToUnreadDivider, revealAfterUnreadJump]);
 
   // Reacting to the newest message grows its cell — the badge hangs below the
   // bubble (MessageReactionsRow pulls itself up with a negative marginTop). The
@@ -5845,7 +5918,7 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
             // their new absolute position while the keyboard is independently
             // moving them. New messages still slide up via their `entering`
             // animation; older messages reposition instantly (WhatsApp behavior).
-            style={styles.messagesList}
+            style={[styles.messagesList, unreadJumpHidden && { opacity: 0 }]}
             contentContainerStyle={[
               styles.messagesContent,
               { flexGrow: 1, justifyContent: 'flex-end' },
@@ -5882,7 +5955,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
               } else if (hasUserScrolledRef.current) {
                 isNearBottomRef.current = false;
               }
-              if (distanceFromTop < 200 && hasMoreMessagesRef.current && !isLoadingOlderRef.current) {
+              setShowJumpDown(!isNearBottomRef.current);
+              if (
+                distanceFromTop < 200 &&
+                hasMoreMessagesRef.current &&
+                !isLoadingOlderRef.current &&
+                Date.now() >= unreadJumpUntilRef.current
+              ) {
                 loadOlderMessages();
               }
             }}
@@ -5907,6 +5986,13 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                 offset: info.averageItemLength * info.index,
                 animated: false,
               });
+              if (Date.now() < unreadJumpUntilRef.current) {
+                // Open-at-divider jump: retry with the divider's fresh index
+                // and its own viewPosition, while the list is still hidden.
+                unreadJumpFailedRef.current = true;
+                setTimeout(scrollToUnreadDivider, 120);
+                return;
+              }
               setTimeout(() => {
                 // The window can be replaced by a re-anchor fetch between the
                 // failure and this retry, leaving info.index out of range —
@@ -6058,15 +6144,23 @@ export const DirectMessageScreen: React.FC<DirectMessageScreenProps> = ({
                   <Text style={styles.returnToLatestText}>Return to latest ↓</Text>
                 </TouchableOpacity>
               )}
-              {newWhileAwayCount > 0 && (
-                <TouchableOpacity style={styles.newMessagesFab} onPress={handleJumpToNew} activeOpacity={0.8}>
-                  <View style={styles.newMessagesFabBadge}>
-                    <Text style={styles.newMessagesFabBadgeText}>
-                      {newWhileAwayCount > 99 ? '99+' : newWhileAwayCount}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-down" size={22} color="#111" />
-                </TouchableOpacity>
+              {(newWhileAwayCount > 0 || (showJumpDown && !showReturnToLatest)) && (
+                <Reanimated.View
+                  style={styles.newMessagesFab}
+                  entering={FadeIn.duration(160)}
+                  exiting={FadeOut.duration(120)}
+                >
+                  <TouchableOpacity style={styles.newMessagesFabTouch} onPress={handleJumpToNew} activeOpacity={0.8}>
+                    {newWhileAwayCount > 0 && (
+                      <View style={styles.newMessagesFabBadge}>
+                        <Text style={styles.newMessagesFabBadgeText}>
+                          {newWhileAwayCount > 99 ? '99+' : newWhileAwayCount}
+                        </Text>
+                      </View>
+                    )}
+                    <Ionicons name="chevron-down" size={22} color="#111" />
+                  </TouchableOpacity>
+                </Reanimated.View>
               )}
               {editDimRect && (menuVisible || editingMessageId) && (
                 <BubbleSpotlightDim
@@ -6564,6 +6658,7 @@ const styles = StyleSheet.create({
   returnToLatestPill: { position: 'absolute', alignSelf: 'center', bottom: 90, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: '#111' },
   // WhatsApp-style round jump-to-new button with a count badge riding its top edge.
   newMessagesFab: { position: 'absolute', right: 16, bottom: 112, width: 36, height: 36, borderRadius: 18, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 5 },
+  newMessagesFabTouch: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   newMessagesFabBadge: { position: 'absolute', top: -8, left: -8, minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: '#05BCD3', alignItems: 'center', justifyContent: 'center', zIndex: 1 },
   newMessagesFabBadgeText: { color: '#fff', fontSize: 11.5, fontWeight: '700' },
   // Negative horizontal margin cancels messagesContent's paddingHorizontal so

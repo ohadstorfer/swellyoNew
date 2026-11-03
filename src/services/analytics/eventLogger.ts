@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../config/supabase';
 import { analyticsService } from './analyticsService';
+import { getSessionUser } from '../auth/sessionUser';
 
 /**
  * Names of events that should only fire once per user. The DB enforces this
@@ -55,8 +56,7 @@ export async function logEvent(
   let userId = opts.userId ?? null;
   if (!userId) {
     try {
-      const { data } = await supabase.auth.getUser();
-      userId = data?.user?.id ?? null;
+      userId = (await getSessionUser())?.id ?? null;
     } catch {
       // fall through — insert will fail RLS and be swallowed below
     }
@@ -109,8 +109,7 @@ export async function logEventThrottled(
   try {
     let userId = opts.userId ?? null;
     if (!userId) {
-      const { data } = await supabase.auth.getUser();
-      userId = data?.user?.id ?? null;
+      userId = (await getSessionUser())?.id ?? null;
     }
     if (!userId) return; // not signed in — nothing to log
 

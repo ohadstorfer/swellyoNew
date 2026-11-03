@@ -41,6 +41,7 @@ export type RootStackParamList = {
   OperatorEditTrip: { tripId: string };
   /** Full-screen place picker pushed from the Edit trip screen's "Where" row. */
   OperatorEditDestination: { tripId: string };
+  OperatorEditItinerary: { tripId: string };
   /**
    * Traveler onboarding on an operator trip — the flow between "approved" and
    * "actually in the trip".

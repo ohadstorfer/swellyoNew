@@ -32,6 +32,7 @@ import {
   CATEGORY_TITLE,
   type PriceInclusions,
 } from '../../services/trips/priceInclusions';
+import type { ItineraryDay } from '../../services/trips/itinerary';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { Images } from '../../assets/images';
 import { formatTripPrice, formatTripPriceRange } from '../../utils/currency';
@@ -107,6 +108,8 @@ export interface TripDetailVM {
    *  there are two or more (max 10 shown). Nothing fills this yet — trips store
    *  one cover today — so the cover alone is what renders. */
   galleryImageUris?: string[];
+  /** The day-by-day plan, unfiltered. The Overview shows it through `guestDays`. */
+  itinerary?: ItineraryDay[];
   title: string | null;
   destinationLabel: string | null;
 
@@ -140,8 +143,8 @@ export interface TripDetailVM {
   accommodationName: string | null;
   accommodationImageUri: string | null;
   accommodationUrl: string | null;
-  // Overview stay card extras (Figma 17488:28118). All optional and nothing
-  // fills them yet — each row shows only when its field is set.
+  // Overview stay card extras (Figma 17488:28118). All optional — each row
+  // shows only when its field is set. The logo and "verified" have no data yet.
   /** The stay's own logo, in the round cell next to its name. */
   accommodationLogoUri?: string | null;
   /** "Verified Swellyo Stay" under the stay's name. */
@@ -479,6 +482,8 @@ const ParticipantsRow: React.FC<{ count: number }> = ({ count }) => {
 // ---------------------------------------------------------------------------
 export interface TripDetailViewProps {
   vm: TripDetailVM;
+  /** Scrolls the host screen down, so an opened itinerary day stays in view. */
+  onRevealBy?: (dy: number) => void;
   /** Real participant avatar URLs (host first), for the Participants row.
    *  Falls back to placeholder circles when empty. */
   participantAvatars?: string[];

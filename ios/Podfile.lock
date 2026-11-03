@@ -307,6 +307,8 @@ PODS:
     - ExpoModulesCore
   - ExpoSharing (14.0.8):
     - ExpoModulesCore
+  - ExpoTrackingTransparency (6.0.8):
+    - ExpoModulesCore
   - ExpoVideo (3.0.14):
     - ExpoModulesCore
   - ExpoVideoThumbnails (10.0.8):
@@ -2955,6 +2957,7 @@ DEPENDENCIES:
   - ExpoSecureStore (from `../node_modules/expo-secure-store/ios`)
   - ExpoShareIntentModule (from `../node_modules/expo-share-intent/ios`)
   - ExpoSharing (from `../node_modules/expo-sharing/ios`)
+  - ExpoTrackingTransparency (from `../node_modules/expo-tracking-transparency/ios`)
   - ExpoVideo (from `../node_modules/expo-video/ios`)
   - ExpoVideoThumbnails (from `../node_modules/expo-video-thumbnails/ios`)
   - ExpoWebBrowser (from `../node_modules/expo-web-browser/ios`)
@@ -3170,6 +3173,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-share-intent/ios"
   ExpoSharing:
     :path: "../node_modules/expo-sharing/ios"
+  ExpoTrackingTransparency:
+    :path: "../node_modules/expo-tracking-transparency/ios"
   ExpoVideo:
     :path: "../node_modules/expo-video/ios"
   ExpoVideoThumbnails:
@@ -3416,6 +3421,7 @@ SPEC CHECKSUMS:
   ExpoSecureStore: decd2943fa19fa6f02c5ef3689f9ba5012ad6a6d
   ExpoShareIntentModule: eee475fa39b66bf7e9d8cb784d7cba1ed5c32a33
   ExpoSharing: a0e593c497c49377e9797b72586964e31c17ca7c
+  ExpoTrackingTransparency: 1096e9082787daf71904fac651c6e73a3179f5b1
   ExpoVideo: 9e7f39ff824ee2c087e60908fea77013e7edeb1c
   ExpoVideoThumbnails: 9fccaa03acb8991317d1c26909003ea2bc064d73
   ExpoWebBrowser: 35223474c19e261c0661ecc7caa513d054244ab5

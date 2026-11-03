@@ -424,6 +424,10 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   }));
   // ──────────────────────────────────────────────────────────────────────────
 
+  // Declared above the Welcome Guide: its trigger waits for these to close.
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [showTopicOverlay, setShowTopicOverlay] = useState(false);
+
   // ——— Welcome Guide (tutorial overlay) ———
   const tutorial = useTutorial();
   const filtersButtonRef = useRef<View>(null);
@@ -447,6 +451,15 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   // opens Swelly chat. Gated by the DB-backed `isSeen` flag (NULL means never
   // shown) — survives reinstall, cross-device, and decouples "shown" from
   // "completed" so abandoning the guide doesn't lock the trigger.
+  // The guide is its own Modal, and iOS cannot present a second sibling Modal
+  // over one that is already up. On a brand-new chat the guide used to fire on
+  // entry and the topic picker 3 s later (after the health check): the picker
+  // was never presented, the chat stayed empty with nothing to tap, and the
+  // user had to kill the app — "got stuck in the AI bird" (21 Oct 2026 test,
+  // Sentry REACT-NATIVE-T). So the guide waits until init is done and no other
+  // Modal is up, plus a beat for the closing Modal's dismissal to finish.
+  const otherModalUp = isInitializing || showTopicOverlay || showNewChatModal;
+
   useEffect(() => {
     // DEBUG: remove once first-open trigger is verified stable.
     console.log('[Tutorial trigger]', {
@@ -464,12 +477,16 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
     if (tutorial.isActive) { console.log('[Tutorial trigger] bail: already active'); return; }
     if (process.env.EXPO_PUBLIC_MVP_MODE === 'true') { console.log('[Tutorial trigger] bail: MVP mode'); return; }
     if (isDemoUser) { console.log('[Tutorial trigger] bail: demo user'); return; }
-    console.log('[Tutorial trigger] FIRING goTo(3) + markSeen()');
-    tutorial.goTo(3);
-    // Mark seen immediately — not on "Done" — so that swipe-back / app kill
-    // mid-tutorial doesn't re-fire it next time. Best-effort DB write inside.
-    tutorial.markSeen();
-  }, [visible, tutorial.isHydrated, tutorial.isSeen, tutorial.isActive, isDemoUser]);
+    if (otherModalUp) { console.log('[Tutorial trigger] bail: another modal is up'); return; }
+    const t = setTimeout(() => {
+      console.log('[Tutorial trigger] FIRING goTo(3) + markSeen()');
+      tutorial.goTo(3);
+      // Mark seen immediately — not on "Done" — so that swipe-back / app kill
+      // mid-tutorial doesn't re-fire it next time. Best-effort DB write inside.
+      tutorial.markSeen();
+    }, 700);
+    return () => clearTimeout(t);
+  }, [visible, tutorial.isHydrated, tutorial.isSeen, tutorial.isActive, isDemoUser, otherModalUp]);
 
   // Show step 3 tooltip as soon as the screen is mounted. The filters button
   // is part of the screen chrome and is laid out before the edge-function
@@ -532,8 +549,6 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
   const messageBubbleRefs = useRef<Record<string, View | null>>({});
   const [messageIdsUnblockedByFilterDeletion, setMessageIdsUnblockedByFilterDeletion] = useState<Record<string, true>>({});
   const [trashHoverProgress, setTrashHoverProgress] = useState(0);
-  const [showNewChatModal, setShowNewChatModal] = useState(false);
-  const [showTopicOverlay, setShowTopicOverlay] = useState(false);
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const androidKeyboardHeight = useKeyboardHeight();

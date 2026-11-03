@@ -28,11 +28,11 @@ import { Images } from '../../assets/images';
 import { ff } from '../../theme/fonts';
 import { showErrorAlert } from '../../utils/friendlyError';
 import {
-  listStaffRoles, listTripStaff, addTripStaff, updateTripStaffRole, revokeTripStaff,
+  listStaffRoles, listTripStaff, listPendingStaffInvites, addTripStaff, updateTripStaffRole, revokeTripStaff,
   createStaffInviteLink, updateTripStaffListed, canChangeTier,
   searchUsersForStaff, inviteStaffMember, updateTripStaffProfile, STAFF_PROFESSIONS,
   setStaffLocal,
-  type StaffRole, type StaffRoleKey, type TripStaffMember, type StaffSearchResult,
+  type StaffRole, type StaffRoleKey, type TripStaffMember, type StaffSearchResult, type PendingStaffInvite,
 } from '../../services/trips/tripStaffService';
 import { uploadCrewPhoto } from '../../services/storage/storageService';
 import { queryClient } from '../../lib/queryClient';
@@ -136,6 +136,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
 
   const [roles, setRoles] = useState<StaffRole[]>([]);
   const [staff, setStaff] = useState<TripStaffMember[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<PendingStaffInvite[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
@@ -216,11 +217,17 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     let cancelled = false;
     setLoading(true);
     setLoadError(false);
-    Promise.all([listStaffRoles(), listTripStaff(tripId)])
-      .then(([r, s]) => {
+    Promise.all([
+      listStaffRoles(),
+      listTripStaff(tripId),
+      // Best-effort: a failure here must not hide the crew itself.
+      listPendingStaffInvites(tripId).catch(() => [] as PendingStaffInvite[]),
+    ])
+      .then(([r, s, p]) => {
         if (cancelled) return;
         setRoles(r);
         setStaff(s);
+        setPendingInvites(p);
       })
       .catch(() => { if (!cancelled) setLoadError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -312,6 +319,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
         isLocal: draftLocal,
       });
       setStaff(await listTripStaff(tripId));
+      listPendingStaffInvites(tripId).then(setPendingInvites).catch(() => {});
       setMode({ kind: 'list' });
     } catch (e) {
       showErrorAlert("Couldn't send the invite", e, 'Please try again.');
@@ -360,6 +368,7 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
       });
       setInviteUrl(url);
       setCopied(false);
+      listPendingStaffInvites(tripId).then(setPendingInvites).catch(() => {});
       // Back to the link screen, which is the one that renders a made link.
       setMode({ kind: 'link' });
     } catch (e) {
@@ -501,6 +510,39 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
     );
   };
 
+  const renderPendingInvite = (invite: PendingStaffInvite) => {
+    const tint = TIER_TINT[invite.role_key];
+    const role = roleByKey.get(invite.role_key);
+    const daysLeft = Math.max(
+      1,
+      Math.ceil((new Date(invite.expires_at).getTime() - Date.now()) / 86_400_000),
+    );
+    return (
+      <View key={invite.id} style={styles.row}>
+        {invite.photo_url ? (
+          <Thumb uri={invite.photo_url} size={128} style={[styles.avatar, styles.pendingAvatar]} contentFit="cover" cachePolicy="memory-disk" />
+        ) : invite.invited_user_id ? (
+          <Image source={Images.defaultAvatar} style={[styles.avatar, styles.pendingAvatar]} contentFit="cover" />
+        ) : (
+          <View style={[styles.avatar, styles.linkAvatar]}>
+            <Ionicons name="link-outline" size={20} color="#7B7B7B" />
+          </View>
+        )}
+        <View style={styles.rowText}>
+          <Text style={styles.name} numberOfLines={1}>
+            {invite.name ?? (invite.title ? `${invite.title} (invite link)` : 'Invite link')}
+          </Text>
+          <Text style={styles.meta} numberOfLines={1}>
+            {`Not accepted yet · expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`}
+          </Text>
+        </View>
+        <View style={[styles.tierPill, { backgroundColor: tint.bg }]}>
+          <Text style={[styles.tierPillText, { color: tint.fg }]}>{role?.label ?? invite.role_key}</Text>
+        </View>
+      </View>
+    );
+  };
+
   const renderRoleOption = (role: StaffRole) => {
     const selected = draftRole === role.role_key;
     const tint = TIER_TINT[role.role_key];
@@ -563,10 +605,20 @@ export function TripStaffSheet({ visible, tripId, operatorId, isOwner, onClose }
             </View>
           }
           ListFooterComponent={
-            <TouchableOpacity style={styles.addRow} activeOpacity={0.7} onPress={openAdd}>
-              <View style={styles.addIcon}><Ionicons name="add" size={20} color="#212121" /></View>
-              <Text style={styles.addRowText}>Add someone</Text>
-            </TouchableOpacity>
+            <>
+              {/* Sent, not accepted yet — so the operator knows whom they
+                  already invited (21 Oct 2026 test). */}
+              {pendingInvites.length > 0 && (
+                <>
+                  <Text style={styles.pendingHeader}>Pending invites</Text>
+                  {pendingInvites.map(renderPendingInvite)}
+                </>
+              )}
+              <TouchableOpacity style={styles.addRow} activeOpacity={0.7} onPress={openAdd}>
+                <View style={styles.addIcon}><Ionicons name="add" size={20} color="#212121" /></View>
+                <Text style={styles.addRowText}>Add someone</Text>
+              </TouchableOpacity>
+            </>
           }
         />
       )}
@@ -1303,6 +1355,18 @@ const styles = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 22 },
   name: { fontFamily: ff('Montserrat', '600'), fontSize: 15, color: '#212121', includeFontPadding: false },
   meta: { fontFamily: ff('Inter', '400'), fontSize: 12, color: '#7B7B7B', marginTop: 2, includeFontPadding: false },
+
+  pendingHeader: {
+    fontFamily: ff('Inter', '600'),
+    fontSize: 12,
+    color: '#7B7B7B',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
+    includeFontPadding: false,
+  },
+  pendingAvatar: { opacity: 0.6 },
+  linkAvatar: { backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
 
   tierPill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
   tierPillText: { fontFamily: ff('Montserrat', '600'), fontSize: 11, includeFontPadding: false },

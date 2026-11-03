@@ -25,6 +25,7 @@ import { OnboardingScaffold } from './onboarding/OnboardingScaffold';
 import RootNavigator from '../navigation/RootNavigator';
 import { NotificationPermissionModal } from './notifications/NotificationPermissionModal';
 import { useNotificationPermissionPrompt } from '../hooks/notifications/useNotificationPermissionPrompt';
+import { askForNotifications } from '../services/notifications/notificationAsks';
 import { pushChatCard, pushRootCard, navigationRef } from '../navigation/navigationRef';
 import type { RootStackParamList } from '../navigation/navigationRef';
 import { MainNavProvider, type MainNavContextValue } from '../navigation/MainNavContext';
@@ -734,12 +735,9 @@ export const AppContent: React.FC = () => {
       tripId: !conv.is_direct && typeof conv.metadata?.trip_id === 'string' ? conv.metadata.trip_id : undefined,
       surftripId: !conv.is_direct && typeof conv.metadata?.surftrip_id === 'string' ? conv.metadata.surftrip_id : undefined,
     });
-    // Land the tab UNDER the card on the chat list, so backing out of the
-    // chat ends up there (mirrors openTripCard's land-on-Trips behavior).
-    requestTab('lineup');
-    // requestTab is a stable useCallback([]) declared later — TDZ-safe at
-    // effect time, same pattern as openTripCard above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The navigator switches to the chat-list tab itself, BEFORE pushing the
+    // card (RootNavigator). A separate requestTab here raced the push and its
+    // tab navigate could pop the card, leaving the user on the list.
   }, [pendingChatNotification, messagingConversations]);
 
   // Start the shared notifications realtime hub + the bell→banner bridge so
@@ -1466,6 +1464,9 @@ export const AppContent: React.FC = () => {
     // re-appears next session, which is acceptable).
     markJoinDecisionSeen(decision.request_id).catch(() => undefined);
     setJoinDecisionQueue((prev) => prev.filter((d) => d.request_id !== decision.request_id));
+    // They are a member now — the trip chat is where things happen next. The
+    // popup waits for the overlay to clear (activeJoinDecision gates it).
+    if (decision.status === 'approved') askForNotifications('trip_approved');
   }, []);
 
   const handleJoinDecisionPrimary = useCallback(
@@ -1934,12 +1935,19 @@ export const AppContent: React.FC = () => {
     }
   }, [shouldShowConversations]);
 
-  // Register for push notifications once user reaches home screen
+  // Register for push notifications once user reaches home screen.
+  // On iOS, first take provisional authorization: silent (no prompt), it gives
+  // the device a token and quiet delivery from day one, and it leaves the full
+  // prompt unspent for the "Stay in the loop" popup below. Elsewhere it is a
+  // plain registration, which no-ops until permission exists.
   useEffect(() => {
     if (shouldShowConversations) {
-      pushNotificationService.registerForPushNotifications().catch(err =>
-        console.warn('[AppContent] Push registration failed (non-blocking):', err)
-      );
+      pushNotificationService
+        .requestProvisionalPermission()
+        .then(() => pushNotificationService.registerForPushNotifications())
+        .catch(err =>
+          console.warn('[AppContent] Push registration failed (non-blocking):', err)
+        );
     }
   }, [shouldShowConversations]);
 
@@ -2648,6 +2656,8 @@ export const AppContent: React.FC = () => {
         )}
         <NotificationPermissionModal
           visible={notificationPrompt.visible}
+          context={notificationPrompt.context}
+          blocked={notificationPrompt.blocked}
           onTurnOn={notificationPrompt.onTurnOn}
           onDismiss={notificationPrompt.onDismiss}
         />

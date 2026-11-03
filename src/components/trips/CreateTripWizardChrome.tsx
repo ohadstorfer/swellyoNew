@@ -117,6 +117,9 @@ export interface CreateTripWizardChromeProps {
    *  input clear of the keyboard. Inputs call it in onFocus so it also works
    *  when the keyboard is already open (switching between fields). */
   keyboardScrollRef?: React.MutableRefObject<(() => void) | null>;
+  /** The chrome assigns a function here that scrolls the content down by that
+   *  many points, for step content that grows out of view. */
+  scrollByRef?: React.MutableRefObject<((dy: number) => void) | null>;
   children: React.ReactNode;
 }
 
@@ -137,6 +140,7 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     focusedInputRef,
     suppressKeyboardScroll = false,
     keyboardScrollRef,
+    scrollByRef,
     children,
   } = props;
 
@@ -160,6 +164,15 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
     dir.value = -1;
     (onClose ?? onSecondary)();
   }, [dir, onClose, onSecondary]);
+
+  // A view can also change from inside the step (a row opening a sub-page), with
+  // no button press to set the direction, and a sub-page's primary button goes
+  // back. The index always tells which way it went, so it has the last word.
+  const prevStepIndex = useRef(stepIndex);
+  if (prevStepIndex.current !== stepIndex) {
+    dir.value = stepIndex > prevStepIndex.current ? 1 : -1;
+    prevStepIndex.current = stepIndex;
+  }
 
   // Incoming enters from the side we're heading toward; outgoing leaves the
   // opposite way — a true mirror between Next and Back.
@@ -208,6 +221,15 @@ export function CreateTripWizardChrome(props: CreateTripWizardChromeProps): Reac
       node.scrollTo({ y: 0, animated: false });
     }
   }, [stepIndex]);
+  useEffect(() => {
+    if (!scrollByRef) return;
+    scrollByRef.current = dy => {
+      scrollRef.current?.scrollTo({ y: scrollYRef.current + dy, animated: true });
+    };
+    return () => {
+      scrollByRef.current = null;
+    };
+  }, [scrollByRef]);
 
   // -------- Status bar style — white text on dark header, dark on light bg --------
   // Goes through RN's StatusBar stack (push/pop), not setBarStyle: the imperative

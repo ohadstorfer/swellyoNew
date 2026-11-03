@@ -21,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.7</string>
+    <string>2.0.8</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -47,7 +47,7 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>50</string>
+    <string>51</string>
     <key>LSApplicationQueriesSchemes</key>
     <array>
       <string>instagram</string>
@@ -68,6 +68,8 @@
     <string>Swellyo uses your camera so you can take photos and record videos for your profile and to send in chats.</string>
     <key>NSContactsUsageDescription</key>
     <string>Swellyo accesses your contacts so you can share a contact card in chats.</string>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>Swellyo uses a device identifier only for app analytics and crash reports. We do not show ads or share your data with advertisers.</string>
     <key>NSFaceIDUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSMicrophoneUsageDescription</key>

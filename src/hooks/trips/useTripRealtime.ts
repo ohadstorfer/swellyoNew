@@ -42,6 +42,7 @@ import { tripsKeys } from './useTripQueries';
 import { tripTopic, acquireTopic } from '../../services/trips/tripsRealtime';
 
 const FIRST_FOCUS_FRESH_MS = 30_000;
+const COALESCE_MS = 300;
 
 export function useTripRealtime(tripId: string) {
   const queryClient = useQueryClient();
@@ -52,6 +53,28 @@ export function useTripRealtime(tripId: string) {
 
     const invalidate = (...keys: readonly unknown[][]) => {
       keys.forEach((queryKey) => queryClient.invalidateQueries({ queryKey }));
+    };
+
+    // Broadcast events are coalesced for COALESCE_MS: one user action often
+    // writes several trip tables (join request + participant + trip count),
+    // and each event used to refetch `detail` again on every member's open
+    // trip screen — cancelling the in-flight fetch each time, while the server
+    // still ran it. Same keys still get invalidated, just once, a beat later
+    // (same pattern as useTripsListRealtime).
+    const pending = new Map<string, unknown[]>();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushPending = () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+      const keys = Array.from(pending.values());
+      pending.clear();
+      if (keys.length > 0) invalidate(...keys);
+    };
+    const invalidateSoon = (...keys: readonly unknown[][]) => {
+      keys.forEach((queryKey) => pending.set(JSON.stringify(queryKey), [...queryKey]));
+      if (!flushTimer) flushTimer = setTimeout(flushPending, COALESCE_MS);
     };
 
     const detailState = queryClient.getQueryState(tripsKeys.detail(tripId));
@@ -83,39 +106,41 @@ export function useTripRealtime(tripId: string) {
       channel.on('broadcast', { event: 'trip_changed' }, ({ payload }: any) => {
         switch (payload?.table as string | undefined) {
           case 'group_trips':
-            invalidate([...tripsKeys.detail(tripId)], [...tripsKeys.explore], ['trips', 'my']);
+            invalidateSoon([...tripsKeys.detail(tripId)], [...tripsKeys.explore], ['trips', 'my']);
             break;
           case 'group_trip_participants':
             // Participant rows carry commitment_status too, so this also
             // refreshes the commit pill when the host approves a commitment.
-            invalidate([...tripsKeys.detail(tripId)], ['trips', 'my']);
+            invalidateSoon([...tripsKeys.detail(tripId)], ['trips', 'my']);
             break;
           case 'group_trip_join_requests':
-            invalidate([...tripsKeys.detail(tripId)], [...tripsKeys.detailRequests(tripId)]);
+            invalidateSoon([...tripsKeys.detail(tripId)], [...tripsKeys.detailRequests(tripId)]);
             break;
           case 'group_trip_admin_updates':
-            invalidate([...tripsKeys.detailUpdates(tripId)]);
+            invalidateSoon([...tripsKeys.detailUpdates(tripId)]);
             break;
           case 'group_trip_commitment_requests':
-            invalidate([...tripsKeys.detail(tripId)]);
+            invalidateSoon([...tripsKeys.detail(tripId)]);
             break;
           case 'group_trip_gear_items':
           case 'group_trip_gear_claims':
-            invalidate([...tripsKeys.detailGear(tripId)]);
+            invalidateSoon([...tripsKeys.detailGear(tripId)]);
             break;
           case 'group_trip_gear_requests':
-            invalidate([...tripsKeys.detailGearRequests(tripId)], [...tripsKeys.detailGear(tripId)]);
+            invalidateSoon([...tripsKeys.detailGearRequests(tripId)], [...tripsKeys.detailGear(tripId)]);
             break;
           default:
             // Unknown table (e.g. one added to the trigger before this map):
             // safe blanket refresh of the core query.
-            invalidate([...tripsKeys.detail(tripId)]);
+            invalidateSoon([...tripsKeys.detail(tripId)]);
         }
       });
     });
 
     return () => {
       hasBlurredRef.current = true;
+      // Deliver anything still queued instead of dropping it.
+      flushPending();
       release();
     };
   }, [tripId, queryClient]));

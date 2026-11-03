@@ -107,7 +107,9 @@ export async function fetchTripCore(
   tripId: string, currentUserId: string | null, signal?: AbortSignal,
 ): Promise<TripCoreData> {
   const [tripData, participantsData] = await Promise.all([
-    getTripById(tripId, signal),
+    // Throw on real errors so the screen shows "couldn't load" + retry,
+    // not "no longer available" (react-query retries twice first).
+    getTripById(tripId, signal, { throwOnError: true }),
     getTripParticipants(tripId, signal),
   ]);
   if (!tripData) return { trip: null, participants: [], myRequest: null };

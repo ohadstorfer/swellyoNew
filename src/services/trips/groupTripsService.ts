@@ -1,3 +1,4 @@
+import type { ItineraryDay } from './itinerary';
 import { supabase } from '../../config/supabase';
 import { STRIPE_LIVEMODE } from './tripPaymentsService';
 import { messagingService } from '../messaging/messagingService';
@@ -205,6 +206,11 @@ export interface GroupTrip {
   visibility: string | null; // 'public' | 'friends' | 'private'
 
   personal_gear_host_suggestion: string[];
+
+  // The operator's day-by-day plan. OPTIONAL for the same reason as the policy
+  // fields above: the feed RPCs do not return it. Read it through
+  // `normalizeItinerary`, since it is jsonb.
+  itinerary?: ItineraryDay[];
 
   created_at: string;
   updated_at: string;
@@ -781,7 +787,9 @@ export async function listMyTripsByBucket(userId: string): Promise<MyTripsBucket
 /** A My Trips feed row: a normalized trip + the host/member fields the RPC joins
  *  in, plus which relationship put it in the list (participant vs pending request). */
 export type MyTripsFeedRow = ExploreFeedRow & {
-  membership: 'participant' | 'pending_request';
+  // 'staff': active trip staff who are not a participant (migration
+  // 20261023000000_my_trips_feed_staff). Bucketed like 'participant'.
+  membership: 'participant' | 'pending_request' | 'staff';
 };
 
 /**
@@ -835,7 +843,8 @@ export async function fetchMyTripsFeed(
 
   // Participant rows first so an approved/past bucket always wins over a stale
   // pending request for the same trip (mirrors listMyTripsByBucket's `seen`).
-  for (const trip of rows.filter(t => t.membership === 'participant')) {
+  // Staff see their trip like a member does (upcoming / past, never pending).
+  for (const trip of rows.filter(t => t.membership === 'participant' || t.membership === 'staff')) {
     if (seen.has(trip.id)) continue;
     seen.add(trip.id);
     if (trip.status === 'cancelled') continue; // cancelled trips vanish from My Trips
@@ -1927,7 +1936,17 @@ function isAbortError(error: unknown, signal?: AbortSignal): boolean {
   return e?.name === 'AbortError' || /abort/i.test(e?.message ?? '');
 }
 
-export async function getTripById(tripId: string, signal?: AbortSignal): Promise<GroupTrip | null> {
+/**
+ * `throwOnError`: a timeout / expired session / server error throws instead of
+ * returning null. null means "this trip does not exist (or you can't see it)",
+ * so the trip screen used to show "This trip is no longer available" whenever
+ * the network or the server had a bad moment (21 Oct 2026 load test).
+ */
+export async function getTripById(
+  tripId: string,
+  signal?: AbortSignal,
+  opts?: { throwOnError?: boolean },
+): Promise<GroupTrip | null> {
   let q = supabase.from('group_trips').select(`*, ${TRIP_DEST_EMBED}`).eq('id', tripId);
   if (signal) q = q.abortSignal(signal);
   const { data, error } = await q.single();
@@ -1935,6 +1954,7 @@ export async function getTripById(tripId: string, signal?: AbortSignal): Promise
     if ((error as any).code === 'PGRST116') return null;
     if (isAbortError(error, signal)) return null;
     console.error('[groupTripsService] getTripById error:', error);
+    if (opts?.throwOnError) throw error;
     return null;
   }
   return data ? normalizeTrip(data) : null;

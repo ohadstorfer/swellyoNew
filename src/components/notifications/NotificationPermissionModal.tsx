@@ -13,6 +13,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { TripIcon, type TripIconName } from '../trips/tripIcons';
 import { ff } from '../../theme/fonts';
+import type { NotificationAskContext } from '../../services/notifications/notificationAsks';
 
 /**
  * "Stay in the loop" — the pre-permission popup (Figma 15098:17656).
@@ -70,8 +71,36 @@ const ROWS: { icon: TripIconName; title: string; subtitle: string; strokeWidth?:
   },
 ];
 
+/**
+ * Heading per moment. The arrival copy is the Figma one; the contextual ones
+ * name the thing the user is now waiting for, which is the whole reason to ask
+ * at that moment instead of on arrival.
+ */
+const HEADINGS: Record<NotificationAskContext, { title: string; subtitle: string }> = {
+  arrival: { title: 'Stay in the loop', subtitle: 'Don’t miss the moments that matter.' },
+  trip_request: {
+    title: 'Know when you’re in',
+    subtitle: 'We’ll tell you the moment the host answers.',
+  },
+  trip_approved: {
+    title: 'Don’t miss the trip chat',
+    subtitle: 'Get a ping when someone writes to the crew.',
+  },
+  message_sent: {
+    title: 'Know when they reply',
+    subtitle: 'We’ll let you know as soon as they answer.',
+  },
+};
+
 interface NotificationPermissionModalProps {
   visible: boolean;
+  /** Which moment the popup is for. Defaults to the arrival copy. */
+  context?: NotificationAskContext;
+  /**
+   * The OS will not prompt again (refused before), so the CTA opens Settings —
+   * say so on the button instead of letting the tap jump somewhere unexpected.
+   */
+  blocked?: boolean;
   /** Primary CTA. The parent decides whether this opens the OS prompt or Settings. */
   onTurnOn: () => void;
   /** "Maybe later", the backdrop, and Android back all land here. */
@@ -112,6 +141,8 @@ const PressScale: React.FC<{
 
 export const NotificationPermissionModal: React.FC<NotificationPermissionModalProps> = ({
   visible,
+  context = 'arrival',
+  blocked = false,
   onTurnOn,
   onDismiss,
 }) => {
@@ -177,6 +208,9 @@ export const NotificationPermissionModal: React.FC<NotificationPermissionModalPr
 
   if (!mounted) return null;
 
+  const heading = HEADINGS[context];
+  const ctaLabel = blocked ? 'Open Settings' : 'Turn on notifications';
+
   // Never animate from scale(0) — nothing in the real world appears from nothing.
   const cardScale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] });
 
@@ -224,8 +258,12 @@ export const NotificationPermissionModal: React.FC<NotificationPermissionModalPr
 
           <View style={styles.body}>
             <View style={styles.heading}>
-              <Text style={styles.title}>Stay in the loop</Text>
-              <Text style={styles.subtitle}>Don’t miss the moments that matter.</Text>
+              <Text style={styles.title}>{heading.title}</Text>
+              <Text style={styles.subtitle}>
+                {blocked
+                  ? 'Notifications are off for Swellyo. Turn them on in Settings.'
+                  : heading.subtitle}
+              </Text>
             </View>
 
             <View style={styles.rows}>
@@ -269,11 +307,11 @@ export const NotificationPermissionModal: React.FC<NotificationPermissionModalPr
               <PressScale
                 onPress={onTurnOn}
                 style={styles.ctaButton}
-                accessibilityLabel="Turn on notifications"
+                accessibilityLabel={ctaLabel}
                 testID="notification-permission-turn-on"
               >
                 <TripIcon name="bell-01" size={24} color={C.ctaText} strokeWidth={1.5} />
-                <Text style={styles.ctaText}>Turn on notifications</Text>
+                <Text style={styles.ctaText}>{ctaLabel}</Text>
               </PressScale>
 
               <PressScale
