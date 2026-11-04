@@ -539,7 +539,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
   ];
   if (crew.length > 0)
     infoCards.push({
-      icon: 'marker-pin-05',
+      icon: 'marker-pin-06',
       label: 'Local Crew',
       value: `${localCrew}/${crew.length}`,
       tint: '#F37A3C',
@@ -712,7 +712,7 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                     {heroHost.avatarUrl ? (
                       <Thumb
                         uri={heroHost.avatarUrl}
-                        size={160}
+                        size={320}
                         style={styles.heroHostAvatar}
                         contentFit="cover"
                         cachePolicy="memory-disk"
@@ -1389,10 +1389,13 @@ const styles = StyleSheet.create({
   },
   // Figma 17488:27976 — the card overlaps the cover's last 61px. Height is set
   // inline (HERO_H + the status-bar inset the cover runs under).
+  // Figma 18437:21673 — rounded 24 at the bottom only.
   hero: {
     width: '100%',
     backgroundColor: C.border,
     overflow: 'hidden',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   heroPlaceholder: {
     alignItems: 'center',
@@ -1454,18 +1457,29 @@ const styles = StyleSheet.create({
   heroCardBottom: {
     flexDirection: 'row',
     alignItems: 'center',
+    // Figma 18437:21695: a fixed 48 between photo and stats; the slack goes
+    // to the outside, so on wide screens the pair stays together, centred.
     justifyContent: 'center',
-    gap: 81,
+    gap: 48,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 16,
   },
   // Only one of the two (no host on planned-together trips): centre it.
   heroCardBottomSolo: { justifyContent: 'center' },
-  heroHost: { alignItems: 'center', gap: 8, width: 74 },
-  heroHostAvatar: { width: 74, height: 74, borderRadius: 37, backgroundColor: C.border },
+  // Figma 18437:21696 — 107 squircle (radius 40), 1px white stroke.
+  heroHost: { alignItems: 'center', gap: 8, width: 107 },
+  heroHostAvatar: {
+    width: 107,
+    height: 107,
+    borderRadius: 40,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    backgroundColor: C.border,
+  },
   // "By <name>" — B-4 bold (get_variable_defs 17488:28003).
-  heroHostName: { ...textStyle('B4', '700'), color: C.ink, textAlign: 'center' },
+  // Body/B-3 12/18, bold override (get_variable_defs 18437:21701).
+  heroHostName: { ...textStyle('B3', '700'), color: C.ink, textAlign: 'center' },
   // Figma 17488:28004 — 8 between the rows, icon centred on its two lines.
   heroStats: { gap: 8, flexShrink: 1 },
   heroStat: { flexDirection: 'row', alignItems: 'center', gap: 16 },
@@ -1620,8 +1634,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   chipLabel: {
-    // Body/B-4 10/17 (get_variable_defs 17020:29601).
-    ...textStyles.B4,
+    // Size/s 12 bold, 17 line height (Figma 18437:21742).
+    ...textStyle('B3', '700'),
+    lineHeight: 17,
     color: C.textFaint,
   },
   chipValue: {
