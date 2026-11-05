@@ -3,7 +3,7 @@
 // "Learn More" link. Each row shows only when the trip carries its flag.
 
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Linking } from 'react-native';
 import { Image as CachedImage } from 'expo-image';
 import { Images } from '../../../assets/images';
 import { textStyle, textStyles } from '../../../theme/typography';
@@ -15,16 +15,30 @@ const LOGO_H = 33;
 const CI_WINDOW_W = 29;
 const CI_IMAGE_W = 102; // 351.39% of the window, as Figma scales it
 
-// "Learn More" is drawn but opens nothing yet — there is no page to send
-// people to (Ohad, 9 Oct). A plain row, so it does not press like a button.
-const CertRow: React.FC<{ logo: React.ReactNode; title: string }> = ({ logo, title }) => (
-  <View style={styles.row}>
+// Each program's own site, opened from the row's "Learn More".
+const CI_URL = 'https://www.conservation.org/projects/surf-conservation';
+const STOKE_URL = 'https://www.stokecertified.com/';
+
+// The whole row presses, so "Learn More" is not a tiny 10px tap target.
+const CertRow: React.FC<{ logo: React.ReactNode; title: string; url: string }> = ({
+  logo,
+  title,
+  url,
+}) => (
+  <Pressable
+    style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+    onPress={() => {
+      Linking.openURL(url).catch(() => {});
+    }}
+    accessibilityRole="link"
+    accessibilityLabel={`${title.replace('\n', ' ')}, Learn More`}
+  >
     <View style={styles.logoSlot}>{logo}</View>
     <View style={styles.text}>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.link}>Learn More</Text>
     </View>
-  </View>
+  </Pressable>
 );
 
 export const StayCertRows: React.FC<{
@@ -37,6 +51,7 @@ export const StayCertRows: React.FC<{
       {ciSurfConservation ? (
         <CertRow
           title={'Conservation International\nSurf Protected Ecosystem'}
+          url={CI_URL}
           logo={
             <View style={styles.ciWindow}>
               <CachedImage
@@ -51,6 +66,7 @@ export const StayCertRows: React.FC<{
       {stokeCertified ? (
         <CertRow
           title="Sustainable STOKE Certified Provider"
+          url={STOKE_URL}
           logo={
             <CachedImage
               source={Images.stayCerts.stoke}
@@ -79,6 +95,7 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     backgroundColor: '#F7F7F7',
   },
+  rowPressed: { opacity: 0.7 },
   // One slot width for both logos, so the two titles start on the same line.
   logoSlot: { width: LOGO_H, height: LOGO_H, alignItems: 'center', justifyContent: 'center' },
   ciWindow: { width: CI_WINDOW_W, height: LOGO_H, overflow: 'hidden' },
