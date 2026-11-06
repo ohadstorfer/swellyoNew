@@ -94,6 +94,49 @@ const CertRow: React.FC<CertRowProps> = ({ logo, label, checked, onPress }) => (
   </Pressable>
 );
 
+export interface OperatorCertRowsProps {
+  stokeCertified: boolean;
+  ciSurfConservation: boolean;
+  onToggleStoke: () => void;
+  onToggleCi: () => void;
+}
+
+/** The two certification questions (STOKE / CI Surf Conservation). Shared by
+ *  the create flow's stay card and the operator edit screen's stay sheet. */
+export const OperatorCertRows: React.FC<OperatorCertRowsProps> = ({
+  stokeCertified,
+  ciSurfConservation,
+  onToggleStoke,
+  onToggleCi,
+}) => (
+  <View style={styles.certBlock}>
+    <CertRow
+      logo={<Image source={STOKE_LOGO} style={styles.stokeLogo} resizeMode="contain" />}
+      label="Do you have a STOKE Certification?"
+      checked={stokeCertified}
+      onPress={onToggleStoke}
+    />
+    <CertRow
+      logo={
+        <View style={styles.ciLogoClip}>
+          <Image source={CI_LOGO} style={styles.ciLogo} />
+        </View>
+      }
+      label="Do they participate with CI Surf Conservation?"
+      checked={ciSurfConservation}
+      onPress={onToggleCi}
+    />
+    <View style={styles.learnMoreRow}>
+      <Text style={styles.learnMore}>
+        All good if not!{' '}
+        {/* Drawn as a link, opens nothing yet — there is no page to
+            send them to (Ohad, 9 Oct). */}
+        <Text style={styles.learnMoreLink}>Learn more here.</Text>
+      </Text>
+    </View>
+  </View>
+);
+
 export const OperatorStayCard: React.FC<OperatorStayCardProps> = ({
   name,
   url,
@@ -230,33 +273,12 @@ export const OperatorStayCard: React.FC<OperatorStayCardProps> = ({
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {/* Certifications */}
-        <View style={styles.certBlock}>
-          <CertRow
-            logo={<Image source={STOKE_LOGO} style={styles.stokeLogo} resizeMode="contain" />}
-            label="Do you have a STOKE Certification?"
-            checked={stokeCertified}
-            onPress={onToggleStoke}
-          />
-          <CertRow
-            logo={
-              <View style={styles.ciLogoClip}>
-                <Image source={CI_LOGO} style={styles.ciLogo} />
-              </View>
-            }
-            label="Do they participate with CI Surf Conservation?"
-            checked={ciSurfConservation}
-            onPress={onToggleCi}
-          />
-          <View style={styles.learnMoreRow}>
-            <Text style={styles.learnMore}>
-              All good if not!{' '}
-              {/* Drawn as a link, opens nothing yet — there is no page to
-                  send them to (Ohad, 9 Oct). */}
-              <Text style={styles.learnMoreLink}>Learn more here.</Text>
-            </Text>
-          </View>
-        </View>
+        <OperatorCertRows
+          stokeCertified={stokeCertified}
+          ciSurfConservation={ciSurfConservation}
+          onToggleStoke={onToggleStoke}
+          onToggleCi={onToggleCi}
+        />
       </View>
     </View>
   );

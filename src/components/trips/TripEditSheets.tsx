@@ -25,6 +25,7 @@ import { WizardBottomSheet } from './WizardBottomSheet';
 import { WhenSheetContent } from './sheets/WhenSheetContent';
 import { StayTypeSheetContent, type AccommodationKind } from './sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from './sheets/SpecificStaySheetContent';
+import { OperatorCertRows } from './create/OperatorStayCard';
 import { Images } from '../../assets/images';
 
 // Compact date helpers (mirror CreateTripFlowA — kept inline to avoid importing
@@ -470,6 +471,9 @@ export interface AccommodationInitial {
   name: string;
   url: string;
   photoUri: string | null;
+  /** Operator (Flow C) trips only — read when `showCerts` is set. */
+  stokeCertified?: boolean;
+  ciSurfConservation?: boolean;
 }
 
 export interface EditAccommodationSheetProps {
@@ -482,6 +486,8 @@ export interface EditAccommodationSheetProps {
   /** When true, hide the stay-type picker and only edit the specific place
    *  (name / link / photo). The type stays whatever was set at creation. */
   specificOnly?: boolean;
+  /** Operator trips: also show the STOKE / CI certification questions. */
+  showCerts?: boolean;
 }
 
 export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
@@ -490,15 +496,20 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
   onClose,
   onSave,
   specificOnly = false,
+  showCerts = false,
 }) => {
   const [kind, setKind] = useState<AccommodationKind | null>(initial.kind);
   const [name, setName] = useState(initial.name);
   const [url, setUrl] = useState(initial.url);
   const [photoUri, setPhotoUri] = useState<string | null>(initial.photoUri);
+  const [stokeCertified, setStokeCertified] = useState(initial.stokeCertified === true);
+  const [ciSurfConservation, setCiSurfConservation] = useState(initial.ciSurfConservation === true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      setStokeCertified(initial.stokeCertified === true);
+      setCiSurfConservation(initial.ciSurfConservation === true);
       setKind(initial.kind);
       setName(initial.name);
       setUrl(initial.url);
@@ -512,7 +523,13 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
     if (!valid) return;
     setSaving(true);
     try {
-      await onSave({ kind, name: name.trim(), url: url.trim(), photoUri });
+      await onSave({
+        kind,
+        name: name.trim(),
+        url: url.trim(),
+        photoUri,
+        ...(showCerts ? { stokeCertified, ciSurfConservation } : {}),
+      });
       onClose();
     } catch {
       // parent surfaces its own error; keep open to retry
@@ -550,6 +567,16 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
           setPhotoUri(next.photoUri);
         }}
       />
+      {showCerts && (
+        <View style={{ marginTop: 24 }}>
+          <OperatorCertRows
+            stokeCertified={stokeCertified}
+            ciSurfConservation={ciSurfConservation}
+            onToggleStoke={() => setStokeCertified(v => !v)}
+            onToggleCi={() => setCiSurfConservation(v => !v)}
+          />
+        </View>
+      )}
     </WizardBottomSheet>
   );
 };

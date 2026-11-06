@@ -677,11 +677,15 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     name: trip?.accommodation_name ?? '',
     url: trip?.accommodation_url ?? '',
     photoUri: trip?.accommodation_image_url ?? null,
+    stokeCertified: trip?.stoke_certified === true,
+    ciSurfConservation: trip?.ci_surf_conservation === true,
   }), [
     trip?.accommodation_type,
     trip?.accommodation_name,
     trip?.accommodation_url,
     trip?.accommodation_image_url,
+    trip?.stoke_certified,
+    trip?.ci_surf_conservation,
   ]);
 
   // Per the note above, EditFieldSheet itself doesn't need this memo to stay
@@ -1081,6 +1085,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       <EditAccommodationSheet
         visible={sheet === 'stay'}
         initial={accommodationInitial}
+        showCerts
         onClose={close}
         onSave={async (next) => {
           // photoUri is either a freshly-picked local uri (needs uploading) or
@@ -1106,6 +1111,15 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             accommodation_url: next.url || null,
             accommodation_image_url: imageUrl,
             specific_stay_selected: true,
+            // A `false` is only written when the loaded trip carried the
+            // column: list-cache placeholder data may lack it, and must not
+            // overwrite a stored `true` (same guard as CreateTripFlowA).
+            ...(trip.stoke_certified !== undefined || next.stokeCertified
+              ? { stoke_certified: next.stokeCertified === true }
+              : {}),
+            ...(trip.ci_surf_conservation !== undefined || next.ciSurfConservation
+              ? { ci_surf_conservation: next.ciSurfConservation === true }
+              : {}),
           });
         }}
       />
