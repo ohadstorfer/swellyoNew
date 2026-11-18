@@ -17,12 +17,14 @@ import {
   Pressable,
   Platform,
   Animated,
+  ScrollView,
 } from 'react-native';
 import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 import { AnnouncementIcon } from '../AdminUpdateUI';
 import { TripIcon } from '../tripIcons';
 
@@ -86,6 +88,9 @@ export const AdminUpdateSheet: React.FC<Props> = ({
   };
 
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Shared cap: with the keyboard up this sheet used to grow past the status bar,
+  // leaving no grabber and no scrim to tap. Capped, the body scrolls instead.
+  const sheetMaxHeight = useSheetMaxHeight(true);
   // Android: pad past the system nav/gesture bar so the CTA + "Maybe later" clear
   // it. iOS keeps the static 24 (no change). See styles.sheet.
   const insets = useSafeAreaInsets();
@@ -101,11 +106,11 @@ export const AdminUpdateSheet: React.FC<Props> = ({
             style={[styles.backdrop, { opacity: backdropOpacity }]}
           />
           <Animated.View
-            style={{ transform: [{ translateY }] }}
+            style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }}
             onLayout={onSheetLayout}
           >
             <Pressable
-              style={[styles.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
+              style={[styles.sheet, { maxHeight: sheetMaxHeight }, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
               onPress={e => e.stopPropagation()}
             >
             {/* Grabber */}
@@ -113,6 +118,11 @@ export const AdminUpdateSheet: React.FC<Props> = ({
               <View style={styles.grabber} />
             </View>
 
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
             <View style={styles.body}>
               {/* Megaphone + title, with a trash button (edit only). */}
               <View style={styles.titleRow}>
@@ -207,6 +217,7 @@ export const AdminUpdateSheet: React.FC<Props> = ({
                 ) : null}
               </View>
             </View>
+            </ScrollView>
             </Pressable>
           </Animated.View>
         </Pressable>

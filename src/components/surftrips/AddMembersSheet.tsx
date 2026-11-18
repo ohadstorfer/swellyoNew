@@ -18,6 +18,7 @@ import { Thumb } from '../Thumb';
 import { Image } from 'expo-image';
 import { Images } from '../../assets/images';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../hooks/useSheetMaxHeight';
 import type { AddableDmPartner } from '../../services/surftrips/surftripsService';
 import { friendlyErrorMessage } from '../../utils/friendlyError';
 
@@ -60,6 +61,8 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
   // Slide + swipe-to-dismiss, shared with every other bottom sheet.
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, submitting ? () => {} : onClose);
+    // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+    const sheetMaxHeight = useSheetMaxHeight(false);
   // Android: pad past the system nav/gesture bar (iOS keeps its static 28).
   const insets = useSafeAreaInsets();
 
@@ -142,7 +145,7 @@ export const AddMembersSheet: React.FC<AddMembersSheetProps> = ({
     >
       <Pressable style={styles.backdrop} onPress={submitting ? undefined : onClose}>
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dim, { opacity: backdropOpacity }]} />
-        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+        <Animated.View style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }} onLayout={onSheetLayout}>
         <Pressable
           style={[styles.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 16) }]}
           onPress={e => e.stopPropagation()}

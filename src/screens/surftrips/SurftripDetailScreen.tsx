@@ -12,9 +12,11 @@ import {
   TextInput,
   Modal,
   Share,
+  Pressable,
 } from 'react-native';
 import { KeyboardAvoidingView } from '../../utils/keyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSheetMaxHeight } from '../../hooks/useSheetMaxHeight';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text } from '../../components/Text';
@@ -78,6 +80,8 @@ export default function SurftripDetailScreen({
   const [requestNote, setRequestNote] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const insets = useSafeAreaInsets();
+  // Shared cap for the request-to-join sheet (see useSheetMaxHeight).
+  const requestSheetMaxHeight = useSheetMaxHeight(true);
   const [showAddMembers, setShowAddMembers] = useState(false);
 
   const myMember = useMemo(
@@ -690,7 +694,9 @@ export default function SurftripDetailScreen({
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <View style={styles.requestBackdrop}>
-            <View style={styles.requestSheet}>
+            {/* Tap outside closes — a sibling below the sheet, never its ancestor. */}
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowRequestModal(false)} />
+            <View style={[styles.requestSheet, { maxHeight: requestSheetMaxHeight }]}>
               <Text style={styles.requestTitle}>Request to join</Text>
               <Text style={styles.requestHelper}>
                 Add a short note for the host (optional).

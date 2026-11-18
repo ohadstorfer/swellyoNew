@@ -22,6 +22,8 @@ import {
 } from '../../services/trips/tripStaffService';
 import { fetchMyStaffRequirements } from '../../services/trips/staffRequirementsService';
 import type { TripCapability } from '../../hooks/trips/useTripCapabilities';
+import { useQueryClient } from '@tanstack/react-query';
+import { tripsKeys } from '../../hooks/trips/useTripQueries';
 
 const CAPABILITY_LABELS: Record<TripCapability, string> = {
   'profile.shown_to_travelers': 'Be shown to travelers',
@@ -66,6 +68,7 @@ export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: 
   const [role, setRole] = useState<StaffRole | null>(null);
   const [loading, setLoading] = useState(true);
   const [accepting, setAccepting] = useState(false);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (!visible) return;
@@ -86,6 +89,18 @@ export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: 
     setAccepting(true);
     try {
       const tripId = await acceptStaffInvite(token);
+      // Drop everything cached about this trip from BEFORE they were crew.
+      // Capabilities have a 5-minute staleTime, so someone who opened the trip
+      // first (e.g. from the invite push) kept `[]` and landed back on the
+      // stranger view with the join CTA right after accepting. Reset, not
+      // invalidated: the old answer is dropped at once (never rendered again),
+      // and an open trip screen behind this sheet refetches. The crew list rides under the capabilities key.
+      queryClient.resetQueries({ queryKey: tripsKeys.capabilities(tripId) });
+      queryClient.resetQueries({ queryKey: tripsKeys.chatMembership(tripId) });
+      queryClient.resetQueries({ queryKey: ['tripStaff', 'mine', tripId] });
+      queryClient.resetQueries({ queryKey: ['staffPaperwork', 'mine', tripId] });
+      queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+      queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
       // Asked here rather than read off the invite: accept_staff_invite skips
       // any requirement deleted since the invite was sent, so the invite's own
       // list can promise paperwork that no longer exists. A failure is not
@@ -104,7 +119,7 @@ export function StaffInviteAcceptSheet({ visible, token, onClose, onAccepted }: 
       showErrorAlert("Couldn't join", e, 'This invite may have already been used.');
       setAccepting(false);
     }
-  }, [token, onAccepted]);
+  }, [token, onAccepted, queryClient]);
 
   // One shape for wrong / spent / revoked / expired. The server does not tell
   // them apart either — otherwise a stale link becomes a way to probe which

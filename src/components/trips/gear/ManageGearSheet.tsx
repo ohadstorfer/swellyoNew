@@ -21,6 +21,7 @@ import { TripIcon } from '../tripIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 import { friendlyErrorMessage } from '../../../utils/friendlyError';
 
 // Name length cap mirrors the Figma "N /21" counter on the Edit Gear sheet.
@@ -87,6 +88,8 @@ export const ManageGearSheet: React.FC<Props> = ({
   // Sheet motion — fade the backdrop, slide the sheet (matches every other
   // bottom sheet; the formOnly Modal below consumes it).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(true);
   // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
   const insets = useSafeAreaInsets();
 
@@ -154,7 +157,7 @@ export const ManageGearSheet: React.FC<Props> = ({
         >
           <Pressable style={fs.container} onPress={onClose}>
             <Animated.View pointerEvents="none" style={[fs.backdrop, { opacity: backdropOpacity }]} />
-            <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+            <Animated.View style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }} onLayout={onSheetLayout}>
               <Pressable
                 style={[fs.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
                 onPress={e => e.stopPropagation()}

@@ -6,6 +6,7 @@ import {
   Modal,
   Image as RNImage,
   Platform,
+  Alert,
 } from 'react-native';
 import { GestureDetector, Gesture, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
@@ -199,12 +200,20 @@ const AvatarCropModal: React.FC<AvatarCropModalProps> = ({
 
       const result = await ImageManipulator.manipulateAsync(
         imageUri,
-        [{ crop: { originX, originY, width: w, height: h } }],
+        // Resize in the same pass: a 50MP original cropped to a big square is
+        // still a huge bitmap, and uploadImageToS3 shrinks to 1024 anyway.
+        // Holding it through a second manipulate is what froze low-RAM Android.
+        w > 1024
+          ? [{ crop: { originX, originY, width: w, height: h } }, { resize: { width: 1024 } }]
+          : [{ crop: { originX, originY, width: w, height: h } }],
         { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG },
       );
       onConfirm(result.uri);
     } catch (e) {
       console.error('[AvatarCropModal] crop failed:', e);
+      // Never leave the modal stuck with no feedback.
+      Alert.alert("Couldn't use this photo", 'Please try again, or pick a different photo.');
+      onCancel();
     } finally {
       setBusy(false);
     }

@@ -15,6 +15,15 @@ import { OnboardingStep4Screen } from '../screens/OnboardingStep4Screen';
 import { OnboardingStep4DestinationsScreen } from '../screens/OnboardingStep4DestinationsScreen';
 import { OnboardingStep5BudgetScreen } from '../screens/OnboardingStep5BudgetScreen';
 import { OnboardingStep6LifestyleScreen } from '../screens/OnboardingStep6LifestyleScreen';
+
+// The onboarding budget step (step 5, OnboardingStep5BudgetScreen) is hidden
+// for now — product call, Nov 2026 ("Budget mode not needed for now").
+// Hidden, not deleted: flip to true and the step is back exactly as it was.
+// While false: destinations (4) → "Let's Get Viby" → lifestyle (6), Back from
+// lifestyle returns to destinations, and anyone resuming on step 5 is moved on.
+// `surfers.travel_type` stays nullable and every reader already treats it as
+// optional (matching only uses it when set, and budget matching is off).
+const SHOW_BUDGET_STEP = false;
 import { OnboardingVideoUploadScreen } from '../screens/OnboardingVideoUploadScreen';
 import {
   OnboardingInterstitialScreen,
@@ -688,6 +697,22 @@ export const AppContent: React.FC = () => {
           openProfileEditor('destinations');
           return;
         }
+        // Crew invite → the accept sheet, never the trip. Opening the trip
+        // straight away showed the invitee the stranger view with "Drop In"
+        // (the paid join request) — they are not on the crew until they
+        // accept. Same rule the bell row already follows (NotificationCenter).
+        // No live invite (already accepted, expired) → just open the trip.
+        if (payload.type === 'operator_staff_invited' && payload.tripId) {
+          const tripId = payload.tripId;
+          import('../services/trips/tripStaffService')
+            .then(({ findMyLiveStaffInviteToken }) => findMyLiveStaffInviteToken(tripId))
+            .then(token => {
+              if (token) setPendingStaffToken(token);
+              else openTripCard(tripId);
+            })
+            .catch(() => openTripCard(tripId));
+          return;
+        }
         if (payload.tripId) {
           openTripCard(
             payload.tripId,
@@ -1081,6 +1106,17 @@ export const AppContent: React.FC = () => {
     }
   };
 
+  // Budget (5) when it is shown; otherwise straight to the travel interstitial
+  // + lifestyle (6) — the same landing handleStep5Next produces.
+  const goToStepAfterDestinations = () => {
+    if (SHOW_BUDGET_STEP) {
+      setCurrentStep(5);
+    } else {
+      setInterstitial('travel');
+      setCurrentStep(6);
+    }
+  };
+
   const handleStep4Next = async (data: OnboardingData) => {
     if (isSavingStep4) return;
     console.log('Step 4 next (destinations) called with data:', data);
@@ -1090,7 +1126,7 @@ export const AppContent: React.FC = () => {
       const { onboardingService } = await import('../services/onboarding/onboardingService');
       await onboardingService.saveStep4Destinations(data.destinations_array || []);
       logEvent('onboarding_step_4', { userId: user?.id });
-      setCurrentStep(5);
+      goToStepAfterDestinations();
     } catch (error) {
       console.error('Error in Step 4 (destinations) Next:', error);
       // Don't silently advance — the user's destinations live in local
@@ -1102,7 +1138,7 @@ export const AppContent: React.FC = () => {
         'Your destinations are saved on this device but not yet synced to your profile. Check your connection and try again.',
         [
           { text: 'Retry', onPress: () => handleStep4Next(data) },
-          { text: 'Continue anyway', style: 'cancel', onPress: () => setCurrentStep(5) },
+          { text: 'Continue anyway', style: 'cancel', onPress: goToStepAfterDestinations },
         ],
       );
     } finally {
@@ -1908,8 +1944,19 @@ export const AppContent: React.FC = () => {
   };
 
   const handleStep6Back = () => {
-    setCurrentStep(5); // Lifestyle back to budget
+    // Lifestyle back to budget, or to destinations while budget is hidden.
+    setCurrentStep(SHOW_BUDGET_STEP ? 5 : 4);
   };
+
+  // Someone who stopped on the budget step before it was hidden can come back
+  // to currentStep 5 (OnboardingContext restores it on the swelly_chat route).
+  // Move them on instead of showing a step that no longer exists.
+  useEffect(() => {
+    if (!SHOW_BUDGET_STEP && currentStep === 5) {
+      setInterstitial('travel');
+      setCurrentStep(6);
+    }
+  }, [currentStep, setCurrentStep]);
 
   const handleStep7Back = () => {
     setCurrentStep(6); // Profile back to lifestyle (renumbered from step-3-back)

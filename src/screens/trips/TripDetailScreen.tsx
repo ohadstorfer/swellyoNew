@@ -57,6 +57,7 @@ import {
   listPendingRequests,
   listDeclinedRequests,
   requestToJoinTrip,
+  joinTripInstantly,
   withdrawJoinRequest,
   approveJoinRequest,
   declineJoinRequest,
@@ -359,6 +360,7 @@ const buildTripDetailVM = (
     : null,
   accommodationName: trip.accommodation_name,
   accommodationImageUri: trip.accommodation_image_url,
+  accommodationGalleryUris: trip.accommodation_gallery_urls ?? [],
   accommodationUrl: trip.accommodation_url,
   // The operator's two answers from the create flow. `=== true`: null means
   // "never asked", and that draws no row on the stay card.
@@ -532,7 +534,10 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
    * Declared this early because query `enabled` flags below read it, and
    * hoisting them above their data would be a temporal-dead-zone crash.
    */
-  const { can } = useTripCapabilities(tripId, trip?.hosting_style === 'C');
+  const { can, unknown: capsUnknown } = useTripCapabilities(tripId, trip?.hosting_style === 'C');
+  // Operator trips only: on a peer trip the query is disabled, which reads as
+  // pending forever. Until we know, a crew member looks like a stranger.
+  const capsPending = trip?.hosting_style === 'C' && capsUnknown;
 
   const updatesQuery = useTripAdminUpdates(tripId);
   const adminUpdates = updatesQuery.data ?? [];
@@ -1306,7 +1311,11 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   const chatMembershipKnown = !!chatMembership.data || chatMembership.isError || !currentUserId;
   // Opened on the Chat tab and not yet sure the viewer may see it: keep the
   // tab until we know. If they can't, the tab drops and the Overview shows.
-  const chatFocusPending = initialFocus === 'chat' && !(trip && membershipKnown && chatMembershipKnown);
+  // capsPending too: crew see the chat through a capability, and deciding
+  // before it loads dropped a chat-push tap onto the Overview (tester report,
+  // Nov 2026).
+  const chatFocusPending =
+    initialFocus === 'chat' && !(trip && membershipKnown && chatMembershipKnown && !capsPending);
   const chatTabAvailable = canSeeChat || chatFocusPending;
   // Joining, leaving or being removed changes the chat row on the server (a
   // trigger does it). Re-read it when the trip says membership moved, so a
@@ -1605,6 +1614,9 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   const chatOpenedOnMountRef = useRef(initialFocus === 'chat');
   useEffect(() => {
     if (initialFocus !== 'chat' || !trip || !membershipKnown || !chatMembershipKnown) return;
+    // Wait for capabilities before deciding — otherwise a crew member's
+    // `canSeeChat` is briefly false and the token below is spent on "no".
+    if (capsPending && !canSeeChat) return;
     const token = `${tripId}:${focusNonce ?? 0}`;
     if (appliedChatFocusRef.current === token) return;
     appliedChatFocusRef.current = token;
@@ -1620,7 +1632,7 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
     setChatMountKey(k => k + 1);
     setActiveTab('chat');
     setChatBodyVisible(true);
-  }, [initialFocus, initialChat, focusNonce, trip, tripId, membershipKnown, chatMembershipKnown, canSeeChat, scrollY]);
+  }, [initialFocus, initialChat, focusNonce, trip, tripId, membershipKnown, chatMembershipKnown, canSeeChat, capsPending, scrollY]);
 
   const meParticipant = useMemo(
     () => participants.find(p => p.user_id === currentUserId),
@@ -1717,6 +1729,27 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
       );
       hapticError();
       Alert.alert('Could not send request', friendlyErrorMessage(e, 'Please try again.'));
+    }
+  };
+
+  // join_mode = 'instant' (operator trips): no request, no approval. The
+  // server creates the 'onboarding' row and the traveler goes straight to
+  // checkout. Not optimistic on purpose — the next screen needs the row.
+  const [instantJoining, setInstantJoining] = useState(false);
+  const handleInstantJoin = async () => {
+    if (!currentUserId || !trip || instantJoining) return;
+    hapticMedium();
+    setInstantJoining(true);
+    try {
+      await joinTripInstantly(tripId);
+      await queryClient.invalidateQueries({ queryKey: tripsKeys.detail(tripId) });
+      queryClient.invalidateQueries({ queryKey: tripsKeys.all });
+      onStartOnboarding?.(trip.id, trip.title ?? null);
+    } catch (e: any) {
+      hapticError();
+      Alert.alert('Could not join', friendlyErrorMessage(e, 'Please try again.'));
+    } finally {
+      setInstantJoining(false);
     }
   };
 
@@ -3050,8 +3083,10 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
   // and the database refuses it anyway (the join_requests INSERT policy
   // carries `not trip_staff_can(trip_id, 'roster.view')`, invariant I3: staff
   // and travelers are exclusive). A button that always errors.
+  // `!capsPending`: wait for the capabilities too. Without it crew saw "Drop In"
+  // while their own permissions were still loading (Jake, 6 Nov 2026).
   const showJoinCta =
-    membershipKnown &&
+    membershipKnown && !capsPending &&
     !isHost && !isCancelled && !isApprovedMember && !isStaffViewer &&
     myRequest?.status !== 'approved';
   // Trip full = a cap is set and it's reached. participant_count is the
@@ -4074,6 +4109,9 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
                 isFull={isFull}
                 onRequest={handleRequestToJoin}
                 onWithdraw={handleWithdraw}
+                instant={isOperatorTrip && trip.join_mode === 'instant'}
+                onInstantJoin={handleInstantJoin}
+                instantJoining={instantJoining}
                 compact
               />
             </View>
@@ -4569,8 +4607,8 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
             : 'Why you’re the right Captain'
         }
         initialValue={trip.host_lead_note ?? ''}
-        placeholder="Mention anything that brings credibility to your experience here"
-        maxLength={250}
+        placeholder="e.g. 12 years guiding surfers in Bali, ISA Level 2 coach, lifeguard certified. I know every break on the Bukit and when it works."
+        maxLength={500}
         onClose={() => setEditSheet(null)}
         onSave={handleSaveAboutHost}
       />
@@ -4849,7 +4887,11 @@ const CtaButton: React.FC<{
   onWithdraw: () => void;
   /** Inside the bottom join bar: 50 tall, radius 12 (Figma 17157:26517). */
   compact?: boolean;
-}> = ({ myRequest, isFull, onRequest, onWithdraw, compact }) => {
+  /** Operator trip with join_mode 'instant': "Join Trip" instead of a request. */
+  instant?: boolean;
+  onInstantJoin?: () => void;
+  instantJoining?: boolean;
+}> = ({ myRequest, isFull, onRequest, onWithdraw, compact, instant, onInstantJoin, instantJoining }) => {
   const sizeStyle = compact ? styles.ctaBtnCompact : null;
   // Trip is full and the user hasn't already got a request in flight → show a
   // non-pressable "Trip full" state instead of letting them request a spot that
@@ -4860,6 +4902,30 @@ const CtaButton: React.FC<{
         <Ionicons name="people" size={18} color="#555" />
         <Text style={styles.ctaPendingText}>Trip full</Text>
       </View>
+    );
+  }
+  if (instant && myRequest?.status !== 'pending') {
+    // No request to send: join and go to checkout. A request sent before the
+    // operator switched modes stays "Requested" below until it is decided.
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.ctaBtn,
+          sizeStyle,
+          styles.ctaPrimary,
+          (pressed || instantJoining) && styles.ctaPressed,
+        ]}
+        onPress={onInstantJoin}
+        disabled={instantJoining}
+        accessibilityRole="button"
+        accessibilityState={{ busy: !!instantJoining }}
+      >
+        {instantJoining ? (
+          <ActivityIndicator color="#FFFFFF" />
+        ) : (
+          <Text style={styles.ctaPrimaryText}>Join Trip</Text>
+        )}
+      </Pressable>
     );
   }
   if (myRequest?.status === 'pending') {

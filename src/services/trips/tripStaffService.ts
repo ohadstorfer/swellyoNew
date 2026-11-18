@@ -591,6 +591,29 @@ export async function peekStaffInvite(token: string): Promise<StaffInvitePreview
   return rows[0] ?? null;
 }
 
+/**
+ * The token of the viewer's newest crew invite on one trip, if it is still
+ * live. Used by the push tap: the push payload carries only `tripId` (the token
+ * grants access, so it stays out of APNs/FCM), but the bell row written by
+ * invite_staff_member holds it, RLS'd to its recipient. Null when there is no
+ * row or the invite is spent — the caller then just opens the trip, which is
+ * right for a crew member tapping an old push after accepting.
+ */
+export async function findMyLiveStaffInviteToken(tripId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('data')
+    .eq('type', 'operator_staff_invited')
+    .eq('trip_id', tripId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  const token = (data?.data as { staff_token?: unknown } | null)?.staff_token;
+  if (typeof token !== 'string' || !token) return null;
+  return (await peekStaffInvite(token)) ? token : null;
+}
+
 /** Join the crew. Returns the trip id so the caller can navigate there. */
 export async function acceptStaffInvite(token: string): Promise<string> {
   const { data, error } = await supabase.rpc('accept_staff_invite', { p_token: token });

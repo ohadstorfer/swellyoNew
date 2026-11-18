@@ -25,15 +25,28 @@ import {
  *  key. Months are sorted so two equivalent selections produce the same key
  *  (react-query keys are structurally compared, but sorting keeps it canonical). */
 export type ExploreFilterKey = {
-  months: string[];
-  budgetMin: number | null;
-  budgetMax: number | null;
+  /** USD. Budget slider; the trip's price band must overlap. */
+  priceMin: number | null;
+  priceMax: number | null;
+  /** YYYY-MM-DD. Dates calendar; the trip's dates must overlap. */
+  dateFrom: string | null;
+  dateTo: string | null;
+  /** Age range; a trip with no age limit always passes. */
+  ageMin: number | null;
+  ageMax: number | null;
+  /** Search box text, trimmed + lower-cased ('' = no search). Searched
+   *  server-side by explore_feed (migration 20261112000000_explore_feed_search). */
+  search: string;
 };
 
 export const EMPTY_EXPLORE_FILTER_KEY: ExploreFilterKey = {
-  months: [],
-  budgetMin: null,
-  budgetMax: null,
+  priceMin: null,
+  priceMax: null,
+  dateFrom: null,
+  dateTo: null,
+  ageMin: null,
+  ageMax: null,
+  search: '',
 };
 
 /** Query-key factory — keep keys in one place so invalidation can't drift. */
@@ -87,9 +100,13 @@ export function useExploreTrips(filterKey: ExploreFilterKey = EMPTY_EXPLORE_FILT
   // The RPC filter args are derived directly from the key, so the cache entry and
   // the request that fills it can never disagree about which filters are applied.
   const rpcFilters: ExploreFeedFilters = {
-    months: filterKey.months.length > 0 ? filterKey.months : null,
-    budgetMin: filterKey.budgetMin,
-    budgetMax: filterKey.budgetMax,
+    priceMin: filterKey.priceMin,
+    priceMax: filterKey.priceMax,
+    dateFrom: filterKey.dateFrom,
+    dateTo: filterKey.dateTo,
+    ageMin: filterKey.ageMin,
+    ageMax: filterKey.ageMax,
+    search: filterKey.search || null,
   };
   const q = useInfiniteQuery({
     queryKey: tripsKeys.exploreFiltered(filterKey),
@@ -112,6 +129,13 @@ export function useExploreTrips(filterKey: ExploreFilterKey = EMPTY_EXPLORE_FILT
           }
         : undefined,
     maxPages: 10,
+    // While the search text changes, keep showing the last results until the
+    // new ones land, instead of flashing the skeleton on every keystroke.
+    // Chip changes still show the skeleton, as before.
+    placeholderData: (prev, prevQuery) => {
+      const prevSearch = (prevQuery?.queryKey[2] as ExploreFilterKey | undefined)?.search;
+      return prevSearch !== undefined && prevSearch !== filterKey.search ? prev : undefined;
+    },
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });
@@ -143,6 +167,8 @@ export function useExploreTrips(filterKey: ExploreFilterKey = EMPTY_EXPLORE_FILT
     hasNextPage: q.hasNextPage,
     fetchNextPage: q.fetchNextPage,
     isFetchingNextPage: q.isFetchingNextPage,
+    /** Showing the previous search's results while the new search loads. */
+    isPlaceholderData: q.isPlaceholderData,
   };
 }
 

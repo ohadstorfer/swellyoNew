@@ -34,6 +34,7 @@ import {
 import type { LayoutChangeEvent } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../hooks/useSheetMaxHeight';
 
 /**
  * How far the keyboard covers the screen, on iOS, for `avoidKeyboard` sheets.
@@ -161,6 +162,10 @@ export function BottomSheetShell({
   // Gated on `visible` as well as the prop: a closed sheet must not hold a
   // keyboard inset from the last time it was open.
   const keyboardInset = useIosKeyboardInset(avoidKeyboard && visible);
+  // Hard cap for EVERY sheet: never taller than the screen minus the status bar and a
+  // strip of scrim, so the grabber stays visible and a tap above the sheet closes it.
+  // Keyboard-aware only when the sheet rises with the keyboard.
+  const sheetMaxHeight = useSheetMaxHeight(avoidKeyboard && visible);
 
   // Android: the RN Modal draws in its OWN native window, and how much of the navigation bar
   // that window covers is not ours to decide — so MEASURE it, never assume.
@@ -292,12 +297,17 @@ export function BottomSheetShell({
           The scrim above is `absoluteFill`, so it keeps covering the whole screen
           regardless of what happens in here. */}
       <View style={keyboardInset > 0 ? { paddingBottom: keyboardInset } : null}>
-        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+        <Animated.View
+          style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }}
+          onLayout={onSheetLayout}
+        >
           {/* Whole-sheet swipe only when NOT using the render-prop (caller places it).
               A plain View, not a Pressable: nothing here needs to answer a tap, and a
-              Pressable would put the responder back above the sheet's ScrollView. */}
+              Pressable would put the responder back above the sheet's ScrollView.
+              flexShrink lets a sheet whose surface can shrink (a ScrollView body) give up
+              room to the cap; one that can't overflows DOWN, never up past the status bar. */}
           <View
-            style={androidNavBarNudge}
+            style={[styles.shrink, androidNavBarNudge]}
             {...(swipeToDismiss && !isRenderProp ? panHandlers : {})}
           >
             {content}
@@ -350,6 +360,7 @@ export default BottomSheetShell;
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  shrink: { flexShrink: 1 },
   container: { flex: 1, justifyContent: 'flex-end' },
   // `inline` only. Above DocumentViewer's own inline layer (zIndex 50), because a
   // sheet opened from the viewer has to sit on top of it.

@@ -95,6 +95,14 @@ export const dayHasContent = (day: ItineraryDay): boolean =>
   day.photos.length > 0 ||
   day.activities.some(a => a.name.trim().length > 0);
 
+/**
+ * Has photos or activities but no title. Such a day is kept while editing but
+ * dropped on save (cleanItinerary keeps only titled days), so the editor must
+ * not let it be closed — or its photos are lost without a word.
+ */
+export const dayNeedsTitle = (day: ItineraryDay): boolean =>
+  dayHasContent(day) && !isDayPlanned(day);
+
 /** The line under the title. Derived, so the operator never types it twice. */
 export const dayHighlights = (day: ItineraryDay): string =>
   day.activities.map(a => a.name.trim()).filter(Boolean).join(' · ');

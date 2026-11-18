@@ -30,6 +30,7 @@ import {
   MAX_DAY_TITLE_LENGTH,
   dayHighlights,
   dayLabel,
+  dayNeedsTitle,
   daysPastEnd,
   emptyDay,
   isDayPlanned,
@@ -248,6 +249,28 @@ const OpenRow: React.FC<{ label: string; onPress: () => void }> = ({ label, onPr
   </Pressable>
 );
 
+/**
+ * Leaving an open day by Back while it has photos or activities but no title
+ * (`dayNeedsTitle`). Done is disabled in that state, but Back would save the
+ * day and publish would then drop it without a word, photos included. So ask:
+ * stay and add a title, or leave without saving this day's changes (the
+ * version saved before stays as it was). RN's Alert ignores custom buttons on
+ * web, hence window.confirm there (same as TripsScreen).
+ */
+export const confirmLeaveUntitledDay = (onDiscard: () => void): void => {
+  const title = 'This day has no title';
+  const message =
+    "Guests only see days with a title, so this day's photos and activities won't be saved.";
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}\n\nLeave without saving this day?`)) onDiscard();
+    return;
+  }
+  Alert.alert(title, message, [
+    { text: 'Add a title', style: 'cancel' },
+    { text: 'Discard changes', style: 'destructive', onPress: onDiscard },
+  ]);
+};
+
 // -----------------------------------------------------------------------------
 // Day editor
 // -----------------------------------------------------------------------------
@@ -270,7 +293,7 @@ export const ItineraryDayEditor: React.FC<ItineraryDayEditorProps> = ({
   const [timeFor, setTimeFor] = useState<number | null>(null);
 
   const isEmpty = !day.title && day.photos.length === 0 && day.activities.length === 0;
-  const needsTitle = !day.title.trim() && day.activities.some(a => a.name.trim());
+  const needsTitle = dayNeedsTitle(day);
   const canAddPhoto = day.photos.length < MAX_DAY_PHOTOS;
 
   const setActivity = (index: number, patch: Partial<ItineraryActivity>) =>
@@ -438,7 +461,7 @@ export const ItineraryDayEditor: React.FC<ItineraryDayEditorProps> = ({
                 style={styles.activityName}
                 value={activity.name}
                 onChangeText={name => setActivity(index, { name })}
-                placeholder="Activity"
+                placeholder="e.g. Dawn patrol at Padang Padang"
                 placeholderTextColor={C.faint}
                 accessibilityLabel="Activity"
                 onInputFocus={onInputFocus}
@@ -460,7 +483,7 @@ export const ItineraryDayEditor: React.FC<ItineraryDayEditorProps> = ({
                 style={styles.activityPlace}
                 value={activity.place ?? ''}
                 onChangeText={place => setActivity(index, { place })}
-                placeholder="Place (optional)"
+                placeholder="e.g. Padang Padang Beach (optional)"
                 placeholderTextColor={C.faint}
                 accessibilityLabel="Place"
                 onInputFocus={onInputFocus}

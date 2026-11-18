@@ -18,6 +18,7 @@ import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import { Images } from '../../../assets/images';
 import { Ionicons } from '@expo/vector-icons';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.88;
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -76,6 +77,8 @@ export const RequestToJoinSheet: React.FC<Props> = ({
   const displayName = profile?.name?.trim() || 'You';
 
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, close);
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(true);
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={close}>
       <KeyboardAvoidingView
@@ -88,7 +91,7 @@ export const RequestToJoinSheet: React.FC<Props> = ({
           style={[styles.backdrop, { opacity: backdropOpacity }]}
         />
         <Animated.View
-          style={{ transform: [{ translateY }] }}
+          style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }}
           onLayout={onSheetLayout}
         >
           <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>

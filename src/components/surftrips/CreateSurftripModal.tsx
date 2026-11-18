@@ -10,8 +10,10 @@ import {
   Image,
   ScrollView,
   Platform,
+  Pressable,
 } from 'react-native';
 import { KeyboardAvoidingView } from '../../utils/keyboardAvoidingView';
+import { useSheetMaxHeight } from '../../hooks/useSheetMaxHeight';
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
 import {
@@ -121,6 +123,9 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
     return Math.max(2, Math.min(200, n));
   })();
 
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(true);
+
   const handleClose = () => {
     if (submitting) return;
     reset();
@@ -227,7 +232,10 @@ export const CreateSurftripModal: React.FC<CreateSurftripModalProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
       <View style={styles.backdrop}>
-        <View style={styles.sheet}>
+        {/* Tap outside closes. A SIBLING below the sheet, never its ancestor, so it
+            can't steal the first scroll drag on Android. */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
+        <View style={[styles.sheet, { maxHeight: sheetMaxHeight }]}>
           <View style={styles.header}>
             <TouchableOpacity onPress={handleClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Ionicons name="close" size={24} color="#222B30" />

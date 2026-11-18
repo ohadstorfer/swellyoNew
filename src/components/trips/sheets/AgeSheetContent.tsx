@@ -1,4 +1,8 @@
-// AgeSheetContent — side-by-side Min/Max number cubes. If the typed pair
+// AgeSheetContent — "All ages" (the default) or a Min/Max range.
+//
+// Two choices on top: "All ages" and "Set a range". A trip with no age set is
+// all ages, so that is what shows selected until the host picks a range.
+// "Set a range" opens side-by-side Min/Max number cubes. If the typed pair
 // is closer together than `ageWindow`, the field NOT just edited is pushed
 // out to close the gap automatically (never blocks with an error).
 import React, { useEffect, useRef, useState } from 'react';
@@ -72,14 +76,33 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
     ageMax != null ? String(ageMax) : '',
   );
   const [focused, setFocused] = useState<'min' | 'max' | null>(null);
+  // No age set = all ages. The cubes show only once the host picks a range.
+  const [ranged, setRanged] = useState<boolean>(ageMin != null || ageMax != null);
 
   // Auto-focus the Min input as soon as the first frame paints — the
   // keyboard then rises in lockstep with the sheet's slide-in, so the
-  // two read as one moving brick (open AND close).
+  // two read as one moving brick (open AND close). Only when a range is
+  // already set: on "All ages" there is nothing to type.
   useEffect(() => {
+    if (!ranged) return;
     const id = requestAnimationFrame(() => minRef.current?.focus());
     return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const pickAllAges = () => {
+    setRanged(false);
+    setMinStr('');
+    setMaxStr('');
+    minRef.current?.blur();
+    maxRef.current?.blur();
+    if (ageMin != null || ageMax != null) onChange({ ageMin: null, ageMax: null });
+    onClose?.();
+  };
+  const pickRange = () => {
+    setRanged(true);
+    requestAnimationFrame(() => minRef.current?.focus());
+  };
 
   // If parent props change from outside (e.g. reset), pull them into local state.
   useEffect(() => {
@@ -141,6 +164,12 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
 
   return (
     <View>
+      <View style={styles.modeRow}>
+        <ModeChip label="All ages" active={!ranged} onPress={pickAllAges} />
+        <ModeChip label="Set a range" active={ranged} onPress={pickRange} />
+      </View>
+
+      {ranged && (
       <View style={styles.row}>
         <TouchableOpacity
           activeOpacity={0.85}
@@ -232,6 +261,7 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
           />
         </TouchableOpacity>
       </View>
+      )}
 
       {/* "Must span N years" lives on the sheet header as a subtitle now,
           to match the styling of the other sheets. */}
@@ -245,7 +275,51 @@ export const AgeSheetContent: React.FC<AgeSheetContentProps> = ({
   );
 };
 
+const ModeChip: React.FC<{ label: string; active: boolean; onPress: () => void }> = ({
+  label,
+  active,
+  onPress,
+}) => (
+  <TouchableOpacity
+    style={[styles.modeChip, active && styles.modeChipActive]}
+    onPress={onPress}
+    activeOpacity={0.8}
+    accessibilityRole="radio"
+    accessibilityState={{ selected: active }}
+  >
+    <Text style={[styles.modeChipText, active && styles.modeChipTextActive]}>{label}</Text>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
+  modeRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  modeChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: '#F7F7F7',
+  },
+  modeChipActive: {
+    borderColor: '#212121',
+    backgroundColor: '#212121',
+  },
+  modeChipText: {
+    fontFamily: FONT_INTER,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  modeChipTextActive: {
+    color: '#FFFFFF',
+  },
   row: {
     flexDirection: 'row',
     justifyContent: 'center',

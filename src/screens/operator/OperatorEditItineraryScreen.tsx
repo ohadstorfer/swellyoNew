@@ -4,7 +4,11 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useQueryClient } from '@tanstack/react-query';
 import type { RootStackParamList } from '../../navigation/navigationRef';
 import { CreateTripWizardChrome } from '../../components/trips/CreateTripWizardChrome';
-import { ItineraryDayEditor, ItineraryDayList } from '../../components/trips/create/ItineraryEditor';
+import {
+  ItineraryDayEditor,
+  ItineraryDayList,
+  confirmLeaveUntitledDay,
+} from '../../components/trips/create/ItineraryEditor';
 import { useTripCore } from '../../hooks/trips/useTripDetail';
 import { tripsKeys } from '../../hooks/trips/useTripQueries';
 import { useDiscardConfirm } from '../../hooks/useDiscardConfirm';
@@ -66,6 +70,12 @@ export default function OperatorEditItineraryScreen({ route, navigation }: Props
 
   const closeDay = useCallback(() => {
     if (!editing) return;
+    // Only Back can get here in this state (Done is disabled): saving it would
+    // let Save drop the day silently, so ask first.
+    if (dayHasContent(cleanDay(editing)) && !isDayPlanned(cleanDay(editing))) {
+      confirmLeaveUntitledDay(() => setEditing(null));
+      return;
+    }
     setDays(prev => upsertDay(prev ?? [], editing));
     setEditing(null);
   }, [editing]);

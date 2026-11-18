@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Images } from '../../../assets/images';
+import { StayGalleryStrip } from './StayGalleryStrip';
 import { textStyle, textStyles } from '../../../theme/typography';
 
 const C = {
@@ -55,6 +56,11 @@ export interface OperatorStayCardProps {
   /** Opens the photo picker. The wizard owns the picker and the state. */
   onPickPhoto: () => void;
   onRemovePhoto: () => void;
+  /** Extra stay photos after the main one (accommodation_gallery_urls). The
+   *  strip shows only when these three are passed. */
+  galleryUris?: string[];
+  onAddGalleryPhotos?: () => void;
+  onRemoveGalleryPhoto?: (index: number) => void;
   onToggleStoke: () => void;
   onToggleCi: () => void;
   /** Lets the wizard chrome scroll the focused field clear of the keyboard. */
@@ -147,6 +153,9 @@ export const OperatorStayCard: React.FC<OperatorStayCardProps> = ({
   onChangeUrl,
   onPickPhoto,
   onRemovePhoto,
+  galleryUris,
+  onAddGalleryPhotos,
+  onRemoveGalleryPhoto,
   onToggleStoke,
   onToggleCi,
   onFieldFocus,
@@ -269,6 +278,17 @@ export const OperatorStayCard: React.FC<OperatorStayCardProps> = ({
               </View>
             )}
           </Pressable>
+          {galleryUris && onAddGalleryPhotos && onRemoveGalleryPhoto ? (
+            <StayGalleryStrip
+              uris={galleryUris}
+              disabled={!photoUri}
+              onAdd={() => {
+                Keyboard.dismiss();
+                onAddGalleryPhotos();
+              }}
+              onRemove={onRemoveGalleryPhoto}
+            />
+          ) : null}
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}

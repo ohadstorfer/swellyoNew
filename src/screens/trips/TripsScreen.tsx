@@ -16,13 +16,16 @@ import {
   InteractionManager,
   StyleProp,
   ViewStyle,
+  TextInput,
+  Pressable,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 // Remote user-content images (trip covers, avatars) render through expo-image
 // for its disk cache — URLs are immutable (timestamped filenames), so cached
 // copies never go stale. Local bundled assets keep using RN's Image.
 import { Image as CachedImage } from 'expo-image';
-import Svg, { Path } from 'react-native-svg';
+import { CertBadges } from '../../components/trips/overview/CertBadges';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 const NOISE_TEXTURE = require('../../../assets/textures/noise.png');
@@ -34,10 +37,14 @@ import {
   SurfLevel,
   TripCardMeta,
 } from '../../services/trips/groupTripsService';
-import { BUDGET_THRESHOLD } from '../../services/trips/exploreFilterPredicates';
+import {
+  ExploreFiltersSheet,
+  EMPTY_EXPLORE_FILTERS,
+  countActiveFilters,
+  type ExploreFilters,
+} from '../../components/trips/ExploreFiltersSheet';
 import { COUNTRY_NAMES } from '../../data/countryNames';
 import {
-  formatAmount,
   formatTripPrice as formatTripPriceIn,
   formatTripPriceRange,
   type Viewer,
@@ -55,10 +62,10 @@ import { pushRootCard } from '../../navigation/navigationRef';
 import { ff, fs } from '../../theme/fonts';
 import { fontSize, textStyle, textStyles } from '../../theme/typography';
 import { LinearGradient } from 'expo-linear-gradient';
+import { setStatusBarStyle } from 'expo-status-bar';
 import MaskedView from '@react-native-masked-view/masked-view';
 import BottomSheetShell from '../../components/BottomSheetShell';
 import { TripIcon, type TripIconName } from '../../components/trips/tripIcons';
-import { ExploreSwipeDeck, DECK_PEEK } from '../../components/trips/ExploreSwipeDeck';
 import { MyTripsSkeleton, ExploreDeckSkeleton } from '../../components/skeletons';
 import NoTripsEmptyState from '../../components/trips/NoTripsEmptyState';
 import { FadeInView } from '../../components/FadeInView';
@@ -81,7 +88,11 @@ import Reanimated, {
   Easing,
   Extrapolation,
   interpolate,
+  interpolateColor,
+  runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
   useSharedValue,
   withTiming,
@@ -89,6 +100,9 @@ import Reanimated, {
 } from 'react-native-reanimated';
 
 export type TripsTab = 'explore' | 'my';
+/** How long after opening the app we may still move a user on a trip to My
+ *  Trips. Later than this they are already browsing Explore. */
+const ENTRY_DECISION_WINDOW_MS = 4000;
 
 interface TripsScreenProps {
   onBack: () => void;
@@ -445,21 +459,50 @@ const formatVibe = (trip: GroupTrip): string | null => {
 // fixed 64px row under it for the host and the price; only the photo scales.
 const EX_FRAME_PAD = 8;
 const EX_INFO_H = 64;
-const EX_IMAGE_RATIO = 408 / 328; // photo height / width
+// Figma 18960:24187: a horizontal carousel. The first card starts 14 from the
+// left edge and the next one sits 8 after it, so it peeks in on the right.
+const EX_CAROUSEL_INSET = 14;
+const EX_CAROUSEL_GAP = 8;
 // The design is a 344 card on a 393 screen. The card keeps that share of the
 // width, so it grows on a Max phone instead of stopping at 344.
 const EX_CARD_WIDTH_SHARE = 344 / 393;
 // Ceiling for tablets and wide web windows.
 const EX_CARD_MAX_W = 420;
-// Only a genuinely short phone goes below the design width, and never far.
-const EX_CARD_MIN_W = 300;
-// Room kept free under the stack for the floating nav bar: the bar's top edge
-// sits ~91px above the bottom of the screen.
+const EX_CARD_MIN_W = 280;
+// The HEIGHT follows the phone: the card fills the space down to the floating
+// nav bar, so a tall phone gets a tall photo and a short one a shorter photo.
+// The bar's top edge sits ~91px above the bottom of the screen, and the design
+// leaves ~44 more between it and the card (481 tall on an 852 screen).
 const EX_NAV_RESERVE = 92;
-const exploreCardHeight = (w: number) =>
-  Math.round((w - EX_FRAME_PAD * 2) * EX_IMAGE_RATIO) + EX_INFO_H + EX_FRAME_PAD * 3;
-const exploreCardWidthForHeight = (h: number) =>
-  Math.floor((h - EX_INFO_H - EX_FRAME_PAD * 3) / EX_IMAGE_RATIO) + EX_FRAME_PAD * 2;
+const EX_NAV_GAP = 44;
+// The photo never gets shorter than this (an SE-size phone)…
+const EX_IMAGE_MIN_H = 220;
+// …or taller than this share of its width (tablets, tall web windows).
+const EX_IMAGE_MAX_RATIO = 1.6;
+const exploreCardHeight = (w: number, areaH: number) => {
+  const imageW = w - EX_FRAME_PAD * 2;
+  const room = areaH - EX_NAV_RESERVE - EX_NAV_GAP - EX_INFO_H - EX_FRAME_PAD * 3;
+  const imageH = Math.max(EX_IMAGE_MIN_H, Math.min(Math.round(imageW * EX_IMAGE_MAX_RATIO), room));
+  return imageH + EX_INFO_H + EX_FRAME_PAD * 3;
+};
+
+// Search runs server-side (explore_feed p_search: title, About, host, place,
+// levels, boards, vibe…). Wait this long after the last keystroke before
+// asking, so typing "nicaragua" is one request, not nine.
+const EX_SEARCH_DEBOUNCE_MS = 250;
+// Keyboard-up card fit: space kept above the keyboard, and the smallest the
+// card may get (details panel + a strip of photo) on very short phones.
+const EX_KB_GAP = 16;
+const EX_FIT_MIN_H = 200;
+// Where the keyboard's top landed last time (window y). Search opens with the
+// same keyboard almost every time, so the cards can start shrinking in the tap
+// itself, with the header, instead of waiting for the keyboard event.
+let lastKbTop = 0;
+// If no keyboard has started showing this long after search opens (hardware
+// keyboard), the cards grow back. Long, because the first keyboard of a
+// session can take ~1s to appear, and Android only reports it once it is up.
+const EX_NO_KB_GRACE_MS = 1500;
+const normalizeSearch = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase().slice(0, 100);
 
 const exploreCardLabel = (trip: GroupTrip): string => {
   const headline = trip.title || formatDestination(trip);
@@ -468,24 +511,22 @@ const exploreCardLabel = (trip: GroupTrip): string => {
   return `${headline}${place}, ${formatTripDates(trip)}`;
 };
 
-// Explore card logos. Conservation International is Figma 18675:22870, a
-// two-path vector, drawn as-is. STOKE Certified is the source PNG of Figma
-// 18675:22751 (transparent). A flattened node export would bake in the
-// blurred photo behind it.
-const SC_BADGE = require('../../../assets/images/badges/sc-badge.png');
-const CiBadge: React.FC<{ style?: StyleProp<ViewStyle> }> = ({ style }) => (
-  <Svg width={33.75} height={38.3643} viewBox="0 0 33.75 38.3643" fill="none" style={style}>
-    <Path d="M16.5013 0.618408C24.6616 0.198488 31.6197 6.47013 32.0462 14.6301C32.4726 22.7902 26.2059 29.7528 18.0462 30.1858C9.87747 30.619 2.90574 24.3442 2.47882 16.175C2.05212 8.00599 8.33189 1.03892 16.5013 0.618408ZM16.7327 6.59497C11.8673 6.89039 8.15948 11.0689 8.44562 15.9348C8.73196 20.8009 12.9043 24.5167 17.7708 24.2395C22.6502 23.9615 26.3782 19.7757 26.0911 14.8967C25.804 10.0179 21.6111 6.29884 16.7327 6.59497Z" fill="#0096D5" stroke="#000000" strokeWidth={0.25} />
-    <Path d="M28.1014 31.8312L28.1346 31.9034C28.1422 31.9199 28.1452 31.9358 28.1463 31.9415C28.1479 31.9499 28.1492 31.9587 28.1502 31.9669C28.1522 31.9835 28.1545 32.0044 28.1561 32.0275C28.1591 32.074 28.1615 32.1372 28.1639 32.214C28.1687 32.3682 28.1727 32.5817 28.1756 32.8351C28.1814 33.3425 28.1839 34.0136 28.1844 34.6954C28.1853 36.0589 28.1778 37.4714 28.1746 37.7267L28.1736 37.8468L28.0535 37.8497C27.6824 37.8593 27.1984 37.8347 26.825 37.8341V37.8331H12.5545C10.5909 37.8335 8.528 37.7984 6.57892 37.8458C6.57762 37.846 6.5763 37.8457 6.57501 37.8458C6.57338 37.8459 6.57176 37.8468 6.57013 37.8468L6.56915 37.8458C6.53582 37.8479 6.50623 37.8451 6.47638 37.8331C6.46394 37.8281 6.45237 37.8217 6.44611 37.8185C6.43878 37.8147 6.43281 37.812 6.4256 37.8087L6.37775 37.7872L6.35919 37.7374C6.35195 37.7175 6.34891 37.6946 6.3465 37.6779C6.34373 37.6587 6.34082 37.6357 6.33868 37.6105C6.3344 37.5597 6.33108 37.4936 6.32794 37.4152C6.32164 37.2578 6.31729 37.0458 6.31427 36.797C6.30823 36.2988 6.30716 35.6491 6.30939 34.9874C6.31385 33.6609 6.32938 32.291 6.3299 31.9679V31.8331L6.46368 31.8429C6.86887 31.8725 7.43808 31.8594 7.86407 31.8595L10.2186 31.8585L17.4969 31.8575L24.3065 31.8585C25.318 31.859 26.9973 31.9085 27.9373 31.8322L27.9471 31.8312H28.1014Z" fill="#48AB44" stroke="#000000" strokeWidth={0.25} />
-  </Svg>
-);
-
+// Explore card logos live in components/trips/overview/CertBadges (shared
+// with the trip page's top card).
 const ExploreTripCard: React.FC<{
   trip: GroupTrip;
   meta?: TripCardMeta;
-}> = React.memo(({ trip, meta }) => {
+  /** How much taller the photo is than its frame right now (see
+   *  ExploreTripsView): when the card shrinks, the photo keeps its full-card
+   *  size and is cropped top and bottom instead of rescaled. */
+  photoLag?: SharedValue<number>;
+}> = React.memo(({ trip, meta, photoLag }) => {
   const viewer = useViewer();
   const reduceMotion = useReducedMotion();
+  const photoStyle = useAnimatedStyle(() => {
+    const lag = photoLag ? photoLag.value : 0;
+    return { top: -lag / 2, bottom: -lag / 2 };
+  });
   const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
@@ -512,16 +553,18 @@ const ExploreTripCard: React.FC<{
     <View style={styles.exFrame}>
       <View style={styles.exImage}>
         {trip.hero_image_url ? (
-          <Thumb
-            uri={trip.hero_image_url}
-            widthPx={HERO_THUMB_PX}
-            placeholder={heroThumb ? { uri: heroThumb } : undefined}
-            placeholderContentFit="cover"
-            style={styles.cardImageBg}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            transition={reduceMotion ? 0 : 150}
-          />
+          <Reanimated.View style={[styles.exPhotoLayer, photoStyle]}>
+            <Thumb
+              uri={trip.hero_image_url}
+              widthPx={HERO_THUMB_PX}
+              placeholder={heroThumb ? { uri: heroThumb } : undefined}
+              placeholderContentFit="cover"
+              style={styles.cardImageBg}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={reduceMotion ? 0 : 150}
+            />
+          </Reanimated.View>
         ) : (
           <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
             <Ionicons name="image-outline" size={32} color="#B0B0B0" />
@@ -571,18 +614,7 @@ const ExploreTripCard: React.FC<{
             {/* Conservation International + STOKE Certified logos (Figma
                 18675:22874), only when the operator ticked them on the stay.
                 Both: one grid cell, SC 43 right and 1 down over CI's edge. */}
-            {(hasCi || hasSc) && (
-              <View style={styles.exBadges} pointerEvents="none">
-                {hasCi && <CiBadge style={styles.exBadgeCi} />}
-                {hasSc && (
-                  <CachedImage
-                    source={SC_BADGE}
-                    style={[styles.exBadgeSc, !hasCi && styles.exBadgeSolo]}
-                    contentFit="contain"
-                  />
-                )}
-              </View>
-            )}
+            <CertBadges ci={hasCi} stoke={hasSc} />
             <View style={styles.exRoute}>
               <Text style={styles.exTitle} numberOfLines={1}>{headline}</Text>
               {showLocation && (
@@ -653,144 +685,9 @@ const ExploreTripCard: React.FC<{
   );
 });
 
-// ---------------------------------------------------------------------------
-// Explore filters (Figma 11966:32392) — month + budget chips.
-// Chips toggle independently. Within a group (months / budget) the matches are
-// OR'd; across groups they're AND'd. "All" clears every selection. The actual
-// filtering now happens server-side in the explore_feed RPC (covers the whole
-// catalogue); these chips just drive the RPC args + query key.
-// ---------------------------------------------------------------------------
-// BUDGET_THRESHOLD + the trip predicates live in exploreFilterPredicates.ts (the
-// shared source of truth the SQL port is parity-tested against).
-
-type ExploreChipKind = 'month' | 'budget';
-interface ExploreChip {
-  id: string;
-  label: string;
-  kind: ExploreChipKind;
-  value: string; // month → "YYYY-MM"; budget → "below" | "above"
-}
-
-// Three rolling month chips derived from the device clock, so the labels move
-// forward on their own every month. First two read "This/Next Month"; the third
-// shows the literal month name (e.g. "August").
-const buildExploreChips = (now: Date, viewer: Viewer): ExploreChip[] => {
-  const ymOffset = (offset: number) => {
-    const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const name = d.toLocaleDateString(undefined, { month: 'long' });
-    return { ym, name };
-  };
-  const m0 = ymOffset(0);
-  const m1 = ymOffset(1);
-  const m2 = ymOffset(2);
-  // Label only — the RPC still filters against BUDGET_THRESHOLD in USD.
-  //
-  // No trip is involved here (the chip spans the whole catalogue), so there is
-  // no frozen rate to use: it is today's cached rate or nothing. It used to be
-  // a hardcoded 3.0 — close to the real rate today, but a constant pretending to
-  // be a live one, so the chip's label would drift away from the threshold it
-  // actually filters on with nothing to flag it. With no rate cached we now say
-  // "$5k" — the real threshold in the currency we charge — rather than a guess.
-  const rate = viewer.currency === 'USD' ? null : viewer.rates?.[viewer.currency];
-  const budgetChipUnit =
-    rate != null && Number.isFinite(rate) && rate > 0
-      ? `${formatAmount(Math.round((BUDGET_THRESHOLD * rate) / 1000), viewer.currency)}k`
-      : `$${BUDGET_THRESHOLD / 1000}k`;
-  return [
-    { id: `m:${m0.ym}`, label: 'This Month', kind: 'month', value: m0.ym },
-    { id: `m:${m1.ym}`, label: 'Next Month', kind: 'month', value: m1.ym },
-    { id: `m:${m2.ym}`, label: m2.name, kind: 'month', value: m2.ym },
-    { id: 'b:below', label: `Below ${budgetChipUnit}`, kind: 'budget', value: 'below' },
-    { id: 'b:above', label: `Above ${budgetChipUnit}`, kind: 'budget', value: 'above' },
-  ];
-};
-
-// Collapse the chip selection into the RPC's filter args (the same shape the
-// query key carries). months are OR'd; the two budget chips map to the inclusive
-// threshold bounds the RPC expects: "below" → budgetMax (band_lo <= bound),
-// "above" → budgetMin (band_hi >= bound). Returns canonical (sorted months) so an
-// equivalent selection always yields the same key.
-const deriveExploreFilterKey = (
-  chips: ExploreChip[],
-  selected: Set<string>,
-): ExploreFilterKey => {
-  const months = chips
-    .filter(c => c.kind === 'month' && selected.has(c.id))
-    .map(c => c.value)
-    .sort();
-  const budgets = new Set(
-    chips.filter(c => c.kind === 'budget' && selected.has(c.id)).map(c => c.value),
-  );
-  return {
-    months,
-    budgetMin: budgets.has('above') ? BUDGET_THRESHOLD : null,
-    budgetMax: budgets.has('below') ? BUDGET_THRESHOLD : null,
-  };
-};
-
-const ExploreFilterSheet: React.FC<{
-  visible: boolean;
-  onClose: () => void;
-  chips: ExploreChip[];
-  selected: Set<string>;
-  onToggle: (id: string) => void;
-  onClear: () => void;
-}> = ({ visible, onClose, chips, selected, onToggle, onClear }) => {
-  const insets = useSafeAreaInsets();
-  const group = (kind: ExploreChipKind) => (
-    <View style={styles.fsChips}>
-      {chips.filter(c => c.kind === kind).map(chip => {
-        const active = selected.has(chip.id);
-        return (
-          <TouchableOpacity
-            key={chip.id}
-            style={[styles.fsChip, active ? styles.fsChipActive : styles.fsChipInactive]}
-            onPress={() => onToggle(chip.id)}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-          >
-            <Text style={[styles.fsChipText, active ? styles.fsChipTextActive : styles.fsChipTextInactive]}>
-              {chip.label}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-  return (
-    <BottomSheetShell visible={visible} onClose={onClose}>
-      {({ panHandlers }) => (
-        <View style={[styles.fsSheet, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-          <View style={styles.fsHandleWrap} {...panHandlers}>
-            <View style={styles.fsHandle} />
-          </View>
-          <View style={styles.fsHeader}>
-            <Text style={styles.fsTitle}>Filters</Text>
-            {selected.size > 0 && (
-              <TouchableOpacity onPress={onClear} hitSlop={8} accessibilityRole="button">
-                <Text style={styles.fsClear}>Clear all</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <Text style={styles.fsGroup}>When</Text>
-          {group('month')}
-          <Text style={styles.fsGroup}>Budget</Text>
-          {group('budget')}
-          <TouchableOpacity
-            style={styles.fsDone}
-            onPress={onClose}
-            activeOpacity={0.9}
-            accessibilityRole="button"
-          >
-            <Text style={styles.fsDoneText}>Show trips</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </BottomSheetShell>
-  );
-};
+// Explore filters: budget slider, dates calendar, age range. The sheet lives
+// in components/trips/ExploreFiltersSheet.tsx; filtering runs server-side in
+// explore_feed across the whole catalogue.
 
 // ---------------------------------------------------------------------------
 // Explore view
@@ -807,25 +704,39 @@ type NavScrollHandler = (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
 const ExploreTripsView: React.FC<{
   onOpenTrip: (tripId: string) => void;
   userId: string | null;
-}> = ({ onOpenTrip, userId }) => {
-  // The viewer decides the budget chip label currency; the RPC filter value
-  // itself stays in USD (see deriveExploreFilterKey).
+  /** Search opened/closed — the screen slides its header away while open. */
+  onSearchOpenChange?: (open: boolean) => void;
+  /** The header's height and how far it has slid away (0 shown, 1 hidden),
+   *  so the deck's top can be tracked on the UI thread while it slides. */
+  headerH?: SharedValue<number>;
+  headerP?: SharedValue<number>;
+}> = ({ onOpenTrip, userId, onSearchOpenChange, headerH, headerP }) => {
+  // The viewer decides the budget slider's label currency; the RPC filter
+  // value itself stays in USD.
   const viewer = useViewer();
 
-  // Month chips roll off the device clock; re-derived if the viewer changes
-  // (profile finishing its load, a rate landing, or a currency override) so the
-  // budget label follows.
-  const chips = useMemo(() => buildExploreChips(new Date(), viewer), [viewer]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [filters, setFilters] = useState<ExploreFilters>(EMPTY_EXPLORE_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const toggleChip = useCallback((id: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const applyFilters = useCallback((next: ExploreFilters) => {
+    setFiltersOpen(false);
+    // Same values → keep the old object, so the query key does not change.
+    setFilters(prev => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
   }, []);
-  const clearChips = useCallback(() => setSelected(new Set()), []);
+  const activeFilterCount = countActiveFilters(filters);
+
+  // Search (Figma 18960:24689). `query` is what the box shows; `search` is the
+  // debounced, normalized text that goes into the query key and the RPC.
+  const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const next = normalizeSearch(query);
+    // Clearing is instant; typing waits for a pause.
+    if (next === '') { setSearch(''); return; }
+    const t = setTimeout(() => setSearch(next), EX_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [query]);
+  const q = normalizeSearch(query);
 
   // Push month/budget filters into the RPC so they span the whole catalogue, not
   // just the loaded page. The derived key drives BOTH the query cache identity and
@@ -833,21 +744,28 @@ const ExploreTripsView: React.FC<{
   // signature so the key reference is stable across renders that don't change the
   // selection (otherwise useInfiniteQuery would see a new key every render).
   const filterKey: ExploreFilterKey = useMemo(
-    () => deriveExploreFilterKey(chips, selected),
-    [chips, selected],
+    () => ({ ...filters, search }),
+    [filters, search],
   );
-  // New filters = a different list, so the stack starts again from its first card.
+  // New filters or a new search = a different list, so the carousel goes back to
+  // its first card.
   const resetKey = useMemo(() => JSON.stringify(filterKey), [filterKey]);
 
   // Cached + stale-while-revalidate. The data survives tab switches and
   // leaving/re-entering Trips, so re-entry is instant (no skeleton) and only
   // revalidates silently in the background when stale.
-  const { trips, meta, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useExploreTrips(filterKey);
-  const hasActiveFilter = selected.size > 0;
+  const { trips, meta, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage, isPlaceholderData } = useExploreTrips(filterKey);
+  const hasActiveFilter = activeFilterCount > 0;
+
+  // Results for the text typed are still on their way (debounce, or the
+  // request itself while the last results stay on screen).
+  const searchPending = q !== search || isPlaceholderData;
+  const visibleTrips = trips;
+  const listKey = resetKey;
 
   const queryClient = useQueryClient();
-  const liveRef = useRef({ trips, meta });
-  liveRef.current = { trips, meta };
+  const liveRef = useRef({ trips: visibleTrips, meta });
+  liveRef.current = { trips: visibleTrips, meta };
 
   // Warm what the next swipes will show: hero + avatar thumbs for the cards
   // behind the front one, and the detail query for the front card and its
@@ -878,7 +796,7 @@ const ExploreTripsView: React.FC<{
 
   useEffect(() => {
     if (!isLoading) warmAround(0);
-  }, [isLoading, resetKey, warmAround]);
+  }, [isLoading, listKey, warmAround]);
 
   // The stack loops, so "near the end" only means "ask for the next page if
   // there is one" — once everything is loaded it simply wraps to the start.
@@ -889,26 +807,169 @@ const ExploreTripsView: React.FC<{
     }
   }, [warmAround, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  // The card is sized to the space that is actually there: the design's share
-  // of the width (so it grows on a Max phone), smaller on a short one so the
-  // whole stack still clears the floating nav bar.
+  // Width: the design's share of the screen. Height: whatever the phone has
+  // down to the nav bar (see exploreCardHeight).
   const [area, setArea] = useState({ w: 0, h: 0 });
+  // Opening search slides the header away, so this area grows taller. Keep the
+  // height measured with the header shown, so the cards stay the same size.
+  // The hold starts in the tap (before the header's first frame) and ends when
+  // the header has REALLY landed back (headerP back at 0, seen on the UI
+  // thread) — not on a timer. A timer raced the JS thread: when it was busy
+  // (the feed swapping back in on close), the slide's late, in-between layout
+  // heights arrived after the timer had let go, so the cards grew a few px
+  // past their size and came back (the "bump").
+  const holdAreaH = useRef(false);
+  const searchOpenRef = useRef(searchOpen);
+  searchOpenRef.current = searchOpen;
+  const releaseHold = useCallback(() => {
+    if (!searchOpenRef.current) holdAreaH.current = false;
+  }, []);
+  // This view mounts with search closed. If the parent still has the header
+  // slid away (this view was remounted mid-search, e.g. by Fast Refresh), put
+  // it back — otherwise the deck is measured with the header gone, the cards
+  // come out a header taller, and the keyboard fit never runs.
+  useEffect(() => {
+    onSearchOpenChange?.(false);
+    // Mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useAnimatedReaction(
+    () => (headerP ? headerP.value : 0),
+    (p, prev) => {
+      if (p === 0 && prev != null && prev !== 0) runOnJS(releaseHold)();
+    },
+    [headerP, releaseHold],
+  );
   const cardW = area.w === 0
     ? 0
-    : Math.max(
-        EX_CARD_MIN_W,
-        Math.min(
-          EX_CARD_MAX_W,
-          Math.round(area.w * EX_CARD_WIDTH_SHARE),
-          exploreCardWidthForHeight(area.h - EX_NAV_RESERVE - DECK_PEEK * 2),
-        ),
-      );
+    : Math.max(EX_CARD_MIN_W, Math.min(EX_CARD_MAX_W, Math.round(area.w * EX_CARD_WIDTH_SHARE)));
+  const cardH = cardW === 0 ? 0 : exploreCardHeight(cardW, area.h);
+
+  // With the keyboard up, the cards shrink to fit between the search row and
+  // the keyboard, and grow back when it goes down. Both edges are tracked on
+  // the UI thread: the keyboard's top (animated with the keyboard's own
+  // duration) and the deck's top. The deck's top is measured ONCE, at rest
+  // with the header shown, and then moved by the header's own animation —
+  // measuring while the header slides returns late, stepped values (the
+  // card jumps). The photo takes the change; the details panel keeps its size.
+  const reduceMotion = useReducedMotion();
+  const deckRef = useRef<View>(null);
+  const deckBase = useSharedValue(0);
+  const measureDeck = useCallback(() => {
+    if (holdAreaH.current || (headerP && headerP.value !== 0)) return;
+    deckRef.current?.measureInWindow((_x, y) => { deckBase.value = y; });
+  }, [headerP, deckBase]);
+  // Room for the card, animated straight to its FINAL value: the keyboard's
+  // end position minus the deck's end position (header gone). Following both
+  // live made the card over-shrink — the keyboard (~250ms) lands before the
+  // header (460ms) has finished sliding away — and then grow back.
+  const NO_LIMIT = 1e6;
+  const room = useSharedValue(NO_LIMIT);
+  // Where `room` is heading (NO_LIMIT = full card, no fit). A keyboard event
+  // that asks for the same place is ignored: restarting the timing would
+  // restart the curve too, and the card would visibly kick.
+  const roomTo = useRef(NO_LIMIT);
+  const cardHRef = useRef(cardH);
+  cardHRef.current = cardH;
+  // The header slide in progress (start time + length), so a resize that
+  // starts late still lands on the same frame as the header.
+  const slide = useRef({ start: 0, ms: 0 });
+  const openToken = useRef(0);
+  // The keyboard has started to show (our own show event). NOT
+  // Keyboard.isVisible(): that only turns true at keyboardDidShow, after the
+  // keyboard has finished rising — a slow first keyboard read as "no keyboard"
+  // and the card grew back under it.
+  const kbComing = useRef(false);
+  const slideLeft = () =>Math.max(0, slide.current.ms - (Date.now() - slide.current.start));
+  // The photo is never rescaled: it always keeps the size it has in the
+  // full-height card, and the smaller card just crops its top and bottom
+  // (centered). Only the card's height animates — with the header when search
+  // opens or closes (same curve, same end), or with the keyboard when only it
+  // moves.
+  const resizeTo = useCallback((target: number, cardMs: number, release = false) => {
+    const full = cardHRef.current;
+    if (full === 0) return;
+    const to = Math.min(full, target);
+    roomTo.current = release ? NO_LIMIT : to;
+    room.value = room.value >= NO_LIMIT ? full : Math.min(full, room.value);
+    room.value = withTiming(to, { duration: reduceMotion ? 0 : cardMs, easing: EX_SEARCH_EASE }, done => {
+      if (done && release) room.value = NO_LIMIT;
+    });
+  }, [room, reduceMotion]);
+  // The card height that fits above a keyboard whose top is at `kbTop`.
+  const fitFor = useCallback((kbTop: number) => {
+    const deckTopEnd = deckBase.value - (searchOpenRef.current && headerH ? headerH.value : 0);
+    return Math.max(Math.min(EX_FIT_MIN_H, cardHRef.current), kbTop - deckTopEnd - EX_KB_GAP);
+  }, [deckBase, headerH]);
+  useEffect(() => {
+    const ios = Platform.OS === 'ios';
+    const show = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', e => {
+      kbComing.current = true;
+      lastKbTop = e.endCoordinates.screenY;
+      if (deckBase.value === 0 || !searchOpenRef.current) return;
+      const target = Math.min(cardHRef.current, fitFor(lastKbTop));
+      // Already on its way there (started in the tap from the last keyboard).
+      if (roomTo.current < NO_LIMIT && Math.abs(roomTo.current - target) < 2) return;
+      resizeTo(target, Math.max(slideLeft(), e.duration || 250));
+    });
+    const hide = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', e => {
+      kbComing.current = false;
+      // Closing search is handled below, in step with the header.
+      if (!searchOpenRef.current || roomTo.current >= NO_LIMIT) return;
+      resizeTo(cardHRef.current, e.duration || 250, true);
+    });
+    return () => { show.remove(); hide.remove(); };
+  }, [deckBase, fitFor, resizeTo]);
+  // The ONE way search opens or closes. Everything that moves starts right
+  // here, in the tap, on the UI thread: the header slide (parent, no re-render
+  // there), the keyboard, and the card — shrinking on open (to where the
+  // keyboard landed last time) and growing back on close, with the header's
+  // own duration and curve, so it is one movement. Waiting for a render first
+  // froze the screen ~400ms and then jumped to the end.
+  const changeSearchOpen = useCallback((open: boolean) => {
+    searchOpenRef.current = open;
+    slide.current = { start: Date.now(), ms: open ? EX_SEARCH_OPEN_MS : EX_SEARCH_CLOSE_MS };
+    onSearchOpenChange?.(open);
+    const token = ++openToken.current;
+    if (open) {
+      holdAreaH.current = true;
+      if (lastKbTop > 0 && deckBase.value !== 0) {
+        resizeTo(fitFor(lastKbTop), EX_SEARCH_OPEN_MS);
+        // Shrunk for a keyboard that never came (hardware keyboard): grow back.
+        setTimeout(() => {
+          if (token !== openToken.current || !searchOpenRef.current) return;
+          if (!kbComing.current && roomTo.current < NO_LIMIT) resizeTo(cardHRef.current, 250, true);
+        }, EX_NO_KB_GRACE_MS);
+      }
+    } else {
+      Keyboard.dismiss();
+      if (roomTo.current < NO_LIMIT || room.value < NO_LIMIT) resizeTo(cardHRef.current, EX_SEARCH_CLOSE_MS, true);
+      // The header never left (search was opened on another tab's header
+      // state), so nothing will report it landing.
+      if (!headerP || headerP.value === 0) holdAreaH.current = false;
+    }
+    setSearchOpen(open);
+  }, [onSearchOpenChange, room, resizeTo, fitFor, deckBase, headerP]);
+  const fitH = useDerivedValue(() => {
+    if (cardH === 0 || room.value >= NO_LIMIT) return 0;
+    return Math.max(Math.min(EX_FIT_MIN_H, cardH), Math.min(cardH, room.value));
+  }, [cardH]);
+  // How much the card is shorter than full: the photo overflows its frame by
+  // this much, half cropped at the top and half at the bottom.
+  const photoLag = useDerivedValue(() => {
+    if (cardH === 0 || room.value >= NO_LIMIT) return 0;
+    return Math.max(0, cardH - Math.max(Math.min(EX_FIT_MIN_H, cardH), Math.min(cardH, room.value)));
+  }, [cardH]);
 
   const renderCard = useCallback(
-    (trip: GroupTrip) => <ExploreTripCard trip={trip} meta={meta.get(trip.id)} />,
-    [meta],
+    (trip: GroupTrip) => <ExploreTripCard trip={trip} meta={meta.get(trip.id)} photoLag={photoLag} />,
+    [meta, photoLag],
   );
-  const openTrip = useCallback((trip: GroupTrip) => onOpenTrip(trip.id), [onOpenTrip]);
+  const openTrip = useCallback((trip: GroupTrip) => {
+    // The keyboard can still be up from search; don't carry it onto the trip.
+    Keyboard.dismiss();
+    onOpenTrip(trip.id);
+  }, [onOpenTrip]);
 
   let body: React.ReactNode = null;
   if (isError && trips.length === 0) {
@@ -924,75 +985,393 @@ const ExploreTripsView: React.FC<{
       </FadeInView>
     );
   } else if (isLoading) {
-    // Same footprint as the real deck below, so nothing moves when it lands.
+    // Same footprint as the real carousel below, so nothing moves when it lands.
     body = cardW > 0 ? (
-      <FadeInView>
-        <ExploreDeckSkeleton cardWidth={cardW} cardHeight={exploreCardHeight(cardW)} />
+      <FadeInView style={styles.exFillWidth}>
+        <ExploreDeckSkeleton
+          cardWidth={cardW}
+          cardHeight={cardH}
+          gap={EX_CAROUSEL_GAP}
+          inset={EX_CAROUSEL_INSET}
+        />
       </FadeInView>
     ) : null;
-  } else if (trips.length === 0) {
+  } else if (visibleTrips.length === 0) {
     body = (
       <FadeInView style={styles.emptyState}>
-        <Ionicons name="compass-outline" size={48} color="#B0B0B0" />
+        <Ionicons name={q ? 'search-outline' : 'compass-outline'} size={48} color="#B0B0B0" />
         <Text style={styles.emptyText}>
-          {hasActiveFilter ? 'No trips match these filters.' : 'No trips yet. Check back soon.'}
+          {q
+            ? (searchPending ? 'Searching…' : `No trips match "${query.trim()}".`)
+            : hasActiveFilter ? 'No trips match these filters.' : 'No trips yet. Check back soon.'}
         </Text>
       </FadeInView>
     );
   } else if (cardW > 0) {
     body = (
-      <ExploreSwipeDeck
-        items={trips}
+      <ExploreCarousel
+        items={visibleTrips}
         cardWidth={cardW}
-        cardHeight={exploreCardHeight(cardW)}
+        cardHeight={cardH}
+        fitHeight={fitH}
         renderCard={renderCard}
         onOpen={openTrip}
-        onTopChange={handleTopChange}
+        onIndexChange={handleTopChange}
         getAccessibilityLabel={exploreCardLabel}
-        resetKey={resetKey}
+        resetKey={listKey}
       />
     );
   }
 
   return (
     <View style={styles.exRoot}>
-      <View style={styles.exTopRow}>
-        <Text style={styles.exploreTitle} numberOfLines={1}>Travel Better Together.</Text>
-        <TouchableOpacity
-          testID="explore-filter-button"
-          style={styles.exFilterBtn}
-          onPress={() => setFiltersOpen(true)}
-          activeOpacity={0.8}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={hasActiveFilter ? `Filters, ${selected.size} on` : 'Filters'}
-        >
-          <TripIcon name="settings-04" size={24} color="#212121" strokeWidth={1} />
-          {hasActiveFilter && (
-            <View style={styles.exFilterBadge}>
-              <Text style={styles.exFilterBadgeText}>{selected.size}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
+      <ExploreSearchRow
+        query={query}
+        onChangeQuery={setQuery}
+        filterCount={activeFilterCount}
+        onOpenFilters={() => setFiltersOpen(true)}
+        open={searchOpen}
+        onOpenChange={changeSearchOpen}
+      />
       <View
+        ref={deckRef}
         style={styles.exDeckArea}
         onLayout={e => {
-          const { width, height } = e.nativeEvent.layout;
-          setArea(prev => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
+          measureDeck();
+          const { width } = e.nativeEvent.layout;
+          const measured = e.nativeEvent.layout.height;
+          setArea(prev => {
+            const height = holdAreaH.current && prev.h > 0 ? prev.h : measured;
+            return prev.w === width && prev.h === height ? prev : { w: width, h: height };
+          });
         }}
       >
+        {/* Nothing covers the cards while search is open, so the carousel
+            can be swiped (and a card opened) with the keyboard still up.
+            This sits BEHIND the cards: a tap on the empty space under them
+            drops the keyboard when text is typed, or closes search when the
+            box is empty. The X always closes. */}
+        {searchOpen && (
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => (q ? Keyboard.dismiss() : changeSearchOpen(false))}
+            accessible={false}
+          />
+        )}
         {body}
       </View>
-      <ExploreFilterSheet
+      <ExploreFiltersSheet
         visible={filtersOpen}
-        onClose={() => setFiltersOpen(false)}
-        chips={chips}
-        selected={selected}
-        onToggle={toggleChip}
-        onClear={clearChips}
+        value={filters}
+        onApply={applyFilters}
+        viewer={viewer}
       />
     </View>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Explore header row (Figma 18960:24283): "Travel Better Together." + search +
+// filters. Tapping search grows the search button to the LEFT into a text
+// field; the title slides out to the left ahead of it and fades. The search
+// icon rides the field's left edge, so the button visibly becomes the field.
+// ---------------------------------------------------------------------------
+const EX_ROW_PAD = 20;
+const EX_BTN_W = 48;
+const EX_BTN_GAP = 7; // Figma: search at right 55 of a 48 filter button.
+// The field's right edge stays where the search button's right edge is.
+const EX_FIELD_RIGHT = EX_ROW_PAD + EX_BTN_W + EX_BTN_GAP;
+// Strong ease-out: the field answers the tap at once, then settles.
+// iOS drawer curve: quick to start, long soft landing — the slide stays on
+// screen long enough to read as "the button became the field".
+const EX_SEARCH_EASE = Easing.bezier(0.32, 0.72, 0, 1);
+const EX_SEARCH_OPEN_MS = 460;
+const EX_SEARCH_CLOSE_MS = 360;
+// Share of the header slide (0–1) done before the status-bar area starts
+// changing color. Higher = later.
+const EX_SAFE_AREA_COLOR_FROM = 0.55;
+// The field's border turns the app accent while search is open.
+const EX_SEARCH_BORDER = '#E4E4E4';
+const EX_SEARCH_BORDER_OPEN = '#05BCD3';
+
+const ExploreSearchRow: React.FC<{
+  query: string;
+  onChangeQuery: (q: string) => void;
+  filterCount: number;
+  onOpenFilters: () => void;
+  /** Owned by the parent, so a tap anywhere else on Explore can close it. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Whether the text field has focus (the keyboard is up). */
+}> = ({ query, onChangeQuery, filterCount, onOpenFilters, open, onOpenChange }) => {
+  const reduceMotion = useReducedMotion();
+  const [rowW, setRowW] = useState(0);
+  const inputRef = useRef<TextInput>(null);
+  const progress = useSharedValue(0);
+  // How far the field's left edge travels: from the button to the row's start.
+  const travel = Math.max(0, rowW - EX_ROW_PAD - EX_FIELD_RIGHT - EX_BTN_W);
+  const travelSV = useSharedValue(0);
+  useEffect(() => { travelSV.value = travel; }, [travel, travelSV]);
+
+  // Focus / blur in the tap itself, so the keyboard moves with the slide
+  // instead of after a render.
+  const openSearch = useCallback(() => {
+    inputRef.current?.focus();
+    onOpenChange(true);
+  }, [onOpenChange]);
+  const closeSearch = useCallback(() => {
+    inputRef.current?.blur();
+    onOpenChange(false);
+  }, [onOpenChange]);
+
+  // However it was closed (the X, or a tap elsewhere on the screen), closing
+  // drops the keyboard and the query and plays the slide back.
+  useEffect(() => {
+    progress.value = withTiming(open ? 1 : 0, {
+      duration: reduceMotion ? 0 : open ? EX_SEARCH_OPEN_MS : EX_SEARCH_CLOSE_MS,
+      easing: EX_SEARCH_EASE,
+    });
+    if (open) {
+      inputRef.current?.focus();
+      return;
+    }
+    inputRef.current?.blur();
+    // Clearing the query swaps the whole list back to the full feed — heavy.
+    // Do it once the slide has landed, so it can't stall the animation.
+    const t = setTimeout(() => onChangeQuery(''), reduceMotion ? 0 : EX_SEARCH_CLOSE_MS + 40);
+    return () => clearTimeout(t);
+    // onChangeQuery is a state setter; only `open` should drive this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // The title is pushed all the way off the row's left edge (its travel plus
+  // the row padding), shrinking a touch, and only fades late — so you watch it
+  // leave instead of seeing it vanish in place.
+  const titleStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0.25, 0.9], [1, 0], Extrapolation.CLAMP),
+    transform: [
+      { translateX: -progress.value * (travelSV.value + EX_ROW_PAD) },
+      { scale: interpolate(progress.value, [0, 1], [1, 0.94]) },
+    ],
+  }));
+  const fieldStyle = useAnimatedStyle(() => ({
+    width: EX_BTN_W + progress.value * travelSV.value,
+    borderColor: interpolateColor(progress.value, [0, 1], [EX_SEARCH_BORDER, EX_SEARCH_BORDER_OPEN]),
+    shadowOpacity: progress.value * 0.12,
+  }));
+  // The magnifier gives a small pop as it sets off to the left.
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(progress.value, [0, 0.35, 1], [1, 1.15, 1], Extrapolation.CLAMP) }],
+  }));
+  // Text and the X arrive from the right once the field has room for them.
+  const inputStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.value, [0.45, 1], [0, 1], Extrapolation.CLAMP),
+    transform: [{ translateX: interpolate(progress.value, [0.45, 1], [24, 0], Extrapolation.CLAMP) }],
+  }));
+  const closeStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(progress.value, [0.6, 1], [0.6, 1], Extrapolation.CLAMP) }],
+  }));
+
+  return (
+    <View
+      style={styles.exTopRow}
+      // Empty parts of the row let the tap through to the dismiss layer.
+      pointerEvents="box-none"
+      onLayout={e => {
+        const w = e.nativeEvent.layout.width;
+        setRowW(prev => (prev === w ? prev : w));
+      }}
+    >
+      <Reanimated.View
+        style={[styles.exTitleWrap, titleStyle]}
+        pointerEvents={open ? 'none' : 'auto'}
+        accessibilityElementsHidden={open}
+        importantForAccessibility={open ? 'no-hide-descendants' : 'auto'}
+      >
+        <Text style={styles.exploreTitle} numberOfLines={1}>Travel Better Together.</Text>
+      </Reanimated.View>
+
+      {/* Holds the search button's slot; the field itself floats over it. */}
+      <View style={styles.exBtnSlot} />
+
+      <TouchableOpacity
+        testID="explore-filter-button"
+        style={styles.exFilterBtn}
+        onPress={onOpenFilters}
+        activeOpacity={0.8}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={filterCount > 0 ? `Filters, ${filterCount} on` : 'Filters'}
+      >
+        <TripIcon name="settings-04" size={24} color="#212121" strokeWidth={1} />
+        {filterCount > 0 && (
+          <View style={styles.exFilterBadge}>
+            <Text style={styles.exFilterBadgeText}>{filterCount}</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      <Reanimated.View style={[styles.exSearchField, fieldStyle]}>
+        <Pressable
+          testID="explore-search-button"
+          style={styles.exSearchIcon}
+          onPress={open ? () => inputRef.current?.focus() : openSearch}
+          hitSlop={8}
+          accessibilityRole={open ? undefined : 'button'}
+          accessibilityLabel={open ? undefined : 'Search trips'}
+        >
+          <Reanimated.View style={iconStyle}>
+            {/* Same color and stroke as the filter icon beside it, so the pair reads
+                as one set. */}
+            <TripIcon name="search-lg" size={24} color="#212121" strokeWidth={1} />
+          </Reanimated.View>
+        </Pressable>
+        <Reanimated.View style={[styles.exSearchInputWrap, inputStyle]} pointerEvents={open ? 'auto' : 'none'}>
+          <TextInput
+            ref={inputRef}
+            testID="explore-search-input"
+            value={query}
+            onChangeText={onChangeQuery}
+            placeholder="Search trips or places"
+            placeholderTextColor="#A0A0A0"
+            style={styles.exSearchInput}
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+            clearButtonMode="never"
+            accessibilityLabel="Search trips"
+          />
+          <Reanimated.View style={closeStyle}>
+            <TouchableOpacity
+              onPress={closeSearch}
+              hitSlop={10}
+              style={styles.exSearchClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close search"
+            >
+              <TripIcon name="x-close" size={20} color="#7B7B7B" strokeWidth={1.5} />
+            </TouchableOpacity>
+          </Reanimated.View>
+        </Reanimated.View>
+      </Reanimated.View>
+    </View>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Explore carousel (Figma 18960:24187): one card at a time, snapping, with the
+// next card peeking in on the right. Replaces the vertical ExploreSwipeDeck.
+// ---------------------------------------------------------------------------
+// Room under the cards so their drop shadow is not clipped by the list.
+const EX_SHADOW_ROOM = 28;
+const CarouselGap: React.FC = () => <View style={{ width: EX_CAROUSEL_GAP }} />;
+
+const CarouselCard: React.FC<{
+  trip: GroupTrip;
+  width: number;
+  height: number;
+  /** Live height while the keyboard is up (see ExploreTripsView); `height`
+   *  otherwise. */
+  fitHeight?: SharedValue<number>;
+  label?: string;
+  onOpen: (trip: GroupTrip) => void;
+  children: React.ReactNode;
+}> = React.memo(({ trip, width, height, fitHeight, label, onOpen, children }) => {
+  // Press feedback: a subtle scale, eased, not a jump.
+  const pressed = useSharedValue(0);
+  const style = useAnimatedStyle(() => ({
+    height: fitHeight && fitHeight.value > 0 ? fitHeight.value : height,
+    transform: [{ scale: 1 - pressed.value * 0.02 }],
+  }));
+  return (
+    <Pressable
+      onPress={() => onOpen(trip)}
+      // A swipe starts with a touch too; wait a beat so a swipe doesn't
+      // flash the press scale.
+      unstable_pressDelay={80}
+      onPressIn={() => { pressed.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.quad) }); }}
+      onPressOut={() => { pressed.value = withTiming(0, { duration: 160, easing: Easing.out(Easing.quad) }); }}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Reanimated.View style={[{ width }, style]}>{children}</Reanimated.View>
+    </Pressable>
+  );
+});
+
+const ExploreCarousel: React.FC<{
+  items: GroupTrip[];
+  cardWidth: number;
+  cardHeight: number;
+  fitHeight?: SharedValue<number>;
+  renderCard: (trip: GroupTrip) => React.ReactNode;
+  onOpen: (trip: GroupTrip) => void;
+  onIndexChange: (index: number) => void;
+  getAccessibilityLabel: (trip: GroupTrip) => string;
+  resetKey: string;
+}> = ({ items, cardWidth, cardHeight, fitHeight, renderCard, onOpen, onIndexChange, getAccessibilityLabel, resetKey }) => {
+  const listRef = useRef<FlatList<GroupTrip>>(null);
+  const interval = cardWidth + EX_CAROUSEL_GAP;
+  const indexRef = useRef(0);
+
+  useEffect(() => {
+    indexRef.current = 0;
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [resetKey]);
+
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const i = Math.max(0, Math.round(e.nativeEvent.contentOffset.x / interval));
+    if (i !== indexRef.current) {
+      indexRef.current = i;
+      onIndexChange(i);
+    }
+  }, [interval, onIndexChange]);
+
+  const renderItem = useCallback(({ item }: { item: GroupTrip }) => (
+    <CarouselCard
+      trip={item}
+      width={cardWidth}
+      height={cardHeight}
+      fitHeight={fitHeight}
+      label={getAccessibilityLabel(item)}
+      onOpen={onOpen}
+    >
+      {renderCard(item)}
+    </CarouselCard>
+  ), [cardWidth, cardHeight, fitHeight, getAccessibilityLabel, onOpen, renderCard]);
+
+  const getItemLayout = useCallback((_: unknown, index: number) => ({
+    length: interval,
+    offset: EX_CAROUSEL_INSET + interval * index,
+    index,
+  }), [interval]);
+
+  return (
+    <FlatList
+      ref={listRef}
+      testID="explore-carousel"
+      data={items}
+      keyExtractor={t => t.id}
+      renderItem={renderItem}
+      getItemLayout={getItemLayout}
+      ItemSeparatorComponent={CarouselGap}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      // Search can leave the keyboard up: swipes and taps on a card work
+      // without closing it first.
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="none"
+      snapToInterval={interval}
+      snapToAlignment="start"
+      decelerationRate="fast"
+      disableIntervalMomentum
+      onScroll={onScroll}
+      scrollEventThrottle={32}
+      initialNumToRender={3}
+      windowSize={5}
+      style={[styles.exCarousel, { height: cardHeight + EX_SHADOW_ROOM, marginBottom: -EX_SHADOW_ROOM }]}
+      contentContainerStyle={styles.exCarouselContent}
+    />
   );
 };
 
@@ -1267,6 +1646,26 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
     setActiveTab(tab);
   }, []);
 
+  // App re-entry: when the app opens, a user on a trip (host, staff, or an
+  // approved traveler, on a trip that has not ended: My Trips' "approved"
+  // bucket) lands on My Trips. Everyone else stays on Explore. Decided once,
+  // from the first My Trips data. Skipped if the user already switched tabs,
+  // or if that data took so long that they are already browsing Explore.
+  const { data: myTripsForEntry } = useMyTrips(currentUserId);
+  const entryDecided = useRef(false);
+  const mountedAt = useRef(Date.now());
+  useEffect(() => {
+    if (entryDecided.current || !myTripsForEntry) return;
+    entryDecided.current = true;
+    if (activeTab !== 'explore') return;
+    if (Date.now() - mountedAt.current > ENTRY_DECISION_WINDOW_MS) return;
+    if (myTripsForEntry.buckets.approved.length === 0) return;
+    // Open already on My Trips: snap, don't slide.
+    firstSlide.current = true;
+    goToTab('my');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTripsForEntry]);
+
   // Slide the row when the active tab changes (skip the very first run so the
   // screen opens already positioned, not sliding in).
   useEffect(() => {
@@ -1379,18 +1778,107 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
     goToTab('my');
   };
 
+  // Explore search open → slide the header (title bar + tabs) up and out,
+  // the way The Lineup's search does, so the search field rises to the top.
+  // Driven by refs, NOT state: re-rendering this whole screen on every open /
+  // close is what froze the slide. The child calls onExploreSearchChange in
+  // the tap, and the header starts moving on the UI thread right away.
+  const headerH = useSharedValue(0);
+  const headerP = useSharedValue(0);
+  const statusBarTouched = useRef(false);
+  const exploreSearchingRef = useRef(false);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const headerHiddenRef = useRef(false);
+  const applyHeader = useCallback((hidden: boolean) => {
+    if (hidden === headerHiddenRef.current) return;
+    headerHiddenRef.current = hidden;
+    headerP.value = withTiming(hidden ? 1 : 0, {
+      duration: reduceMotion ? 0 : hidden ? EX_SEARCH_OPEN_MS : EX_SEARCH_CLOSE_MS,
+      easing: EX_SEARCH_EASE,
+    });
+    // Dark text on the light top while searching. Only touch the status bar
+    // once search has actually opened, so mounting this screen in the
+    // background never overrides another screen's style.
+    if (hidden) statusBarTouched.current = true;
+    if (statusBarTouched.current) setStatusBarStyle(hidden ? 'dark' : 'light', true);
+  }, [headerP, reduceMotion]);
+  const onExploreSearchChange = useCallback((open: boolean) => {
+    exploreSearchingRef.current = open;
+    applyHeader(open && activeTabRef.current === 'explore');
+  }, [applyHeader]);
+  useEffect(() => {
+    applyHeader(exploreSearchingRef.current && activeTab === 'explore');
+  }, [activeTab, applyHeader]);
+  // Leaving the screen mid-search (opening a trip, another tab, unmount) must
+  // not leave dark status-bar text on the next screen's dark top; coming back
+  // with search still open puts it back.
+  useEffect(() => {
+    const offBlur = navigation.addListener('blur', () => {
+      if (statusBarTouched.current) setStatusBarStyle('light', true);
+    });
+    const offFocus = navigation.addListener('focus', () => {
+      if (headerHiddenRef.current) setStatusBarStyle('dark', true);
+    });
+    return () => {
+      offBlur();
+      offFocus();
+      if (statusBarTouched.current) setStatusBarStyle('light', true);
+    };
+  }, [navigation]);
+  // The wrapper's height shrinks to 0 (so the page below rises) while the
+  // header inside moves up by the same amount (so it slides, not crops).
+  const headerWrapStyle = useAnimatedStyle(() =>
+    headerH.value === 0
+      ? { overflow: 'hidden' as const }
+      : { overflow: 'hidden' as const, height: headerH.value * (1 - headerP.value) },
+  );
+  const headerInnerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: -headerH.value * headerP.value }],
+  }));
+  // The header fades to the search white with the SAME progress as the
+  // status-bar area above it (rootBgStyle), so the two read as one surface —
+  // like The Lineup's search page. The header is #212121, the same dark as
+  // the root, so a #FAFAFA veil at opacity p matches the interpolated color.
+  const headerVeilStyle = useAnimatedStyle(() => ({ opacity: headerP.value }));
+  // The status-bar area waits until the header has slid most of the way up
+  // under it, then turns white (EX_SAFE_AREA_COLOR_FROM). Closing plays it
+  // backwards: it turns dark first, then the header slides back in.
+  const rootBgStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(headerP.value, [EX_SAFE_AREA_COLOR_FROM, 1], ['#212121', '#FAFAFA']),
+  }));
+
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
+      {/* Behind the status bar: dark with the header, light once search slides
+          the header away (like The Lineup's search). */}
+      <Reanimated.View style={[StyleSheet.absoluteFill, rootBgStyle]} pointerEvents="none" />
       {/* Shared dark header (see MainHeader). "Trips" is the title slot and the
-          underline tabs are the `below` slot; no gradient hairline here. */}
-      <MainHeader
-        userId={currentUserId}
-        title={<Text style={styles.tripsHeaderTitle}>Trips</Text>}
-        // Figma bar is 59px (17779:51132), not the default 60. The pixel comes
-        // off the bottom so the logo + bell stay level with The Lineup's.
-        spaceBelow={7}
-        below={<TripsHeaderTabs active={activeTab} onChange={goToTab} />}
-      />
+          underline tabs are the `below` slot; no gradient hairline here.
+          While Explore search is open it slides up out of the way and the
+          page rises with it. */}
+      <Reanimated.View style={headerWrapStyle}>
+        <Reanimated.View
+          style={headerInnerStyle}
+          onLayout={e => {
+            const h = e.nativeEvent.layout.height;
+            if (h > 0 && h !== headerH.value) headerH.value = h;
+          }}
+        >
+          <MainHeader
+            userId={currentUserId}
+            title={<Text style={styles.tripsHeaderTitle}>Trips</Text>}
+            // Figma bar is 59px (17779:51132), not the default 60. The pixel comes
+            // off the bottom so the logo + bell stay level with The Lineup's.
+            spaceBelow={7}
+            below={<TripsHeaderTabs active={activeTab} onChange={goToTab} />}
+          />
+        </Reanimated.View>
+        <Reanimated.View
+          style={[StyleSheet.absoluteFill, styles.headerVeil, headerVeilStyle]}
+          pointerEvents="none"
+        />
+      </Reanimated.View>
 
       {/* My Trips only. That is where the "Create a trip" card it gates lives,
           and on Explore its ~105px would push the card stack under the nav
@@ -1435,7 +1923,13 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
           {/* index 1 — Explore */}
           <TabPane index={1} width={bodyW} tx={tx} reduceMotion={reduceMotion}>
             {visited.explore ? (
-              <ExploreTripsView onOpenTrip={openTrip} userId={currentUserId} />
+              <ExploreTripsView
+                onOpenTrip={openTrip}
+                userId={currentUserId}
+                onSearchOpenChange={onExploreSearchChange}
+                headerH={headerH}
+                headerP={headerP}
+              />
             ) : null}
           </TabPane>
 
@@ -1476,6 +1970,8 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#212121' },
+  // Same white as Explore's page (exRoot) and the status-bar area in search.
+  headerVeil: { backgroundColor: '#FAFAFA' },
 
   // White header reused only by the "Edit trip" sub-screen.
   header: {
@@ -1550,15 +2046,18 @@ const styles = StyleSheet.create({
 
   // Explore (Figma 17779:50970): title + filter button, then the card stack.
   exRoot: { flex: 1, backgroundColor: '#FAFAFA' },
+  // Figma 18960:24283: 42 tall, 21 under the header, 22 above the cards.
   exTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingHorizontal: 20,
-    marginTop: 22,
-    marginBottom: 16,
+    gap: EX_BTN_GAP,
+    height: 42,
+    paddingHorizontal: EX_ROW_PAD,
+    marginTop: 21,
+    marginBottom: 22,
+    zIndex: 2,
   },
+  exTitleWrap: { flex: 1, minWidth: 0 },
   // Inter Bold 20/24. The node is Body/M B-1, but its Size/lg resolves to 20
   // on this layer, not the 16 the style has elsewhere — measured on the render.
   exploreTitle: {
@@ -1568,11 +2067,42 @@ const styles = StyleSheet.create({
     fontWeight: Platform.OS === 'web' ? '700' : undefined,
     includeFontPadding: false,
     color: '#333333',
-    flexShrink: 1,
   },
+  exBtnSlot: { width: EX_BTN_W, height: 42 },
+  // The search button and, once open, the field. Anchored on the right where
+  // the button sits; its width grows to the left.
+  exSearchField: {
+    position: 'absolute',
+    right: EX_FIELD_RIGHT,
+    top: 0,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E4E4E4',
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    // Lifts off the page as it opens (opacity is animated from 0).
+    shadowColor: '#05BCD3',
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+    shadowOpacity: 0,
+  },
+  // 12 + 24 + 12 = the closed 48 width, so the icon sits centred when closed.
+  exSearchIcon: { width: EX_BTN_W - 2, height: 40, alignItems: 'center', justifyContent: 'center' },
+  exSearchInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingRight: 12 },
+  exSearchInput: {
+    ...textStyles.MB2,
+    flex: 1,
+    color: '#333333',
+    paddingVertical: 0,
+    height: 40,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null),
+  },
+  exSearchClose: { marginLeft: 8 },
   exFilterBtn: {
-    width: 48,
-    height: 34,
+    width: EX_BTN_W,
+    height: 42,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E4E4E4',
@@ -1593,45 +2123,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   exFilterBadgeText: { ...textStyles.B3, lineHeight: 16, color: '#FFFFFF' },
-  exDeckArea: { flex: 1, alignItems: 'center' },
+  exDeckArea: { flex: 1 },
+  exFillWidth: { alignSelf: 'stretch' },
+  exCarousel: { flexGrow: 0, overflow: 'visible' },
+  exCarouselContent: { paddingHorizontal: EX_CAROUSEL_INSET, paddingBottom: EX_SHADOW_ROOM },
 
   // Explore filter sheet.
-  fsSheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 16,
-  },
-  fsHandleWrap: { alignItems: 'center', paddingTop: 10, paddingBottom: 14 },
-  fsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#E4E4E4' },
-  fsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  fsTitle: { ...textStyle('MB1', '700'), color: '#333333' },
-  fsClear: { ...textStyles.MB2, color: '#05BCD3' },
-  fsGroup: { ...textStyle('B3', '700'), color: '#7B7B7B', marginTop: 20, marginBottom: 10 },
-  fsChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  fsChip: { borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
-  fsChipActive: { backgroundColor: '#212121', borderWidth: 1, borderColor: '#212121' },
-  fsChipInactive: { backgroundColor: '#F7F7F7', borderWidth: 1, borderColor: '#EEEEEE' },
-  fsChipText: { ...textStyles.B3 },
-  fsChipTextActive: { color: '#FFFFFF' },
-  fsChipTextInactive: { color: '#333333' },
-  fsDone: {
-    marginTop: 28,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    backgroundColor: '#212121',
-  },
-  fsDoneText: {
-    fontFamily: ff('Montserrat', '600'),
-    fontSize: fs(fontSize.lg),
-    lineHeight: 22,
-    fontWeight: Platform.OS === 'web' ? '600' : undefined,
-    includeFontPadding: false,
-    color: '#FFFFFF',
-  },
-
-
   listContent: { paddingHorizontal: 16, paddingBottom: 150, flexGrow: 1 },
 
   // Filter pills (My Trips, Figma 17029:25735): three hug-width pills packed to
@@ -1843,6 +2340,7 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 6,
   },
+  exPhotoLayer: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
   exImage: { flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: '#F2F2F2' },
   exPills: { position: 'absolute', top: 20, left: 8, right: 8, flexDirection: 'row', gap: 8 },
   // Figma 17779:51090 — 33 tall: 8 + the 17 line + 8.
@@ -1868,11 +2366,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   exPanelContent: { paddingLeft: 20, paddingRight: 16, paddingVertical: 16, gap: 9 },
-  exBadges: { flexDirection: 'row', minWidth: 33.75, height: 38.364 },
-  exBadgeCi: { position: 'absolute', left: 0, top: 0, width: 33.75, height: 38.364 },
-  exBadgeSc: { position: 'absolute', left: 43, top: 1, width: 36.563, height: 36.563 },
-  // SC alone sits at the row's start, like CI does.
-  exBadgeSolo: { left: 0 },
   exRoute: { gap: 4 },
   // "H6.2" in Figma — Inter Bold 20/24, a fixed size with no Size/* variable.
   exTitle: {

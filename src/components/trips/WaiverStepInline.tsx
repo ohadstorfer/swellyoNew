@@ -36,13 +36,20 @@ import { PdfRendererView } from '../filePreview/pdfRenderer';
 import { FilePreviewShell } from '../filePreview/FilePreviewShell';
 import { ff } from '../../theme/fonts';
 import { textStyle, textStyles } from '../../theme/typography';
-import { supabase } from '../../config/supabase';
 import {
   fetchWaiver,
   getViewUrl,
   acknowledgeRequirement,
+  fetchMyAcknowledgement,
 } from '../../services/trips/tripDocumentsService';
 import { showErrorAlert } from '../../utils/friendlyError';
+
+/** "12 Nov 2026" — the date line on a signed waiver. */
+function formatSignedDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
 
 const C = {
   accent: '#05BCD3',
@@ -65,8 +72,9 @@ export const WaiverStepInline: React.FC<{
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
   const [renderFailed, setRenderFailed] = useState(false);
-  const [profileName, setProfileName] = useState<string | null>(null);
   const [name, setName] = useState('');
+  /** Shown once agreed: who signed and when, so a signed waiver never looks blank. */
+  const [signed, setSigned] = useState<{ agreedName: string; agreedAt: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   /** Only for the full-screen shell's header, which prints the file size. */
@@ -78,18 +86,9 @@ export const WaiverStepInline: React.FC<{
     setMissing(false);
     setRenderFailed(false);
 
-    // Their own name, so agreeing is a tap. Fired alongside the download rather
-    // than before it — a slow profile read must not delay the document.
-    supabase.auth.getSession().then(async ({ data }) => {
-      const uid = data.session?.user?.id;
-      if (!uid) return;
-      const { data: me } = await supabase
-        .from('surfers')
-        .select('name')
-        .eq('user_id', uid)
-        .maybeSingle();
-      if (!cancelled) setProfileName(((me as any)?.name ?? '').trim());
-    });
+    // No auto-filled name any more (testers saw nicknames / joined-up names
+    // they could not change). The traveler types their full legal name — that
+    // typed name IS the signature, and it is what agreed_name records.
 
     (async () => {
       try {
@@ -126,8 +125,16 @@ export const WaiverStepInline: React.FC<{
     };
   }, [tripId]);
 
-  const signingName = (profileName || name).trim();
-  const needsTypedName = profileName !== null && profileName === '';
+  useEffect(() => {
+    if (!agreed) return;
+    let cancelled = false;
+    fetchMyAcknowledgement(requirementId)
+      .then(r => { if (!cancelled) setSigned(r); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [agreed, requirementId]);
+
+  const signingName = name.trim();
   const canAgree = !missing && signingName.length >= 2 && !saving && !loading;
 
   const handleAgree = useCallback(async () => {
@@ -186,7 +193,7 @@ export const WaiverStepInline: React.FC<{
       <View style={styles.pdfFrame}>
         <PdfRendererView
           source={localUri!}
-          maxZoom={1}
+          maxZoom={4}
           maxPageResolution={2048}
           style={styles.pdf}
           onError={() => setRenderFailed(true)}
@@ -216,36 +223,42 @@ export const WaiverStepInline: React.FC<{
       {agreed ? (
         <View style={styles.agreedBox}>
           <Ionicons name="checkmark-circle" size={16} color="#1F7A4D" />
-          <Text style={styles.agreedText}>You already agreed to this waiver.</Text>
+          <Text style={styles.agreedText}>
+            {signed?.agreedName
+              ? `Signed by ${signed.agreedName} on ${formatSignedDate(signed.agreedAt)}.`
+              : 'You already signed this waiver.'}
+          </Text>
         </View>
       ) : (
         <View style={styles.agreeBlock}>
-          {needsTypedName ? (
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="Type your full name to agree"
-              placeholderTextColor="#9A9A9A"
-              autoCapitalize="words"
-              style={styles.input}
-            />
-          ) : (
-            <Text style={styles.signing}>Agreeing as {signingName || '…'}</Text>
-          )}
+          <Text style={styles.signing}>Sign with your full legal name</Text>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="e.g. Maria Lopez"
+            placeholderTextColor="#9A9A9A"
+            autoCapitalize="words"
+            autoComplete="name"
+            textContentType="name"
+            autoCorrect={false}
+            maxLength={120}
+            style={styles.input}
+            accessibilityLabel="Your full legal name"
+          />
           <Text style={styles.legal}>
-            We record your name, the date, and which version you agreed to.
+            By typing your name you sign this waiver. We record your name, the date, and which version you signed.
           </Text>
           <Pressable
             onPress={handleAgree}
             disabled={!canAgree}
             style={[styles.primaryBtn, !canAgree && styles.btnDisabled]}
             accessibilityRole="button"
-            accessibilityLabel="I agree to this waiver"
+            accessibilityLabel="Sign and complete"
           >
             {saving ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
-              <Text style={styles.primaryBtnText}>I agree</Text>
+              <Text style={styles.primaryBtnText}>Sign and complete</Text>
             )}
           </Pressable>
         </View>

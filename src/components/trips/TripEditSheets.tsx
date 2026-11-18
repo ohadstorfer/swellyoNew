@@ -26,6 +26,7 @@ import { WhenSheetContent } from './sheets/WhenSheetContent';
 import { StayTypeSheetContent, type AccommodationKind } from './sheets/StayTypeSheetContent';
 import { SpecificStaySheetContent } from './sheets/SpecificStaySheetContent';
 import { OperatorCertRows } from './create/OperatorStayCard';
+import { StayGalleryStrip, pickStayGalleryPhotos, STAY_GALLERY_MAX } from './create/StayGalleryStrip';
 import { Images } from '../../assets/images';
 
 // Compact date helpers (mirror CreateTripFlowA — kept inline to avoid importing
@@ -474,6 +475,9 @@ export interface AccommodationInitial {
   /** Operator (Flow C) trips only — read when `showCerts` is set. */
   stokeCertified?: boolean;
   ciSurfConservation?: boolean;
+  /** Operator trips only (shown with `showCerts`): extra stay photos after the
+   *  main one. Local uris for new picks (the parent uploads), remote otherwise. */
+  galleryUris?: string[];
 }
 
 export interface EditAccommodationSheetProps {
@@ -504,10 +508,12 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
   const [photoUri, setPhotoUri] = useState<string | null>(initial.photoUri);
   const [stokeCertified, setStokeCertified] = useState(initial.stokeCertified === true);
   const [ciSurfConservation, setCiSurfConservation] = useState(initial.ciSurfConservation === true);
+  const [galleryUris, setGalleryUris] = useState<string[]>(initial.galleryUris ?? []);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (visible) {
+      setGalleryUris(initial.galleryUris ?? []);
       setStokeCertified(initial.stokeCertified === true);
       setCiSurfConservation(initial.ciSurfConservation === true);
       setKind(initial.kind);
@@ -528,7 +534,7 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
         name: name.trim(),
         url: url.trim(),
         photoUri,
-        ...(showCerts ? { stokeCertified, ciSurfConservation } : {}),
+        ...(showCerts ? { stokeCertified, ciSurfConservation, galleryUris: photoUri ? galleryUris : [] } : {}),
       });
       onClose();
     } catch {
@@ -567,6 +573,19 @@ export const EditAccommodationSheet: React.FC<EditAccommodationSheetProps> = ({
           setPhotoUri(next.photoUri);
         }}
       />
+      {showCerts && (
+        <View style={{ marginTop: 20 }}>
+          <StayGalleryStrip
+            uris={galleryUris}
+            disabled={!photoUri}
+            onAdd={async () => {
+              const picked = await pickStayGalleryPhotos(STAY_GALLERY_MAX - galleryUris.length);
+              if (picked.length) setGalleryUris(prev => [...prev, ...picked].slice(0, STAY_GALLERY_MAX));
+            }}
+            onRemove={i => setGalleryUris(prev => prev.filter((_, k) => k !== i))}
+          />
+        </View>
+      )}
       {showCerts && (
         <View style={{ marginTop: 24 }}>
           <OperatorCertRows

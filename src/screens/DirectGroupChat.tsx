@@ -117,12 +117,15 @@ function getReceiptState(msg: Message, otherReadAt: string | null): ReceiptState
 }
 
 function ReadReceipt({ state, enabled = true }: { state: ReceiptState; onDark?: boolean; enabled?: boolean }) {
-  // Group chats pass enabled={isDirect} so the tick is hidden — read state across
-  // multiple recipients isn't a single boolean.
-  if (!enabled) return null;
+  // Group chats (trip chats) pass enabled={isDirect}=false. Read state across
+  // many recipients isn't one boolean, so a group never shows "read" — but it
+  // DOES show the grey "delivered" tick once the message is on the server.
+  // With no tick at all, testers could not tell whether a trip-chat message
+  // had gone out.
+  if (!enabled && state === 'pending') return null;
   // Gray when delivered (or pending — UI shows "Sending…" alongside it anyway),
-  // Swellyo teal when the other user has read up to this message.
-  const color = state === 'read' ? '#05BCD3' : '#C2C2C2';
+  // Swellyo teal when the other user has read up to this message (DMs only).
+  const color = enabled && state === 'read' ? '#05BCD3' : '#C2C2C2';
   return (
     <Reanimated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(140)}>
       <Image

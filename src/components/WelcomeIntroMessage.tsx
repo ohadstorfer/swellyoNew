@@ -9,6 +9,8 @@ const WELCOME_INTRO_TEXT =
 /**
  * Welcome message shown when a DM conversation is new or has no messages.
  * Matches Figma: Message Container (node 4673-7479) — light purple bubble, border, avatar on right.
+ * Avatar is the pelican ("swelly face 1", node 14385:87970, 57×77 centered in a
+ * ~71px frame), which replaced the old Swelly man.
  */
 export const WelcomeIntroMessage: React.FC = () => {
   return (
@@ -19,9 +21,9 @@ export const WelcomeIntroMessage: React.FC = () => {
         </View>
         <View style={styles.avatarContainer}>
           <Image
-            source={Images.swellyWelcomeMessage}
+            source={Images.swellyFace}
             style={styles.avatarImage}
-            resizeMode="cover"
+            resizeMode="contain"
           />
         </View>
       </View>
@@ -64,20 +66,17 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     alignSelf: 'flex-end',
-    width: 100,
-    height: 87,
+    width: 71,
+    height: 78,
     flexShrink: 0,
-    overflow: 'hidden',
-    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
     // Negative right margin pushes the avatar past the bubble's right edge
     // so it sits closer to (or beyond) the chat row's right boundary.
     marginRight: -8,
   },
   avatarImage: {
-    width: 100,
-    height: 87,
-    ...(Platform.OS === 'web' && {
-      objectFit: 'cover' as any,
-    }),
+    width: 57,
+    height: 77,
   },
 });

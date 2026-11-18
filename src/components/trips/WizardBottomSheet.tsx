@@ -13,7 +13,7 @@ import {
   StatusBar,
   StyleSheet,
   TouchableOpacity,
-  TouchableWithoutFeedback,
+  Pressable,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -255,9 +255,21 @@ export const WizardBottomSheet: React.FC<WizardBottomSheetProps> = ({
       {/* RNGH gestures (used by sliders inside sheet content) require this
           root inside the Modal — gestures don't bubble through RN's Modal. */}
       <GestureHandlerRootView style={styles.root}>
-        <TouchableWithoutFeedback onPress={onClose}>
-          <Animated.View style={[styles.overlay, { opacity: overlayAnim }]} />
-        </TouchableWithoutFeedback>
+        {/* Tap outside to close. Plain Pressable around a pointerEvents="none"
+            Animated scrim — the BottomSheetShell pattern. The old
+            TouchableWithoutFeedback-around-Animated.View did not reliably get
+            the tap, so testers had to swipe every sheet down. */}
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+        >
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.overlay, { opacity: overlayAnim }]}
+          />
+        </Pressable>
 
         <Animated.View
           style={[

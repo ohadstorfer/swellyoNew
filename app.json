@@ -48,7 +48,7 @@
     },
     "android": {
       "package": "com.swellyo.app",
-      "versionCode": 37,
+      "versionCode": 38,
       "userInterfaceStyle": "light",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {

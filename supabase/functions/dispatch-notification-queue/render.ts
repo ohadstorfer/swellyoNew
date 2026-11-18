@@ -351,6 +351,16 @@ export function renderPush(
         body: `${actor} wants you on the crew.`,
       };
     }
+    case 'operator_staff_accepted': {
+      // Live copy comes from the notification_templates row added with this
+      // type (20261108000100), so it works without a deploy of this function.
+      // Same words here, so deleting that row changes nothing.
+      const tier = data?.role_label || data?.item_name || 'crew';
+      return {
+        title: `${actor} joined your crew`,
+        body: `They accepted your invite to ${trip} as ${tier}.`,
+      };
+    }
     case 'operator_setup_required':
       // Same 20 Aug gap as above. Never about a trip — it fires when a Swellyo
       // admin flips `surfers.operator`, usually long before the operator's

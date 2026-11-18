@@ -80,6 +80,10 @@ export type NotificationType =
   // a QUESTION, not news: tapping it opens the accept sheet rather than the
   // trip, because the recipient is not on the crew until they say yes.
   | 'operator_staff_invited'
+  // The other half: the invitee said yes. Written by `accept_staff_invite`
+  // to the operator who sent the invite (20261108000100). News, not a
+  // question — tapping it opens the trip, where they are now on the Crew list.
+  | 'operator_staff_accepted'
   // A traveler's payment did not finish — the card was declined
   // (`data.reason === 'card_declined'`) or a checkout was opened and abandoned
   // until Stripe expired it (`'checkout_abandoned'`). Written by
@@ -187,6 +191,7 @@ const BELL_TYPE_FLAGS: Record<NotificationType, true> = {
   operator_stripe_action_needed: true,
   operator_setup_required: true,
   operator_staff_invited: true,
+  operator_staff_accepted: true,
   operator_payment_stuck: true,
   operator_charge_disputed: true,
   operator_dispute_closed: true,
@@ -345,7 +350,15 @@ export function tripFocusForNotification(
       return data?.has_deadlines ? 'documents' : 'overview';
     case 'trip_invite_accepted':
     case 'trip_invite_declined':
+    case 'operator_staff_accepted':
       return 'overview';
+    // A chat message that carries a tripId is a TRIP CHAT message — open the
+    // Chat tab, never the Overview (tester tapped a chat push and landed on
+    // the trip homepage). Today's message push has no tripId and routes via
+    // the conversation, but any producer that adds one must land here.
+    case 'message':
+    case 'new_message':
+      return 'chat';
     // trip_invite_received routes to a dedicated response sheet, not this
     // generic trip-focus path — see NotificationCenter's handleRowPress.
     case 'trip_reminder':
@@ -1080,6 +1093,17 @@ function renderNotificationDefault(n: NotificationRow): RenderedNotification {
       return {
         title: `Join ${trip} as ${tier}?`,
         body: `${who} wants you on the crew.`,
+        icon: 'people-outline',
+      };
+    }
+    case 'operator_staff_accepted': {
+      // Same name/action layout as trip_invite_accepted. The tier is named
+      // because an operator may have several invites out at once.
+      const tier = d.role_label || 'crew';
+      return {
+        title: who,
+        body: `joined ${tripName} as ${tier}`,
+        bodyParts: [{ t: 'joined ' }, { t: tripName, b: true }, { t: ` as ${tier}` }],
         icon: 'people-outline',
       };
     }

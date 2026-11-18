@@ -663,3 +663,91 @@ export async function saveTravelerPrice(
   });
   if (error) throw error;
 }
+
+// ── Room variants (shared / private) ─────────────────────────────────────────
+// Migration 20261111000000. The trip's cost_per_person is the SHARED price;
+// private_room_price_usd is optional. The traveler's pick lives on their own
+// participant row (room_type) and the server re-freezes their price, so every
+// amount above keeps reading the participant row as before.
+
+export type RoomType = 'shared' | 'private';
+
+export type RoomChoice = {
+  sharedUsd: number | null;
+  privateUsd: number;
+  /** null on the row = shared. */
+  room: RoomType;
+  /** Why the traveler can't change it any more, or null when they can. */
+  lockedBy: 'paid' | 'operator' | null;
+};
+
+/**
+ * The room picker's data, or null when this trip offers no choice (no private
+ * price, offline payments, or the migration is not applied yet — a missing
+ * column must never break checkout, so every failure here reads as "no choice").
+ */
+export async function fetchMyRoomChoice(
+  tripId: string,
+  userId: string,
+): Promise<RoomChoice | null> {
+  try {
+    const [trip, row, prices, paid] = await Promise.all([
+      supabase
+        .from('group_trips')
+        .select('cost_per_person, private_room_price_usd, payment_mode')
+        .eq('id', tripId)
+        .single(),
+      supabase
+        .from('group_trip_participants')
+        .select('room_type')
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .maybeSingle(),
+      readTravelerPrices<{ price_set_by: string | null } | null>(q =>
+        q.select('price_set_by').eq('trip_id', tripId).eq('user_id', userId).maybeSingle(),
+      ),
+      supabase
+        .from('organized_trip_payment_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('trip_id', tripId)
+        .eq('user_id', userId)
+        .eq('event_type', 'paid'),
+    ]);
+    if (trip.error || row.error) return null;
+    const t = trip.data as {
+      cost_per_person: number | null;
+      private_room_price_usd: number | null;
+      payment_mode: string;
+    };
+    if (t.payment_mode !== 'managed' || t.private_room_price_usd == null) return null;
+
+    const lockedBy: RoomChoice['lockedBy'] =
+      (paid.count ?? 0) > 0 ? 'paid' : prices.data?.price_set_by ? 'operator' : null;
+
+    return {
+      sharedUsd: t.cost_per_person,
+      privateUsd: Number(t.private_room_price_usd),
+      room: (row.data as { room_type: RoomType | null } | null)?.room_type === 'private'
+        ? 'private'
+        : 'shared',
+      lockedBy,
+    };
+  } catch (e) {
+    console.warn('[tripPaymentsService] fetchMyRoomChoice failed:', e);
+    return null;
+  }
+}
+
+/** Pick shared / private. The server checks it is still allowed and re-prices
+ *  the caller's row. Returns the new total, USD. */
+export async function setMyTripRoom(tripId: string, room: RoomType): Promise<number | null> {
+  const { data, error } = await supabase.rpc('set_my_trip_room', {
+    p_trip_id: tripId,
+    p_room: room,
+  });
+  if (error) {
+    console.error('[tripPaymentsService] setMyTripRoom error:', error);
+    throw new Error(error.message || 'Could not change your room');
+  }
+  return data == null ? null : Number(data);
+}

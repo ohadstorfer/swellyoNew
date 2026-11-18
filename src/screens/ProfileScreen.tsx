@@ -3215,9 +3215,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ onBack, userId, on
     {destinationsSheetMounted && (
       <Modal visible transparent animationType="none" onRequestClose={() => setShowDestinationsSheet(false)}>
         <View style={styles.destinationsSheetContainer}>
-          <TouchableWithoutFeedback onPress={() => setShowDestinationsSheet(false)}>
-            <Animated.View style={[styles.destinationsSheetOverlay, { opacity: destinationsSheetOverlayAnim }]} />
-          </TouchableWithoutFeedback>
+          {/* Plain Pressable scrim (BottomSheetShell pattern) so a tap outside closes reliably. */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShowDestinationsSheet(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+          >
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.destinationsSheetOverlay, { opacity: destinationsSheetOverlayAnim }]}
+            />
+          </Pressable>
           <Animated.View
             style={[
               styles.destinationsSheet,

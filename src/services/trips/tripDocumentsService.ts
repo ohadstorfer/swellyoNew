@@ -1581,6 +1581,29 @@ export async function acknowledgeRequirement(
   if (error) throw error;
 }
 
+/**
+ * The viewer's own latest agreement to one requirement (a waiver), so the
+ * signed state can show WHO signed and WHEN instead of a generic "already
+ * agreed". RLS (ack_select) lets a traveler read their own rows only.
+ */
+export async function fetchMyAcknowledgement(
+  requirementId: string,
+): Promise<{ agreedName: string; agreedAt: string } | null> {
+  const { data: sess } = await supabase.auth.getSession();
+  const uid = sess.session?.user?.id;
+  if (!uid) return null;
+  const { data, error } = await supabase
+    .from('group_trip_acknowledgements')
+    .select('agreed_name, agreed_at')
+    .eq('requirement_id', requirementId)
+    .eq('user_id', uid)
+    .order('agreed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  return { agreedName: (data as any).agreed_name ?? '', agreedAt: (data as any).agreed_at };
+}
+
 // ---------------------------------------------------------------------------
 // Medical form
 // ---------------------------------------------------------------------------

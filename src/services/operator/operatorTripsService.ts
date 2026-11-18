@@ -50,7 +50,11 @@ export async function freezeTripPrices(tripId: string): Promise<number> {
  */
 export async function updateOperatorTripPrice(
   tripId: string,
-  patch: { cost_per_person?: number | null; deposit_amount?: number | null },
+  patch: {
+    cost_per_person?: number | null;
+    deposit_amount?: number | null;
+    private_room_price_usd?: number | null;
+  },
   paymentMode: 'offline' | 'managed' = 'offline',
 ): Promise<void> {
   await freezeTripPrices(tripId);

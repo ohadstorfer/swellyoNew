@@ -9,7 +9,7 @@
 // link. Every route carries the same join link — friends open the trip in-app
 // and tap "Request to join" (group trips are host-approved).
 
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,8 @@ import { ff } from '../../theme/fonts';
 import { ShareTripSheet } from '../../components/trips/ShareTripSheet';
 import { ShareTripStorySheet, type TripStoryVM } from '../../components/trips/ShareTripStorySheet';
 import { isExpoGo } from '../../utils/keyboardAvoidingView';
+import { TripStaffSheet } from '../../components/trips/TripStaffSheet';
+import { listPendingStaffInvites, listTripStaff } from '../../services/trips/tripStaffService';
 
 // Full "Your trip is live!" doodle illustration (line + icons) — Figma node
 // 13451:18152, exported at the design's native 391×756. Its baked background is
@@ -73,6 +75,12 @@ export interface TripPublishedScreenProps {
   memberCount?: number;
   /** Close the success screen and continue (into the app / trip list). */
   onDone: () => void;
+  /**
+   * The operator's user id. When set, the screen offers "Add your crew", which
+   * opens the same TripStaffSheet the trip's Crew page uses, so crew can be
+   * added as the last step of creating the trip and any time later.
+   */
+  operatorId?: string | null;
 }
 
 export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
@@ -88,6 +96,7 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
   requestCount = 0,
   memberCount = 0,
   onDone,
+  operatorId,
 }) => {
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
@@ -96,6 +105,30 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
   // Set when the host taps Instagram: the story sheet may only open once the
   // share sheet's Modal has fully torn down (see ShareTripSheet.onDismissed).
   const [storyPending, setStoryPending] = useState(false);
+  const [crewSheetVisible, setCrewSheetVisible] = useState(false);
+  // Shown under the crew button after the sheet closes, so the operator sees
+  // who they added is still pending until they accept.
+  const [crewCounts, setCrewCounts] = useState<{ pending: number; joined: number } | null>(null);
+
+  const refreshCrewCounts = useCallback(async () => {
+    try {
+      const [pending, staff] = await Promise.all([
+        listPendingStaffInvites(tripId),
+        listTripStaff(tripId),
+      ]);
+      // The operator's own crew row is not someone they added.
+      const others = staff.filter(m => m.user_id !== operatorId);
+      const joined = others.filter(m => !m.pending).length;
+      setCrewCounts({ pending: pending.length + others.filter(m => m.pending).length, joined });
+    } catch {
+      // A count is a nicety; the sheet itself is the source of truth.
+    }
+  }, [tripId, operatorId]);
+
+  const closeCrewSheet = () => {
+    setCrewSheetVisible(false);
+    void refreshCrewCounts();
+  };
 
   const title = tripTitle?.trim() || 'Your trip';
   const desc = description?.trim() || null;
@@ -267,6 +300,28 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
           <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
           <Text style={styles.ctaText}>Share your trip</Text>
         </TouchableOpacity>
+        {operatorId ? (
+          <>
+            <TouchableOpacity
+              style={styles.crewBtn}
+              onPress={() => setCrewSheetVisible(true)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Add your crew"
+            >
+              <Ionicons name="person-add-outline" size={20} color="#212121" />
+              <Text style={styles.crewBtnText}>Add your crew</Text>
+            </TouchableOpacity>
+            {crewCounts && crewCounts.pending + crewCounts.joined > 0 ? (
+              <Text style={styles.crewStatus}>
+                {[
+                  crewCounts.pending > 0 ? `${crewCounts.pending} invite${crewCounts.pending === 1 ? '' : 's'} pending` : null,
+                  crewCounts.joined > 0 ? `${crewCounts.joined} joined` : null,
+                ].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
+          </>
+        ) : null}
         <TouchableOpacity
           style={styles.secondaryBtn}
           onPress={onDone}
@@ -293,6 +348,17 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
         }}
         onCreatePost={handleCreatePost}
       />
+
+      {operatorId && crewSheetVisible ? (
+        <TripStaffSheet
+          visible={crewSheetVisible}
+          tripId={tripId}
+          operatorId={operatorId}
+          // Only the creator reaches this screen.
+          isOwner
+          onClose={closeCrewSheet}
+        />
+      ) : null}
 
       {storySheetVisible && (
         <ShareTripStorySheet
@@ -467,6 +533,33 @@ const styles = StyleSheet.create({
     lineHeight: 22, // Size/2-xl
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  crewBtn: {
+    height: 52,
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DADADA',
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  crewBtnText: {
+    fontFamily: ff('Montserrat', '600'),
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '600',
+    color: '#212121',
+  },
+  crewStatus: {
+    fontFamily: ff('Inter', '400'),
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#7B7B7B',
+    textAlign: 'center',
+    marginTop: 6,
   },
   secondaryBtn: { alignItems: 'center', justifyContent: 'center', paddingVertical: 14, marginTop: 4 },
   secondaryText: {

@@ -27,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 import { TripIcon } from '../tripIcons';
 import Thumb from '../../Thumb';
 import { Image } from 'expo-image';
@@ -107,6 +108,8 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item: itemProp, curren
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(false);
 
   useEffect(() => {
     if (itemProp) {
@@ -171,7 +174,7 @@ export const GearItemSheet: React.FC<Props> = ({ visible, item: itemProp, curren
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <Pressable style={styles.container} onPress={onClose}>
         <Animated.View pointerEvents="none" style={[styles.backdrop, { opacity: backdropOpacity }]} />
-        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+        <Animated.View style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }} onLayout={onSheetLayout}>
           <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
           {/* Grabber */}
           <View style={styles.grabberRow} {...panHandlers}>

@@ -105,3 +105,53 @@ export const sqlBudgetMatch = (
   const above = budgetMin != null && bandHi >= budgetMin;
   return below || above;
 };
+
+// ---------------------------------------------------------------------------
+// (3) TS port of the slider / calendar / age clauses (explore_feed p_price_*,
+//     p_date_*, p_age_*; migration 20261113000000). The arguments above stay
+//     for app builds already in the stores; new clients send only these.
+// ---------------------------------------------------------------------------
+
+export interface AgeFilterableTrip {
+  age_min?: number | null;
+  age_max?: number | null;
+}
+
+/** Budget slider: the trip's price band OVERLAPS [min, max]. null end = no bound. */
+export const sqlPriceRangeMatch = (
+  trip: FilterableTrip,
+  min: number | null | undefined,
+  max: number | null | undefined,
+): boolean => {
+  if (min == null && max == null) return true;
+  const band = tripBudgetBand(trip);
+  if (!band) return false;
+  return (max == null || band[0] <= max) && (min == null || band[1] >= min);
+};
+
+/** Dates calendar. A one-sided pick is a single day. Firm dates overlap the
+ *  picked days; loose months overlap the picked months; no dates ⇒ no match. */
+export const sqlDateRangeMatch = (
+  trip: FilterableTrip,
+  from: string | null | undefined,
+  to: string | null | undefined,
+): boolean => {
+  if (!from && !to) return true;
+  const lo = (from || to)!;
+  const hi = (to || from)!;
+  if (trip.start_date && trip.end_date) {
+    return trip.start_date <= hi && trip.end_date >= lo;
+  }
+  const loM = lo.slice(0, 7);
+  const hiM = hi.slice(0, 7);
+  return !!trip.date_months?.some(m => m >= loM && m <= hiM);
+};
+
+/** Age range. A trip with no limit on a side always passes that side. */
+export const sqlAgeRangeMatch = (
+  trip: AgeFilterableTrip,
+  min: number | null | undefined,
+  max: number | null | undefined,
+): boolean =>
+  (min == null || trip.age_max == null || trip.age_max >= min) &&
+  (max == null || trip.age_min == null || trip.age_min <= max);

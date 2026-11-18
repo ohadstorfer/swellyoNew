@@ -4,6 +4,7 @@ import {
   coverSquareSide,
   dayHighlights,
   dayLabel,
+  dayNeedsTitle,
   daysPastEnd,
   emptyDay,
   guestDays,
@@ -226,5 +227,28 @@ describe('uploadItineraryPhotos', () => {
     await expect(
       uploadItineraryPhotos([{ ...emptyDay(1), photos: ['file:///a.jpg'] }], upload),
     ).rejects.toThrow('nope');
+  });
+});
+
+describe('dayNeedsTitle', () => {
+  it('is true for a photo-only day with no title (publish would drop it)', () => {
+    const day = { ...emptyDay(2), photos: ['file:///a.jpg'] };
+    expect(dayNeedsTitle(day)).toBe(true);
+    expect(cleanItinerary([day])).toEqual([]);
+  });
+
+  it('is true for activities with no title', () => {
+    const day = { ...emptyDay(2), activities: [{ time: null, name: 'Surf', place: null }] };
+    expect(dayNeedsTitle(day)).toBe(true);
+  });
+
+  it('is false for an empty day and for a titled one', () => {
+    expect(dayNeedsTitle(emptyDay(2))).toBe(false);
+    expect(dayNeedsTitle({ ...planned(2), photos: ['file:///a.jpg'] })).toBe(false);
+  });
+
+  it('ignores blank activity rows and a whitespace title', () => {
+    const day = { ...emptyDay(2), title: '  ', activities: [{ time: null, name: '  ', place: null }] };
+    expect(dayNeedsTitle(day)).toBe(false);
   });
 });

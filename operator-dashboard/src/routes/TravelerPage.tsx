@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { fetchMembers, fetchTrip } from '../services/trips';
+import { fetchMembers, fetchPrivateRoomTravelers, fetchTrip } from '../services/trips';
 import type { ReviewItem } from '../services/review';
 import { useTripReview } from '../services/useTripReview';
 import { fetchMedicalForm, fetchProfiles } from '../services/travelers';
@@ -391,6 +391,10 @@ function TravelerMoneyCard({
   // Refund attempts, including the ones that never moved money. Kept out of
   // useTripMoney on purpose: that hook feeds three pages' totals, and a blocked
   // attempt is not money — folding it in would make it look like one.
+  const privateRooms = useQuery({
+    queryKey: ['privateRooms', tripId],
+    queryFn: () => fetchPrivateRoomTravelers(tripId),
+  });
   const refunds = useQuery({
     queryKey: ['refunds', tripId],
     queryFn: () => fetchRefunds(tripId),
@@ -496,6 +500,7 @@ function TravelerMoneyCard({
               <p className="small">
                 <span className="muted">Total: </span>
                 {me.totalUsd === null ? 'No price set' : formatUsd(me.totalUsd)}
+                {privateRooms.data?.has(me.userId) && <span className="muted"> · Private room</span>}
                 <span className="muted"> · Paid: </span>
                 {formatUsd(me.paidUsd)}
               </p>

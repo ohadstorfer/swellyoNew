@@ -56,6 +56,7 @@ import {
 } from '../../services/trips/priceInclusions';
 import { WizardBottomSheet } from './WizardBottomSheet';
 import { CrewCards } from './CrewSection';
+import { CertBadges } from './overview/CertBadges';
 import { StayCertRows } from './overview/StayCertRows';
 import { TripItinerarySection } from './overview/TripItinerarySection';
 import { guestDays } from '../../services/trips/itinerary';
@@ -79,6 +80,7 @@ import {
   formatSkillLevel,
   formatSkillRange,
 } from './TripDetailView';
+import { StayPhotoGallery } from './overview/StayPhotoGallery';
 import { formatTripPrice, formatTripPriceRange } from '../../utils/currency';
 import { useViewer } from '../../hooks/useViewer';
 
@@ -682,6 +684,13 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           ) : null}
           <View style={styles.heroCard}>
             <View style={styles.heroCardTop}>
+              {/* CI / STOKE logos, as on the Explore card (tester request:
+                  "bring CI and Stoke Cert to the top of the trip page"). */}
+              <CertBadges
+                ci={vm.ciSurfConservation === true}
+                stoke={vm.stokeCertified === true}
+                style={styles.heroCerts}
+              />
               <View style={styles.heroDateRow}>
                 {/* formatDateRange already ends with " · N days". */}
                 <Text style={styles.heroDate}>{dateRange}</Text>
@@ -987,11 +996,9 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
                 >
                   {vm.accommodationImageUri ? (
-                    <CachedImage
-                      source={{ uri: vm.accommodationImageUri }}
-                      style={styles.stayImage}
-                      contentFit="cover"
-                      cachePolicy="memory-disk"
+                    <StayPhotoGallery
+                      uris={[vm.accommodationImageUri, ...(vm.accommodationGalleryUris ?? [])]}
+                      imageStyle={styles.stayImage}
                     />
                   ) : (
                     <View style={[styles.stayImage, styles.stayImagePlaceholder]}>
@@ -1450,6 +1457,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   heroCardTop: { paddingHorizontal: 20, paddingVertical: 10, alignItems: 'center' },
+  heroCerts: { marginTop: 4, marginBottom: 6 },
   // Figma 17480:27518 — the host and the stats 81 apart, centred as a group.
   // On the 358 frame that leaves 48 each side; on a wider phone the extra
   // width goes to the sides, not between them (space-between pushed the

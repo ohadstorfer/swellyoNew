@@ -43,13 +43,16 @@ export const C = {
   header: '#212121',
   track: '#333333',
   accent: '#05BCD3',
-  ok: '#2BCCBD',
-  okText: '#009689',
+  // "Done" is ONE colour across setup: the checklist's cyan. Green used to
+  // mark done on Stripe / Waiver / Insurance only, while Currency / Policy /
+  // Agreement showed cyan — testers could not tell which steps were finished.
+  ok: '#05BCD3',
+  okText: '#0390A2',
   danger: '#FF5367',
   warn: '#FFB443',
   warnSoft: '#FFF7EB',
   dangerSoft: '#FFF0F2',
-  okSoft: '#EAFAF8',
+  okSoft: '#E6F8FB',
   disabled: '#CFCFCF',
 };
 

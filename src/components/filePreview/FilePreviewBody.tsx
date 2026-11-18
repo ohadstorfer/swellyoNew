@@ -109,7 +109,7 @@ function PdfPreview({
     // pan-to-dismiss yields to the renderer's native scroll; the X still closes.
     <Renderer
       source={uri}
-      maxZoom={1}
+      maxZoom={4}
       maxPageResolution={2048}
       style={styles.pdf}
       onError={() => setFailed(true)}

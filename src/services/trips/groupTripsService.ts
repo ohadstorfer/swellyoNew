@@ -134,6 +134,8 @@ export interface GroupTrip {
   accommodation_name: string | null;
   accommodation_url: string | null;
   accommodation_image_url: string | null;
+  /** Extra stay photos after the main one (max 9). Absent on old databases/rows. */
+  accommodation_gallery_urls?: string[] | null;
 
   age_min: number | null;
   age_max: number | null;
@@ -180,6 +182,14 @@ export interface GroupTrip {
   payment_mode: 'offline' | 'managed';
   // Deposit amount, USD. Null = one single payment, no deposit row.
   deposit_amount: number | null;
+  // Room variants (operator trips). cost_per_person is the SHARED room price;
+  // this is the optional PRIVATE room price, USD. Null = no room choice.
+  // Optional: the feed RPCs don't return it. Migration 20261111000000.
+  private_room_price_usd?: number | null;
+  // 'approval' = request to join, operator approves (default).
+  // 'instant' = traveler joins and goes straight to checkout.
+  // Optional for the same reason; undefined reads as 'approval'.
+  join_mode?: 'approval' | 'instant';
   // Offline trips' full-payment deadline, days before departure. Managed trips
   // keep theirs on the `balance` requirement row instead (the DB refuses pay
   // rows on offline trips, so this column is where their deadline lives).
@@ -648,6 +658,13 @@ export interface ExploreFeedFilters {
   months?: string[] | null;      // selected "YYYY-MM" chips, OR'd
   budgetMin?: number | null;     // "above" threshold bound (band_hi >= this)
   budgetMax?: number | null;     // "below" threshold bound (band_lo <= this)
+  search?: string | null;        // search box text; matched server-side (title, About, host, place, tags)
+  priceMin?: number | null;      // USD, budget slider — trip's price band must overlap
+  priceMax?: number | null;
+  dateFrom?: string | null;      // YYYY-MM-DD, dates calendar — trip's dates must overlap
+  dateTo?: string | null;
+  ageMin?: number | null;        // age range — trips with no age limit always pass
+  ageMax?: number | null;
 }
 
 export async function exploreFeed(
@@ -659,12 +676,24 @@ export async function exploreFeed(
   filters?: ExploreFeedFilters,
 ): Promise<ExploreFeedRow[]> {
   const months = filters?.months && filters.months.length > 0 ? filters.months : null;
+  const search = filters?.search?.trim() || null;
   let q = supabase.rpc('explore_feed', {
     p_limit: limit, p_cursor: cursorCreatedAt, p_cursor_id: cursorId,
     p_months: months,
     p_budget_min: filters?.budgetMin ?? null,
     p_budget_max: filters?.budgetMax ?? null,
     p_cursor_participant_count: cursorParticipantCount,
+    // Sent only when searching, so the plain feed keeps working against a
+    // database that does not have the p_search argument yet.
+    ...(search ? { p_search: search } : {}),
+    // Same for the slider / calendar / age filters (migration
+    // 20261113000000_explore_feed_slider_dates_age): sent only when on.
+    ...(filters?.priceMin != null ? { p_price_min: filters.priceMin } : {}),
+    ...(filters?.priceMax != null ? { p_price_max: filters.priceMax } : {}),
+    ...(filters?.dateFrom ? { p_date_from: filters.dateFrom } : {}),
+    ...(filters?.dateTo ? { p_date_to: filters.dateTo } : {}),
+    ...(filters?.ageMin != null ? { p_age_min: filters.ageMin } : {}),
+    ...(filters?.ageMax != null ? { p_age_max: filters.ageMax } : {}),
   });
   if (signal) q = q.abortSignal(signal);
   const { data, error } = await q;
@@ -2148,6 +2177,20 @@ export async function getDepartedParticipants(
       refunded_usd: Math.max(0, Math.round(m.refunded * 100) / 100),
     };
   });
+}
+
+/**
+ * Instant join (trip.join_mode = 'instant'): no request, no approval. The
+ * server records an approved request and creates the 'onboarding' row, then
+ * the traveler goes to checkout. Returns the participant status.
+ */
+export async function joinTripInstantly(tripId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc('join_trip_instantly', { p_trip_id: tripId });
+  if (error) {
+    console.error('[groupTripsService] joinTripInstantly error:', error);
+    throw new Error(error.message || 'Failed to join trip');
+  }
+  return (data as string | null) ?? null;
 }
 
 export async function requestToJoinTrip(

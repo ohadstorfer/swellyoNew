@@ -14,6 +14,7 @@ import { PageHead } from '../components/Shell';
 import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
 import { TripPriceDialog } from '../components/TripPriceDialog';
 import { useTripAccess } from '../services/access';
+import { fetchPrivateRoomTravelers } from '../services/trips';
 
 export function MoneyPage() {
   const { tripId = '' } = useParams();
@@ -24,6 +25,10 @@ export function MoneyPage() {
   const { money, trip, steps, isOffline, hasDepositStep, isPending, isError, error, refetch } =
     useTripMoney(tripId);
 
+  const privateRooms = useQuery({
+    queryKey: ['privateRooms', tripId],
+    queryFn: () => fetchPrivateRoomTravelers(tripId),
+  });
   const userIds = useMemo(() => (money?.travelers ?? []).map(t => t.userId), [money]);
   const profiles = useQuery({
     queryKey: ['profiles', userIds],
@@ -213,7 +218,10 @@ export function MoneyPage() {
                 {money.travelers.map(t => (
                   <tr key={t.userId}>
                     <td>{nameOf(t.userId)}</td>
-                    <td>{t.totalUsd === null ? <span className="muted">No price set</span> : formatUsd(t.totalUsd)}</td>
+                    <td>
+                      {t.totalUsd === null ? <span className="muted">No price set</span> : formatUsd(t.totalUsd)}
+                      {privateRooms.data?.has(t.userId) && <span className="muted small"> · Private room</span>}
+                    </td>
                     {steps.map(s => {
                       const step = t.steps.find(x => x.requirementId === s.requirementId);
                       return (

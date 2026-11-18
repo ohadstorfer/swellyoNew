@@ -146,8 +146,8 @@ function messageLimitResponse(
   resetTime?: number,
 ): Response {
   const returnMessage = kind === 'daily'
-    ? "That's me done for today — you've hit your daily message limit. Come back tomorrow and we'll pick this up. 🤙"
-    : "We've hit the message limit for this chat. Start a new one and we'll keep planning from there. 🤙"
+    ? "That's a wrap for today 🌊 Every chat with me runs on real energy and water, so Swellyo keeps a daily limit — we'd rather save those resources for the ocean we all love. Paddle back in tomorrow and we'll pick up right where we left off. 🤙"
+    : "This chat has had a full session 🌊 To keep our footprint light on the planet, every chat with me has a limit. Start a fresh one and we'll keep planning from there. 🤙"
   console.log(`[message-limit] ${kind} cap reached`, { chatId })
   return new Response(
     JSON.stringify({

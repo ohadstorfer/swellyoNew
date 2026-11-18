@@ -142,6 +142,8 @@ export interface TripDetailVM {
   accommodationKindLabel: string | null;
   accommodationName: string | null;
   accommodationImageUri: string | null;
+  /** Extra stay photos after the main one; shown as a swipeable gallery. */
+  accommodationGalleryUris?: string[];
   accommodationUrl: string | null;
   // Overview stay card extras (Figma 17488:28118). All optional — each row
   // shows only when its field is set. The logo and "verified" have no data yet.

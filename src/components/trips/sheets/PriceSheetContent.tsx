@@ -11,7 +11,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { ff } from '../../../theme/fonts';
 
-export type PriceDraft = { costPerPerson: number | null; depositAmount: number | null };
+export type PriceDraft = {
+  costPerPerson: number | null;
+  depositAmount: number | null;
+  /** The private room price. Optional: costPerPerson is the shared room.
+   *  Undefined = this sheet does not show the field. */
+  privateRoomPrice?: number | null;
+};
 
 /** Which field the operator meant to edit. Price and Deposit are two rows that
  *  open this ONE sheet (they are tied by a DB CHECK — see the header comment),
@@ -159,13 +165,15 @@ function depositHint(
 export const PriceSheetContent: React.FC<{
   costPerPerson: number | null;
   depositAmount: number | null;
+  /** Pass to show the "Private room" field. Undefined hides it. */
+  privateRoomPrice?: number | null;
   currency: string | null;
   onChange: (next: PriceDraft) => void;
   error?: string;
   /** The row the operator tapped to get here. Focused after the sheet has
    *  finished sliding in. */
   focusField?: PriceField | null;
-}> = ({ costPerPerson, depositAmount, currency, onChange, error, focusField }) => {
+}> = ({ costPerPerson, depositAmount, privateRoomPrice, currency, onChange, error, focusField }) => {
   const label = currency ?? 'USD';
   const priceRef = useRef<TextInput | null>(null);
   const depositRef = useRef<TextInput | null>(null);
@@ -189,7 +197,7 @@ export const PriceSheetContent: React.FC<{
         label="Price per person"
         value={costPerPerson}
         currency={label}
-        onChangeValue={(n) => onChange({ costPerPerson: n, depositAmount })}
+        onChangeValue={(n) => onChange({ costPerPerson: n, depositAmount, privateRoomPrice })}
         accessibilityLabel="Price per person"
         inputRef={priceRef}
       />
@@ -198,10 +206,20 @@ export const PriceSheetContent: React.FC<{
         value={depositAmount}
         currency={label}
         hint={depositHint(costPerPerson, depositAmount, label)}
-        onChangeValue={(n) => onChange({ costPerPerson, depositAmount: n })}
+        onChangeValue={(n) => onChange({ costPerPerson, depositAmount: n, privateRoomPrice })}
         accessibilityLabel="Deposit"
         inputRef={depositRef}
       />
+      {privateRoomPrice !== undefined && (
+        <AmountField
+          label="Private room (optional)"
+          value={privateRoomPrice}
+          currency={label}
+          hint="The price per person is a shared room. Add a private room price to let travelers choose at checkout. Same deposit for both."
+          onChangeValue={(n) => onChange({ costPerPerson, depositAmount, privateRoomPrice: n })}
+          accessibilityLabel="Private room price"
+        />
+      )}
       {!!error && <Text style={styles.error}>{error}</Text>}
     </View>
   );

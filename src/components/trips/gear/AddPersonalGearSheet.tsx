@@ -23,6 +23,7 @@ import { KeyboardAvoidingView } from '../../../utils/keyboardAvoidingView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 import { TripIcon } from '../tripIcons';
 
 interface Props {
@@ -45,6 +46,8 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(true);
   // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
   const insets = useSafeAreaInsets();
 
@@ -84,7 +87,7 @@ export const AddPersonalGearSheet: React.FC<Props> = ({
       >
         <Pressable style={s.container} onPress={onClose}>
           <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
-          <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+          <Animated.View style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }} onLayout={onSheetLayout}>
             <Pressable
               style={[s.sheet, Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 24) }]}
               onPress={e => e.stopPropagation()}

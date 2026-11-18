@@ -48,6 +48,7 @@ import {
   Animated,
   Alert,
   Platform,
+  Keyboard,
   Image,
   type StyleProp,
   type ViewStyle,
@@ -86,8 +87,12 @@ import {
   amountDue,
   isPayingInFull,
   startCheckout,
+  fetchMyRoomChoice,
+  setMyTripRoom,
   type PayStep,
   type TravelerPrices,
+  type RoomChoice,
+  type RoomType,
 } from '../../services/trips/tripPaymentsService';
 import { TripPolicyConsentSheet } from '../../components/trips/TripPolicyConsentSheet';
 import { useTripPolicyConsent } from '../../hooks/useTripPolicyConsent';
@@ -328,6 +333,18 @@ const MedicalStepInline: React.FC<{
     true,
     onSaved,
   );
+  // Testers filled part of the form and found a grey button that did nothing.
+  // The button now always answers: it saves when the form is complete, and
+  // otherwise closes the keyboard and says, in red, what is still missing.
+  const [nudged, setNudged] = useState(false);
+  const onComplete = () => {
+    Keyboard.dismiss();
+    if (complete) {
+      save();
+    } else {
+      setNudged(true);
+    }
+  };
   return (
     <View style={styles.screen}>
       {header}
@@ -352,17 +369,19 @@ const MedicalStepInline: React.FC<{
       <View style={[styles.footer, { paddingBottom: bottomInset }]}>
         <PressableScale
           style={[styles.btn, (!complete || saving || loading) && styles.btnDisabled]}
-          disabled={!complete || saving || loading}
-          onPress={save}
-          accessibilityLabel="Save and continue"
+          disabled={saving || loading}
+          onPress={onComplete}
+          accessibilityLabel="Complete"
         >
           {saving ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
-            <Text style={styles.btnText}>Save and continue</Text>
+            <Text style={styles.btnText}>Complete</Text>
           )}
         </PressableScale>
-        {hint && !loading ? <Text style={styles.hint}>{hint}</Text> : null}
+        {hint && !loading ? (
+          <Text style={[styles.hint, nudged && styles.hintNudged]}>{hint}</Text>
+        ) : null}
         {skippable ? (
           <PressableScale style={styles.btnOutline} disabled={saving} onPress={onSkip}>
             <Text style={styles.btnOutlineText}>Skip — I'll do it later</Text>
@@ -411,6 +430,10 @@ export default function TravelerOnboardingScreen({
   const [paymentNote, setPaymentNote] = useState<string | null>(null);
 
   const [prices, setPrices] = useState<TravelerPrices | null>(null);
+  /** Shared / private room, when the trip offers a private room. Null = no
+   *  choice to make (the picker is not shown). */
+  const [roomChoice, setRoomChoice] = useState<RoomChoice | null>(null);
+  const [roomSaving, setRoomSaving] = useState<RoomType | null>(null);
   const [paidByRequirement, setPaidByRequirement] = useState<Record<string, number>>({});
 
   // Which sheet is open. Only uploads have one now — the waiver and medical
@@ -465,14 +488,16 @@ export default function TravelerOnboardingScreen({
 
   const loadPlan = useCallback(async (): Promise<OnboardingPlan | null> => {
     try {
-      const [next, priceData, paid] = await Promise.all([
+      const [next, priceData, paid, room] = await Promise.all([
         fetchOnboardingPlan(tripId),
         fetchTravelerPrices(tripId, userId).catch(() => null),
         fetchPaidByRequirement(tripId, userId).catch(() => ({} as Record<string, number>)),
+        fetchMyRoomChoice(tripId, userId),
       ]);
       if (!aliveRef.current) return null;
       setPlan(next);
       if (priceData) setPrices(priceData);
+      setRoomChoice(room);
       setPaidByRequirement(paid ?? {});
       return next;
     } catch (e) {
@@ -551,6 +576,29 @@ export default function TravelerOnboardingScreen({
       paidByRequirement[step.requirement.requirementId] ?? 0,
     );
   }, [step, prices, paidByRequirement]);
+
+  /** Shared / private. The server re-prices this traveler's row; we re-read
+   *  the prices so the amount card and the checkout use the new total. */
+  const pickRoom = useCallback(
+    async (room: RoomType) => {
+      if (!roomChoice || roomChoice.lockedBy || roomChoice.room === room || roomSaving) return;
+      const prev = roomChoice;
+      setRoomChoice({ ...roomChoice, room });
+      setRoomSaving(room);
+      try {
+        await setMyTripRoom(tripId, room);
+        const next = await fetchTravelerPrices(tripId, userId);
+        if (aliveRef.current) setPrices(next);
+      } catch (e) {
+        if (!aliveRef.current) return;
+        setRoomChoice(prev);
+        Alert.alert('Could not change your room', friendlyErrorMessage(e, 'Please try again.'));
+      } finally {
+        if (aliveRef.current) setRoomSaving(null);
+      }
+    },
+    [roomChoice, roomSaving, tripId, userId],
+  );
 
   /** Move on. The LAST step hands over to activation rather than a done screen,
    *  because "am I in?" is the server's answer, not ours. */
@@ -1147,6 +1195,14 @@ export default function TravelerOnboardingScreen({
                 />
               ) : null}
 
+              {roomChoice ? (
+                <RoomPicker
+                  choice={roomChoice}
+                  saving={roomSaving}
+                  onPick={pickRoom}
+                />
+              ) : null}
+
               <View style={styles.amountCard}>
                 <Text style={styles.amountLabel}>
                   {isDeposit ? (payingInFull ? 'Full payment' : 'Deposit') : catalog.title}
@@ -1204,8 +1260,8 @@ export default function TravelerOnboardingScreen({
         ) : (
           <>
             <PressableScale
-              style={[styles.btn, busy && styles.btnDisabled]}
-              disabled={busy}
+              style={[styles.btn, (busy || !!roomSaving) && styles.btnDisabled]}
+              disabled={busy || !!roomSaving}
               onPress={openSheet}
             >
               {busy ? (
@@ -1268,7 +1324,105 @@ export default function TravelerOnboardingScreen({
 
 // Sizes are the Figma MOBILE mode, read with get_variable_defs — the export's
 // bold numbers are the desktop mode (bold 18 there is MB2 14 here).
+// RoomPicker — shared / private, on the pay step. The trip page shows the base
+// (shared) price; this is where the traveler can upgrade. Locked once anything
+// is paid, or when the operator set this traveler's price by hand.
+const ROOM_LABEL: Record<RoomType, string> = {
+  shared: 'Shared room',
+  private: 'Private room',
+};
+
+const RoomPicker: React.FC<{
+  choice: RoomChoice;
+  saving: RoomType | null;
+  onPick: (room: RoomType) => void;
+}> = ({ choice, saving, onPick }) => {
+  const options: { key: RoomType; price: number | null }[] = [
+    { key: 'shared', price: choice.sharedUsd },
+    { key: 'private', price: choice.privateUsd },
+  ];
+  const locked = choice.lockedBy != null;
+  return (
+    <View style={styles.roomWrap}>
+      <Text style={styles.roomTitle}>Your room</Text>
+      <View style={styles.roomRow} accessibilityRole="radiogroup">
+        {options.map(o => {
+          const selected = choice.room === o.key;
+          const dim = locked && !selected;
+          return (
+            <PressableScale
+              key={o.key}
+              onPress={() => onPick(o.key)}
+              disabled={locked || !!saving}
+              accessibilityLabel={`${ROOM_LABEL[o.key]}${o.price != null ? `, ${usd(o.price)}` : ''}`}
+              style={[
+                styles.roomCard,
+                selected && styles.roomCardOn,
+                dim && styles.roomCardDim,
+              ]}
+            >
+              <View style={styles.roomCardHead}>
+                <Text style={[styles.roomName, selected && styles.roomNameOn]}>
+                  {ROOM_LABEL[o.key]}
+                </Text>
+                <View style={[styles.roomDot, selected && styles.roomDotOn]}>
+                  {saving === o.key ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" style={{ transform: [{ scale: 0.6 }] }} />
+                  ) : selected ? (
+                    <Ionicons name="checkmark" size={12} color="#FFFFFF" />
+                  ) : null}
+                </View>
+              </View>
+              <Text style={styles.roomPrice}>{o.price != null ? usd(o.price) : '—'}</Text>
+            </PressableScale>
+          );
+        })}
+      </View>
+      {locked ? (
+        <Text style={styles.roomNote}>
+          {choice.lockedBy === 'paid'
+            ? 'Your room is set once you’ve paid. Message the operator to change it.'
+            : 'The operator set your price. Message them to change your room.'}
+        </Text>
+      ) : (
+        <Text style={styles.roomNote}>Same deposit for both. The rest changes with your room.</Text>
+      )}
+    </View>
+  );
+};
+
 const styles = StyleSheet.create({
+  roomWrap: { marginTop: 24, gap: 10 },
+  roomTitle: { ...textStyle('MB2', '700'), color: '#333333' },
+  roomRow: { flexDirection: 'row', gap: 10 },
+  roomCard: {
+    flex: 1,
+    padding: 12,
+    gap: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: C.surface,
+  },
+  // Same outer size selected or not: the thicker border eats the padding.
+  roomCardOn: { borderWidth: 2, borderColor: C.accent, padding: 11 },
+  roomCardDim: { opacity: 0.5 },
+  roomCardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
+  roomName: { ...textStyles.MB2, color: '#7B7B7B', flexShrink: 1 },
+  roomNameOn: { color: '#212121' },
+  roomDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roomDotOn: { backgroundColor: C.accent, borderColor: C.accent },
+  roomPrice: { fontFamily: ff('Inter', '700'), fontSize: 18, color: '#333333' },
+  roomNote: { ...textStyles.B3, color: C.muted },
+
   screen: { flex: 1, backgroundColor: C.bg },
 
   // ── Step header (Figma "Step Process", 17115:27593) ──
@@ -1340,6 +1494,8 @@ const styles = StyleSheet.create({
   sub: { ...textStyles.MB2, color: '#7B7B7B' },
   note: { ...textStyles.B3, color: '#333333', textAlign: 'center', marginTop: 12 },
   hint: { ...textStyles.B4, color: '#9A9A9A', textAlign: 'center', marginTop: 8 },
+  // After a tap on Complete with something still missing.
+  hintNudged: { ...textStyles.B3, color: '#D92D20' },
 
   bigIcon: {
     width: 64,

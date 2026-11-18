@@ -1,0 +1,360 @@
+<title>Rooms &amp; Instant Join</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap">
+<style>
+/* Layout: a gallery of phone frames, grouped by who sees them (traveler, operator), each with a one-line caption. */
+:root {
+  --page: #EEF1F2;
+  --ink: #1B2326;
+  --muted: #6B767B;
+  --panel: #FFFFFF;
+  --rule: #DDE3E5;
+  --accent: #05BCD3;
+  --accent-tint: #E3F7FA;
+  --tag: #0788B0;
+  --new: #FFE7A3;
+  --new-ink: #6B4E00;
+  /* Phone screens keep the app's own light colors in both themes. */
+  --app-bg: #FAFAFA;
+  --app-ink: #212121;
+  --app-body: #333333;
+  --app-muted: #7B7B7B;
+  --app-line: #EEEEEE;
+  --app-field: #CFCFCF;
+  --font-text: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Montserrat", "Inter", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #12171A; --ink: #E7ECEE; --muted: #97A3A8; --panel: #1B2226; --rule: #2A3338;
+    --accent-tint: #0F3940; --tag: #5ED4E4; --new: #5A4710; --new-ink: #FFE7A3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #12171A; --ink: #E7ECEE; --muted: #97A3A8; --panel: #1B2226; --rule: #2A3338;
+  --accent-tint: #0F3940; --tag: #5ED4E4; --new: #5A4710; --new-ink: #FFE7A3;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--page); color: var(--ink); font-family: var(--font-text);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 48px; }
+header { display: flex; flex-direction: column; gap: 10px; max-width: 70ch; }
+h1 { font-family: var(--font-display); font-size: clamp(26px, 4vw, 36px); margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); font-size: 15px; line-height: 1.55; margin: 0; }
+.legend { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.legend i { width: 14px; height: 14px; border-radius: 4px; background: var(--new); outline: 1px dashed var(--new-ink); }
+section { display: flex; flex-direction: column; gap: 20px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h2 { font-family: var(--font-display); font-size: 20px; margin: 0; }
+.who { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 700; color: var(--tag); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 28px; align-items: start; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+figcaption { display: flex; flex-direction: column; gap: 4px; }
+figcaption b { font-size: 14px; }
+figcaption span { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+/* Phone */
+.phone {
+  width: 100%; max-width: 320px; border-radius: 34px; background: #111; padding: 9px;
+  box-shadow: 0 18px 40px -20px rgba(0,0,0,.45);
+}
+.screen { border-radius: 26px; overflow: hidden; background: var(--app-bg); color: var(--app-ink); display: flex; flex-direction: column; min-height: 560px; position: relative; }
+.status { display: flex; justify-content: space-between; padding: 12px 22px 4px; font-size: 12px; font-weight: 600; }
+.dark-top { background: #212121; color: #fff; }
+.nav { display: flex; align-items: center; gap: 10px; padding: 10px 18px 16px; font-family: var(--font-display); font-weight: 700; font-size: 20px; }
+.nav .back { font-family: var(--font-text); font-weight: 400; font-size: 22px; opacity: .9; }
+.body { padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.h { font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--app-ink); margin: 0; }
+.sub { font-size: 12.5px; color: var(--app-muted); line-height: 1.45; margin: 0; }
+.label { font-size: 13px; font-weight: 700; color: var(--app-body); }
+.help { font-size: 11.5px; color: var(--app-muted); line-height: 1.4; margin-top: -8px; }
+.field { background: #fff; border: 1px solid var(--app-line); border-radius: 12px; padding: 13px 14px; font-size: 14px; display: flex; gap: 6px; color: var(--app-body); }
+.field b { font-weight: 700; }
+.radio-group { background: #fff; border: 1px solid var(--app-line); border-radius: 14px; overflow: hidden; }
+.radio { padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; }
+.radio + .radio { border-top: 1px solid var(--app-line); }
+.radio.on { background: #E6F8FB; box-shadow: inset 3px 0 0 var(--accent); }
+.radio .t { font-size: 13px; font-weight: 700; }
+.radio .d { font-size: 11.5px; color: var(--app-muted); }
+
+/* "New" highlight */
+.new { position: relative; outline: 2px dashed #C99A1B; outline-offset: 4px; border-radius: 12px; }
+.new::after {
+  content: "NEW"; position: absolute; top: -12px; right: -2px; background: var(--new); color: var(--new-ink);
+  font: 700 9.5px/1 var(--font-text); letter-spacing: .08em; padding: 4px 6px; border-radius: 6px;
+}
+
+/* Trip page */
+.hero { height: 210px; background: linear-gradient(160deg, #2E6E7E 0%, #4BA3A8 45%, #E8C98F 100%); position: relative; }
+.hero::after { content: ""; position: absolute; inset: auto 0 0; height: 60%; background: linear-gradient(transparent, rgba(0,0,0,.35)); }
+.hero .ttl { position: absolute; left: 16px; bottom: 14px; z-index: 1; color: #fff; }
+.hero .ttl b { display: block; font-family: var(--font-display); font-size: 19px; }
+.hero .ttl span { font-size: 12px; opacity: .9; }
+.skel { height: 10px; border-radius: 6px; background: #ECECEC; }
+.joinbar { margin-top: auto; background: #fff; border-top: 1px solid #DCDCDC; padding: 14px 16px 22px; display: flex; align-items: center; gap: 12px; }
+.price { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.price .amt { font-size: 19px; color: var(--app-body); }
+.price .amt b { font-weight: 700; }
+.price .dates { font-size: 12px; color: var(--app-muted); }
+.cta { background: #212121; color: #fff; border-radius: 12px; padding: 14px 0; width: 132px; text-align: center; font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.cta.req { background: #F5C842; color: #212121; }
+
+/* Checkout */
+.tripcard { display: flex; gap: 10px; background: #fff; border: 1px solid var(--app-line); border-radius: 14px; padding: 8px; align-items: center; }
+.tripcard .img { width: 54px; height: 54px; border-radius: 10px; background: linear-gradient(160deg, #2E6E7E, #E8C98F); flex: none; }
+.tripcard b { font-size: 13px; display: block; }
+.tripcard span { font-size: 11.5px; color: var(--app-muted); }
+.rooms { display: flex; flex-direction: column; gap: 8px; }
+.room-row { display: flex; gap: 8px; }
+.room { flex: 1; background: #fff; border: 1px solid var(--app-line); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 4px; }
+.room.on { border: 2px solid var(--accent); padding: 9px; }
+.room.dim { opacity: .5; }
+.room .top { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--app-muted); }
+.room.on .top { color: var(--app-ink); }
+.dot { width: 16px; height: 16px; border-radius: 50%; border: 1px solid #E4E4E4; display: grid; place-items: center; font-size: 10px; color: #fff; }
+.room.on .dot { background: var(--accent); border-color: var(--accent); }
+.room .p { font-weight: 700; font-size: 16px; color: var(--app-body); font-variant-numeric: tabular-nums; }
+.note { font-size: 11.5px; color: var(--app-muted); line-height: 1.4; }
+.amount { background: #fff; border: 1px solid var(--app-line); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.amount .k { font-size: 12.5px; font-weight: 700; color: var(--app-muted); }
+.amount .big { font-size: 28px; font-weight: 700; text-align: center; letter-spacing: -1px; color: var(--app-body); padding: 4px 0 12px; font-variant-numeric: tabular-nums; }
+.amount .row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--app-muted); border-top: 1px solid var(--app-line); padding-top: 7px; }
+.amount .row b { color: var(--app-ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.amount .row + .row { border-top: 0; padding-top: 0; }
+.paybtn { margin: 0 16px 22px; background: var(--accent); color: #fff; border-radius: 14px; text-align: center; padding: 14px; font-weight: 700; font-size: 14px; }
+
+/* Edit list */
+.group { background: #fff; border: 1px solid var(--app-line); border-radius: 14px; overflow: hidden; }
+.group-title { font-size: 12px; font-weight: 700; color: var(--app-muted); text-transform: uppercase; letter-spacing: .06em; }
+.row-e { display: flex; justify-content: space-between; align-items: center; padding: 13px 14px; font-size: 13.5px; gap: 8px; }
+.row-e + .row-e { border-top: 1px solid var(--app-line); }
+.row-e span { color: var(--app-muted); font-size: 12.5px; display: inline-flex; gap: 6px; align-items: center; }
+.row-e span::after { content: "›"; font-size: 18px; color: #B5B5B5; line-height: 1; }
+.row-e.new { outline-offset: -3px; border-radius: 0; }
+.row-e.new::after { top: 6px; right: 34px; }
+
+/* Sheet */
+.scrim { position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; border-radius: 22px 22px 0 0; padding: 10px 16px 22px; display: flex; flex-direction: column; gap: 12px; }
+.grab { width: 38px; height: 4px; background: #DDD; border-radius: 4px; margin: 0 auto 4px; }
+.sheet .h { font-size: 17px; }
+.opt { border: 1px solid #CFCFCF; border-radius: 16px; padding: 13px; display: flex; gap: 10px; }
+.opt.on { border: 2px solid #0788B0; background: #E6F4F8; padding: 12px; }
+.opt .t { font-weight: 700; font-size: 13px; }
+.opt.on .t { color: #0788B0; }
+.opt .d { font-size: 11.5px; color: var(--app-muted); margin-top: 3px; }
+.opt .c { width: 18px; height: 18px; border-radius: 50%; flex: none; margin-left: auto; background: #F7F7F7; border: 1px solid #CFCFCF; display: grid; place-items: center; color: #fff; font-size: 10px; }
+.opt.on .c { background: #0788B0; border-color: #0788B0; }
+.save { background: #212121; color: #fff; border-radius: 12px; text-align: center; padding: 13px; font-weight: 700; font-size: 14px; }
+
+/* Dashboard */
+.desk { background: var(--panel); border: 1px solid var(--rule); border-radius: 16px; overflow: hidden; }
+.desk-bar { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+.desk-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--rule); }
+.desk-body { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.desk-body h3 { margin: 0; font-size: 15px; }
+.tscroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 520px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+td.num { font-variant-numeric: tabular-nums; }
+.pill { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--accent-tint); color: var(--tag); font-weight: 600; }
+.pill.wait { background: transparent; border: 1px solid var(--rule); color: var(--muted); }
+.mut { color: var(--muted); font-size: 12px; }
+mark { background: var(--new); color: var(--new-ink); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+.wide { grid-column: 1 / -1; }
+@media (max-width: 420px) { .phone { max-width: 100%; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Rooms &amp; Instant Join</h1>
+    <p class="lede">What travelers and operators see now that a trip can offer a shared or private room, and can let travelers join without a request. The prices are example numbers from a made-up trip.</p>
+    <span class="legend"><i></i> Dashed outline = new in this change</span>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="who">Traveler</span><h2>Finding the trip and paying</h2></div>
+    <div class="grid">
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="hero"><div class="status" style="color:#fff;position:relative;z-index:1"><span>4:46</span><span>●●●</span></div>
+            <div class="ttl"><b>Bocas del Toro Surf Week</b><span>Panama · 8 days</span></div></div>
+          <div class="body">
+            <div class="skel" style="width:70%"></div><div class="skel" style="width:90%"></div><div class="skel" style="width:55%"></div>
+          </div>
+          <div class="joinbar">
+            <div class="price"><span class="amt"><b>$2,500</b> USD</span><span class="dates">Jun 15–22, 2026</span></div>
+            <div class="cta">Drop In</div>
+          </div>
+        </div></div>
+        <figcaption><b>Trip page, "I approve each traveler"</b><span>Same as before. The bar shows the base price, which is the shared room. "Drop In" sends a request to the operator.</span></figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="hero"><div class="status" style="color:#fff;position:relative;z-index:1"><span>4:46</span><span>●●●</span></div>
+            <div class="ttl"><b>Bocas del Toro Surf Week</b><span>Panama · 8 days</span></div></div>
+          <div class="body">
+            <div class="skel" style="width:70%"></div><div class="skel" style="width:90%"></div><div class="skel" style="width:55%"></div>
+          </div>
+          <div class="joinbar">
+            <div class="price"><span class="amt"><b>$2,500</b> USD</span><span class="dates">Jun 15–22, 2026</span></div>
+            <div class="cta new">Join Trip</div>
+          </div>
+        </div></div>
+        <figcaption><b>Trip page, "Anyone can join right away"</b><span>No request. Tapping "Join Trip" puts the traveler on the trip and opens checkout straight away. A full trip still shows "Trip full".</span></figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="status"><span>4:47</span><span>●●●</span></div>
+          <div class="body">
+            <p class="h">Secure your spot</p>
+            <p class="sub">Pay your deposit to confirm your place on this trip.</p>
+            <div class="tripcard"><div class="img"></div><div><b>Bocas del Toro Surf Week</b><span>Panama · Jun 15–22</span></div></div>
+            <div class="rooms new">
+              <span class="label">Your room</span>
+              <div class="room-row">
+                <div class="room"><div class="top">Shared room <span class="dot"></span></div><div class="p">$2,500</div></div>
+                <div class="room on"><div class="top">Private room <span class="dot">✓</span></div><div class="p">$3,200</div></div>
+              </div>
+              <span class="note">Same deposit for both. The rest changes with your room.</span>
+            </div>
+            <div class="amount">
+              <span class="k">Deposit</span>
+              <span class="big">$500</span>
+              <div class="row"><span>Trip total</span><b>$3,200</b></div>
+              <div class="row"><span>Remaining after deposit</span><b>$2,700</b></div>
+            </div>
+          </div>
+          <div class="paybtn">Review &amp; pay $500</div>
+        </div></div>
+        <figcaption><b>Checkout, picking a room</b><span>Shown only when the trip has a private room price. Picking private raises the trip total; the deposit stays the same. Trips with no private price look the same as before.</span></figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="status"><span>5:02</span><span>●●●</span></div>
+          <div class="body">
+            <p class="h">Final payment</p>
+            <p class="sub">Pay the rest of your trip before you go.</p>
+            <div class="tripcard"><div class="img"></div><div><b>Bocas del Toro Surf Week</b><span>Panama · Jun 15–22</span></div></div>
+            <div class="rooms new">
+              <span class="label">Your room</span>
+              <div class="room-row">
+                <div class="room dim"><div class="top">Shared room <span class="dot"></span></div><div class="p">$2,500</div></div>
+                <div class="room on"><div class="top">Private room <span class="dot">✓</span></div><div class="p">$3,200</div></div>
+              </div>
+              <span class="note">Your room is set once you’ve paid. Message the operator to change it.</span>
+            </div>
+            <div class="amount">
+              <span class="k">Final payment</span>
+              <span class="big">$2,700</span>
+            </div>
+          </div>
+          <div class="paybtn">Review &amp; pay $2,700</div>
+        </div></div>
+        <figcaption><b>Checkout, after the deposit</b><span>Once anything is paid, the room is locked. Same if the operator set this traveler's price by hand.</span></figcaption>
+      </figure>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="who">Operator</span><h2>Setting it up</h2></div>
+    <div class="grid">
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="dark-top"><div class="status"><span>4:46</span><span>●●●</span></div><div class="nav"><span class="back">‹</span>Pricing</div></div>
+          <div class="body">
+            <span class="label">Price per traveler</span>
+            <div class="field">USD <b>2500</b></div>
+            <div class="new" style="display:flex;flex-direction:column;gap:14px">
+              <span class="label">Private room</span>
+              <span class="help">The price above is for a shared room. Add a private room price to let travelers choose at checkout, or leave it blank.</span>
+              <div class="field">USD <b>3200</b></div>
+            </div>
+            <div class="new" style="display:flex;flex-direction:column;gap:10px">
+              <span class="label">Who can join</span>
+              <div class="radio-group">
+                <div class="radio"><span class="t">I approve each traveler</span><span class="d">Travelers send a request. They pay after you approve them.</span></div>
+                <div class="radio on"><span class="t">Anyone can join right away</span><span class="d">No request. Travelers join and go straight to checkout.</span></div>
+              </div>
+            </div>
+            <span class="label">Getting paid</span>
+            <div class="radio-group"><div class="radio on"><span class="t">Collect payment in Swellyo</span><span class="d">Travelers pay by card. A deposit now, the rest before the trip.</span></div></div>
+          </div>
+        </div></div>
+        <figcaption><b>Create a trip, pricing step</b><span>Two new blocks under the price. The private room is optional. "Who can join" starts on "I approve each traveler", so nothing changes unless the operator picks the other one.</span></figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="dark-top"><div class="status"><span>4:46</span><span>●●●</span></div><div class="nav"><span class="back">‹</span>Edit trip</div></div>
+          <div class="body">
+            <span class="group-title">Price</span>
+            <div class="group">
+              <div class="row-e">Price per person <span>USD 2,500</span></div>
+              <div class="row-e">Deposit <span>USD 500</span></div>
+              <div class="row-e new">Private room <span>USD 3,200</span></div>
+              <div class="row-e">What's included <span></span></div>
+              <div class="row-e new">Who can join <span>Right away</span></div>
+              <div class="row-e">Getting paid <span>In Swellyo</span></div>
+            </div>
+          </div>
+        </div></div>
+        <figcaption><b>Edit a published trip</b><span>Two new rows. "Private room" opens the same Price &amp; deposit sheet, because the deposit can't be more than either room price.</span></figcaption>
+      </figure>
+
+      <figure>
+        <div class="phone"><div class="screen">
+          <div class="dark-top"><div class="status"><span>4:46</span><span>●●●</span></div><div class="nav"><span class="back">‹</span>Edit trip</div></div>
+          <div class="body"><div class="group"><div class="row-e">Price per person <span>USD 2,500</span></div><div class="row-e">Deposit <span>USD 500</span></div></div></div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <p class="h">Who can join</p>
+            <div class="opt"><div><div class="t">I approve each traveler</div><div class="d">Travelers send a request. They pay after you approve them.</div></div><span class="c"></span></div>
+            <div class="opt on"><div><div class="t">Anyone can join right away</div><div class="d">No request. Travelers join and go straight to checkout.</div></div><span class="c">✓</span></div>
+            <span class="note">Requests already waiting stay waiting. Approve or decline them as usual.</span>
+            <div class="save">Save</div>
+          </div>
+        </div></div>
+        <figcaption><b>"Who can join" sheet</b><span>Switching to "right away" doesn't approve anyone automatically. Pending requests are still there for the operator to decide.</span></figcaption>
+      </figure>
+
+      <figure class="wide">
+        <div class="desk">
+          <div class="desk-bar"><i></i><i></i><i></i></div>
+          <div class="desk-body">
+            <h3>Money · Travelers</h3>
+            <div class="tscroll">
+              <table>
+                <thead><tr><th>Traveler</th><th>Total</th><th>Deposit</th><th>Final payment</th><th>Paid so far</th></tr></thead>
+                <tbody>
+                  <tr><td>Maya R.</td><td class="num">$3,200 <mark>· Private room</mark></td><td><span class="pill">Paid</span></td><td><span class="pill wait">Due Jun 1</span></td><td class="num">$500</td></tr>
+                  <tr><td>Tom B.</td><td class="num">$2,500</td><td><span class="pill">Paid</span></td><td><span class="pill">Paid</span></td><td class="num">$2,500</td></tr>
+                  <tr><td>Lina K.</td><td class="num">$2,500</td><td><span class="pill wait">Not paid</span></td><td><span class="pill wait">Due Jun 1</span></td><td class="num">$0</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <span class="mut">Shared room travelers show the total only. The same label appears on each traveler's own page.</span>
+          </div>
+        </div>
+        <figcaption><b>Operator dashboard (desktop)</b><span>The only change is the "Private room" label next to the total.</span></figcaption>
+      </figure>
+
+    </div>
+  </section>
+</div>

@@ -12,9 +12,30 @@
 // with reordering is one tap away once the trip is live.
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { EditGearItemSheet } from '../gear/EditGearItemSheet';
 import { TripIcon } from '../tripIcons';
 import { textStyle, textStyles } from '../../../theme/typography';
+
+// The usual surf-trip kit, one tap each. Picking one adds the exact label to
+// the same string[] the free-text rows write, so guests and the post-publish
+// editor see no difference between a chip and a typed item.
+export const COMMON_PACKING_ITEMS = [
+  'Surf wax',
+  'Reef-safe sunscreen',
+  'Rash guard',
+  'Wetsuit',
+  'Leash',
+  'Fins',
+  'Reef booties',
+  'Board bag',
+  'Ding repair kit',
+  'Sun hat',
+  'Reusable water bottle',
+  'Beach towel',
+] as const;
+
+const COMMON_SET = new Set<string>(COMMON_PACKING_ITEMS.map(n => n.toLowerCase()));
 
 type Sheet = { mode: 'add' } | { mode: 'edit'; index: number } | null;
 
@@ -42,6 +63,15 @@ export const PackingListEditor: React.FC<PackingListEditorProps> = ({ items, onC
     setSheet(null);
   };
 
+  const has = (label: string) => items.some(n => n.toLowerCase() === label.toLowerCase());
+  const toggleCommon = (label: string) => {
+    onChange(
+      has(label)
+        ? items.filter(n => n.toLowerCase() !== label.toLowerCase())
+        : [...items, label],
+    );
+  };
+
   // Names already used (minus the one being edited) for the sheet's dedupe.
   const existingNames =
     sheet?.mode === 'edit' ? items.filter((_, i) => i !== sheet.index) : items;
@@ -55,7 +85,32 @@ export const PackingListEditor: React.FC<PackingListEditorProps> = ({ items, onC
         </Text>
       </View>
 
-      {items.map((name, index) => (
+      <View style={styles.chips}>
+        {COMMON_PACKING_ITEMS.map(label => {
+          const on = has(label);
+          return (
+            <Pressable
+              key={label}
+              onPress={() => toggleCommon(label)}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={label}
+              hitSlop={4}
+              style={({ pressed }) => [
+                styles.chip,
+                on && styles.chipOn,
+                pressed && styles.chipPressed,
+              ]}
+            >
+              {on ? <Ionicons name="checkmark" size={14} color={ACCENT} /> : null}
+              <Text style={[styles.chipText, on && styles.chipTextOn]}>{label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* Typed items (anything not in the chips above) stay editable rows. */}
+      {items.map((name, index) => COMMON_SET.has(name.toLowerCase()) ? null : (
         <Pressable
           key={name}
           onPress={() => setSheet({ mode: 'edit', index })}
@@ -77,7 +132,7 @@ export const PackingListEditor: React.FC<PackingListEditorProps> = ({ items, onC
         accessibilityLabel="Add an item to the packing list"
         style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
       >
-        <Text style={styles.addText}>+ Add Item</Text>
+        <Text style={styles.addText}>+ Add your own</Text>
       </Pressable>
 
       <Text style={styles.hint}>
@@ -99,8 +154,27 @@ export const PackingListEditor: React.FC<PackingListEditorProps> = ({ items, onC
   );
 };
 
+const ACCENT = '#05BCD3';
+
 const styles = StyleSheet.create({
   root: { gap: 8 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingBottom: 4 },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
+    backgroundColor: '#FFFFFF',
+  },
+  chipOn: { borderColor: ACCENT, backgroundColor: '#EAF9FB' },
+  // Press feedback only; selection itself is instant (picked many times in a row).
+  chipPressed: { transform: [{ scale: 0.97 }] },
+  chipText: { ...textStyles.B3, color: '#333333' },
+  chipTextOn: { ...textStyle('B3', '700'), color: '#333333' },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -29,6 +29,7 @@ import { SHEET } from '../TripBottomSheet';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 import Thumb from '../../Thumb';
 import type { EnrichedGearRequest } from '../../../services/trips/groupTripsService';
 
@@ -63,6 +64,8 @@ export const GearRequestsSheet: React.FC<Props> = ({
 
   // Fade the backdrop, slide the sheet (matches the other bottom sheets).
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(false);
   // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
   const insets = useSafeAreaInsets();
 
@@ -135,7 +138,7 @@ export const GearRequestsSheet: React.FC<Props> = ({
         <Pressable style={s.container} onPress={onClose}>
           <Animated.View pointerEvents="none" style={[s.backdrop, { opacity: backdropOpacity }]} />
           <Animated.View
-            style={{ transform: [{ translateY }, { translateY: kbLift }] }}
+            style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }, { translateY: kbLift }] }}
             onLayout={onSheetLayout}
           >
             <Pressable

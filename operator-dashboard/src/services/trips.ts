@@ -322,3 +322,23 @@ export async function fetchDepartedMembers(tripId: string): Promise<DepartedMemb
     priceTotalUsd: null,
   }));
 }
+
+/**
+ * Which room each traveler picked at checkout: userId -> 'private'. Travelers
+ * on a shared room (or a trip with no private room) are simply absent.
+ *
+ * Reads `room_type` off the base table — it is not a money column, so it is
+ * granted to every signed-in user (migration 20261111000000, applied from the
+ * app side; this page adds nothing to the database). Before that migration is
+ * applied the column does not exist, and this returns an empty map rather than
+ * breaking the money page over a label.
+ */
+export async function fetchPrivateRoomTravelers(tripId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('group_trip_participants')
+    .select('user_id')
+    .eq('trip_id', tripId)
+    .eq('room_type', 'private');
+  if (error) return new Set();
+  return new Set((data ?? []).map((r: any) => r.user_id as string));
+}

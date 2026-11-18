@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Priority Fixes Report</title>
+<style>
+  :root { --ink:#1d1d1f; --muted:#6b6b70; --line:#e6e6e8; --bg:#fafafa; --card:#fff; --done:#22c55e; --todo:#9a9aa0; --part:#f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.55 -apple-system, BlinkMacSystemFont, "Inter", Segoe UI, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .note { background:#fff7e6; border:1px solid #f5d9a8; border-radius:12px; padding:12px 14px; margin: 0 0 24px; }
+  .item { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; margin: 0 0 12px; }
+  .item h2 { font-size:17px; margin:0 0 6px; display:flex; gap:10px; align-items:baseline; }
+  .tag { font-size:12px; font-weight:700; border-radius:6px; padding:2px 8px; color:#fff; white-space:nowrap; }
+  .done { background:var(--done); } .todo { background:var(--todo); } .part { background:var(--part); }
+  .item p { margin: 4px 0; }
+  .what { color: var(--muted); font-size: 14px; }
+  code { background:#f2f2f4; border-radius:4px; padding:1px 5px; font-size: 13px; }
+  img { width:100%; border:1px solid var(--line); border-radius:12px; margin: 8px 0 24px; }
+  h3 { margin: 28px 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Priority Fixes: what was done</h1>
+  <p class="sub">9 Nov 2026 · Swellyo app · from the Figma "Priority Fixes" list</p>
+
+  <div class="note">
+    <b>About screenshots.</b> I could not take real app screenshots of the changes.
+    The local web build does not start (a Stripe package breaks it on web, and that problem was there before these changes).
+    The app on the simulator is the old store build 2.0.6, so it does not have this code.
+    Real screenshots need a dev build on the simulator and a signed-in account with a test trip.
+    Below is the Figma list with the done items marked, plus a short note for each fix.
+    Nothing is committed or shipped yet.
+  </div>
+
+  <img src="figma-status.png" alt="Figma Priority Fixes table with green Done markers">
+
+  <h3>Done (9)</h3>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 1. Complete button after Personal Info (allergies)</h2>
+    <p>The button now says <b>Complete</b> and you can always tap it. If something is missing, it closes the keyboard and shows in red what is still needed. When all is filled, it saves and goes to the next onboarding step.</p>
+    <p class="what">Why testers were stuck: the old button was grey and did nothing until every question had an answer, and the hint was tiny and grey.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 2. Waiver: guest types their name and signs</h2>
+    <p>The name is no longer filled in from the profile. The guest types their <b>full legal name</b> in an open field ("Sign with your full legal name"), then taps <b>Sign and complete</b>. The text says that typing your name signs the waiver. This works in onboarding and in the Plan tab.</p>
+    <p class="what">This fixes nicknames and joined-up names on waivers that guests could not change.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 3. Waiver zoom and signed state</h2>
+    <p>You can now pinch to zoom the waiver up to 4×, inline and in full screen (it was locked at 1×). Text-only waivers use bigger text. After signing, the screen shows <b>"Signed by [name] on [date]"</b> instead of a blank-looking waiver.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 4. Chat notifications open the chat</h2>
+    <p>Tapping a trip chat notification now waits until the app knows you can see the chat, then opens the <b>Chat tab</b>. Before, it sometimes decided too early and fell back to the trip homepage. The app already hides banners for the chat you are looking at.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 8. Android profile photo freeze</h2>
+    <p>The photo is now made smaller (1024px) while it is cropped, so the phone no longer has to hold a huge image. If cropping fails, the app shows a message and closes the cropper instead of freezing.</p>
+    <p class="what">The cropped copy in the gallery does not come from our code. It is most likely the phone's own photo app.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 10. Close bottom sheets by tapping outside</h2>
+    <p>The trip-creation sheets and the profile destinations sheet now close when you tap the dark area outside them. Swipe down still works. Most other sheets already did this.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 12. CI and STOKE logos at the top of the trip page</h2>
+    <p>The same CI and STOKE logos from the Explore card now show at the top of the trip's main card, above the dates. Both screens use one shared component, so they always match.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 13. Same "done" color everywhere</h2>
+    <p>In operator setup, finished steps now all use the same cyan color as the checklist. Before, Stripe, Waiver and Insurance turned green while Currency, Policy and Agreement did not.</p>
+    <p class="what">Please confirm this was the screen the tester meant.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag done">DONE</span> 14. "Did they get my message?" in trip chat</h2>
+    <p>Your own messages in trip chats now show a grey tick once they are sent. Before, group chats showed no tick at all. Group chats still do not show "read", because many people read them.</p>
+  </div>
+
+  <h3>Partly done (2)</h3>
+
+  <div class="item">
+    <h2><span class="tag part">PART</span> 9. Swelly message limit</h2>
+    <p>The limit is real: 40 messages per chat and 100 per day. Now, when a chat is full, Swelly offers a <b>Start new chat</b> button. To raise the limit, set <code>SWELLY_MAX_MESSAGES_PER_CHAT</code> and <code>SWELLY_MAX_MESSAGES_PER_DAY</code> in the Supabase function secrets. No code change is needed.</p>
+    <p class="what">The "save resources / environment" reason is not in our code or prompts. Swelly made it up.</p>
+  </div>
+
+  <div class="item">
+    <h2><span class="tag part">PART</span> 11. STOKE / CI easy to find later</h2>
+    <p>The operator's trip edit screen now has its own <b>Certifications</b> row, showing "STOKE · CI" or "Add". Making badges fully automatic, from data we collect about hotels and regions, needs that data first.</p>
+  </div>
+
+  <h3>Not done: needs a decision or another owner (3)</h3>
+
+  <div class="item">
+    <h2><span class="tag todo">TO DO</span> 5. Which page opens first</h2>
+    <p>This is a product decision: should the app open on Explore, or on the trip you joined? Once decided, it is a small change.</p>
+  </div>
+  <div class="item">
+    <h2><span class="tag todo">TO DO</span> 6. Vertical + side scroll on Explore</h2>
+    <p>The Explore deck was made vertical-only on purpose earlier. Please confirm we want to change that, and how it should look.</p>
+  </div>
+  <div class="item">
+    <h2><span class="tag todo">TO DO</span> 7. Lineup explanation</h2>
+    <p>Assigned to Moshe.</p>
+  </div>
+</main>
+</body>
+</html>

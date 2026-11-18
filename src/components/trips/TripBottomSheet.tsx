@@ -25,6 +25,7 @@ import { KeyboardAvoidingView } from '../../utils/keyboardAvoidingView';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../hooks/useSheetMaxHeight';
 
 const SHEET_MAX_HEIGHT = Dimensions.get('window').height * 0.9;
 
@@ -94,6 +95,9 @@ export const TripBottomSheet: React.FC<Props> = ({
   // grabber + header double as the swipe-down-to-dismiss drag zone.
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
+  // 90% of the screen by design, but never past the status bar — and with the keyboard
+  // up (avoidKeyboard) the KAV eats that much room, so the cap shrinks with it.
+  const sheetMaxHeight = Math.min(SHEET_MAX_HEIGHT, useSheetMaxHeight(!!avoidKeyboard && visible));
   // Android: pad the bottom-most element (footer if present, else body) past the
   // system nav/gesture bar. iOS keeps the static design values (no change).
   const insets = useSafeAreaInsets();
@@ -117,7 +121,7 @@ export const TripBottomSheet: React.FC<Props> = ({
             style={{ transform: [{ translateY }] }}
             onLayout={onSheetLayout}
           >
-            <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
+            <Pressable style={[styles.sheet, { maxHeight: sheetMaxHeight }]} onPress={e => e.stopPropagation()}>
             {/* Grabber doubles as the swipe-down handle. */}
             <View style={styles.grabberRow} {...panHandlers}>
               <View style={styles.grabber} />

@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TripIcon } from '../tripIcons';
 import { ff } from '../../../theme/fonts';
 import { useSheetTransition } from '../../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../../hooks/useSheetMaxHeight';
 
 const MAX_LEN = 21;
 
@@ -70,6 +71,8 @@ export const EditGearItemSheet: React.FC<Props> = ({
   };
 
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } = useSheetTransition(visible, onClose);
+  // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+  const sheetMaxHeight = useSheetMaxHeight(true);
   // Android: pad past the system nav/gesture bar (iOS keeps the static 24).
   const insets = useSafeAreaInsets();
 
@@ -85,7 +88,7 @@ export const EditGearItemSheet: React.FC<Props> = ({
             style={[styles.backdrop, { opacity: backdropOpacity }]}
           />
           <Animated.View
-            style={{ transform: [{ translateY }] }}
+            style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }}
             onLayout={onSheetLayout}
           >
             <Pressable

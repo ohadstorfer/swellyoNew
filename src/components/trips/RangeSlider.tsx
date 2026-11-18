@@ -125,9 +125,26 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
     return ((v - min) / range) * usable;
   };
 
+  // What the slider itself last sent up. A prop equal to it is just our own
+  // value coming back: moving the thumb to it again would yank it to an older
+  // spot mid-drag (the round trip lags the finger), so the thumb flickers.
+  // Only an outside change (reset, clear, first measure) repositions it.
+  const emittedRef = useRef<{ lower: number; upper: number } | null>(null);
+  const syncedForRef = useRef({ trackWidth: -1, min, max });
+
   useEffect(() => {
-    if (!draggingLower.value) lowerSV.value = valueToPx(lower);
-    if (!draggingUpper.value) upperSV.value = valueToPx(upper);
+    const geometryChanged =
+      syncedForRef.current.trackWidth !== trackWidth ||
+      syncedForRef.current.min !== min ||
+      syncedForRef.current.max !== max;
+    syncedForRef.current = { trackWidth, min, max };
+    const own = emittedRef.current;
+    if (!draggingLower.value && (geometryChanged || own?.lower !== lower)) {
+      lowerSV.value = valueToPx(lower);
+    }
+    if (!draggingUpper.value && (geometryChanged || own?.upper !== upper)) {
+      upperSV.value = valueToPx(upper);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lower, upper, trackWidth, min, max]);
 
@@ -138,6 +155,7 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
     const last = lastReportedRef.current;
     if (nextLower !== last.lower || nextUpper !== last.upper) {
       lastReportedRef.current = { lower: nextLower, upper: nextUpper };
+      emittedRef.current = { lower: nextLower, upper: nextUpper };
       onChange({ lower: nextLower, upper: nextUpper });
     }
   };
@@ -256,6 +274,9 @@ const NativeRangeSlider: React.FC<RangeSliderProps> = ({
   const lastIntUpperSV = useSharedValue(upper);
   useDerivedValue(() => {
     if (usable <= 0) return;
+    // Only a finger moves values up. A thumb placed from props (reset, first
+    // measure) must not echo that value back to the parent.
+    if (!draggingLower.value && !draggingUpper.value) return;
     const nextLower = pxToValueWorklet(lowerSV.value);
     const nextUpper = pxToValueWorklet(upperSV.value);
     if (

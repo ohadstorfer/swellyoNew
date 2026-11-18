@@ -92,6 +92,7 @@ import { LevelsSheetContent } from '../../components/trips/sheets/LevelsSheetCon
 import { WaveSizeSheetContent } from '../../components/trips/sheets/WaveSizeSheetContent';
 import { StyleSheetContent } from '../../components/trips/sheets/StyleSheetContent';
 import { AgeSheetContent } from '../../components/trips/sheets/AgeSheetContent';
+import { pickStayGalleryPhotos, STAY_GALLERY_MAX } from '../../components/trips/create/StayGalleryStrip';
 import { WhenSheetContent } from '../../components/trips/sheets/WhenSheetContent';
 import { HowItWorksSheetContent } from '../../components/trips/sheets/HowItWorksSheetContent';
 import { VibeSheetContent } from '../../components/trips/sheets/VibeSheetContent';
@@ -167,10 +168,15 @@ import { Images } from '../../assets/images';
 import { WaveSheetContent } from '../../components/trips/sheets/WaveSheetContent';
 import { OperatorStayCard } from '../../components/trips/create/OperatorStayCard';
 import { PackingListEditor } from '../../components/trips/create/PackingListEditor';
-import { ItineraryDayEditor, ItineraryDayList } from '../../components/trips/create/ItineraryEditor';
+import {
+  ItineraryDayEditor,
+  ItineraryDayList,
+  confirmLeaveUntitledDay,
+} from '../../components/trips/create/ItineraryEditor';
 import {
   cleanItinerary,
   dayLabel,
+  dayNeedsTitle,
   isDayPlanned,
   tripCalendarDays,
   uploadItineraryPhotos,
@@ -216,7 +222,8 @@ const DESCRIPTION_AMBER_THRESHOLD = 450;
 // (stokeCertified, ciSurfConservation) and the guest packing list on the
 // Requirements step (suggestedPackingOn, suggestedPacking).
 // v9 -> v10: the Flow C Trip itinerary step (itinerary).
-export const WIZARD_STATE_VERSION = 10;
+// v10 -> v11: Flow C room variants + join mode (privateRoomPrice, joinMode).
+export const WIZARD_STATE_VERSION = 11;
 
 // Step KEYS — flat step list. Preview is the final step (publishes directly).
 type StepKey =
@@ -339,6 +346,7 @@ const MONTH_SHORT: Record<string, string> = {
 // Field error keys (per spec). Used as keys in useFieldErrors.
 // -----------------------------------------------------------------------------
 type FieldKey =
+  | 'privatePrice'
   | 'waiverText'
   | 'title'
   | 'description'
@@ -432,6 +440,9 @@ interface WizardState extends Record<string, unknown> {
   accommodationName: string;
   accommodationUrl: string;
   accommodationImageUri: string | null;
+  /** Extra stay photos after the main one (local uris until saved, then
+   *  remote). OPTIONAL so old drafts still load without a version bump. */
+  accommodationGalleryUris?: string[];
 
   // Flow C only — the two certification questions under the stay form.
   stokeCertified: boolean;
@@ -456,6 +467,12 @@ interface WizardState extends Record<string, unknown> {
   paymentMode: 'offline' | 'managed';
   /** Blank means one single payment — no deposit row is created at all. */
   depositAmount: string;
+  /** Flow C only. The PRIVATE room price; costPerPerson is the shared room.
+   *  Blank = no room choice for travelers. */
+  privateRoomPrice: string;
+  /** Flow C only. 'approval' = request to join (default); 'instant' = travelers
+   *  join and pay right away. */
+  joinMode: 'approval' | 'instant';
 
   // Step 5 (Flow C only) — traveler requirements. Written as
   // `organized_trip_requirements` rows on publish, never before; the wizard
@@ -547,6 +564,8 @@ const INITIAL_STATE: WizardState = {
   priceInclusions: {},
   paymentMode: 'offline',
   depositAmount: '',
+  privateRoomPrice: '',
+  joinMode: 'approval',
   // The starting point, not the rule (Ohad, 21 Aug). Every operator trip is
   // seeded with the same seven things, split the same way, so a traveler who
   // has done one operator trip knows roughly what the next will ask — but the
@@ -851,6 +870,7 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardS
     accommodationName: trip.accommodation_name ?? '',
     accommodationUrl: trip.accommodation_url ?? '',
     accommodationImageUri: trip.accommodation_image_url ?? null,
+    accommodationGalleryUris: trip.accommodation_gallery_urls ?? [],
     stokeCertified: trip.stoke_certified === true,
     ciSurfConservation: trip.ci_surf_conservation === true,
     hostDestFamiliarity: trip.host_destination_familiarity ?? null,
@@ -871,6 +891,11 @@ const stateFromTrip = (trip: GroupTrip, operatorCurrency: CurrencyCode): WizardS
     // stored column is always canonical USD.
     depositAmount:
       trip.deposit_amount != null ? String(toEditCurrency(trip.deposit_amount)) : '',
+    privateRoomPrice:
+      trip.private_room_price_usd != null
+        ? String(toEditCurrency(trip.private_room_price_usd))
+        : '',
+    joinMode: trip.join_mode === 'instant' ? 'instant' : 'approval',
     visibility: (trip.visibility as Visibility) ?? 'public',
   };
 };
@@ -1348,9 +1373,9 @@ const formatAgeSummary = (min: string, max: string): string => {
   if (min && max) return `${min} - ${max}`;
   if (min) return `${min}+`;
   if (max) return `Up to ${max}`;
-  // Default "any age" — rendered as a real value (same bold styling as a
-  // number) instead of as the italic "tap to set" hint.
-  return 'Any';
+  // Default: no age set means all ages — rendered as a real value (same bold
+  // styling as a number) instead of as the italic "tap to set" hint.
+  return 'All ages';
 };
 
 // -----------------------------------------------------------------------------
@@ -1818,6 +1843,7 @@ export default function CreateTripFlowA({
         ...prev,
         costPerPerson: convert(prev.costPerPerson),
         depositAmount: convert(prev.depositAmount),
+        privateRoomPrice: convert(prev.privateRoomPrice),
         budgetManualMin: convert(prev.budgetManualMin),
         budgetManualMax: convert(prev.budgetManualMax),
       }));
@@ -2030,6 +2056,13 @@ export default function CreateTripFlowA({
           const price = rawPrice != null && Number.isNaN(rawPrice) ? null : rawPrice;
           const priceError = validatePrice(price);
           if (priceError) fail('price', priceError);
+          // Private room: optional. When set, a real price, and the deposit
+          // must fit inside it too (group_trips_private_room_price_check).
+          const rawPrivate = state.privateRoomPrice ? parseInt(state.privateRoomPrice, 10) : null;
+          if (rawPrivate != null && !Number.isNaN(rawPrivate)) {
+            const privateError = rawPrivate <= 0 ? 'Enter a price, or leave it blank' : validatePrice(rawPrivate);
+            if (privateError) fail('privatePrice', privateError);
+          }
           if (isFixedFlow && state.paymentMode === 'managed') {
             // Publishing a trip that asks for money it cannot receive is the
             // one failure with no recovery for the traveler — but "cannot
@@ -2066,6 +2099,12 @@ export default function CreateTripFlowA({
             const depositError = validateDeposit(dep, depositPrice);
             if (depositError) {
               setError('deposit', depositError);
+              return false;
+            }
+            const privateForDeposit =
+              state.privateRoomPrice ? parseInt(state.privateRoomPrice, 10) : null;
+            if (dep != null && privateForDeposit != null && privateForDeposit > 0 && dep > privateForDeposit) {
+              setError('deposit', 'The deposit can’t be more than the private room price');
               return false;
             }
           }
@@ -2279,6 +2318,27 @@ export default function CreateTripFlowA({
           accommodationImageUrl = accRes.url;
         }
       }
+      // Extra stay photos: upload the new (local) ones, keep the rest. Only
+      // with a main photo — the gallery follows it.
+      let accommodationGalleryUrls: string[] = [];
+      if (accommodationCommitted && accommodationImageUrl) {
+        accommodationGalleryUrls = await Promise.all(
+          (state.accommodationGalleryUris ?? []).slice(0, STAY_GALLERY_MAX).map(async uri => {
+            if (isRemoteUrl(uri)) return uri;
+            const res = await uploadTripImage(uri, hostId, 'accommodation');
+            if (!res.success || !res.url) {
+              throw new Error(res.error || 'Failed to upload a stay photo');
+            }
+            return res.url;
+          }),
+        );
+      }
+      // Written only when there is something to write or the loaded trip
+      // carried the column, so a database without it yet keeps working.
+      const galleryFields: { accommodation_gallery_urls?: string[] | null } =
+        accommodationGalleryUrls.length > 0 || initialTrip?.accommodation_gallery_urls !== undefined
+          ? { accommodation_gallery_urls: accommodationGalleryUrls.length ? accommodationGalleryUrls : null }
+          : {};
 
       const exactDates = state.datesMode === 'exact';
       const dateMonths = exactDates ? [] : expandMonthRange(state.monthFrom, state.monthTo);
@@ -2343,6 +2403,16 @@ export default function CreateTripFlowA({
         rawDeposit == null || operatorCurrency === 'USD' || saveRate == null
           ? rawDeposit
           : fromTripCurrency(rawDeposit, saveRate);
+      // Same USD-canonical rule as cost_per_person. Blank / 0 = no private room.
+      const rawPrivateInput =
+        isFixedFlow && state.privateRoomPrice ? parseInt(state.privateRoomPrice, 10) : null;
+      const rawPrivate = rawPrivateInput != null && rawPrivateInput > 0 ? rawPrivateInput : null;
+      const privateRoomPriceUsd =
+        rawPrivate == null || operatorCurrency === 'USD' || saveRate == null
+          ? rawPrivate
+          : fromTripCurrency(rawPrivate, saveRate);
+      const joinMode: 'approval' | 'instant' =
+        isFixedFlow && state.joinMode === 'instant' ? 'instant' : 'approval';
       const priceInclusions = isFixedFlow
         ? normalizePriceInclusions(state.priceInclusions)
         : null;
@@ -2398,6 +2468,7 @@ export default function CreateTripFlowA({
             ? state.accommodationUrl.trim() || null
             : null,
           accommodation_image_url: accommodationCommitted ? accommodationImageUrl : null,
+          ...galleryFields,
           // budget_currency/cost_per_person are the operator's INPUT currency only —
           // budget_min/budget_max/cost_per_person are always canonical USD. Never
           // multiply an amount column by budget_currency; use budget_fx_rate only
@@ -2408,6 +2479,8 @@ export default function CreateTripFlowA({
           budget_fx_rate: budget.fxRate,
           budget_tier: state.manualBudget ? null : state.budgetTier,
           cost_per_person: fixedPrice,
+          private_room_price_usd: privateRoomPriceUsd,
+          join_mode: joinMode,
           price_inclusions: priceInclusions,
           payment_mode: editPaymentMode,
           deposit_amount: editDepositAmount,
@@ -2458,6 +2531,7 @@ export default function CreateTripFlowA({
             ? state.accommodationUrl.trim() || null
             : null,
           accommodation_image_url: accommodationCommitted ? accommodationImageUrl : null,
+          ...galleryFields,
 
           age_min: state.ageMin ? parseInt(state.ageMin, 10) : null,
           age_max: state.ageMax ? parseInt(state.ageMax, 10) : null,
@@ -2478,6 +2552,11 @@ export default function CreateTripFlowA({
           cost_per_person: fixedPrice,
           price_inclusions: priceInclusions,
           payment_mode: isFixedFlow ? state.paymentMode : 'offline',
+          // Room variants + join mode (20261111000000). Only sent on operator
+          // trips so A/B creates keep working before the migration is applied.
+          ...(isFixedFlow
+            ? { private_room_price_usd: privateRoomPriceUsd, join_mode: joinMode }
+            : {}),
           deposit_amount:
             isFixedFlow && state.paymentMode === 'managed' ? depositAmountUsd : null,
           // Offline C trips only. Managed trips carry the same value on their
@@ -2669,6 +2748,12 @@ export default function CreateTripFlowA({
   // -----------------------------------------------------------------------
   const closeDayEditor = useCallback(() => {
     if (!editingDay) return;
+    // Only Back can get here in this state (Done is disabled): saving it would
+    // let publish drop the day silently, so ask first.
+    if (dayNeedsTitle(editingDay)) {
+      confirmLeaveUntitledDay(() => setEditingDay(null));
+      return;
+    }
     update('itinerary', upsertDay(state.itinerary, editingDay));
     setEditingDay(null);
   }, [editingDay, state.itinerary, update]);
@@ -3404,7 +3489,7 @@ export default function CreateTripFlowA({
                 focusedInputRef.current = null;
               }
             }}
-            placeholder="Bali and Barrels"
+            placeholder="e.g. Bali and Barrels"
             placeholderTextColor={COLORS.textPlaceholder}
             maxLength={TRIP_TITLE_MAX_LENGTH}
             returnKeyType="done"
@@ -3449,7 +3534,7 @@ export default function CreateTripFlowA({
                 focusedInputRef.current = null;
               }
             }}
-            placeholder="Tell people what makes this trip special - the surf, the crew, the place."
+            placeholder="e.g. A week of reef breaks around Uluwatu with a small crew. Two surf sessions a day, sunset yoga, and the best warungs on the Bukit."
             placeholderTextColor={COLORS.textPlaceholder}
             multiline
             numberOfLines={6}
@@ -3620,6 +3705,24 @@ export default function CreateTripFlowA({
                 }
               }}
               onRemovePhoto={() => update('accommodationImageUri', null)}
+              galleryUris={state.accommodationGalleryUris ?? []}
+              onAddGalleryPhotos={async () => {
+                const current = state.accommodationGalleryUris ?? [];
+                const picked = await pickStayGalleryPhotos(STAY_GALLERY_MAX - current.length);
+                if (picked.length) {
+                  setState(s => ({
+                    ...s,
+                    accommodationGalleryUris: [...(s.accommodationGalleryUris ?? []), ...picked].slice(0, STAY_GALLERY_MAX),
+                  }));
+                  if (!hasBeenTouched) setHasBeenTouched(true);
+                }
+              }}
+              onRemoveGalleryPhoto={i =>
+                setState(s => ({
+                  ...s,
+                  accommodationGalleryUris: (s.accommodationGalleryUris ?? []).filter((_, k) => k !== i),
+                }))
+              }
               onToggleStoke={() => update('stokeCertified', !state.stokeCertified)}
               onToggleCi={() => update('ciSurfConservation', !state.ciSurfConservation)}
               onFieldFocus={handleFieldFocus}
@@ -4081,6 +4184,76 @@ export default function CreateTripFlowA({
 
         {isFixedFlow && (
           <>
+            {/* Room variants. The price above is the shared room; a private
+                room price is optional and lets travelers choose at checkout. */}
+            <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
+              Private room
+            </Text>
+            <Text style={[localStyles.priceHelper, { marginBottom: 8 }]}>
+              The price above is for a shared room. Add a private room price to let
+              travelers choose at checkout, or leave it blank.
+            </Text>
+            <View
+              style={[localStyles.moneyField, !!errors.privatePrice && localStyles.inputError]}
+            >
+              <Text style={localStyles.moneyCurrency}>{operatorCurrency}</Text>
+              <TextInput
+                style={localStyles.moneyInput}
+                value={state.privateRoomPrice}
+                onChangeText={t => {
+                  update('privateRoomPrice', t.replace(/[^0-9]/g, ''));
+                  if (errors.privatePrice) setError('privatePrice', null);
+                }}
+                placeholder="3800"
+                placeholderTextColor={COLORS.textPlaceholder}
+                keyboardType="number-pad"
+                maxLength={6}
+                accessibilityLabel={`Private room price in ${operatorCurrency}`}
+              />
+            </View>
+            {errors.privatePrice ? (
+              <Text style={localStyles.errorText}>{errors.privatePrice}</Text>
+            ) : null}
+
+            <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
+              Who can join
+            </Text>
+            <View style={localStyles.summaryGroup}>
+              <Pressable
+                onPress={() => update('joinMode', 'approval')}
+                style={({ pressed }) => [
+                  localStyles.payModeRow,
+                  state.joinMode === 'approval' && localStyles.payModeRowOn,
+                  pressed && { transform: [{ scale: 0.97 }] },
+                ]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: state.joinMode === 'approval' }}
+              >
+                <Text style={localStyles.payModeTitle}>I approve each traveler</Text>
+                <Text style={localStyles.payModeSub}>
+                  Travelers send a request. They pay after you approve them.
+                </Text>
+              </Pressable>
+
+              <View style={localStyles.payModeDivider} />
+
+              <Pressable
+                onPress={() => update('joinMode', 'instant')}
+                style={({ pressed }) => [
+                  localStyles.payModeRow,
+                  state.joinMode === 'instant' && localStyles.payModeRowOn,
+                  pressed && { transform: [{ scale: 0.97 }] },
+                ]}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: state.joinMode === 'instant' }}
+              >
+                <Text style={localStyles.payModeTitle}>Anyone can join right away</Text>
+                <Text style={localStyles.payModeSub}>
+                  No request. Travelers join and go straight to checkout.
+                </Text>
+              </Pressable>
+            </View>
+
             <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
               Getting paid
             </Text>
@@ -4556,10 +4729,10 @@ export default function CreateTripFlowA({
           style={[
             localStyles.counter,
             localStyles.leadCounter,
-            { color: state.hostLeadNote.length >= 250 ? COLORS.errorText : COLORS.textMuted },
+            { color: state.hostLeadNote.length >= 500 ? COLORS.errorText : COLORS.textMuted },
           ]}
         >
-          {state.hostLeadNote.length}/250
+          {state.hostLeadNote.length}/500
         </Text>
         <View style={[localStyles.inputWrap, localStyles.inputWrapTextarea]}>
           <Image
@@ -4570,11 +4743,11 @@ export default function CreateTripFlowA({
           <TextInput
             style={[localStyles.inputField, localStyles.inputFieldTextarea]}
             value={state.hostLeadNote}
-            onChangeText={t => update('hostLeadNote', t.slice(0, 250))}
-            placeholder="Mention anything that brings credibility to your experience here"
+            onChangeText={t => update('hostLeadNote', t.slice(0, 500))}
+            placeholder="e.g. 12 years guiding surfers in Bali, ISA Level 2 coach, lifeguard certified. I know every break on the Bukit and when it works."
             placeholderTextColor={COLORS.textPlaceholder}
             multiline
-            maxLength={250}
+            maxLength={500}
             textAlignVertical="top"
           />
         </View>
@@ -4626,6 +4799,8 @@ export default function CreateTripFlowA({
         : null,
       accommodationName: staySelected ? state.accommodationName || null : null,
       accommodationImageUri: staySelected ? state.accommodationImageUri : null,
+      accommodationGalleryUris:
+        staySelected && state.accommodationImageUri ? state.accommodationGalleryUris ?? [] : [],
       accommodationUrl: staySelected ? state.accommodationUrl || null : null,
       costPerPerson:
         isFixedFlow && state.costPerPerson
@@ -4815,6 +4990,8 @@ export default function CreateTripFlowA({
           state.maxParticipants ? parseInt(state.maxParticipants, 10) : null
         }
         onDone={onCreated}
+        // Crew is an operator-trip thing (Flow C), same gate as ensureOperatorOnCrew.
+        operatorId={isFixedFlow ? hostId : null}
       />
     );
   }
@@ -4839,11 +5016,9 @@ export default function CreateTripFlowA({
         onSecondary={onSecondary}
         onClose={guardedCancel}
         submitting={submitting}
-        primaryDisabled={
-          !!editingDay &&
-          !editingDay.title.trim() &&
-          editingDay.activities.some(a => a.name.trim().length > 0)
-        }
+        // Same rule as the post-publish editor: a day with photos or
+        // activities needs a title, or publish would drop it silently.
+        primaryDisabled={!!editingDay && dayNeedsTitle(editingDay)}
         hideProgress
         flushContent={step === 'preview'}
         focusedInputRef={focusedInputRef}
@@ -4921,7 +5096,7 @@ export default function CreateTripFlowA({
       <WizardBottomSheet
         visible={openSheet === 'age'}
         title="Age range"
-        subtitle={`Must span at least ${ageWindow} ${ageWindow === 1 ? 'year' : 'years'}`}
+        subtitle={`Default is all ages. A range must span at least ${ageWindow} ${ageWindow === 1 ? 'year' : 'years'}.`}
         largeTitle
         hideHeaderDivider
         extendBehindKeyboard

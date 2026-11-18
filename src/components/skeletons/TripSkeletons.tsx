@@ -5,7 +5,7 @@
 //
 // Keep these in step with the real screens. Sources:
 //   My Trips     → TripsScreen: TripFilterBar, TripCard
-//   Explore      → TripsScreen: ExploreTripCard + ExploreSwipeDeck
+//   Explore      → TripsScreen: ExploreTripCard + the horizontal carousel
 //   Trip detail  → TripDetailViewRedesigned (cover, hero card, info cards,
 //                  sections) + TripTabToggle + TripDetailScreen's cover buttons
 
@@ -13,7 +13,6 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SkeletonBase } from './SkeletonPrimitives';
-import { DECK_PEEK } from '../trips/ExploreSwipeDeck';
 
 /** Light silhouette drawn on top of a shimmering photo block. */
 const ON_PHOTO = 'rgba(255,255,255,0.7)';
@@ -77,19 +76,11 @@ export const MyTripsSkeleton: React.FC<{ count?: number }> = ({ count = 3 }) => 
 );
 
 // ---------------------------------------------------------------------------
-// Explore — the card stack (ExploreSwipeDeck) with the front card filled in.
+// Explore — the horizontal carousel: the first card filled in, the next peeking.
 // ---------------------------------------------------------------------------
-// Same as ExploreSwipeDeck's BACK_SCALE_STEP: each card behind is 10% smaller.
-const BACK_SCALE_STEP = 0.1;
 // ExploreTripCard geometry.
 const EX_FRAME_PAD = 8;
 const EX_INFO_H = 64;
-
-/** Where ExploreSwipeDeck draws the card `depth` slots behind the front one. */
-const deckTransform = (depth: number, height: number) => [
-  { translateY: depth * (height * (BACK_SCALE_STEP / 2) + DECK_PEEK) },
-  { scale: 1 - BACK_SCALE_STEP * depth },
-];
 
 const ExploreFrontCardSkeleton: React.FC = () => (
   <View style={styles.exFrame}>
@@ -149,31 +140,26 @@ const ExploreFrontCardSkeleton: React.FC = () => (
 );
 
 /**
- * Explore loading state. Only the stack is a skeleton — the title and filter
- * button are static and render from TripsScreen. Pass the same width/height
- * the real deck gets so the stack lands on the exact same footprint.
+ * Explore loading state. Only the carousel is a skeleton — the title and the
+ * search / filter buttons are static and render from TripsScreen. Pass the same
+ * width/height/gap/inset the real carousel gets so it lands on the exact same
+ * footprint: one card, and the next one peeking in on the right.
  */
-export const ExploreDeckSkeleton: React.FC<{ cardWidth: number; cardHeight: number }> = ({
-  cardWidth,
-  cardHeight,
-}) => (
-  <View style={{ width: cardWidth, height: cardHeight + DECK_PEEK * 2 }}>
-    {[2, 1].map(depth => (
-      <View
-        key={depth}
-        style={[
-          styles.exSlot,
-          { width: cardWidth, height: cardHeight, transform: deckTransform(depth, cardHeight) },
-        ]}
-      >
-        <View style={styles.exFrame}>
-          <View style={[styles.exImage, styles.exImageBack]} />
-          <View style={{ height: EX_INFO_H }} />
-        </View>
-      </View>
-    ))}
-    <View style={[styles.exSlot, { width: cardWidth, height: cardHeight }]}>
+export const ExploreDeckSkeleton: React.FC<{
+  cardWidth: number;
+  cardHeight: number;
+  gap: number;
+  inset: number;
+}> = ({ cardWidth, cardHeight, gap, inset }) => (
+  <View style={[styles.exRow, { height: cardHeight, paddingLeft: inset, gap }]}>
+    <View style={{ width: cardWidth, height: cardHeight }}>
       <ExploreFrontCardSkeleton />
+    </View>
+    <View style={{ width: cardWidth, height: cardHeight }}>
+      <View style={styles.exFrame}>
+        <View style={[styles.exImage, styles.exImageBack]} />
+        <View style={{ height: EX_INFO_H }} />
+      </View>
     </View>
   </View>
 );
@@ -444,7 +430,7 @@ const styles = StyleSheet.create({
   },
 
   // ── Explore ──
-  exSlot: { position: 'absolute', top: 0, left: 0 },
+  exRow: { flexDirection: 'row', alignSelf: 'stretch', overflow: 'hidden' },
   exFrame: {
     flex: 1,
     backgroundColor: '#FFFFFF',

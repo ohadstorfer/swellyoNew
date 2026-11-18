@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Modal, Pressable, Animated } from '
 import { Ionicons } from '@expo/vector-icons';
 import { Text } from '../Text';
 import { useSheetTransition } from '../../hooks/useSheetTransition';
+import { useSheetMaxHeight } from '../../hooks/useSheetMaxHeight';
 import type { EnrichedSurftripMember, SurftripRole } from '../../types/surftrips';
 
 interface ParticipantMenuSheetProps {
@@ -28,6 +29,8 @@ export const ParticipantMenuSheet: React.FC<ParticipantMenuSheetProps> = ({
   // before the early returns so hook order stays stable.
   const { mounted, backdropOpacity, translateY, onSheetLayout, panHandlers } =
     useSheetTransition(visible, onClose);
+    // Shared cap: the sheet never grows past the status bar (see useSheetMaxHeight).
+    const sheetMaxHeight = useSheetMaxHeight(false);
 
   if (!participant) return null;
 
@@ -83,7 +86,7 @@ export const ParticipantMenuSheet: React.FC<ParticipantMenuSheetProps> = ({
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dim, { opacity: backdropOpacity }]} />
-        <Animated.View style={{ transform: [{ translateY }] }} onLayout={onSheetLayout}>
+        <Animated.View style={{ maxHeight: sheetMaxHeight, transform: [{ translateY }] }} onLayout={onSheetLayout}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.handleZone} {...panHandlers}>
             <View style={styles.handle} />

@@ -33,6 +33,10 @@ import {
 } from '../../components/trips/sheets/PriceSheetContent';
 import { VisibilitySheetContent } from '../../components/trips/sheets/VisibilitySheetContent';
 import {
+  JoinModeSheetContent,
+  type JoinMode,
+} from '../../components/trips/sheets/JoinModeSheetContent';
+import {
   ActivitiesSheetContent,
   SurfFilmSheetContent,
   VideoAnalysisSheetContent,
@@ -132,7 +136,7 @@ type SheetKey =
   | 'levels' | 'boards' | 'wave' | 'age'
   | 'howItWorks' | 'vibe' | 'stayType'
   | 'price' | 'includes' | 'gettingPaid' | 'payDeadline' | 'cancellation'
-  | 'visibility'
+  | 'visibility' | 'joinMode'
   | 'requirements'
   | null;
 
@@ -677,6 +681,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     name: trip?.accommodation_name ?? '',
     url: trip?.accommodation_url ?? '',
     photoUri: trip?.accommodation_image_url ?? null,
+    galleryUris: trip?.accommodation_gallery_urls ?? [],
     stokeCertified: trip?.stoke_certified === true,
     ciSurfConservation: trip?.ci_surf_conservation === true,
   }), [
@@ -684,6 +689,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
     trip?.accommodation_name,
     trip?.accommodation_url,
     trip?.accommodation_image_url,
+    trip?.accommodation_gallery_urls,
     trip?.stoke_certified,
     trip?.ci_surf_conservation,
   ]);
@@ -697,7 +703,13 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
   const priceInitial = useMemo(() => ({
     costPerPerson: trip?.cost_per_person ?? null,
     depositAmount: trip?.deposit_amount ?? null,
-  }), [trip?.cost_per_person, trip?.deposit_amount]);
+    privateRoomPrice: trip?.private_room_price_usd ?? null,
+  }), [trip?.cost_per_person, trip?.deposit_amount, trip?.private_room_price_usd]);
+
+  const joinModeInitial = useMemo(
+    () => ({ joinMode: (trip?.join_mode === 'instant' ? 'instant' : 'approval') as JoinMode }),
+    [trip?.join_mode],
+  );
 
   // A one-key object rather than a bare string so EditFieldSheet's JSON dirty
   // check and `initial` reseed behave the same as every other row here.
@@ -839,7 +851,16 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <EditRow label="Surf level" onPress={() => setSheet('levels')} />
           <EditRow label="Boards" onPress={() => setSheet('boards')} />
           <EditRow label="The wave" onPress={() => setSheet('wave')} />
-          <EditRow label="Age" onPress={() => setSheet('age')} />
+          <EditRow
+            label="Age"
+            value={
+              trip.age_min == null && trip.age_max == null ? 'All ages'
+                : trip.age_max == null ? `${trip.age_min}+`
+                  : trip.age_min == null ? `Up to ${trip.age_max}`
+                    : `${trip.age_min} – ${trip.age_max}`
+            }
+            onPress={() => setSheet('age')}
+          />
         </EditSection>
 
         <EditSection title="The trip">
@@ -847,6 +868,19 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           <EditRow label="Vibe" onPress={() => setSheet('vibe')} />
           <EditRow label="Stay type" onPress={() => setSheet('stayType')} />
           <EditRow label="Your stay" onPress={() => setSheet('stay')} />
+          {/* Its own row so a skipped STOKE / CI answer is findable later
+              (tester could not find it under "Your stay"). Same sheet — the
+              cert toggles live with the stay they describe. */}
+          <EditRow
+            label="Certifications"
+            value={
+              [
+                trip?.stoke_certified === true ? 'STOKE' : null,
+                trip?.ci_surf_conservation === true ? 'CI' : null,
+              ].filter(Boolean).join(' · ') || 'Add'
+            }
+            onPress={() => setSheet('stay')}
+          />
           <EditRow label="About you" onPress={() => setSheet('aboutYou')} />
           <EditRow
             label="Itinerary"
@@ -873,7 +907,17 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             value={formatTripAmount(trip.deposit_amount, trip.budget_currency) ?? 'None'}
             onPress={() => { setPriceFocus('deposit'); setSheet('price'); }}
           />
+          <EditRow
+            label="Private room"
+            value={formatTripAmount(trip.private_room_price_usd, trip.budget_currency) ?? 'None'}
+            onPress={() => { setPriceFocus(null); setSheet('price'); }}
+          />
           <EditRow label="What's included" onPress={() => setSheet('includes')} />
+          <EditRow
+            label="Who can join"
+            value={trip.join_mode === 'instant' ? 'Right away' : 'I approve'}
+            onPress={() => setSheet('joinMode')}
+          />
           <EditRow
             label="Getting paid"
             value={trip.payment_mode === 'managed' ? 'In Swellyo' : 'Myself'}
@@ -989,6 +1033,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Trip name"
         label="Trip name"
         initialValue={trip.title ?? ''}
+        placeholder="e.g. Bali and Barrels"
         maxLength={80}
         onClose={close}
         onSave={(value) => save({ title: value.trim() })}
@@ -999,6 +1044,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="Description"
         label="Description"
         initialValue={trip.description ?? ''}
+        placeholder="e.g. A week of reef breaks around Uluwatu with a small crew. Two surf sessions a day, sunset yoga, and the best warungs on the Bukit."
         maxLength={2000}
         onClose={close}
         onSave={(value) => save({ description: value.trim() })}
@@ -1009,6 +1055,7 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         title="About you"
         label="About you"
         initialValue={trip.host_lead_note ?? ''}
+        placeholder="e.g. 12 years guiding surfers in Bali, ISA Level 2 coach, lifeguard certified. I know every break on the Bukit and when it works."
         maxLength={1000}
         onClose={close}
         // Two rows carry this text: the trip's own note, and the operator's
@@ -1105,7 +1152,37 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             }
             imageUrl = res.url;
           }
+          // Extra photos: upload new (local) picks, keep the remote ones.
+          // Only with a main photo — the sheet clears them without one.
+          let galleryUrls: string[] = [];
+          if (imageUrl && next.galleryUris?.length) {
+            if (!currentUserId) {
+              const err = new Error('Not signed in');
+              showErrorAlert('Could not save', err, 'Please try again.');
+              throw err;
+            }
+            try {
+              galleryUrls = await Promise.all(
+                next.galleryUris.map(async uri => {
+                  if (/^https?:\/\//.test(uri)) return uri;
+                  const res = await uploadTripImage(uri, currentUserId, 'accommodation');
+                  if (!res.success || !res.url) throw new Error(res.error || 'Failed to upload stay photo');
+                  return res.url;
+                }),
+              );
+            } catch (err) {
+              showErrorAlert('Could not upload photo', err as Error, 'Please try again.');
+              throw err;
+            }
+          }
+          // Written only when there is something to write or the loaded trip
+          // carried the column, so a database without it yet keeps working.
+          const galleryChanged =
+            galleryUrls.length > 0 || trip.accommodation_gallery_urls !== undefined;
           await save({
+            ...(galleryChanged
+              ? { accommodation_gallery_urls: galleryUrls.length ? galleryUrls : null }
+              : {}),
             accommodation_type: next.kind ? [next.kind] : null,
             accommodation_name: next.name || null,
             accommodation_url: next.url || null,
@@ -1290,7 +1367,11 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
           `write()` already does that once on a thrown error; save() above
           also alerts, so routing this through save() (or duplicating its
           try/catch here) would show the failure twice. */}
-      <EditFieldSheet<{ costPerPerson: number | null; depositAmount: number | null }>
+      <EditFieldSheet<{
+        costPerPerson: number | null;
+        depositAmount: number | null;
+        privateRoomPrice: number | null;
+      }>
         visible={sheet === 'price'}
         // Names BOTH fields: arriving here from the "Deposit" row and reading
         // "Price" reads as having tapped the wrong row.
@@ -1303,6 +1384,12 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             {
               cost_per_person: next.costPerPerson,
               deposit_amount: next.depositAmount,
+              // 0 / blank = no private room. Travelers who already picked
+              // private keep their frozen price on their own row.
+              private_room_price_usd:
+                next.privateRoomPrice != null && next.privateRoomPrice > 0
+                  ? next.privateRoomPrice
+                  : null,
             },
             // On a managed trip the deposit ROW has to follow the deposit
             // AMOUNT — see updateOperatorTripPrice.
@@ -1314,14 +1401,21 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
         validate={(next) =>
           validatePrice(next.costPerPerson)
           ?? validateDeposit(next.depositAmount, next.costPerPerson)
+          ?? (next.privateRoomPrice != null && next.privateRoomPrice > 0
+            ? validatePrice(next.privateRoomPrice)
+              ?? (next.depositAmount != null && next.depositAmount > next.privateRoomPrice
+                ? 'The deposit can’t be more than the private room price.'
+                : null)
+            : null)
         }
       >
         {(draft, setDraft) => (
           <PriceSheetContent
             costPerPerson={draft.costPerPerson}
             depositAmount={draft.depositAmount}
+            privateRoomPrice={draft.privateRoomPrice}
             currency={trip.budget_currency}
-            onChange={setDraft}
+            onChange={(n) => setDraft({ ...n, privateRoomPrice: n.privateRoomPrice ?? null })}
             focusField={priceFocus}
             // No `error` here — EditFieldSheet already shows the `validate`
             // message once (see PriceSheetContent's own doc comment / Task 6).
@@ -1395,6 +1489,22 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             value={draft.paymentMode}
             onChange={(paymentMode) => setDraft({ paymentMode })}
             depositLabel={formatTripAmount(trip.deposit_amount, trip.budget_currency)}
+          />
+        )}
+      </EditFieldSheet>
+
+      {/* Who can join — a plain trip column, so plain saveField. */}
+      <EditFieldSheet<{ joinMode: JoinMode }>
+        visible={sheet === 'joinMode'}
+        title="Who can join"
+        initial={joinModeInitial}
+        onClose={close}
+        onSave={(next) => saveField({ join_mode: next.joinMode } as UpdateGroupTripInput)}
+      >
+        {(draft, setDraft) => (
+          <JoinModeSheetContent
+            value={draft.joinMode}
+            onChange={(joinMode) => setDraft({ joinMode })}
           />
         )}
       </EditFieldSheet>
