@@ -37,12 +37,6 @@ export async function uploadCrewPhoto(file: File, userId: string): Promise<strin
   if (!file.type.startsWith('image/')) {
     throw new Error('That is not an image. Pick a JPEG or a PNG.');
   }
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session) throw new Error('You are signed out. Sign in and try again.');
-
   // Resized before it is sent, not after. The app compresses with
   // expo-image-manipulator; a canvas is the browser's version of the same
   // step, and without it a 6MB phone photo is uploaded whole.
@@ -50,6 +44,43 @@ export async function uploadCrewPhoto(file: File, userId: string): Promise<strin
   if (blob.size > MAX_UPLOAD_BYTES) {
     throw new Error('That photo is too large even after resizing. Try a smaller one.');
   }
+  return putSigned(blob, userId, 'crew');
+}
+
+/**
+ * A trip's cover, stay photo, stay gallery or itinerary photo — the app's
+ * `uploadTripImage` (storageService.ts): bucket `trip-images`, kind `hero` or
+ * `accommodation`, 2048px at quality 0.85. Both kinds are already on the edge
+ * function's allowlist, so nothing server-side changes.
+ *
+ * The 5MB cap is the generate-thumbnail-s3 guard the app sizes heroes under.
+ */
+const MAX_TRIP_IMAGE_BYTES = 5_000_000;
+
+export async function uploadTripImage(
+  file: Blob,
+  userId: string,
+  kind: 'hero' | 'accommodation',
+): Promise<string> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error('That is not an image. Pick a JPEG or a PNG.');
+  }
+  const blob = await downscale(file, 2048, 0.85);
+  if (blob.size > MAX_TRIP_IMAGE_BYTES) {
+    throw new Error('That photo is too large even after resizing. Try a smaller one.');
+  }
+  return putSigned(blob, userId, kind);
+}
+
+async function putSigned(
+  blob: Blob,
+  userId: string,
+  kind: 'crew' | 'hero' | 'accommodation',
+): Promise<string> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) throw new Error('You are signed out. Sign in and try again.');
 
   const signRes = await fetch(FUNCTION_URL, {
     method: 'POST',
@@ -61,7 +92,7 @@ export async function uploadCrewPhoto(file: File, userId: string): Promise<strin
       action: 'get-upload-url',
       userId,
       bucket: 'trip-images',
-      kind: 'crew',
+      kind,
     }),
   });
   if (!signRes.ok) {
@@ -92,7 +123,7 @@ export async function uploadCrewPhoto(file: File, userId: string): Promise<strin
  * for no visible difference, and a signed URL will refuse a body whose type
  * does not match what it was signed with.
  */
-async function downscale(file: File, maxDimension: number): Promise<Blob> {
+async function downscale(file: Blob, maxDimension: number, quality = 0.85): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
   const w = Math.round(bitmap.width * scale);
@@ -107,7 +138,7 @@ async function downscale(file: File, maxDimension: number): Promise<Blob> {
   bitmap.close?.();
 
   const blob = await new Promise<Blob | null>(resolve =>
-    canvas.toBlob(resolve, 'image/jpeg', 0.85),
+    canvas.toBlob(resolve, 'image/jpeg', quality),
   );
   if (!blob) throw new Error('Could not read that image.');
   return blob;

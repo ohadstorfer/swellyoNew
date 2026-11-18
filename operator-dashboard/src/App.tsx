@@ -14,6 +14,7 @@ import { PaymentsPage } from './routes/PaymentsPage';
 import { CrewPage } from './routes/CrewPage';
 import { SettingsPage } from './routes/SettingsPage';
 import { SetupPage } from './routes/SetupPage';
+import { CreateTripPage } from './routes/CreateTripPage';
 import { SetupBanner } from './components/SetupBanner';
 import { useOperatorSetup } from './services/useOperatorSetup';
 
@@ -84,6 +85,7 @@ export function App() {
           element={isOperator ? <SettingsPage /> : <Navigate to="/trips" replace />}
         />
         <Route path="/trips" element={<TripsPage />} />
+        <Route path="/trips/new" element={isOperator ? <CreateTripPage /> : <Navigate to="/trips" replace />} />
         <Route path="/trips/:tripId" element={<TripPage />} />
         <Route path="/trips/:tripId/money" element={<MoneyPage />} />
         {/* The ledger — every transaction, with an export. Not guarded here:

@@ -208,6 +208,26 @@ The shared rule lives in `src/domain/operatorSetup.ts`. It is **not** a byte cop
 
 Trips the person hosts, `hosting_style = 'C'` only. Each row: name, dates, how many travelers, and how many documents are waiting for review.
 
+### 4.1b Create trip — added 2026-11-18
+
+`/trips/new`, behind a **Create trip** button on the trips list. Operators only
+(`surfers.operator`); crew never see it.
+
+A port of the app's operator create flow (`CreateTripFlowA.tsx`, style C): the
+same eight steps, fields, defaults, option lists and validation. Pure logic and
+its tests are `domain/createTrip.ts`; the writes are `services/createTrip.ts`,
+in the app's order — S3 images (`image-upload-s3`, kinds `hero` /
+`accommodation`), `group_trips`, host participant row, group conversation +
+owner member, waiver PDF (or a copy of the default) + `organized_trip_operator_documents`,
+`organized_trip_requirements`, operator crew row, `group_trip_destinations` +
+`geocode-group-trip-destinations`. Rule 1 holds: nothing new in the database.
+
+Web-only differences: the destination search calls Google Places (New) from the
+browser with `VITE_GOOGLE_PLACES_API_KEY` and sends the details session token as
+a query parameter (Google's CORS refuses the header the app uses); the draft is
+in localStorage and does not keep picked photos or the waiver PDF across a
+reload; today's exchange rate is fetched at publish, not read from a cache.
+
 ### 4.2 Trip snapshot
 
 Top to bottom:
