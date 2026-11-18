@@ -1,0 +1,475 @@
+/* Create-trip wizard. Its own file so the shared tokens/global pass applies
+ * without either side editing the other. Only existing tokens are used. */
+
+.ct {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-bottom: 96px; /* room for the sticky footer */
+}
+
+/* Progress: one segment per step, filled up to the current one. */
+.ct-progress {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 var(--s-3);
+}
+.ct-progress span {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background-color var(--t-fast) ease;
+}
+.ct-progress span[data-on='true'] {
+  background: var(--cyan);
+}
+.ct-stepcount {
+  font: 600 var(--fs-xs) / 16px var(--font);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ct-steptitle {
+  font-family: var(--font-heading);
+  font-size: var(--fs-2xl);
+  line-height: 1.2;
+  margin: 4px 0 2px;
+  color: var(--ink);
+}
+
+.ct-section {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: var(--s-4);
+  margin-top: var(--s-3);
+}
+.ct-section[data-error='true'] {
+  border-color: var(--danger);
+}
+.ct-section h3 {
+  font-family: var(--font-heading);
+  font-size: var(--fs-lg);
+  margin: 0 0 4px;
+  color: var(--ink);
+}
+.ct-section > p.muted {
+  margin: 0 0 var(--s-3);
+}
+.ct-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+
+.ct-field {
+  display: block;
+  margin-top: var(--s-3);
+}
+.ct-field:first-child {
+  margin-top: 0;
+}
+.ct-label {
+  display: block;
+  font: 600 var(--fs-s) / 18px var(--font);
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.ct-hint {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  margin-top: 4px;
+}
+.ct-error {
+  font-size: var(--fs-s);
+  color: var(--danger);
+  margin-top: 6px;
+}
+
+.ct input[type='number'],
+.ct input[type='date'],
+.ct input[type='url'],
+.ct input[type='time'],
+.ct input[type='search'],
+.ct select {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  padding: 10px var(--s-12);
+  font: var(--fs-md) / 20px var(--font);
+  color: var(--text);
+  min-height: 42px;
+}
+.ct input:focus,
+.ct select:focus {
+  outline: 2px solid var(--cyan);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.ct-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3);
+}
+.ct-grid2 > .ct-field {
+  margin-top: 0;
+}
+.ct-section-head + .ct-grid2,
+.ct-field + .ct-grid2,
+.ct-chips + .ct-grid2 {
+  margin-top: var(--s-3);
+}
+.ct-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ct-choices {
+  display: grid;
+  gap: 8px;
+}
+.ct-choice-title {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Money input: currency symbol inside the field. */
+.ct-money {
+  display: flex;
+  align-items: stretch;
+}
+.ct-money select {
+  width: auto;
+  flex: 0 0 auto;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.ct-money input {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+.ct-prefix {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--s-12);
+  border: 1px solid var(--line-strong);
+  border-right: none;
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* Photos */
+.ct-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.ct-photo {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.ct-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ct-photo button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 26px;
+  transition: transform var(--t-press) var(--ease-out);
+}
+.ct-photo button:active {
+  transform: scale(0.9);
+}
+.ct-hero {
+  aspect-ratio: 16 / 9;
+}
+.ct-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  aspect-ratio: 1;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+  font: 600 var(--fs-s) / 18px var(--font);
+  text-align: center;
+  padding: 8px;
+  transition: border-color var(--t-fast) ease, transform var(--t-press) var(--ease-out);
+}
+.ct-drop:active {
+  transform: scale(0.98);
+}
+.ct-drop.ct-hero {
+  aspect-ratio: 16 / 9;
+}
+.ct-drop input {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ct-drop:hover {
+    border-color: var(--cyan);
+  }
+}
+
+/* Destination search */
+.ct-search {
+  position: relative;
+}
+.ct-suggest {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  transform-origin: top center;
+  animation: ct-pop 160ms var(--ease-out);
+}
+.ct-suggest button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 10px var(--s-12);
+  font: inherit;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+}
+.ct-suggest button:last-child {
+  border-bottom: none;
+}
+.ct-suggest button:focus-visible,
+.ct-suggest button[data-active='true'] {
+  background: var(--panel);
+  outline: none;
+}
+@keyframes ct-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(-2px);
+  }
+}
+
+/* Spots / deadline stepper */
+.ct-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.ct-stepper button {
+  width: 40px;
+  height: 38px;
+  border: none;
+  background: var(--surface);
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background-color var(--t-fast) ease;
+}
+.ct-stepper button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.ct-stepper output {
+  min-width: 96px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Switch row */
+.ct-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-12) 0;
+  border-bottom: 1px solid var(--line);
+}
+.ct-toggle:last-child {
+  border-bottom: none;
+}
+.ct-toggle input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--ink);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+/* Inclusions accordion */
+.ct-acc {
+  border-bottom: 1px solid var(--line);
+}
+.ct-acc:last-child {
+  border-bottom: none;
+}
+.ct-acc summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-12) 0;
+  font-weight: 600;
+}
+.ct-acc summary::-webkit-details-marker {
+  display: none;
+}
+.ct-acc summary::after {
+  content: '+';
+  color: var(--muted);
+  font-weight: 400;
+}
+.ct-acc[open] summary::after {
+  content: '–';
+}
+.ct-acc-body {
+  padding: 0 0 var(--s-3);
+}
+
+/* Itinerary list */
+.ct-day {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  padding: var(--s-12) var(--s-3);
+  cursor: pointer;
+  font: inherit;
+  transition: transform var(--t-press) var(--ease-out), border-color var(--t-fast) ease;
+}
+.ct-day:active {
+  transform: scale(0.99);
+}
+.ct-activity {
+  display: grid;
+  grid-template-columns: 110px 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* Preview */
+.ct-preview-hero {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--r-lg);
+  display: block;
+  background: var(--panel);
+  margin-top: var(--s-3);
+}
+.ct-kv {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px var(--s-3);
+  font-size: var(--fs-md);
+}
+.ct-kv dt {
+  color: var(--muted);
+}
+.ct-kv dd {
+  margin: 0;
+}
+
+/* Sticky footer with Back / Next. */
+.ct-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding: var(--s-12) 16px calc(var(--s-12) + env(safe-area-inset-bottom));
+}
+.ct-footer-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.ct-footer .btn-primary {
+  min-width: 140px;
+  justify-content: center;
+}
+
+.ct-enter {
+  animation: ct-step 200ms var(--ease-out);
+}
+@keyframes ct-step {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ct-enter,
+  .ct-suggest {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .ct-grid2,
+  .ct-kv {
+    grid-template-columns: 1fr;
+  }
+  .ct-kv dt {
+    margin-top: 6px;
+  }
+  .ct-section {
+    padding: var(--s-3);
+  }
+  .ct-activity {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ct-activity > :nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .ct-steptitle {
+    font-size: var(--fs-xl);
+  }
+}

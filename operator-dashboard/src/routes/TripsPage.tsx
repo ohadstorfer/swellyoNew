@@ -7,7 +7,7 @@ import { Empty, ErrorBox, Loading } from '../components/StateBits';
 import { PageHead } from '../components/Shell';
 
 export function TripsPage() {
-  const { user } = useAuth();
+  const { user, isOperator } = useAuth();
 
   const q = useQuery({
     queryKey: ['operator-trips', user?.id],
@@ -17,7 +17,11 @@ export function TripsPage() {
 
   return (
     <>
-      <PageHead title="Your trips" sub="Trips you run, and trips you're crew on" />
+      <PageHead
+        title="Your trips"
+        sub="Trips you run, and trips you're crew on"
+        right={isOperator ? <Link to="/trips/new" className="btn btn-primary">Create trip</Link> : undefined}
+      />
 
       {q.isPending && <Loading what="Loading your trips" />}
       {q.isError && <ErrorBox what="Your trips" error={q.error} onRetry={() => void q.refetch()} />}
