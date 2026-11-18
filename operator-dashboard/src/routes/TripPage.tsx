@@ -33,6 +33,8 @@ import { CancelTripDialog } from '../components/CancelTripDialog';
 import { MyCrewCard } from '../components/MyCrewCard';
 import { GearCard } from '../components/GearCard';
 import { MyPaperworkCard } from '../components/MyPaperworkCard';
+import { TripActionsMenu } from '../components/TripActionsMenu';
+import { AdminsCard } from '../components/TripAdmins';
 
 export function TripPage() {
   const { tripId = '' } = useParams();
@@ -196,6 +198,7 @@ export function TripPage() {
             />
           </>
         }
+        right={<TripActionsMenu trip={trip.data} />}
       />
 
       <div className="stack">
@@ -457,6 +460,11 @@ export function TripPage() {
             everything else on this site asks it. A Manager reviewing documents
             never sees the link. */}
         {access.can('staff.manage') && <CrewCard tripId={tripId} />}
+
+        {/* ── Admins ────────────────────────────────────────────────────── */}
+        {/* Co-hosts (participants.role = 'host'). Silent until there is one
+            besides the operator. */}
+        <AdminsCard tripId={tripId} ownerId={trip.data.hostId} />
 
         {/* ── Travelers ─────────────────────────────────────────────────── */}
         <TravelersCard

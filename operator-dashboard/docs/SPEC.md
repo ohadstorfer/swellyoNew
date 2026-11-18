@@ -17,6 +17,8 @@ A small, separate website. It is **not** part of the mobile app and does not sha
 - Since 5 September 2026 they can also run the trip: approve join requests, post admin updates,
   manage the crew end to end, edit the trip's refund terms and waiver while it is empty, and
   cancel it. See §2's fifth amendment.
+- Since 18 November 2026: remind travelers, share the trip, complete it, and manage co-hosts.
+  See §4.8.
 
 **Why it exists:** reviewing 60 documents and sending passports to a hotel is painful on a phone. Those two jobs earned the desktop screen in the first place.
 
@@ -332,6 +334,53 @@ with a timestamp.
 The CSV export always carries EVERYTHING, whatever the toggle says, with the raw ISO timestamp
 and the Stripe mode as columns. A filtered spreadsheet is one that quietly lies to whoever opens
 it next.
+
+### 4.8 Trip actions — added 2026-11-18
+
+Parity pass against the app's operator trip screens (`TripDetailScreen` header menu,
+`TripMembersScreen` / `TripMemberSheet`, `DocumentReviewScreen`). Every action below is the app's
+own call — same RPC or table write, same condition for showing it. **Nothing new in the database**
+(Rule 1); each RPC was checked live on prod before building. Code: `services/tripActions.ts`,
+`domain/tripLifecycle.ts` (tested), `components/TripActionsMenu.tsx`, `RemindButton.tsx`,
+`ShareTripDialog.tsx`, `TripAdmins.tsx`, `ConfirmDialog.tsx`, `styles/tripActions.css`.
+
+| Action | Where | Call | Shown when (the app's rule) |
+|---|---|---|---|
+| **Remind N** — everyone who owes a requirement | Requirement page head | `operator_remind_requirement` | Someone is `not_started` / `overdue` / `rejected` on it, and it is not a pay row |
+| **Remind** — one traveler | Requirement rows · traveler page rows | `operator_remind_traveler_requirement` | Same, per row |
+| **Share trip** | Trip page → More | none — `?grouptrip=<id>` on the invite site, the app's `getGroupTripInviteUrl` | Everyone |
+| **Complete trip** | Trip page → More | `group_trips.status = 'completed'` (`completeTrip`) | A host (`host_id` or `role = 'host'`), the trip has started, and it is not cancelled, completed or past its end date |
+| **Add yourself to the crew** | Trip page → More | `organized_trip_staff` insert (`ensureOperatorOnCrew`) | Operator of record, operator trip, not locked, and they have no crew row |
+| **Set as admin** | Traveler page | `promote_trip_host` | Viewer is a host, and not on their own page |
+| **Remove as admin** | Trip page → Admins card | `demote_trip_host` | Viewer is a host; never on yourself, never on the operator of record |
+
+- **Reminders are pushes to real phones.** Both are confirmed first, and the button then says
+  what happened, not what was asked: the RPCs skip anyone reminded about that requirement in the
+  last 24 hours (shared cooldown), so "Remind 5" can come back "Reminded 3 · 2 already today".
+  The count is the same three states the RPC selects — not `isLate`, which is narrower. Gated by
+  the RPC on `docs.view`, which is also this page's door, so no extra check here.
+- **Share** copies the link (or the link with the app's message). The system share sheet is
+  offered only where the browser has `navigator.share` — in practice a phone.
+- **Admins are not crew.** `role = 'host'` grants no capability row; money, crew and cancelling
+  stay on `host_id` and `my_trip_capabilities`. `fetchMembers` reads `role = 'member'` only, so a
+  promoted traveler leaves Travelers, Money and the document lists and shows under **Admins**
+  instead. The app's member lists behave the same (`role <> 'host'`). The dialog says so.
+
+**Not built, and why:**
+
+- **Delete trip** (`deleteGroupTrip`). The app has the function and **no UI calls it**; on an
+  operator trip a hard `DELETE` would take payments and documents with it. Cancel (§4.2c) is the
+  operator's way out.
+- **Delivered documents** (operator → traveler: `deliverDocument`, `withdrawDeliveredDocument`,
+  `fetchTripDeliveredDocuments`). Table, policies and the `delivered/<trip_id>/` storage prefix are
+  live, and that prefix would be allowed here (its own policy, like the waiver amendment in §2).
+  But the app has **no screen on either side**: `SendDocumentSheet` is mounted nowhere, and
+  nothing calls `fetchMyDeliveredDocuments`, so a traveler could never see what was sent. Building
+  the sender first would hand operators a button that delivers into the void. Build it when the
+  traveler's side ships in the app.
+- **Approve / decline commitment.** Peer trips only — the app passes
+  `showCommitment={!isOperatorTrip}`; an operator traveler commits by paying.
+- **Report trip, Share to Story, mute chat.** Not operator work, native-only, or messaging (§1).
 
 ### 4.2b Crew page — added 2026-08-14
 
