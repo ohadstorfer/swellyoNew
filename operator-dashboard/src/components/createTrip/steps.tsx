@@ -931,6 +931,19 @@ export function PreviewStep({
 }: StepProps & { currency: OperatorCurrency; policyLabel: string; kinds: EditableKind[] }) {
   const sym = CURRENCY_SYMBOL[currency];
   const inc = normalizePriceInclusions(s.priceInclusions);
+
+  // ── TODO(overview-merge) ────────────────────────────────────────────────
+  // Interim summary. Once this branch is merged with main, replace everything
+  // returned below with the shared trip Overview, the same view the app's
+  // create-flow preview uses (TripDetailViewRedesigned):
+  //
+  //   import { TripOverview } from '../overview/TripOverview';
+  //   return <TripOverview data={toOverviewData(s, { src, currency, kinds })} />;
+  //
+  // `toOverviewData` maps WizardState → TripOverviewData. Write it next to
+  // this component. Images are `src(ref)` (local refs are object URLs until
+  // publish). Amounts are as typed, in `currency`, not yet USD. Don't grow
+  // this interim view into a second trip-detail renderer.
   return (
     <>
       {s.heroImage && <img className="ct-preview-hero" src={src(s.heroImage)} alt="" />}
