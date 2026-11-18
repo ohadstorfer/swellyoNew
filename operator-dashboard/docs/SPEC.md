@@ -178,6 +178,7 @@ The setup banner is hidden for the same reason: it names a step only the operato
 /login                        Google sign-in
 /trips                        the operator's trips
 /trips/:id                    trip snapshot
+/trips/:id/edit               edit the trip — the app's Edit trip screen (§4.8)
 /trips/:id/money              every traveler's price, what they paid, the ledger
 /trips/:id/crew               who runs the trip — tiers, titles, paperwork (operator only)
 /trips/:id/d/:requirementId   one requirement, everyone, with export
@@ -348,6 +349,37 @@ Rule 1 holds: no table, no function, no migration from this project. Two bugs we
 - `fetchProfiles` read `surfers.profile_photo_url`. Both columns exist; only `profile_image_url` is ever written, so 684 of 685 people showed a letter instead of a face.
 - `fetchTripReview` read every active requirement on the trip. `organized_trip_requirements_resolved` does not carry `audience` (it was created `select r.*` before the column existed), so a crew passport would have appeared in the traveler review and every traveler would have shown as missing it. Fixed the same way migration 20260813190000 fixed it in SQL — by reading the base table for the audience.
 
+### 4.8 Edit trip — added 2026-11-18
+
+`/trips/:tripId/edit`, opened from **Edit trip** on the trip page. The web twin of the app's
+`OperatorTripEditScreen`, section by section: Photos, The basics, Who it's for, The trip, Price,
+Visibility. One dialog per row, one write per Save, nothing autosaves; below 640px the dialog is a
+bottom sheet.
+
+- **Who.** `trip.edit` opens the page and every non-money row — a Manager holds it. The operator
+  of record (`host_id`) also owns **Where**, **When** and the whole **Price** section. A Manager
+  sees Where and When disabled with "Operator only" (the app's choice); Price is hidden. The walls
+  are the database's: `trg_guard_operator_trip_money`, `trg_guard_operator_trip_dates`, and
+  `auth.uid() = host_id` on `group_trip_destinations`.
+- **Dates notify.** `trg_notify_trip_dates_changed` tells every non-host participant (onboarding
+  included) when the dates move, so Save asks first, names how many, and says what moves with
+  it — the final payment date and the document deadlines (`describeDeadlineShift`).
+- **Destination** is Google Places (New), the app's two REST calls, with
+  `VITE_GOOGLE_PLACES_API_KEY`. The key needs the dashboard's origin on its HTTP-referrer list.
+  Then `geocode-group-trip-destinations`, best-effort, as in the app.
+- **Price & deposit** is the existing `TripPriceDialog` + `updateTripPrice` (freeze first), with
+  an optional private-room field — one save, because two CHECKs tie the three numbers.
+- **Refund terms and waiver** are the existing `TripPolicyCard`.
+- **Photos** go through `image-upload-s3` with kind `hero` / `accommodation`, both already on its
+  allowlist (`services/tripImages.ts`).
+- Requirements, packing suggestions and admin updates already live on the trip page; the Manage
+  row points there.
+- The rules are in `domain/editTrip.ts`, `domain/priceInclusions.ts` and `domain/itinerary.ts`,
+  twins of the app's files, tested.
+
+Rule 1 holds: every table, RPC and edge function here is one the app already calls, in the same
+order.
+
 ### 4.3 Requirement detail page
 
 Every tile opens a full page: all travelers, their state, and **export**.
@@ -490,7 +522,14 @@ Every amount here is US dollars, and the currency is baked into column names rat
   2026-09-05 — refund terms, waiver, gear and admin updates are all here now (§4.2c). Messaging
   did not, and it is not an oversight: a narrow group chat was built and removed on the same day
   (§1). (Removing a traveler moved out of this list on 2026-08-19 — see §4.4.)
-- Changing `payment_mode`. Turning payment collection on or off reorders more than two columns (pay rows, freeze, revert on failure) and stays in the app's "Getting paid" sheet.
+- ~~Changing `payment_mode`. Turning payment collection on or off reorders more than two columns (pay rows, freeze, revert on failure) and stays in the app's "Getting paid" sheet.~~
+  **Moved out 2026-11-18, by Ohad's ruling (full parity with the app).** The Edit trip page
+  (§4.8) has a Getting paid row. It is the app's `setOperatorTripPaymentMode`, step for step:
+  write `payment_mode` → `operator_freeze_trip_prices` → `syncPayRequirements`, and back to
+  `offline` if either of the last two throws. Turning it off is one write; the
+  `trg_deactivate_pay_rows_when_offline` trigger retires the pay rows. Gated, like the app, on a
+  price being set and on Stripe Connect being `ready`, `under_review` or `action_needed`. No new
+  database object.
 
 ---
 

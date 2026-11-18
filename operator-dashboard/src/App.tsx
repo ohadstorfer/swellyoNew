@@ -12,6 +12,7 @@ import { TravelerPage } from './routes/TravelerPage';
 import { MoneyPage } from './routes/MoneyPage';
 import { PaymentsPage } from './routes/PaymentsPage';
 import { CrewPage } from './routes/CrewPage';
+import { EditTripPage } from './routes/EditTripPage';
 import { SettingsPage } from './routes/SettingsPage';
 import { SetupPage } from './routes/SetupPage';
 import { CreateTripPage } from './routes/CreateTripPage';
@@ -87,6 +88,7 @@ export function App() {
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/trips/new" element={isOperator ? <CreateTripPage /> : <Navigate to="/trips" replace />} />
         <Route path="/trips/:tripId" element={<TripPage />} />
+        <Route path="/trips/:tripId/edit" element={<EditTripPage />} />
         <Route path="/trips/:tripId/money" element={<MoneyPage />} />
         {/* The ledger — every transaction, with an export. Not guarded here:
             "may I see the money" is a question about one trip, and the page

@@ -1,4 +1,6 @@
 import type { DestinationGeo } from '../domain/createTrip';
+import { destinationFromPlace, type DestinationGeo as EditDestinationGeo } from '../domain/editTrip';
+import { SayError } from './sayError';
 
 /**
  * Google Places (New) — the destination search, as the app's
@@ -114,4 +116,40 @@ export async function placeDetails(s: PlaceSuggestion, sessionToken: string): Pr
     lat: typeof data.location?.latitude === 'number' ? data.location.latitude : null,
     lng: typeof data.location?.longitude === 'number' ? data.location.longitude : null,
   };
+}
+
+// ── Edit trip's entry points ─────────────────────────────────────────────────
+// Create trip and Edit trip each wrote a Places client in parallel; merged
+// 18 Nov 2026 into this one. Edit trip keeps its names and its row shape
+// (`destinationFromPlace`), but goes through the same requests as above — in
+// particular the session token as a query parameter, since the header the app
+// uses is refused by Google's CORS preflight in a browser.
+
+export const PLACES_API_KEY: string | undefined = PLACES_KEY || undefined;
+
+export async function autocompletePlaces(
+  input: string,
+  sessionToken: string,
+  signal?: AbortSignal,
+): Promise<PlaceSuggestion[]> {
+  if (!PLACES_API_KEY) throw new SayError('Place search is not set up on this site.');
+  try {
+    return await autocomplete(input, sessionToken, signal);
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') throw e;
+    throw new SayError('Search failed. Please try again.');
+  }
+}
+
+export async function resolvePlace(s: PlaceSuggestion, sessionToken: string): Promise<EditDestinationGeo> {
+  if (!PLACES_API_KEY) throw new SayError('Place search is not set up on this site.');
+  const url = `${DETAILS_URL}/${encodeURIComponent(s.placeId)}?sessionToken=${encodeURIComponent(sessionToken)}`;
+  const res = await fetch(url, {
+    headers: {
+      'X-Goog-Api-Key': PLACES_API_KEY,
+      'X-Goog-FieldMask': 'id,formattedAddress,location,addressComponents,displayName',
+    },
+  });
+  if (!res.ok) throw new SayError('Could not open that place. Pick another one.');
+  return destinationFromPlace(await res.json(), s);
 }
