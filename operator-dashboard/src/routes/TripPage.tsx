@@ -177,6 +177,13 @@ export function TripPage() {
         back="/trips"
         backLabel="All trips"
         title={trip.data.title}
+        right={
+          (access.can('trip.edit') || (!!user && trip.data.hostId === user.id)) && (
+            <Link to={`/trips/${tripId}/edit`} className="btn btn-sm">
+              Edit trip
+            </Link>
+          )
+        }
         sub={
           <>
             {formatRange(trip.data.startDate, trip.data.endDate)} ·{' '}

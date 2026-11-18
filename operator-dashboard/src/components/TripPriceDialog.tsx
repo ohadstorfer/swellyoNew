@@ -7,10 +7,20 @@ type Props = {
   currentDepositAmount: number | null;
   /** 'managed' trips freeze everyone first; offline trips have nobody frozen. */
   isManaged: boolean;
+  /**
+   * The Edit trip page passes this to show a third field. Left undefined (the
+   * Money page), the field is not rendered and `onSave` never gets a third
+   * argument — `updateTripPrice` then leaves the column alone.
+   */
+  currentPrivateRoomPrice?: number | null;
   busy?: boolean;
   error?: string | null;
   onCancel: () => void;
-  onSave: (costPerPerson: number, depositAmount: number | null) => void;
+  onSave: (
+    costPerPerson: number,
+    depositAmount: number | null,
+    privateRoomPrice?: number | null,
+  ) => void;
 };
 
 /**
@@ -27,6 +37,7 @@ export function TripPriceDialog({
   currentCostPerPerson,
   currentDepositAmount,
   isManaged,
+  currentPrivateRoomPrice,
   busy,
   error,
   onCancel,
@@ -39,10 +50,18 @@ export function TripPriceDialog({
     currentDepositAmount === null ? '' : String(currentDepositAmount),
   );
 
+  const withPrivateRoom = currentPrivateRoomPrice !== undefined;
+  const [roomText, setRoomText] = useState(
+    currentPrivateRoomPrice == null ? '' : String(currentPrivateRoomPrice),
+  );
+
   const price = parseUsdInput(priceText);
   const deposit = parseUsdInput(depositText);
+  const room = parseUsdInput(roomText);
 
-  const problem = validate(price, deposit, priceText, depositText);
+  const problem =
+    validate(price, deposit, priceText, depositText) ??
+    (withPrivateRoom ? validateRoom(room, deposit, roomText) : null);
   const canSave = !problem && !busy && price !== null;
 
   return (
@@ -87,6 +106,30 @@ export function TripPriceDialog({
             {depositHint(price, deposit)}
           </p>
 
+          {withPrivateRoom && (
+            <>
+              <label
+                className="small muted"
+                htmlFor="trip-private-room"
+                style={{ display: 'block', marginTop: 16 }}
+              >
+                Private room price (USD)
+              </label>
+              <input
+                id="trip-private-room"
+                type="text"
+                inputMode="decimal"
+                value={roomText}
+                onChange={e => setRoomText(e.target.value)}
+                placeholder="Leave empty for no private room"
+                style={{ marginTop: 8, width: '100%' }}
+              />
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Travelers who already picked a private room keep their own price.
+              </p>
+            </>
+          )}
+
           <p className="muted small" style={{ marginTop: 12 }}>
             {isManaged
               ? 'Everyone already on the trip keeps the price they have now. This is the price for whoever joins next.'
@@ -115,7 +158,14 @@ export function TripPriceDialog({
           <button
             className="btn btn-sm btn-primary"
             onClick={() => {
-              if (canSave && price !== null) onSave(price, deposit);
+              if (!canSave || price === null) return;
+              if (withPrivateRoom) {
+                // 0 or blank = no private room (`group_trips_private_room_price_check`
+                // refuses 0). A typed 0 deposit is likewise "no deposit".
+                onSave(price, deposit, room !== null && room > 0 ? room : null);
+              } else {
+                onSave(price, deposit);
+              }
             }}
             disabled={busy || !canSave}
           >
@@ -141,6 +191,17 @@ function depositHint(price: number | null, deposit: number | null): string {
   const rest = fromCents(toCents(price) - toCents(deposit));
   if (rest === 0) return `Travelers pay the whole ${formatUsd(price)} up front.`;
   return `Travelers pay ${formatUsd(deposit)} now, ${formatUsd(rest)} before the trip.`;
+}
+
+/** `group_trips_private_room_price_check`: above 0, and the deposit no more
+ *  than it. Blank or 0 means no private room. */
+function validateRoom(room: number | null, deposit: number | null, roomText: string): string | null {
+  if (roomText.trim() !== '' && room === null) {
+    return 'That private room price is not an amount. Use digits, like 1500.';
+  }
+  if (room === null || room <= 0) return null;
+  if (deposit !== null && deposit > room) return 'The deposit can’t be more than the private room price.';
+  return null;
 }
 
 /** Typo-shaped input caught before validateTripPrice sees a silent null. */

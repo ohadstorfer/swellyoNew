@@ -243,6 +243,10 @@ export async function updateTripPrice(args: {
   depositAmount: number | null;
   /** The trip's CURRENT payment mode. This function never changes it. */
   paymentMode: string | null;
+  /** Optional, and written only when passed: the Edit trip page saves it in
+   *  the same row update, because `group_trips_private_room_price_check` ties
+   *  it to the deposit. Null = no private room. */
+  privateRoomPriceUsd?: number | null;
 }): Promise<void> {
   const { error: freezeErr } = await supabase.rpc('operator_freeze_trip_prices', {
     p_trip_id: args.tripId,
@@ -251,7 +255,13 @@ export async function updateTripPrice(args: {
 
   const { error } = await supabase
     .from('group_trips')
-    .update({ cost_per_person: args.costPerPerson, deposit_amount: args.depositAmount })
+    .update({
+      cost_per_person: args.costPerPerson,
+      deposit_amount: args.depositAmount,
+      ...(args.privateRoomPriceUsd !== undefined
+        ? { private_room_price_usd: args.privateRoomPriceUsd }
+        : {}),
+    })
     .eq('id', args.tripId);
   if (error) throw error;
 
@@ -302,7 +312,7 @@ const PAY_ROWS = {
  * No migration behind any of this: `organized_trip_req_write` is a FOR ALL
  * policy on is_trip_host(trip_id), so the host could already write these rows.
  */
-async function syncPayRequirements(tripId: string, hasDeposit: boolean): Promise<void> {
+export async function syncPayRequirements(tripId: string, hasDeposit: boolean): Promise<void> {
   const { data, error } = await supabase
     .from('organized_trip_requirements')
     .select('id, kind, is_active')
