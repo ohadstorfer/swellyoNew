@@ -15,6 +15,8 @@ import { ErrorBox, Loading, NoPaperworkAccess, StateTag } from '../components/St
 import { PageHead } from '../components/Shell';
 import { DocumentViewer } from '../components/DocumentViewer';
 import { RejectDialog } from '../components/RejectDialog';
+import { RemindButton } from '../components/RemindButton';
+import { isRemindable } from '../domain/tripLifecycle';
 
 type Row = { userId: string; name: string; item: ReviewItem };
 
@@ -125,6 +127,9 @@ export function RequirementPage() {
   const exportable = rows.filter(r => r.item.storagePath && !r.item.fileDeleted);
   const received = rows.filter(r => r.item.state !== 'not_started' && r.item.state !== 'overdue');
   const approved = rows.filter(r => r.item.state === 'approved');
+  // Counted off the rows on screen, so the N on the button and the names in
+  // the table cannot disagree. Same states the RPC selects.
+  const owed = rows.filter(r => isRemindable(r.item));
 
   async function exportAll() {
     setExportState('Preparing…');
@@ -153,11 +158,22 @@ export function RequirementPage() {
         title={requirement.title}
         sub={`${received.length}/${rows.length} in · ${approved.length}/${rows.length} approved`}
         right={
-          isUpload && exportable.length > 0 ? (
-            <button className="btn" onClick={() => void exportAll()} disabled={!!exportState}>
-              {exportState ?? `Export all (${exportable.length})`}
-            </button>
-          ) : undefined
+          <div className="ta-head-actions">
+            {owed.length > 0 && (
+              <RemindButton
+                mode="all"
+                tripId={tripId}
+                requirementId={requirement.id}
+                requirementTitle={requirement.title}
+                owed={owed.length}
+              />
+            )}
+            {isUpload && exportable.length > 0 && (
+              <button className="btn" onClick={() => void exportAll()} disabled={!!exportState}>
+                {exportState ?? `Export all (${exportable.length})`}
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -301,16 +317,29 @@ export function RequirementPage() {
                       {row.item.submittedAt ? formatDate(row.item.submittedAt) : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {viewable ? (
-                        // Kept even though the row itself is now clickable: it
-                        // is the visible affordance that says the row is, and
-                        // it is the tab stop keyboard users navigate to.
-                        <button className="btn btn-sm" onClick={() => setViewing(row)}>
-                          View
-                        </button>
-                      ) : (
-                        <span className="muted small">—</span>
-                      )}
+                      <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                        {viewable && (
+                          // Kept even though the row itself is now clickable: it
+                          // is the visible affordance that says the row is, and
+                          // it is the tab stop keyboard users navigate to.
+                          <button className="btn btn-sm" onClick={() => setViewing(row)}>
+                            View
+                          </button>
+                        )}
+                        {isRemindable(row.item) && (
+                          <RemindButton
+                            mode="one"
+                            tripId={tripId}
+                            requirementId={requirement.id}
+                            requirementTitle={requirement.title}
+                            userId={row.userId}
+                            travelerName={row.name}
+                          />
+                        )}
+                        {!viewable && !isRemindable(row.item) && (
+                          <span className="muted small">—</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

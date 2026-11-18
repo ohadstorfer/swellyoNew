@@ -21,6 +21,9 @@ import { RefundDialog } from '../components/RefundDialog';
 import { TravelerPriceDialog } from '../components/TravelerPriceDialog';
 import { fetchRefunds } from '../services/refunds';
 import { RemoveTravelerDialog } from '../components/RemoveTravelerDialog';
+import { RemindButton } from '../components/RemindButton';
+import { MakeAdminCard } from '../components/TripAdmins';
+import { isRemindable } from '../domain/tripLifecycle';
 import { DASHBOARD_CAPABILITY, useTripAccess } from '../services/access';
 import { explain, policyFromTrip } from '../domain/cancellation';
 
@@ -274,25 +277,39 @@ export function TravelerPage() {
                       {item.submittedAt ? formatDate(item.submittedAt) : '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {item.storagePath && !item.fileDeleted ? (
+                      {(item.storagePath && !item.fileDeleted) || isRemindable(item) ? (
                         <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-                          <button className="btn btn-sm" onClick={() => setViewing(item)}>
-                            View
-                          </button>
-                          <button
-                            className="btn btn-sm"
-                            onClick={() =>
-                              void downloadOne(
-                                item.storagePath!,
-                                fileNameFor(
-                                  item.storagePath,
-                                  safeFileName(`${name} - ${item.title}`),
-                                ),
-                              )
-                            }
-                          >
-                            Export
-                          </button>
+                          {item.storagePath && !item.fileDeleted && (
+                            <>
+                              <button className="btn btn-sm" onClick={() => setViewing(item)}>
+                                View
+                              </button>
+                              <button
+                                className="btn btn-sm"
+                                onClick={() =>
+                                  void downloadOne(
+                                    item.storagePath!,
+                                    fileNameFor(
+                                      item.storagePath,
+                                      safeFileName(`${name} - ${item.title}`),
+                                    ),
+                                  )
+                                }
+                              >
+                                Export
+                              </button>
+                            </>
+                          )}
+                          {isRemindable(item) && (
+                            <RemindButton
+                              mode="one"
+                              tripId={tripId}
+                              requirementId={item.requirementId}
+                              requirementTitle={item.title}
+                              userId={userId}
+                              travelerName={name}
+                            />
+                          )}
                         </div>
                       ) : (
                         <span className="muted small">—</span>
@@ -324,6 +341,12 @@ export function TravelerPage() {
         {/* Last on the page, and the only thing under Medical: this page exists
             to review someone, and the destructive action should be the one you
             travel to, not the one your cursor lands on. */}
+        <MakeAdminCard
+          tripId={tripId}
+          ownerId={trip.data.hostId}
+          userId={userId}
+          name={name}
+        />
         <RemoveCard tripId={tripId} userId={userId} name={name} />
       </div>
 

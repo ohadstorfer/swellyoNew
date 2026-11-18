@@ -12,3 +12,22 @@ export const INVITE_LINK_BASE = 'https://swellyo-invite.netlify.app';
 export function staffInviteUrl(token: string): string {
   return `${INVITE_LINK_BASE}/?staff=${encodeURIComponent(token)}`;
 }
+
+/**
+ * Group trip — tokenless. Opens the trip in the app, where the recipient taps
+ * "Request to join". Byte-for-byte the app's `groupTripInviteUrl`, which is
+ * what `getGroupTripInviteUrl` returns.
+ */
+export function groupTripInviteUrl(tripId: string): string {
+  return `${INVITE_LINK_BASE}/?grouptrip=${encodeURIComponent(tripId)}`;
+}
+
+/**
+ * The text the app's "Share Trip" sends — `handleShare` in TripDetailScreen.
+ * The URL sits inside the message so it survives apps that drop the separate
+ * `url` field (WhatsApp).
+ */
+export function tripShareMessage(title: string | null | undefined, url: string): string {
+  const name = title?.trim() || 'my surf trip';
+  return `Yo! check out my trip "${name}" on Swellyo! 🌊\n${url}`;
+}

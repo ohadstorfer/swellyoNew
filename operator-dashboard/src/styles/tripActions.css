@@ -1,0 +1,102 @@
+/*
+ * Trip actions: the "More" menu and the reminder pill.
+ * Own file on purpose — tokens.css / global.css / Shell.tsx belong to the
+ * layout work. Only existing variables are used.
+ */
+
+.ta-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* Anchored to its trigger, so it grows out of the top-right corner rather
+ * than from the middle (modals keep center — they have no trigger). */
+.ta-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 220px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 40;
+  transform-origin: top right;
+  animation: ta-pop var(--t-fast) var(--ease-out) both;
+}
+@keyframes ta-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+.ta-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-md);
+  padding: 10px var(--s-12);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  /* 44px is the smallest comfortable thumb target on a phone. */
+  min-height: 44px;
+}
+.ta-item:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+.ta-item-danger {
+  color: var(--danger);
+}
+.ta-item-sub {
+  display: block;
+  font-size: var(--fs-s);
+  color: var(--muted);
+  line-height: 18px;
+}
+.ta-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ta-item:hover {
+    background: var(--panel);
+  }
+}
+
+/* The head's right side: Export + Remind + More, wrapping under the title on
+ * a phone instead of squeezing it. */
+.ta-head-actions {
+  display: flex;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Share link field: readable, selectable, never wider than the dialog. */
+.ta-link {
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  min-width: 0;
+  flex: 1;
+}
+
+.ta-reminded {
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ta-pop {
+    animation: none;
+  }
+}
