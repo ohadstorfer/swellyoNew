@@ -20,7 +20,7 @@
     "ios": {
       "bundleIdentifier": "com.swellyo.app",
       "appleTeamId": "683UA9HZYT",
-      "buildNumber": "52",
+      "buildNumber": "53",
       "supportsTablet": false,
       "usesNonExemptEncryption": false,
       "usesAppleSignIn": true,
@@ -48,7 +48,7 @@
     },
     "android": {
       "package": "com.swellyo.app",
-      "versionCode": 38,
+      "versionCode": 39,
       "userInterfaceStyle": "light",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
