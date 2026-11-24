@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
+import { Logo } from './Logo';
 
 /** Page frame: brand on the left, who you are on the right. */
 export function Shell({ children }: { children: ReactNode }) {
@@ -8,43 +9,27 @@ export function Shell({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <header
-        style={{
-          borderBottom: '1px solid var(--line)',
-          background: 'var(--surface)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
-        }}
-      >
-        <div
-          className="row-between"
-          style={{ maxWidth: 1080, margin: '0 auto', padding: '12px 24px' }}
-        >
-          <Link to="/trips" className="row" style={{ gap: 8, color: 'var(--text)' }}>
-            <span
-              aria-hidden
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: 999,
-                background: 'var(--cyan)',
-                display: 'inline-block',
-              }}
-            />
-            <strong style={{ fontSize: 'var(--fs-md)', lineHeight: '20px' }}>Swellyo Operator</strong>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <Link to="/trips" className="brand" aria-label="Swellyo Operator — your trips">
+            <Logo size={32} />
+            <span className="brand-name">
+              Swellyo <span className="brand-sub">Operator</span>
+            </span>
           </Link>
 
           {user && (
-            <div className="row" style={{ gap: 12 }}>
+            <div className="row" style={{ gap: 8 }}>
               {/* Settings is the operator's own defaults — waiver, cancellation
                   policy, Stripe. Crew have none of that. */}
               {isOperator && (
-                <Link to="/settings" className="small">
+                <Link to="/settings" className="btn btn-sm btn-ghost">
                   Settings
                 </Link>
               )}
-              <span className="muted small">{user.email}</span>
+              {/* The address is who you are — useful on a desk with two
+                  Google accounts, noise on a phone header. */}
+              <span className="muted small hide-sm">{user.email}</span>
               <button className="btn btn-sm" onClick={() => void signOut()}>
                 Sign out
               </button>
@@ -79,8 +64,8 @@ export function PageHead({
           ← {backLabel ?? 'Back'}
         </Link>
       )}
-      <div className="row-between">
-        <div>
+      <div className="page-head">
+        <div style={{ minWidth: 0 }}>
           <h1>{title}</h1>
           {sub && (
             <p className="muted small" style={{ marginTop: 4 }}>
@@ -88,7 +73,7 @@ export function PageHead({
             </p>
           )}
         </div>
-        {right}
+        {right && <div className="page-head-actions">{right}</div>}
       </div>
     </div>
   );

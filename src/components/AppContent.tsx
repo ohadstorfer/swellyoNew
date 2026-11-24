@@ -96,6 +96,7 @@ import { startNotificationsHub } from '../services/notifications/notificationsRe
 import { startBellBannerSource } from '../services/notifications/bellBannerSource';
 import { useMessaging } from '../context/MessagingProvider';
 import { initSessionBridge } from '../services/sessionBridge';
+import { useOtaGatePhase } from '../ota/otaGate';
 import {
   sweepStagedShare,
   setPendingShare,
@@ -128,6 +129,9 @@ const useShareIntentSafe: () => ShareIntentApi =
 export const AppContent: React.FC = () => {
   const { currentStep, formData, setCurrentStep, updateFormData, saveStepToSupabase, isComplete, markOnboardingComplete, isDemoUser, setIsDemoUser, setUser, resetOnboarding, user, isRestoringSession, isLoaded: isOnboardingLoaded, completionCheckedForUserId } = useOnboarding();
   const onboardingCheckedForCurrentUser = user !== null && completionCheckedForUserId === user.id;
+  // OTA gate (src/ota/otaGate.ts): while it checks for / downloads an update it
+  // wants to wait for, the loading video below stays up (and says "Updating…").
+  const otaPhase = useOtaGatePhase();
   const { setSeenFromProfile: setTutorialSeenFromProfile, setSurftripsTipSeenFromProfile } = useTutorial();
   
   // Initialize auth guard - this will automatically redirect unauthenticated users
@@ -2572,8 +2576,12 @@ export const AppContent: React.FC = () => {
   }
 
   // Wait for session restoration to complete before rendering
-  // This prevents premature redirects before we know if user has a valid session
-  if (isRestoringSession) {
+  // This prevents premature redirects before we know if user has a valid session.
+  // Also held while the OTA gate is not idle: a launch that waits for an update
+  // looks like a normal launch whose loading video lasts longer. 'idle' comes
+  // within milliseconds on every launch except a fresh install's first one or
+  // a critical update (see src/ota/otaGate.ts).
+  if (isRestoringSession || otaPhase !== 'idle') {
     // Show the branded loading experience (background video + spinning logo)
     // instead of a white screen while restoring the session
     return (

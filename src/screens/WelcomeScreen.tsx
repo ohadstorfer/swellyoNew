@@ -10,6 +10,7 @@ import {
   Image,
   Text as RNText,
   Animated,
+  Easing,
   Linking,
   ScrollView,
   Dimensions,
@@ -19,6 +20,12 @@ import { Logo } from '../components/Logo';
 import { Button } from '../components/Button';
 import { Text } from '../components/Text';
 import { BackgroundVideo } from '../components/BackgroundVideo';
+import { useOtaGatePhase } from '../ota/otaGate';
+
+// First frame of the background video. Drawn under the video until it starts,
+// and the same frame the OTA reload screen shows (assets/ota/reload-screen.jpg),
+// so a reload into an update looks like the video pausing for a moment.
+const LOADING_FIRST_FRAME = require('../../assets/ota/loading-first-frame.jpg');
 import { colors, spacing } from '../styles/theme';
 import { authService } from '../services/auth/authService';
 import { supabaseAuthService } from '../services/auth/supabaseAuthService';
@@ -204,6 +211,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
 
   // Spinning animation for logo when checking auth
   const spinAnim = useRef(new Animated.Value(0)).current;
+  // OTA gate downloading an update it's waiting for (src/ota/otaGate.ts).
+  const otaUpdating = useOtaGatePhase() === 'waiting';
+  const otaLabelAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!otaUpdating) {
+      otaLabelAnim.setValue(0); // so a later 'waiting' fades in again
+      return;
+    }
+    Animated.timing(otaLabelAnim, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.bezier(0.23, 1, 0.32, 1),
+      useNativeDriver: true,
+    }).start();
+  }, [otaUpdating, otaLabelAnim]);
 
   useEffect(() => {
     if (isCheckingAuth) {
@@ -844,7 +866,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
   return (
     <View style={styles.container}>
       {/* Background Video */}
-      <BackgroundVideo />
+      <BackgroundVideo posterSource={LOADING_FIRST_FRAME} />
 
       {/* Gradient Overlay */}
       <LinearGradient
@@ -852,6 +874,21 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onGetStarted, onDe
         locations={[0, 0.18721, 0.75469]}
         style={styles.gradientOverlay}
       />
+
+      {/* OTA gate: the loading video stays up while an update downloads. */}
+      {isCheckingAuth && otaUpdating && (
+        <Animated.Text
+          style={[
+            styles.otaUpdating,
+            {
+              opacity: otaLabelAnim,
+              transform: [{ translateY: otaLabelAnim.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) }],
+            },
+          ]}
+        >
+          Updating…
+        </Animated.Text>
+      )}
 
         {/* Content */}
         <View style={styles.content}>
@@ -1260,6 +1297,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingTop: spacing.xxxxl,
+  },
+  otaUpdating: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 64,
+    zIndex: 2,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 13,
+    letterSpacing: 0.2,
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   bottomContent: {
     paddingBottom: 63,

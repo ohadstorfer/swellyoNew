@@ -27,7 +27,12 @@ import { CurrencySheet } from '../components/settings/CurrencySheet';
 import { CancellationPolicySheet } from '../components/settings/CancellationPolicySheet';
 import { ConnectStripeCard } from '../components/trips/ConnectStripeCard';
 import { PayoutScheduleCard } from '../components/trips/PayoutScheduleCard';
-import { isCurrencyCode, resolveViewerCurrency, type CurrencyCode } from '../utils/currency';
+import {
+  CURRENCY_SELECTION_ENABLED,
+  isCurrencyCode,
+  resolveViewerCurrency,
+  type CurrencyCode,
+} from '../utils/currency';
 import { supabaseDatabaseService } from '../services/database/supabaseDatabaseService';
 import {
   EMPTY_OPERATOR_SETTINGS,
@@ -352,13 +357,16 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
             <Text style={[styles.menuRowText, styles.linkText]}>About us</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowCurrency(true)}>
-            <TripIcon name="bank-note-01" size={24} />
-            <Text style={styles.menuRowText}>Currency</Text>
-            <Text style={styles.menuRowValue}>
-              {storedCurrency ? storedCurrency : `Auto (${effectiveCurrency})`}
-            </Text>
-          </TouchableOpacity>
+          {/* Hidden while the app is USD-only — see CURRENCY_SELECTION_ENABLED. */}
+          {CURRENCY_SELECTION_ENABLED ? (
+            <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowCurrency(true)}>
+              <TripIcon name="bank-note-01" size={24} />
+              <Text style={styles.menuRowText}>Currency</Text>
+              <Text style={styles.menuRowValue}>
+                {storedCurrency ? storedCurrency : `Auto (${effectiveCurrency})`}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
 
           {notifState !== 'unavailable' && (
             <TouchableOpacity
@@ -431,13 +439,15 @@ export function SettingsScreen({ onBack, userName, userAvatar, userEmail }: Sett
                 </View>
               )}
 
-              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowOpCurrency(true)}>
-                <TripIcon name="tag-01" size={24} />
-                <Text style={styles.menuRowText}>Default price currency</Text>
-                <Text style={styles.menuRowValue}>
-                  {opSettings.defaultCurrency ?? `Auto (${effectiveCurrency})`}
-                </Text>
-              </TouchableOpacity>
+              {CURRENCY_SELECTION_ENABLED ? (
+                <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowOpCurrency(true)}>
+                  <TripIcon name="tag-01" size={24} />
+                  <Text style={styles.menuRowText}>Default price currency</Text>
+                  <Text style={styles.menuRowValue}>
+                    {opSettings.defaultCurrency ?? `Auto (${effectiveCurrency})`}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
 
               <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={() => setShowPolicy(true)}>
                 <TripIcon name="file-06" size={24} />

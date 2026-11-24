@@ -9,7 +9,7 @@
 // link. Every route carries the same join link — friends open the trip in-app
 // and tap "Request to join" (group trips are host-approved).
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -81,6 +81,11 @@ export interface TripPublishedScreenProps {
    * added as the last step of creating the trip and any time later.
    */
   operatorId?: string | null;
+  /**
+   * Open the crew sheet on arrival. Set when the operator picked "Right after
+   * I publish" on the wizard's Crew step. Needs `operatorId`.
+   */
+  openCrewOnMount?: boolean;
 }
 
 export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
@@ -97,6 +102,7 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
   memberCount = 0,
   onDone,
   operatorId,
+  openCrewOnMount = false,
 }) => {
   const insets = useSafeAreaInsets();
   const { width: screenW } = useWindowDimensions();
@@ -124,6 +130,16 @@ export const TripPublishedScreen: React.FC<TripPublishedScreenProps> = ({
       // A count is a nicety; the sheet itself is the source of truth.
     }
   }, [tripId, operatorId]);
+
+  // Let the "published" screen land first, then bring the sheet up over it,
+  // so it reads as the next step rather than as the screen being skipped.
+  useEffect(() => {
+    if (!openCrewOnMount || !operatorId) return;
+    const t = setTimeout(() => setCrewSheetVisible(true), 450);
+    return () => clearTimeout(t);
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const closeCrewSheet = () => {
     setCrewSheetVisible(false);

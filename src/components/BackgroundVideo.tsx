@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, Image, Platform } from 'react-native';
+import { View, StyleSheet, Image, Platform, ImageSourcePropType } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { getBackgroundVideoSource, getBackgroundVideoSourceMP4, getVideoUrl, getBackgroundVideoAsset } from '../services/media/videoService';
 
 interface BackgroundVideoProps {
   videoSource?: string;
+  /**
+   * Native only: image drawn under the video until its first frame shows
+   * (instead of the black container). Use the video's own first frame so the
+   * hand-off is invisible.
+   */
+  posterSource?: ImageSourcePropType;
 }
 
 // Detect if we're on mobile web
@@ -15,7 +21,8 @@ const isMobileWeb = () => {
 };
 
 export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({ 
-  videoSource 
+  videoSource,
+  posterSource,
 }) => {
   const [useImageFallback, setUseImageFallback] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -545,6 +552,9 @@ export const BackgroundVideo: React.FC<BackgroundVideoProps> = ({
 
   return (
     <View style={[styles.container, webContainerStyle as any]}>
+      {posterSource ? (
+        <Image source={posterSource} style={styles.video} resizeMode="cover" fadeDuration={0} />
+      ) : null}
       {/* Transparent overlay to intercept touch events on native */}
       <View 
         style={{

@@ -66,13 +66,14 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Thumb } from '../../Thumb';
-import { textStyle, textStyles } from '../../../theme/typography';
+import { textStyle, textStyles, textStyleUp } from '../../../theme/typography';
 import {
   coverSquareSide,
   dayHighlights,
   dayLabel,
   tripRangeLabel,
   type ItineraryDay,
+  formatActivityTime,
 } from '../../../services/trips/itinerary';
 
 const C = {
@@ -520,7 +521,9 @@ const ItineraryDayCard: React.FC<{
           {day.activities.map((activity, index) => (
             <View key={index}>
               <Text style={styles.lineHead}>
-                {activity.time ? `${activity.time} - ${activity.name}` : activity.name}
+                {activity.time
+                  ? `${formatActivityTime(activity.time)} - ${activity.name}`
+                  : activity.name}
               </Text>
               {activity.place ? (
                 <Text style={[styles.linePlace, activity.time ? styles.linePlaceIndent : null]}>
@@ -589,12 +592,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   text: { flex: 1, minWidth: 0, gap: 4 },
-  day: { ...textStyles.B4, color: C.faint },
-  dayTitle: { ...textStyle('MB2', '700'), color: C.ink },
-  highlights: { ...textStyles.B4, color: C.muted },
+  day: { ...textStyleUp('B4', 2), color: C.faint },
+  dayTitle: { ...textStyleUp('MB2', 2, '700'), color: C.ink },
+  highlights: { ...textStyleUp('B4', 2), color: C.muted },
   lines: { position: 'absolute', left: OPEN_INSET, right: OPEN_INSET },
-  lineHead: { ...textStyle('B4', '700'), color: C.ink },
-  linePlace: { ...textStyles.B4, color: C.muted },
+  lineHead: { ...textStyleUp('B4', 2, '700'), color: C.ink },
+  linePlace: { ...textStyleUp('B4', 2), color: C.muted },
   linePlaceIndent: { paddingLeft: 38 },
 });
 

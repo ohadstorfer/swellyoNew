@@ -274,6 +274,39 @@ export const uploadTripImage = async (
   uploadImageToS3(imageUri, userId, 'trip-images', kind, { maxDimension: 2048, quality: 0.85 });
 
 /**
+ * Upload what is new in the Edit cover sheet and return the group_trips patch.
+ *
+ * `pickedCoverUri` is a new local main cover (or null to keep the old one).
+ * `galleryUris` are the extra photos in order: remote urls are kept, local
+ * uris are uploaded. Uploads run in parallel; any failure throws and nothing
+ * is written (an already-uploaded file is orphaned in storage — harmless).
+ *
+ * `hero_gallery_urls` is only in the patch when the loaded trip carried the
+ * column (`hadGalleryColumn`): writing it to a database without migration
+ * 20261119000100_hero_gallery fails the whole update, main cover included.
+ */
+export const uploadTripCoverPatch = async (
+  next: { pickedCoverUri: string | null; galleryUris: string[] },
+  userId: string,
+  hadGalleryColumn: boolean,
+): Promise<{ hero_image_url?: string; hero_gallery_urls?: string[] | null }> => {
+  const upload = async (uri: string): Promise<string> => {
+    if (/^https?:\/\//.test(uri)) return uri;
+    const res = await uploadTripImage(uri, userId, 'hero');
+    if (!res.success || !res.url) throw new Error(res.error || 'Failed to upload cover');
+    return res.url;
+  };
+  const [cover, gallery] = await Promise.all([
+    next.pickedCoverUri ? upload(next.pickedCoverUri) : Promise.resolve(null),
+    Promise.all(next.galleryUris.map(upload)),
+  ]);
+  return {
+    ...(cover ? { hero_image_url: cover } : {}),
+    ...(hadGalleryColumn ? { hero_gallery_urls: gallery.length ? gallery : null } : {}),
+  };
+};
+
+/**
  * Upload a photo for an operator-trip crew member to swellyo-images S3
  * (`trip-images/` prefix).
  *

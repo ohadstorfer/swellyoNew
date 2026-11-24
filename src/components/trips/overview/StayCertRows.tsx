@@ -3,7 +3,8 @@
 // "Learn More" link. Each row shows only when the trip carries its flag.
 
 import React from 'react';
-import { View, Text, StyleSheet, Pressable, Linking } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Linking, Platform } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { Image as CachedImage } from 'expo-image';
 import { Images } from '../../../assets/images';
 import { textStyle, textStyles } from '../../../theme/typography';
@@ -19,6 +20,24 @@ const CI_IMAGE_W = 102; // 351.39% of the window, as Figma scales it
 const CI_URL = 'https://www.conservation.org/projects/surf-conservation';
 const STOKE_URL = 'https://www.stokecertified.com/';
 
+// Opens the program's site INSIDE the app: a native sheet with a close button
+// (SFSafariViewController on iOS, a Custom Tab on Android), so the traveler
+// never leaves Swellyo. Web just gets a new tab. Falls back to the system
+// browser only if the in-app one cannot open.
+async function openInAppSheet(url: string) {
+  try {
+    await WebBrowser.openBrowserAsync(url, {
+      presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+      dismissButtonStyle: 'close',
+      controlsColor: '#05BCD3',
+      showTitle: true,
+      enableBarCollapsing: true,
+    });
+  } catch {
+    if (Platform.OS !== 'web') Linking.openURL(url).catch(() => {});
+  }
+}
+
 // The whole row presses, so "Learn More" is not a tiny 10px tap target.
 const CertRow: React.FC<{ logo: React.ReactNode; title: string; url: string }> = ({
   logo,
@@ -28,7 +47,7 @@ const CertRow: React.FC<{ logo: React.ReactNode; title: string; url: string }> =
   <Pressable
     style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
     onPress={() => {
-      Linking.openURL(url).catch(() => {});
+      void openInAppSheet(url);
     }}
     accessibilityRole="link"
     accessibilityLabel={`${title.replace('\n', ' ')}, Learn More`}

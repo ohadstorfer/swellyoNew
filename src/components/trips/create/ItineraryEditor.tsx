@@ -33,6 +33,7 @@ import {
   dayNeedsTitle,
   daysPastEnd,
   emptyDay,
+  formatActivityTime,
   isDayPlanned,
   tripRangeLabel,
   type ItineraryActivity,
@@ -55,7 +56,10 @@ const C = {
   scrim: 'rgba(33,33,33,0.75)',
 };
 
-const HOURS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
+// 12-hour clock with an AM/PM column. Stored as "HH:mm" 24h, so sorting holds.
+const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
+const PERIODS = ['AM', 'PM'] as const;
+type Period = (typeof PERIODS)[number];
 const MINUTES = ['00', '15', '30', '45'];
 const HOUR_ROW_H = 44;
 
@@ -451,10 +455,12 @@ export const ItineraryDayEditor: React.FC<ItineraryDayEditorProps> = ({
                 onPress={() => setTimeFor(index)}
                 style={styles.timeBtn}
                 accessibilityRole="button"
-                accessibilityLabel={activity.time ? `Time, ${activity.time}` : 'Set time'}
+                accessibilityLabel={
+                  activity.time ? `Time, ${formatActivityTime(activity.time)}` : 'Set time'
+                }
               >
                 <Text style={activity.time ? styles.timeText : styles.timeEmpty}>
-                  {activity.time ?? 'Time'}
+                  {activity.time ? formatActivityTime(activity.time) : 'Time'}
                 </Text>
               </Pressable>
               <Field
@@ -558,16 +564,19 @@ const TimeSheet: React.FC<{
   onClose: () => void;
   onPick: (time: string | null) => void;
 }> = ({ visible, value, onClose, onPick }) => {
-  const [hour, setHour] = useState('09');
+  const [hour, setHour] = useState('9');
   const [minute, setMinute] = useState('00');
+  const [period, setPeriod] = useState<Period>('AM');
   const hoursRef = useRef<ScrollView>(null);
 
   // Seeds from the row being edited each time the sheet opens.
   useEffect(() => {
     if (!visible) return;
     const [h, m] = (value ?? '09:00').split(':');
-    setHour(h);
-    setMinute(m);
+    const h24 = Number(h) || 0;
+    setHour(String(h24 % 12 === 0 ? 12 : h24 % 12));
+    setMinute(MINUTES.includes(m) ? m : '00');
+    setPeriod(h24 < 12 ? 'AM' : 'PM');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
@@ -576,6 +585,12 @@ const TimeSheet: React.FC<{
       y: Math.max(0, HOURS.indexOf(hour) - 2) * HOUR_ROW_H,
       animated: false,
     });
+
+  // 12 AM is 00, 12 PM is 12.
+  const to24h = (): string => {
+    const h = Number(hour) % 12 + (period === 'PM' ? 12 : 0);
+    return `${String(h).padStart(2, '0')}:${minute}`;
+  };
 
   return (
     <WizardBottomSheet
@@ -587,7 +602,7 @@ const TimeSheet: React.FC<{
       footer={
         <View style={styles.sheetFooter}>
           <Pressable
-            onPress={() => onPick(`${hour}:${minute}`)}
+            onPress={() => onPick(to24h())}
             style={({ pressed }) => [styles.sheetPrimary, pressed && styles.pressedDark]}
             accessibilityRole="button"
           >
@@ -618,6 +633,11 @@ const TimeSheet: React.FC<{
         <View style={styles.timeColumn}>
           {MINUTES.map(m => (
             <TimeCell key={m} label={m} selected={m === minute} onPress={() => setMinute(m)} />
+          ))}
+        </View>
+        <View style={styles.timeColumn}>
+          {PERIODS.map(p => (
+            <TimeCell key={p} label={p} selected={p === period} onPress={() => setPeriod(p)} />
           ))}
         </View>
       </View>

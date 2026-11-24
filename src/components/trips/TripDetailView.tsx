@@ -105,8 +105,8 @@ const INCLUDE_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
 export interface TripDetailVM {
   heroImageUri: string | null;
   /** More cover photos, cover first. The Overview swipes through them when
-   *  there are two or more (max 10 shown). Nothing fills this yet — trips store
-   *  one cover today — so the cover alone is what renders. */
+   *  there are two or more (max 10 shown). Filled from hero_image_url +
+   *  hero_gallery_urls; left undefined when a trip has only the one cover. */
   galleryImageUris?: string[];
   /** The day-by-day plan, unfiltered. The Overview shows it through `guestDays`. */
   itinerary?: ItineraryDay[];

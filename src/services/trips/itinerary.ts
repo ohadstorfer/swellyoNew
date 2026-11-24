@@ -107,6 +107,18 @@ export const dayNeedsTitle = (day: ItineraryDay): boolean =>
 export const dayHighlights = (day: ItineraryDay): string =>
   day.activities.map(a => a.name.trim()).filter(Boolean).join(' · ');
 
+/**
+ * "HH:mm" (24h, how it is stored and sorted) -> "9:30 AM" for people to read.
+ * Anything that is not a valid "HH:mm" comes back unchanged.
+ */
+export const formatActivityTime = (time: string): string => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!m) return time;
+  const h = Number(m[1]);
+  if (h > 23) return time;
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`;
+};
+
 const byTime = (a: ItineraryActivity, b: ItineraryActivity): number => {
   if (a.time && b.time) return a.time.localeCompare(b.time);
   if (a.time) return -1;

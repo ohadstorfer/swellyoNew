@@ -1,3 +1,5 @@
+import { TripOverview } from '../overview/TripOverview';
+import type { TripOverviewData } from '../../services/tripOverview';
 import { useState } from 'react';
 import {
   ACCOMMODATION_LABEL,
@@ -922,6 +924,66 @@ export function ItineraryStep({ s, set, src, addFiles }: StepProps) {
 
 // ── 8. Preview ─────────────────────────────────────────────────────────────
 
+/** The wizard's form state as the shared trip Overview reads a saved trip.
+ *  Amounts stay as typed: they are passed as "USD" with a rate of 1 in the
+ *  operator's currency, which prints them unchanged with the right symbol.
+ *  Images are `src(ref)` — object URLs until publish uploads them. */
+function toOverviewData(s: WizardState, src: (ref: string) => string, currency: OperatorCurrency): TripOverviewData {
+  const num = (v: string) => {
+    const n = Number(v);
+    return v.trim() !== '' && Number.isFinite(n) ? n : null;
+  };
+  const days =
+    s.startDateISO && s.endDateISO
+      ? Math.round((Date.parse(s.endDateISO) - Date.parse(s.startDateISO)) / 86_400_000) + 1
+      : null;
+  return {
+    title: s.title || null,
+    destinationLabel: s.destinationGeo?.short ?? (s.destination || null),
+    coverUrls: s.heroImage ? [src(s.heroImage)] : [],
+    startDate: s.startDateISO,
+    endDate: s.endDateISO,
+    dateMonths: null,
+    durationDays: days,
+    hostingStyle: 'C',
+    skillLevels: s.skillLevels,
+    ageMin: num(s.ageMin),
+    ageMax: num(s.ageMax),
+    participantCount: 0,
+    maxParticipants: num(s.maxParticipants),
+    description: s.description,
+    vibeSlug: s.tripVibes[0] ?? null,
+    surfStyles: s.surfStyles,
+    waveSizeMin: s.waveSizeMin,
+    waveSizeMax: s.waveSizeMax,
+    waveShape: s.waveShape,
+    specificStaySelected: true,
+    accommodationKind: s.accommodationKind,
+    accommodationName: s.accommodationName || null,
+    accommodationUrl: s.accommodationUrl || null,
+    accommodationImageUrl: s.accommodationImage ? src(s.accommodationImage) : null,
+    accommodationGalleryUrls: s.accommodationGallery.map(src),
+    ciSurfConservation: s.ciSurfConservation,
+    stokeCertified: s.stokeCertified,
+    costPerPerson: num(s.costPerPerson),
+    priceInclusions: normalizePriceInclusions(s.priceInclusions) as TripOverviewData['priceInclusions'],
+    budgetMin: null,
+    budgetMax: null,
+    budgetCurrency: currency,
+    budgetFxRate: 1,
+    itinerary: s.itinerary
+      .filter(isDayPlanned)
+      .map(d => ({ day: d.day, title: d.title, photos: d.photos.map(src), activities: d.activities })),
+    host: null,
+    hostBio: s.hostLeadNote || null,
+    hostDestinationFamiliarity: null,
+    hostStayFamiliarity: null,
+    crew: [],
+    participants: [],
+  };
+}
+
+
 export function PreviewStep({
   s,
   src,
@@ -932,25 +994,16 @@ export function PreviewStep({
   const sym = CURRENCY_SYMBOL[currency];
   const inc = normalizePriceInclusions(s.priceInclusions);
 
-  // ── TODO(overview-merge) ────────────────────────────────────────────────
-  // Interim summary. Once this branch is merged with main, replace everything
-  // returned below with the shared trip Overview, the same view the app's
-  // create-flow preview uses (TripDetailViewRedesigned):
-  //
-  //   import { TripOverview } from '../overview/TripOverview';
-  //   return <TripOverview data={toOverviewData(s, { src, currency, kinds })} />;
-  //
-  // `toOverviewData` maps WizardState → TripOverviewData. Write it next to
-  // this component. Images are `src(ref)` (local refs are object URLs until
-  // publish). Amounts are as typed, in `currency`, not yet USD. Don't grow
-  // this interim view into a second trip-detail renderer.
+  // The app's preview IS the trip page (TripDetailViewRedesigned), so this is
+  // the same shared Overview the trip's Overview tab renders. What travelers
+  // never see on it — payment mode, refunds, documents — follows underneath,
+  // because the operator still has to check it before publishing.
   return (
     <>
-      {s.heroImage && <img className="ct-preview-hero" src={src(s.heroImage)} alt="" />}
-      <Section title={s.title || 'Untitled trip'} body={s.destinationGeo?.full ?? s.destination}>
-        <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{s.description}</p>
-      </Section>
-      <Section title="At a glance">
+      <div className="ct-preview-overview">
+        <TripOverview data={toOverviewData(s, src, currency)} />
+      </div>
+      <Section title="Only you see this" body="How the trip runs behind the page above.">
         <dl className="ct-kv">
           <dt>Dates</dt>
           <dd>{formatRange(s.startDateISO, s.endDateISO)}</dd>

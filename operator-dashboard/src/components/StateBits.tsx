@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { friendlyError } from '../lib/errors';
 import { STATE_LABEL, type RequirementState } from '../domain/requirements';
@@ -94,8 +95,12 @@ export function Empty({ title, note }: { title: string; note?: ReactNode }) {
  */
 export function Avatar({ url, name, size = 34 }: { url: string | null; name: string; size?: number }) {
   const box = { width: size, height: size, borderRadius: 999, flexShrink: 0 } as const;
+  // A dead photo URL (deleted object, old bucket) falls back to the letter
+  // instead of the browser's broken-image glyph.
+  const [failed, setFailed] = useState<string | null>(null);
 
-  if (url) return <img src={url} alt="" style={{ ...box, objectFit: 'cover' }} />;
+  if (url && failed !== url)
+    return <img src={url} alt="" style={{ ...box, objectFit: 'cover' }} onError={() => setFailed(url)} />;
 
   return (
     <span

@@ -8,6 +8,7 @@ import {
   OPERATOR_TERMS_VERSION,
   type OperatorSetupInput,
 } from '../operatorSetup';
+import { CURRENCY_SELECTION_ENABLED } from '../../../utils/currency';
 import type { OperatorSettings } from '../operatorSettingsService';
 import { DEFAULT_POLICY } from '../cancellationPolicy';
 import type { ConnectState } from '../connectStatus';
@@ -77,14 +78,11 @@ const stepsByKey = (input: OperatorSetupInput) =>
 describe('operatorSetupSteps', () => {
   it('returns the six steps in a fixed order, terms last', () => {
     expect(operatorSetupSteps(ready()).map(s => s.key)).toEqual(SETUP_STEP_ORDER);
-    expect(SETUP_STEP_ORDER).toEqual([
-      'stripe',
-      'currency',
-      'policy',
-      'waiver',
-      'insurance',
-      'terms',
-    ]);
+    expect(SETUP_STEP_ORDER).toEqual(
+      ['stripe', 'currency', 'policy', 'waiver', 'insurance', 'terms'].filter(
+        k => k !== 'currency' || CURRENCY_SELECTION_ENABLED,
+      ),
+    );
   });
 
   it('a brand new operator has nothing done', () => {
@@ -110,7 +108,7 @@ describe('a default value is not a confirmed one', () => {
     expect(untouched.settings.defaultCurrency).toBeNull();
 
     expect(stepsByKey(untouched).policy.done).toBe(false);
-    expect(stepsByKey(untouched).currency.done).toBe(false);
+    if (CURRENCY_SELECTION_ENABLED) expect(stepsByKey(untouched).currency.done).toBe(false);
     expect(isOperatorSetupComplete(untouched)).toBe(false);
   });
 
@@ -226,7 +224,7 @@ describe('firstOutstandingStep', () => {
     expect(firstOutstandingStep({ connect: 'not_started', settings: settings() })).toBe('stripe');
     expect(
       firstOutstandingStep(ready({ settings: settings({ defaultWaiver: waiver }) })),
-    ).toBe('currency');
+    ).toBe(CURRENCY_SELECTION_ENABLED ? 'currency' : 'policy');
     expect(firstOutstandingStep(ready({ settings: settings({ ...ready().settings, defaultWaiver: null }) }))).toBe(
       'waiver',
     );

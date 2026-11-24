@@ -83,12 +83,13 @@ import { TripDetailViewRedesigned, HERO_SLIDE_MS } from '../../components/trips/
 import {
   EditTextSheet,
   EditCoverSheet,
+  type EditCoverSave,
   EditDatesSheet,
   EditAccommodationSheet,
   type DatesPatch,
   type AccommodationInitial,
 } from '../../components/trips/TripEditSheets';
-import { uploadTripImage } from '../../services/storage/storageService';
+import { uploadTripImage, uploadTripCoverPatch } from '../../services/storage/storageService';
 import { logEvent, logEventThrottled } from '../../services/analytics/eventLogger';
 import { TripTabToggle, type TripTab } from '../../components/trips/TripTabToggle';
 import { TripDashboardTab } from '../../components/trips/dashboard/TripDashboardTab';
@@ -329,6 +330,12 @@ const buildTripDetailVM = (
   host?: EnrichedParticipant | null,
 ): TripDetailVM => ({
   heroImageUri: trip.hero_image_url || null,
+  // Main cover first, then the extras. Only built when there ARE extras, so a
+  // trip with one cover keeps rendering through heroImageUri as before.
+  galleryImageUris:
+    trip.hero_image_url && trip.hero_gallery_urls && trip.hero_gallery_urls.length > 0
+      ? [trip.hero_image_url, ...trip.hero_gallery_urls]
+      : undefined,
   itinerary: normalizeItinerary(trip.itinerary),
   title: trip.title,
   destinationLabel:
@@ -2090,12 +2097,22 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
     queryClient.invalidateQueries({ queryKey: ['trips', 'my'] });
   };
 
-  const handleSaveCover = async (localUri: string) => {
+  const handleSaveCover = async (next: EditCoverSave) => {
     if (!trip || !currentUserId) return;
-    const res = await uploadTripImage(localUri, currentUserId, 'hero');
-    if (!res.success || !res.url) throw new Error(res.error || 'Failed to upload cover');
-    await updateGroupTrip(trip.id, { hero_image_url: res.url });
-    patchTripCache({ hero_image_url: res.url });
+    try {
+      const patch = await uploadTripCoverPatch(
+        next,
+        currentUserId,
+        trip.hero_gallery_urls !== undefined,
+      );
+      if (Object.keys(patch).length === 0) return;
+      await updateGroupTrip(trip.id, patch);
+      patchTripCache(patch);
+    } catch (err) {
+      // EditCoverSheet stays open on a throw but shows nothing itself.
+      showErrorAlert('Could not save the cover', err, 'Please try again.');
+      throw err;
+    }
   };
 
   const handleSaveAboutHost = async (text: string) => {
@@ -4590,6 +4607,8 @@ export default function TripDetailScreen({ tripId, onBack, onEditTrip, onEditOpe
       <EditCoverSheet
         visible={editSheet === 'cover'}
         currentUri={trip.hero_image_url ?? null}
+        currentGalleryUris={trip.hero_gallery_urls}
+        galleryEnabled={trip.hero_gallery_urls !== undefined}
         onClose={() => setEditSheet(null)}
         onSave={handleSaveCover}
       />

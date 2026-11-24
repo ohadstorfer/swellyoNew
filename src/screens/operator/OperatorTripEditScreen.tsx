@@ -12,6 +12,7 @@ import { EditFieldSheet, CANCELLED } from '../../components/trips/edit/EditField
 import {
   EditTextSheet,
   EditCoverSheet,
+  type EditCoverSave,
   EditAccommodationSheet,
   EditDatesSheet,
   type AccommodationInitial,
@@ -56,7 +57,7 @@ import {
   GettingPaidSheetContent,
   type PaymentMode,
 } from '../../components/trips/sheets/GettingPaidSheetContent';
-import { uploadTripImage } from '../../services/storage/storageService';
+import { uploadTripImage, uploadTripCoverPatch } from '../../services/storage/storageService';
 import {
   type UpdateGroupTripInput,
   type SurfLevel,
@@ -1008,8 +1009,10 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
       <EditCoverSheet
         visible={sheet === 'cover'}
         currentUri={trip.hero_image_url ?? null}
+        currentGalleryUris={trip.hero_gallery_urls}
+        galleryEnabled={trip.hero_gallery_urls !== undefined}
         onClose={close}
-        onSave={async (localUri) => {
+        onSave={async (next: EditCoverSave) => {
           // Upload first, then write the row — same order as the wizard
           // (CreateTripFlowA.tsx). A file uploaded before a failed row update
           // is orphaned in storage; harmless, and a retry reuses the remote URL.
@@ -1018,13 +1021,18 @@ export default function OperatorTripEditScreen({ route, navigation }: Props) {
             showErrorAlert('Could not save', err, 'Please try again.');
             throw err;
           }
-          const res = await uploadTripImage(localUri, currentUserId, 'hero');
-          if (!res.success || !res.url) {
-            const err = new Error(res.error || 'Failed to upload cover');
-            showErrorAlert('Could not upload photo', err, 'Please try again.');
+          let patch: Awaited<ReturnType<typeof uploadTripCoverPatch>>;
+          try {
+            patch = await uploadTripCoverPatch(
+              next,
+              currentUserId,
+              trip.hero_gallery_urls !== undefined,
+            );
+          } catch (err) {
+            showErrorAlert('Could not upload photo', err as Error, 'Please try again.');
             throw err;
           }
-          await save({ hero_image_url: res.url });
+          if (Object.keys(patch).length > 0) await save(patch);
         }}
       />
 

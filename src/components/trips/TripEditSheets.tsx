@@ -1,7 +1,7 @@
 // Host-only inline edit sheets for the trip Overview (Figma "admin view").
 // Each sheet edits exactly one field with a focused, keyboard-aware UX:
 //   • EditTextSheet  — multiline text (trip description, host self-intro).
-//   • EditCoverSheet — the trip cover photo (pick → preview → save).
+//   • EditCoverSheet — the trip cover photo + up to 9 more (pick → preview → save).
 //
 // All three are opened from the "Edit" pills in TripDetailViewRedesigned and
 // persist via the parent's onSave handler (which calls updateGroupTrip).
@@ -237,41 +237,75 @@ export const EditTextSheet: React.FC<EditTextSheetProps> = ({
 };
 
 // ---------------------------------------------------------------------------
-// EditCoverSheet — pick a new cover photo, preview, then save.
+// EditCoverSheet — the main cover photo plus up to 9 more. The trip page
+// swipes through them, main cover first (TripDetailViewRedesigned HeroCover).
 // ---------------------------------------------------------------------------
+export interface EditCoverSave {
+  /** A new LOCAL main cover to upload, or null to keep the current one. */
+  pickedCoverUri: string | null;
+  /** The extra photos, in order. Remote urls are kept as they are; local uris
+   *  still need uploading. Empty = no extras. */
+  galleryUris: string[];
+}
+
 export interface EditCoverSheetProps {
   visible: boolean;
   currentUri: string | null;
+  /** The extra cover photos already saved (hero_gallery_urls). */
+  currentGalleryUris?: string[] | null;
+  /** Show the "more photos" strip. Pass `trip.hero_gallery_urls !== undefined`:
+   *  the column only comes back once migration 20261119000100_hero_gallery is
+   *  applied, so the strip turns itself on then — and never offers photos the
+   *  database can't store. */
+  galleryEnabled?: boolean;
   onClose: () => void;
-  /** Receives the picked LOCAL uri to upload + persist. May be async. */
-  onSave: (localUri: string) => void | Promise<void>;
+  /** Uploads what is new and persists. May be async; throw to keep the sheet open. */
+  onSave: (next: EditCoverSave) => void | Promise<void>;
 }
+
+const sameList = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
 
 export const EditCoverSheet: React.FC<EditCoverSheetProps> = ({
   visible,
   currentUri,
+  currentGalleryUris,
+  galleryEnabled = false,
   onClose,
   onSave,
 }) => {
   const [pickedUri, setPickedUri] = useState<string | null>(null);
+  const [galleryUris, setGalleryUris] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (visible) setPickedUri(null);
+    if (visible) {
+      setPickedUri(null);
+      setGalleryUris(currentGalleryUris ?? []);
+    }
+    // Reseed only when the sheet opens, not when the cached trip refreshes
+    // under an open sheet and hands us a new array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const previewUri = pickedUri ?? currentUri;
+  const dirty = !!pickedUri || !sameList(galleryUris, currentGalleryUris ?? []);
 
   const handlePick = async () => {
     const uri = await pickImageUri([12, 5]);
     if (uri) setPickedUri(uri);
   };
 
+  const handleAddMore = async () => {
+    const picked = await pickStayGalleryPhotos(STAY_GALLERY_MAX - galleryUris.length);
+    if (picked.length) setGalleryUris(prev => [...prev, ...picked].slice(0, STAY_GALLERY_MAX));
+  };
+
   const handleSave = async () => {
-    if (!pickedUri) return;
+    if (!dirty) return;
     setSaving(true);
     try {
-      await onSave(pickedUri);
+      await onSave({ pickedCoverUri: pickedUri, galleryUris: previewUri ? galleryUris : [] });
       onClose();
     } catch {
       // parent alerts; keep open to retry
@@ -284,13 +318,13 @@ export const EditCoverSheet: React.FC<EditCoverSheetProps> = ({
     <WizardBottomSheet
       visible={visible}
       title="Edit cover"
-      subtitle="This photo shows at the top of your trip."
+      subtitle="These photos show at the top of your trip. The first one is the cover."
       largeTitle
       titleAlign="left"
       hideHeaderDivider
       onClose={onClose}
       heightMode="auto"
-      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!pickedUri} />}
+      footer={<SaveButton onPress={handleSave} loading={saving} disabled={!dirty} />}
     >
       <TouchableOpacity
         style={styles.coverPreviewWrap}
@@ -314,6 +348,17 @@ export const EditCoverSheet: React.FC<EditCoverSheetProps> = ({
           </Text>
         </View>
       </TouchableOpacity>
+      {galleryEnabled ? (
+        <View style={styles.coverGallery}>
+          <StayGalleryStrip
+            uris={galleryUris}
+            disabled={!previewUri}
+            onAdd={handleAddMore}
+            onRemove={i => setGalleryUris(prev => prev.filter((_, k) => k !== i))}
+            addAccessibilityLabel="Add more cover photos"
+          />
+        </View>
+      ) : null}
     </WizardBottomSheet>
   );
 };
@@ -671,6 +716,9 @@ const styles = StyleSheet.create({
   },
 
   // Cover preview
+  coverGallery: {
+    marginTop: 20,
+  },
   coverPreviewWrap: {
     borderRadius: 16,
     overflow: 'hidden',

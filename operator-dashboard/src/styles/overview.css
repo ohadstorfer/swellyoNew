@@ -1,0 +1,1193 @@
+/*
+ * Trip Overview — the app's Overview tab (TripDetailViewRedesigned.tsx) on the
+ * web. Sizes are the app's Figma MOBILE values (tokens.css --fs-*); the app's
+ * notes name each node. Everything is scoped under .ov-root.
+ *
+ * Text styles used, as in the app's theme/typography.ts:
+ *   MB1 16/24 · MB2 14/18 · B3 12/18 · B4 10/17
+ */
+
+.ov-root {
+  /* Colours the app's Overview uses that tokens.css has no name for. */
+  --ov-orange: #f37a3c; /* "Local Crew" label */
+  --ov-purple: #b72df2; /* Fill/Tertiary — "Trip Vibe", "Verified Swellyo Stay" */
+  --ov-stroke-3: #cfcfcf; /* Stroke/M - 03 — boxed icon cells */
+  --ov-desc: #4a5565; /* stay meta, empty-stay text */
+  --ov-ink-strong: #0a0a0a; /* stay name, cert titles */
+  --ov-border-card: #e8e8e8; /* "What's included" list */
+  --ov-icon-bubble: #f4f6f7;
+  --ov-card-shadow: 0 0 24px rgba(0, 0, 0, 0.09); /* Figma "Card Shadow" */
+
+  max-width: 720px;
+  margin: 0 auto;
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.ov-root h2,
+.ov-root h3,
+.ov-root p,
+.ov-root ul {
+  margin: 0;
+  padding: 0;
+}
+.ov-root ul {
+  list-style: none;
+}
+
+/* Long words (URLs, names) never push the page sideways at 360. */
+.ov-root * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────── */
+
+.ov-head {
+  padding-bottom: 8px;
+}
+
+/* Figma 18437:21673 — rounded 24 at the bottom; 340 tall. */
+.ov-hero {
+  position: relative;
+  height: 340px;
+  overflow: hidden;
+  background: var(--line);
+  border-radius: 0 0 24px 24px;
+}
+@media (min-width: 720px) {
+  /* Inside a desktop page the cover is a card, not a full-bleed header. */
+  .ov-hero {
+    border-radius: 24px;
+  }
+}
+.ov-hero-empty {
+  display: grid;
+  place-items: center;
+  color: #b0b0b0;
+}
+
+/* Sideways photo rows (cover, stay, itinerary day). */
+.ov-snap {
+  display: flex;
+  height: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.ov-snap::-webkit-scrollbar {
+  display: none;
+}
+.ov-snap:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+.ov-snap-img {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  scroll-snap-align: start;
+  display: block;
+}
+
+/* Figma 17488:27977 — black rising from the bottom, 252 tall. */
+.ov-hero-shade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 252px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 14%, rgba(0, 0, 0, 1) 75%);
+}
+.ov-hero-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 87px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.ov-hero-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  transition: width var(--t-panel) var(--ease-out), background-color var(--t-panel) var(--ease-out);
+}
+.ov-hero-dot.is-on {
+  width: 24px;
+  background: var(--surface);
+}
+.ov-hero-count {
+  position: absolute;
+  right: 20px;
+  bottom: 80px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(33, 33, 33, 0.7);
+  color: var(--surface);
+  font-size: var(--fs-md);
+  line-height: var(--fs-xl);
+  pointer-events: none;
+}
+
+/* Figma 17488:27990 — the white card overlapping the cover's last 61px. */
+.ov-hero-card {
+  position: relative;
+  margin: -61px 18px 0;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  box-shadow: var(--ov-card-shadow);
+}
+.ov-hero-top {
+  padding: 10px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.ov-certs {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  margin: 4px 0 6px;
+}
+.ov-stoke-mark {
+  display: inline-grid;
+  place-items: center;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  font-family: var(--font-heading);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ok);
+}
+.ov-stoke-mark-sm {
+  height: 33px;
+  width: 33px;
+  padding: 0;
+}
+/* Body/B-3 12/18. */
+.ov-hero-date {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--muted);
+}
+/* Body/M B-1 16/24, bold. */
+.ov-hero-title {
+  margin-top: 2px;
+  font-family: var(--font);
+  font-size: var(--fs-lg);
+  line-height: 24px;
+  font-weight: 700;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Figma 18437:21695 — a fixed 48 between photo and stats, centred together. */
+.ov-hero-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  padding: 8px 16px 16px;
+}
+@media (max-width: 380px) {
+  .ov-hero-bottom {
+    gap: 24px;
+  }
+}
+.ov-hero-host {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 107px;
+  flex-shrink: 0;
+}
+@media (max-width: 380px) {
+  .ov-hero-host {
+    width: 88px;
+  }
+}
+/* Figma 18437:21696 — 107 squircle (radius 40), 1px white stroke. */
+.ov-hero-host-photo {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 40px;
+  border: 1px solid var(--surface);
+  background: var(--line);
+  object-fit: cover;
+  display: block;
+}
+.ov-hero-host-letter {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-family: var(--font-heading);
+  font-size: 36px;
+  font-weight: 700;
+}
+.ov-hero-host-name {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.ov-hero-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 1;
+}
+.ov-hero-stat {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.ov-hero-stat-icon {
+  padding: 5px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+.ov-hero-stat-glyph {
+  height: 20.125px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ov-hero-stat-text {
+  display: flex;
+  flex-direction: column;
+}
+/* B-4 10/17 faint, then B-3 bold. */
+.ov-hero-stat-label {
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  color: var(--faint);
+  margin-bottom: -3px;
+}
+.ov-hero-stat-value {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Countdown — Figma 17488:29008: 48px boxes, 8 radius, 16 apart. */
+.ov-countdown {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin: 6px 0 0;
+  padding-bottom: 24px;
+}
+.ov-countdown-box {
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+}
+.ov-countdown-value {
+  font-family: var(--font-heading);
+  font-size: var(--fs-xl);
+  line-height: 22px;
+  font-weight: 700;
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+.ov-countdown-label {
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  color: var(--text-2);
+}
+
+/* ── Body ────────────────────────────────────────────────────────────── */
+
+.ov-body {
+  padding: 0 16px;
+}
+@media (min-width: 720px) {
+  .ov-body {
+    padding: 0;
+  }
+}
+
+/* Figma 17157:26177 — three equal cards, 8 apart, lined up with the hero card. */
+.ov-info-row {
+  display: flex;
+  gap: 8px;
+  margin: 20px 2px 8px;
+}
+.ov-info-card {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+/* 38x38: 18px icon in 10px padding. */
+.ov-icon-box {
+  padding: 10px;
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  display: flex;
+}
+.ov-info-label {
+  display: block;
+  font-size: var(--fs-s);
+  line-height: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-info-value {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--fs-s);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Sections — 20 above and below. Hairlines as in Figma 17488:27988. */
+.ov-section {
+  padding: 20px 0;
+}
+.ov-line-below {
+  border-bottom: 1px solid var(--line);
+}
+.ov-line-above {
+  border-top: 1px solid var(--line);
+}
+.ov-section-stay {
+  padding-bottom: 16px;
+}
+.ov-pad-bottom {
+  padding-bottom: 40px;
+}
+.ov-section-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.ov-section-title-text {
+  flex: 1;
+}
+/* Body/M B-1 16/24, bold. */
+.ov-section-title {
+  font-family: var(--font);
+  font-size: var(--fs-lg);
+  line-height: 24px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ov-section-sub {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--muted);
+}
+/* Body/B-3 12/18. */
+.ov-body-text {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--muted);
+  white-space: pre-line;
+}
+.ov-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ov-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ov-link-btn {
+  display: inline-block;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--cyan-dark);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: opacity var(--t-press) var(--ease-out);
+}
+.ov-link-btn:hover {
+  text-decoration: underline;
+}
+.ov-link-btn:active {
+  opacity: 0.6;
+}
+.ov-link-btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+/* Body/M B-2 14/18. The app draws these in #05BCD3; as text on white that
+ * fails contrast, so they take the token for accent-as-text. */
+.ov-see-more {
+  margin-top: 16px;
+  font-size: var(--fs-md);
+  line-height: 18px;
+}
+.ov-view-all {
+  font-size: var(--fs-md);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.ov-host-see-more {
+  margin-top: 16px;
+  font-size: var(--fs-s);
+  line-height: 18px;
+}
+
+/* ── About <host> ─────────────────────────────────────────────────────── */
+
+.ov-about-host-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.ov-about-host-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-host-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.ov-host-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 12px;
+  border-radius: 32px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  font-size: var(--fs-md);
+  line-height: 18px;
+  color: var(--text);
+}
+/* No family: Inter has no emoji glyphs. */
+.ov-emoji {
+  font-family: system-ui, sans-serif;
+}
+.ov-host-bio {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--muted);
+  white-space: pre-line;
+}
+.ov-familiarity {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+.ov-fam-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ov-fam-icon {
+  padding: 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--ov-stroke-3);
+  background: var(--panel);
+  color: var(--text-2);
+  display: flex;
+  flex-shrink: 0;
+}
+.ov-fam-text {
+  flex: 1;
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+/* ── Crew ─────────────────────────────────────────────────────────────── */
+
+/* Figma 17488:28105 — cards 118 wide, 5 apart, scrolling sideways. */
+.ov-crew {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 4px;
+}
+.ov-crew > li {
+  display: flex;
+  flex: 0 0 118px;
+}
+.ov-crew-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+  transition: transform var(--t-press) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+}
+.ov-crew-card:active {
+  transform: scale(0.97);
+}
+.ov-crew-card.is-lead {
+  border-color: var(--cyan);
+}
+.ov-crew-card.is-open {
+  box-shadow: var(--shadow-sm);
+}
+.ov-crew-card:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ov-crew-card:hover {
+    border-color: var(--line-strong);
+  }
+  .ov-crew-card.is-lead:hover {
+    border-color: var(--cyan);
+  }
+}
+.ov-crew-name,
+.ov-crew-meta {
+  display: block;
+  width: 100%;
+  text-align: center;
+  font-size: var(--fs-s);
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-crew-name {
+  font-weight: 700;
+  color: var(--text);
+}
+.ov-crew-meta {
+  color: var(--muted);
+}
+.ov-crew-detail {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+.ov-crew-detail-name {
+  font-family: var(--font-heading);
+  font-size: var(--fs-xl);
+  line-height: 25px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ov-crew-detail-role {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.ov-crew-detail-bio {
+  margin-top: 12px;
+  font-size: var(--fs-md);
+  line-height: 21px;
+  color: var(--text);
+  white-space: pre-line;
+}
+
+/* ── Accommodation ───────────────────────────────────────────────────── */
+
+/* Figma 17020-29417: white, 32 radius, 10 padding, 12 gap, no border. */
+.ov-stay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 32px;
+  background: var(--surface);
+}
+.ov-stay-image {
+  width: 100%;
+  aspect-ratio: 328 / 198;
+  border-radius: 24px;
+  background: var(--panel);
+  object-fit: cover;
+  display: block;
+}
+.ov-stay-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 20px;
+}
+.ov-stay-empty span {
+  color: var(--ov-desc);
+}
+.ov-stay-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ov-stay-clip {
+  position: relative;
+  overflow: hidden;
+}
+.ov-stay-count {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--surface);
+  font-size: var(--fs-s);
+  line-height: 18px;
+  pointer-events: none;
+}
+.ov-stay-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.ov-stay-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: #d9d9d9;
+  transition: background-color var(--t-fast) var(--ease-out);
+}
+.ov-stay-dot.is-on {
+  background: var(--text);
+}
+
+/* Info pill — Figma 17020-29427: px 8, py 7, 8 gap, 32 radius. */
+.ov-stay-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 32px;
+  background: var(--panel);
+  color: inherit;
+  text-decoration: none;
+}
+.ov-stay-pill-link {
+  transition: background-color var(--t-fast) var(--ease-out), transform var(--t-press) var(--ease-out);
+}
+.ov-stay-pill-link:active {
+  transform: scale(0.99);
+}
+.ov-stay-pill-link:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ov-stay-pill-link:hover {
+    background: var(--panel-2);
+  }
+}
+.ov-stay-pill-icon {
+  padding: 10px;
+  border-radius: 32px;
+  background: var(--surface);
+  color: var(--text-2);
+  display: flex;
+  flex-shrink: 0;
+}
+.ov-stay-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 19px;
+  background: var(--surface);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.ov-stay-pill-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ov-stay-name {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--ov-ink-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-stay-meta {
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  color: var(--ov-desc);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-stay-verified {
+  color: var(--ov-purple);
+}
+.ov-stay-link-icon {
+  color: var(--muted);
+  display: flex;
+  padding-right: 6px;
+}
+
+/* Cert rows — Figma: 74 tall, 32 radius, logo 15 from the text. */
+.ov-cert-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  min-height: 74px;
+  padding: 10px 16px 10px 13px;
+  border-radius: 32px;
+  background: var(--panel);
+  color: inherit;
+  text-decoration: none;
+  transition: opacity var(--t-press) var(--ease-out);
+}
+.ov-cert-row:active {
+  opacity: 0.7;
+}
+.ov-cert-row:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.ov-cert-logo {
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ov-cert-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ov-cert-title {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--ov-ink-strong);
+  white-space: pre-line;
+}
+.ov-cert-link {
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  color: var(--cyan-dark);
+}
+
+/* ── Members ─────────────────────────────────────────────────────────── */
+
+.ov-members {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  padding-bottom: 4px;
+}
+.ov-member {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.ov-member-name {
+  width: 56px;
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  color: var(--faint);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── What's included ─────────────────────────────────────────────────── */
+
+.ov-incl-list {
+  border: 1px solid var(--ov-border-card);
+  border-radius: var(--r-lg);
+  padding: 0 16px;
+  background: var(--surface);
+}
+.ov-incl-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+}
+.ov-incl-row + .ov-incl-row {
+  border-top: 1px solid var(--line);
+}
+.ov-incl-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r);
+  background: var(--ov-icon-bubble);
+  color: var(--text-2);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ov-incl-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ov-incl-title {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ov-incl-item {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.ov-addons {
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.ov-addons-title {
+  font-family: var(--font-heading);
+  font-size: var(--fs-xl);
+  line-height: 24px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ov-addons-hint {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--muted);
+}
+.ov-addon-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ov-addon-tag {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+/* ── Surf style ──────────────────────────────────────────────────────── */
+
+.ov-surf-card {
+  padding: 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface);
+}
+.ov-surf-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Body/B-4 10/17. */
+.ov-surf-pill {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--line);
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  color: var(--text);
+}
+
+/* ── Who it's for ────────────────────────────────────────────────────── */
+
+.ov-cell-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ov-icon-cell {
+  flex: 1 1 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ov-icon-cell-box {
+  padding: 10px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  display: flex;
+  flex-shrink: 0;
+}
+.ov-icon-cell-text {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.ov-icon-cell-label {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--muted);
+}
+.ov-icon-cell-value {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* ── Price (the app's bottom bar) ────────────────────────────────────── */
+
+.ov-price {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.ov-price-amount {
+  font-family: var(--font-heading);
+  font-size: var(--fs-3xl);
+  line-height: 30px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ov-price-per {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.ov-price-dates {
+  font-size: var(--fs-s);
+  line-height: 18px;
+  color: var(--muted);
+}
+
+/* ── Itinerary ───────────────────────────────────────────────────────── */
+
+.ov-itin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ov-day {
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.ov-day-photo {
+  position: relative;
+  height: 210px;
+  background: var(--line);
+}
+.ov-day-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.ov-day-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.ov-day-dot.is-on {
+  background: var(--surface);
+}
+/* Closed card: 76 tall, 8 inset, a 68x60 photo, 16 to the text. */
+.ov-day-head {
+  width: 100%;
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 6px 8px 8px;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ov-day.is-open .ov-day-head {
+  padding: 12px 6px 0 12px;
+}
+.ov-day-head:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+  border-radius: var(--r-lg);
+}
+.ov-day-thumb {
+  width: 68px;
+  height: 60px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--line);
+  flex-shrink: 0;
+}
+.ov-day-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ov-day-label,
+.ov-day-highlights {
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-day-label {
+  color: var(--faint);
+}
+.ov-day-highlights {
+  color: var(--muted);
+}
+.ov-day-title {
+  font-size: var(--fs-md);
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-day-chevron {
+  display: flex;
+  color: var(--text);
+  transition: transform var(--t-panel) var(--ease-out);
+}
+.ov-day.is-open .ov-day-chevron {
+  transform: rotate(90deg);
+}
+.ov-day-lines {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 14px;
+}
+.ov-day-lines > li {
+  display: flex;
+  flex-direction: column;
+}
+.ov-day-line-head {
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.ov-day-line-place {
+  font-size: var(--fs-xs);
+  line-height: 17px;
+  color: var(--muted);
+}
+.ov-day-line-place.is-indented {
+  padding-left: 38px;
+}
+
+/* ── Motion ──────────────────────────────────────────────────────────── */
+
+/* Content that unfolds on a click: a short fade with a 4px rise. Never from
+ * scale(0) — nothing in the real world appears from nothing. */
+.ov-enter {
+  animation: ov-enter var(--t-panel) var(--ease-out) both;
+}
+@keyframes ov-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-enter {
+    animation: none;
+  }
+  .ov-day-chevron,
+  .ov-hero-dot,
+  .ov-crew-card,
+  .ov-stay-pill-link {
+    transition: none;
+  }
+}

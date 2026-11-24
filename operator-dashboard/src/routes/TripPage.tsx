@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -36,7 +37,12 @@ import { MyPaperworkCard } from '../components/MyPaperworkCard';
 import { TripActionsMenu } from '../components/TripActionsMenu';
 import { AdminsCard } from '../components/TripAdmins';
 
-export function TripPage() {
+/**
+ * The Dashboard tab of the trip screen. `tabs` is the Overview/Dashboard bar
+ * from `TripScreen`, drawn under the title like the app draws it under the
+ * cover card.
+ */
+export function TripPage({ tabs }: { tabs?: ReactNode } = {}) {
   const { tripId = '' } = useParams();
   const access = useTripAccess(tripId);
   const queryClient = useQueryClient();
@@ -127,6 +133,7 @@ export function TripPage() {
     return (
       <>
         <PageHead back="/trips" backLabel="All trips" title={trip.data.title} />
+        {tabs}
         <NoPaperworkAccess />
       </>
     );
@@ -179,13 +186,6 @@ export function TripPage() {
         back="/trips"
         backLabel="All trips"
         title={trip.data.title}
-        right={
-          (access.can('trip.edit') || (!!user && trip.data.hostId === user.id)) && (
-            <Link to={`/trips/${tripId}/edit`} className="btn btn-sm">
-              Edit trip
-            </Link>
-          )
-        }
         sub={
           <>
             {formatRange(trip.data.startDate, trip.data.endDate)} ·{' '}
@@ -198,8 +198,18 @@ export function TripPage() {
             />
           </>
         }
-        right={<TripActionsMenu trip={trip.data} />}
+        right={
+          <>
+            {(access.can('trip.edit') || (!!user && trip.data.hostId === user.id)) && (
+              <Link to={`/trips/${tripId}/edit`} className="btn btn-sm">
+                Edit trip
+              </Link>
+            )}
+            <TripActionsMenu trip={trip.data} />
+          </>
+        }
       />
+      {tabs}
 
       <div className="stack">
         {/* ── Trip summary ──────────────────────────────────────────────── */}

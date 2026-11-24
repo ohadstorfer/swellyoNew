@@ -5,7 +5,7 @@ import { Loading } from './components/StateBits';
 import { LoginPage } from './routes/LoginPage';
 import { NotOperatorPage } from './routes/NotOperatorPage';
 import { TripsPage } from './routes/TripsPage';
-import { TripPage } from './routes/TripPage';
+import { TripScreen } from './routes/TripScreen';
 import { RequirementPage } from './routes/RequirementPage';
 import { WaitingPage } from './routes/WaitingPage';
 import { TravelerPage } from './routes/TravelerPage';
@@ -87,7 +87,7 @@ export function App() {
         />
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/trips/new" element={isOperator ? <CreateTripPage /> : <Navigate to="/trips" replace />} />
-        <Route path="/trips/:tripId" element={<TripPage />} />
+        <Route path="/trips/:tripId" element={<TripScreen />} />
         <Route path="/trips/:tripId/edit" element={<EditTripPage />} />
         <Route path="/trips/:tripId/money" element={<MoneyPage />} />
         {/* The ledger — every transaction, with an export. Not guarded here:

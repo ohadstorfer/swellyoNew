@@ -61,9 +61,17 @@ export interface StayGalleryStripProps {
   onRemove: (index: number) => void;
   /** The add tile is hidden until there is a main photo, so the order reads right. */
   disabled?: boolean;
+  /** Screen-reader label of the add tile. Defaults to the stay wording. */
+  addAccessibilityLabel?: string;
 }
 
-export const StayGalleryStrip: React.FC<StayGalleryStripProps> = ({ uris, onAdd, onRemove, disabled }) => {
+export const StayGalleryStrip: React.FC<StayGalleryStripProps> = ({
+  uris,
+  onAdd,
+  onRemove,
+  disabled,
+  addAccessibilityLabel = 'Add more stay photos',
+}) => {
   const canAdd = uris.length < STAY_GALLERY_MAX && !disabled;
   return (
     <View style={styles.root}>
@@ -101,7 +109,7 @@ export const StayGalleryStrip: React.FC<StayGalleryStripProps> = ({ uris, onAdd,
               onPress={onAdd}
               style={({ pressed }) => [styles.add, pressed && styles.addPressed]}
               accessibilityRole="button"
-              accessibilityLabel="Add more stay photos"
+              accessibilityLabel={addAccessibilityLabel}
             >
               <Ionicons name="add" size={22} color={C.accent} />
               <Text style={styles.addText}>Add</Text>

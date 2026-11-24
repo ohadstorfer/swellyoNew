@@ -473,3 +473,8 @@
     font-size: var(--fs-xl);
   }
 }
+
+/* The shared trip Overview, as the first thing on the Preview step. */
+.ct-preview-overview {
+  margin-bottom: var(--s-4);
+}

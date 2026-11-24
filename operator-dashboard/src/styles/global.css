@@ -493,7 +493,16 @@ a.banner:active {
 }
 
 textarea,
-input[type='text'] {
+select,
+input[type='text'],
+input[type='number'],
+input[type='email'],
+input[type='url'],
+input[type='tel'],
+input[type='search'],
+input[type='password'],
+input[type='date'],
+input[type='time'] {
   width: 100%;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
@@ -504,7 +513,16 @@ input[type='text'] {
   resize: vertical;
 }
 textarea:focus,
-input[type='text']:focus {
+select:focus,
+input[type='text']:focus,
+input[type='number']:focus,
+input[type='email']:focus,
+input[type='url']:focus,
+input[type='tel']:focus,
+input[type='search']:focus,
+input[type='password']:focus,
+input[type='date']:focus,
+input[type='time']:focus {
   outline: 2px solid var(--cyan);
   outline-offset: -1px;
   border-color: transparent;
@@ -643,6 +661,271 @@ input[type='text']:focus {
   padding-top: var(--s-3);
   border-top: 1px solid var(--line);
   animation: enter var(--t-panel) var(--ease-out) both;
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────────────
+ * The app's header: white, hairline under it, the round Swellyo mark on the
+ * left. Sticky, and it honours the notch when the site is saved to a home
+ * screen (viewport-fit=cover in index.html). */
+html {
+  --topbar-h: calc(53px + env(safe-area-inset-top));
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  padding-top: env(safe-area-inset-top);
+}
+.topbar-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 10px var(--s-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-12);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  min-width: 0;
+}
+.brand:hover {
+  text-decoration: none;
+}
+.brand-name {
+  font: 700 var(--fs-lg) / 24px var(--font-heading);
+  white-space: nowrap;
+}
+.brand-sub {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Page title row: title on the left, actions on the right — and under it,
+ * full width, once the screen is too narrow for both. */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-12);
+  flex-wrap: wrap;
+}
+.page-head h1 {
+  overflow-wrap: anywhere;
+}
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+/* Long names, emails and file names must wrap rather than push the page
+ * sideways — on a phone that is the difference between a page and a mess. */
+.card-head > *,
+.row-between > * {
+  min-width: 0;
+}
+.row-between {
+  flex-wrap: wrap;
+}
+
+.modal > .card-body {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* ── Trip tabs ─────────────────────────────────────────────────────────────
+ * The app's TripTabToggle. Sticks under the top bar like the app's toggle
+ * sticks under its header. Only the indicator moves, on transform; the two
+ * label layers only fade, so the bar never reflows during a switch. */
+.trip-tabs {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 5;
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  margin: 0 0 var(--s-4);
+}
+.trip-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-2);
+  min-height: 48px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: 400 var(--fs-lg) / 20px var(--font);
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--t-fast) ease;
+}
+.trip-tab:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+.trip-tab-label {
+  display: grid;
+}
+.trip-tab-bold,
+.trip-tab-reg {
+  grid-area: 1 / 1;
+  transition: opacity var(--t-panel) ease;
+}
+.trip-tab-bold {
+  font-weight: 700;
+  opacity: 0;
+}
+.trip-tab[aria-selected='true'] .trip-tab-bold {
+  opacity: 1;
+}
+.trip-tab[aria-selected='true'] .trip-tab-reg {
+  opacity: 0;
+}
+.trip-tabs-indicator {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 3px;
+  background: var(--cyan);
+  /* It moves across the bar rather than entering or leaving: ease-in-out, the
+   * app's SLIDE curve and duration. */
+  transition: transform 220ms cubic-bezier(0.77, 0, 0.175, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .trip-tab:not([aria-selected='true']):hover {
+    background: var(--panel);
+  }
+}
+
+/* ── Phone ─────────────────────────────────────────────────────────────────
+ * Same product as the app, so on a phone it behaves like the app: 16px page
+ * gutters, dialogs that rise from the bottom like the app's sheets, tap
+ * targets at least 44px, and inputs at 16px so iOS Safari does not zoom the
+ * page when one is focused. */
+@media (max-width: 640px) {
+  .wrap {
+    padding: var(--s-4) var(--s-3) calc(64px + env(safe-area-inset-bottom));
+  }
+  .topbar-inner {
+    padding: 8px var(--s-3);
+  }
+  html {
+    --topbar-h: calc(49px + env(safe-area-inset-top));
+  }
+  /* Edge to edge on a phone, like the app's bar. */
+  .trip-tabs {
+    margin-left: calc(-1 * var(--s-3));
+    margin-right: calc(-1 * var(--s-3));
+    border-radius: 0;
+  }
+  .hide-sm {
+    display: none !important;
+  }
+  .brand-sub {
+    display: none;
+  }
+
+  .page-head-actions {
+    width: 100%;
+  }
+
+  .card-head,
+  .card-body,
+  .row-link {
+    padding-left: var(--s-12);
+    padding-right: var(--s-12);
+  }
+  th,
+  td {
+    padding-left: var(--s-12);
+    padding-right: var(--s-12);
+  }
+
+  textarea,
+  select,
+  input[type='text'],
+  input[type='number'],
+  input[type='email'],
+  input[type='url'],
+  input[type='tel'],
+  input[type='search'],
+  input[type='password'],
+  input[type='date'],
+  input[type='time'] {
+    font-size: var(--fs-lg);
+  }
+
+  /* A dialog becomes a bottom sheet — the app's BottomSheetShell. Anchored to
+   * the bottom edge, so it slides up from there rather than popping from the
+   * middle, on the iOS drawer curve. */
+  .scrim {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal,
+  .modal-wide {
+    max-width: none;
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top));
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-up 280ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+  /* The grab handle the app draws on every sheet. Decorative: tapping the
+   * scrim closes, as in the app. */
+  .modal::before {
+    content: '';
+    display: block;
+    flex: none;
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--line-strong);
+    margin: 8px auto 0;
+  }
+  .modal .card-head,
+  .modal .card-body {
+    padding-left: var(--s-3);
+    padding-right: var(--s-3);
+  }
+  /* Footer actions share the width, primary last — thumb-reachable. */
+  .modal > .row:last-child {
+    padding-left: var(--s-3) !important;
+    padding-right: var(--s-3) !important;
+  }
+  .modal > .row:last-child > .btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* Fingers, not cursors: every pressable thing gets a 44px target. */
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+  .btn-sm {
+    min-height: 36px;
+  }
+  .chip,
+  .seg-btn {
+    min-height: 36px;
+  }
 }
 
 /* Motion sickness is real. Keep opacity, drop movement. */

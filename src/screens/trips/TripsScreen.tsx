@@ -10,6 +10,7 @@ import {
   Modal,
   Alert,
   Platform,
+  StatusBar,
   Dimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
@@ -58,6 +59,7 @@ import { useTripsListRealtime } from '../../hooks/trips/useTripsListRealtime';
 import CreateTripWizard from './CreateTripWizard';
 import { OperatorSetupBanner } from '../../components/trips/OperatorSetupBanner';
 import { useOperatorSetup } from '../../hooks/trips/useOperatorSetup';
+import { bypassesOperatorSetup } from '../../services/trips/operatorSetup';
 import { pushRootCard } from '../../navigation/navigationRef';
 import { ff, fs } from '../../theme/fonts';
 import { fontSize, textStyle, textStyles } from '../../theme/typography';
@@ -458,6 +460,9 @@ const formatVibe = (trip: GroupTrip): string | null => {
 // Card geometry. The frame pads the photo by 8 on every side and leaves a
 // fixed 64px row under it for the host and the price; only the photo scales.
 const EX_FRAME_PAD = 8;
+// How far the card shrinks before its shadow has fully faded (see
+// ExploreTripCard).
+const EX_SHADOW_FADE_PX = 40;
 const EX_INFO_H = 64;
 // Figma 18960:24187: a horizontal carousel. The first card starts 14 from the
 // left edge and the next one sits 8 after it, so it peeks in on the right.
@@ -473,7 +478,10 @@ const EX_CARD_MIN_W = 280;
 // nav bar, so a tall phone gets a tall photo and a short one a shorter photo.
 // The bar's top edge sits ~91px above the bottom of the screen, and the design
 // leaves ~44 more between it and the card (481 tall on an 852 screen).
-const EX_NAV_RESERVE = 92;
+// iOS only: there the native tab bar floats and the screen runs under it. On
+// Android the Material tab bar takes its own space — the screen already ends
+// at its top edge — so reserving it again left the card ~90dp short.
+const EX_NAV_RESERVE = Platform.OS === 'android' ? 0 : 92;
 const EX_NAV_GAP = 44;
 // The photo never gets shorter than this (an SE-size phone)…
 const EX_IMAGE_MIN_H = 220;
@@ -498,6 +506,11 @@ const EX_FIT_MIN_H = 200;
 // same keyboard almost every time, so the cards can start shrinking in the tap
 // itself, with the header, instead of waiting for the keyboard event.
 let lastKbTop = 0;
+// Android: the keyboard's screenY counts from the top of the screen, but
+// measureInWindow (the deck's top) counts from below the status bar. (The tab
+// bar is hidden while the keyboard is up — see RootNavigator.)
+const kbLimit = (kbTop: number) =>
+  Platform.OS === 'android' ? kbTop - (StatusBar.currentHeight ?? 0) : kbTop;
 // If no keyboard has started showing this long after search opens (hardware
 // keyboard), the cards grow back. Long, because the first keyboard of a
 // session can take ~1s to appear, and Android only reports it once it is up.
@@ -516,17 +529,29 @@ const exploreCardLabel = (trip: GroupTrip): string => {
 const ExploreTripCard: React.FC<{
   trip: GroupTrip;
   meta?: TripCardMeta;
-  /** How much taller the photo is than its frame right now (see
-   *  ExploreTripsView): when the card shrinks, the photo keeps its full-card
-   *  size and is cropped top and bottom instead of rescaled. */
-  photoLag?: SharedValue<number>;
-}> = React.memo(({ trip, meta, photoLag }) => {
+  /** How many px shorter than full the card looks right now (see
+   *  ExploreTripsView), while the keyboard is up. */
+  shrinkBy?: SharedValue<number>;
+}> = React.memo(({ trip, meta, shrinkBy }) => {
   const viewer = useViewer();
   const reduceMotion = useReducedMotion();
-  const photoStyle = useAnimatedStyle(() => {
-    const lag = photoLag ? photoLag.value : 0;
-    return { top: -lag / 2, bottom: -lag / 2 };
-  });
+  // The card never changes its layout size — only transforms move, so the
+  // shrink runs on the GPU at a steady pace (animating `height` re-laid-out
+  // the card every frame and stuttered on a real phone). Layers, by where
+  // they end up on screen:
+  //  · window (clips the card's bottom edge): up by Δ;
+  //  · white frame: back down by Δ → stays still;
+  //  · photo window (clips the photo's bottom edge): up by Δ;
+  //  · photo: back down by Δ → stays still, cropped from below;
+  //  · details panel + host row: up by Δ, riding the bottom edge.
+  // Each clipping layer rounds its own corners, so they stay round.
+  const up = useAnimatedStyle(() => ({ transform: [{ translateY: -(shrinkBy ? shrinkBy.value : 0) }] }));
+  const down = useAnimatedStyle(() => ({ transform: [{ translateY: shrinkBy ? shrinkBy.value : 0 }] }));
+  // The shadow can't be clipped with the card, so it fades out early in the
+  // shrink and back in at the end of the grow.
+  const shadowStyle = useAnimatedStyle(() => ({
+    opacity: 1 - Math.min(1, (shrinkBy ? shrinkBy.value : 0) / EX_SHADOW_FADE_PX),
+  }));
   const avatars = (meta?.memberAvatars ?? []).slice(0, 3);
   const count = meta?.totalCount ?? trip.participant_count ?? 0;
   const max = trip.max_participants;
@@ -550,21 +575,23 @@ const ExploreTripCard: React.FC<{
   const showLocation = !!trip.title && !!location && location !== headline;
 
   return (
-    <View style={styles.exFrame}>
-      <View style={styles.exImage}>
+    <View style={styles.exCard}>
+    <Reanimated.View style={[styles.exCardShadow, shadowStyle]} pointerEvents="none" />
+    <Reanimated.View style={[styles.exCardWindow, up]}>
+    <Reanimated.View style={[styles.exFrame, down]}>
+      <Reanimated.View style={[styles.exImage, up]}>
+      <Reanimated.View style={[styles.exPhotoContent, down]}>
         {trip.hero_image_url ? (
-          <Reanimated.View style={[styles.exPhotoLayer, photoStyle]}>
-            <Thumb
-              uri={trip.hero_image_url}
-              widthPx={HERO_THUMB_PX}
-              placeholder={heroThumb ? { uri: heroThumb } : undefined}
-              placeholderContentFit="cover"
-              style={styles.cardImageBg}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              transition={reduceMotion ? 0 : 150}
-            />
-          </Reanimated.View>
+          <Thumb
+            uri={trip.hero_image_url}
+            widthPx={HERO_THUMB_PX}
+            placeholder={heroThumb ? { uri: heroThumb } : undefined}
+            placeholderContentFit="cover"
+            style={styles.cardImageBg}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={reduceMotion ? 0 : 150}
+          />
         ) : (
           <View style={[styles.cardImageBg, styles.cardImagePlaceholder]}>
             <Ionicons name="image-outline" size={32} color="#B0B0B0" />
@@ -591,7 +618,7 @@ const ExploreTripCard: React.FC<{
             the top. The frame above clips the rounded corners. The blur is
             faded in through a gradient mask too — a bare BlurView ends in a
             hard line across the photo. Same pairing as OnboardingChrome. */}
-        <View style={styles.exPanel}>
+        <Reanimated.View style={[styles.exPanel, up]}>
           <MaskedView
             style={StyleSheet.absoluteFill}
             pointerEvents="none"
@@ -648,10 +675,11 @@ const ExploreTripCard: React.FC<{
               )}
             </View>
           </View>
-        </View>
-      </View>
+        </Reanimated.View>
+      </Reanimated.View>
+      </Reanimated.View>
 
-      <View style={styles.exInfo}>
+      <Reanimated.View style={[styles.exInfo, up]}>
         <View style={styles.exHost}>
           {meta?.hostAvatar ? (
             <Thumb
@@ -680,7 +708,9 @@ const ExploreTripCard: React.FC<{
             {price}
           </Text>
         )}
-      </View>
+      </Reanimated.View>
+    </Reanimated.View>
+    </Reanimated.View>
     </View>
   );
 });
@@ -882,8 +912,8 @@ const ExploreTripsView: React.FC<{
   const kbComing = useRef(false);
   const slideLeft = () =>Math.max(0, slide.current.ms - (Date.now() - slide.current.start));
   // The photo is never rescaled: it always keeps the size it has in the
-  // full-height card, and the smaller card just crops its top and bottom
-  // (centered). Only the card's height animates — with the header when search
+  // full-height card, and the smaller card just crops its bottom (the photo
+  // stays anchored at the top). Only the card's height animates — with the header when search
   // opens or closes (same curve, same end), or with the keyboard when only it
   // moves.
   const resizeTo = useCallback((target: number, cardMs: number, release = false) => {
@@ -899,7 +929,7 @@ const ExploreTripsView: React.FC<{
   // The card height that fits above a keyboard whose top is at `kbTop`.
   const fitFor = useCallback((kbTop: number) => {
     const deckTopEnd = deckBase.value - (searchOpenRef.current && headerH ? headerH.value : 0);
-    return Math.max(Math.min(EX_FIT_MIN_H, cardHRef.current), kbTop - deckTopEnd - EX_KB_GAP);
+    return Math.max(Math.min(EX_FIT_MIN_H, cardHRef.current), kbLimit(kbTop) - deckTopEnd - EX_KB_GAP);
   }, [deckBase, headerH]);
   useEffect(() => {
     const ios = Platform.OS === 'ios';
@@ -950,20 +980,16 @@ const ExploreTripsView: React.FC<{
     }
     setSearchOpen(open);
   }, [onSearchOpenChange, room, resizeTo, fitFor, deckBase, headerP]);
-  const fitH = useDerivedValue(() => {
-    if (cardH === 0 || room.value >= NO_LIMIT) return 0;
-    return Math.max(Math.min(EX_FIT_MIN_H, cardH), Math.min(cardH, room.value));
-  }, [cardH]);
-  // How much the card is shorter than full: the photo overflows its frame by
-  // this much, half cropped at the top and half at the bottom.
-  const photoLag = useDerivedValue(() => {
+  // How much shorter than full the card looks (the card never resizes; see
+  // ExploreTripCard).
+  const shrinkBy = useDerivedValue(() => {
     if (cardH === 0 || room.value >= NO_LIMIT) return 0;
     return Math.max(0, cardH - Math.max(Math.min(EX_FIT_MIN_H, cardH), Math.min(cardH, room.value)));
   }, [cardH]);
 
   const renderCard = useCallback(
-    (trip: GroupTrip) => <ExploreTripCard trip={trip} meta={meta.get(trip.id)} photoLag={photoLag} />,
-    [meta, photoLag],
+    (trip: GroupTrip) => <ExploreTripCard trip={trip} meta={meta.get(trip.id)} shrinkBy={shrinkBy} />,
+    [meta, shrinkBy],
   );
   const openTrip = useCallback((trip: GroupTrip) => {
     // The keyboard can still be up from search; don't carry it onto the trip.
@@ -1013,7 +1039,6 @@ const ExploreTripsView: React.FC<{
         items={visibleTrips}
         cardWidth={cardW}
         cardHeight={cardH}
-        fitHeight={fitH}
         renderCard={renderCard}
         onOpen={openTrip}
         onIndexChange={handleTopChange}
@@ -1270,17 +1295,13 @@ const CarouselCard: React.FC<{
   trip: GroupTrip;
   width: number;
   height: number;
-  /** Live height while the keyboard is up (see ExploreTripsView); `height`
-   *  otherwise. */
-  fitHeight?: SharedValue<number>;
   label?: string;
   onOpen: (trip: GroupTrip) => void;
   children: React.ReactNode;
-}> = React.memo(({ trip, width, height, fitHeight, label, onOpen, children }) => {
+}> = React.memo(({ trip, width, height, label, onOpen, children }) => {
   // Press feedback: a subtle scale, eased, not a jump.
   const pressed = useSharedValue(0);
   const style = useAnimatedStyle(() => ({
-    height: fitHeight && fitHeight.value > 0 ? fitHeight.value : height,
     transform: [{ scale: 1 - pressed.value * 0.02 }],
   }));
   return (
@@ -1294,7 +1315,7 @@ const CarouselCard: React.FC<{
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <Reanimated.View style={[{ width }, style]}>{children}</Reanimated.View>
+      <Reanimated.View style={[{ width, height }, style]}>{children}</Reanimated.View>
     </Pressable>
   );
 });
@@ -1303,13 +1324,12 @@ const ExploreCarousel: React.FC<{
   items: GroupTrip[];
   cardWidth: number;
   cardHeight: number;
-  fitHeight?: SharedValue<number>;
   renderCard: (trip: GroupTrip) => React.ReactNode;
   onOpen: (trip: GroupTrip) => void;
   onIndexChange: (index: number) => void;
   getAccessibilityLabel: (trip: GroupTrip) => string;
   resetKey: string;
-}> = ({ items, cardWidth, cardHeight, fitHeight, renderCard, onOpen, onIndexChange, getAccessibilityLabel, resetKey }) => {
+}> = ({ items, cardWidth, cardHeight, renderCard, onOpen, onIndexChange, getAccessibilityLabel, resetKey }) => {
   const listRef = useRef<FlatList<GroupTrip>>(null);
   const interval = cardWidth + EX_CAROUSEL_GAP;
   const indexRef = useRef(0);
@@ -1332,13 +1352,12 @@ const ExploreCarousel: React.FC<{
       trip={item}
       width={cardWidth}
       height={cardHeight}
-      fitHeight={fitHeight}
       label={getAccessibilityLabel(item)}
       onOpen={onOpen}
     >
       {renderCard(item)}
     </CarouselCard>
-  ), [cardWidth, cardHeight, fitHeight, getAccessibilityLabel, onOpen, renderCard]);
+  ), [cardWidth, cardHeight, getAccessibilityLabel, onOpen, renderCard]);
 
   const getItemLayout = useCallback((_: unknown, index: number) => ({
     length: interval,
@@ -1708,7 +1727,7 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
     // Only style C is gated. The other two are ordinary group trips that need
     // no Stripe account, no waiver and no refund policy — blocking those would
     // punish an operator for being promoted (Ohad, 2026-08-11).
-    if (key === 'C' && operatorSetup.needsSetup) {
+    if (key === 'C' && operatorSetup.needsSetup && !bypassesOperatorSetup(currentUserId)) {
       pushRootCard('OperatorSetup', undefined);
       return;
     }
@@ -1828,12 +1847,15 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
   }, [navigation]);
   // The wrapper's height shrinks to 0 (so the page below rises) while the
   // header inside moves up by the same amount (so it slides, not crops).
-  const headerWrapStyle = useAnimatedStyle(() =>
-    headerH.value === 0
-      ? { overflow: 'hidden' as const }
-      : { overflow: 'hidden' as const, height: headerH.value * (1 - headerP.value) },
-  );
-  const headerInnerStyle = useAnimatedStyle(() => ({
+  // The slide is a TRANSFORM, not a height change: the header and the page
+  // under it move up together by the header's height. Animating the header's
+  // height made the whole screen re-layout every frame (Explore, My Trips, the
+  // cards) — smooth in the simulator, dropped frames on a real phone, so the
+  // header, the cards and the photo read as separate movements. The page is
+  // one header taller (below the screen's bottom edge, clipped) so its bottom
+  // never comes up short; see pageShift.
+  const [headerPx, setHeaderPx] = useState(0);
+  const pageShiftStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: -headerH.value * headerP.value }],
   }));
   // The header fades to the search white with the SAME progress as the
@@ -1857,12 +1879,18 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
           underline tabs are the `below` slot; no gradient hairline here.
           While Explore search is open it slides up out of the way and the
           page rises with it. */}
-      <Reanimated.View style={headerWrapStyle}>
-        <Reanimated.View
-          style={headerInnerStyle}
+      {/* Clips the page at the safe-area edge, so the header slides up
+          under the status bar instead of over it. */}
+      <View style={styles.pageClip}>
+      <Reanimated.View
+        style={[styles.pageShift, { marginBottom: -headerPx, paddingBottom: headerPx }, pageShiftStyle]}
+      >
+      <View style={styles.headerWrap}>
+        <View
           onLayout={e => {
             const h = e.nativeEvent.layout.height;
             if (h > 0 && h !== headerH.value) headerH.value = h;
+            if (h > 0) setHeaderPx(prev => (prev === h ? prev : h));
           }}
         >
           <MainHeader
@@ -1873,12 +1901,12 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
             spaceBelow={7}
             below={<TripsHeaderTabs active={activeTab} onChange={goToTab} />}
           />
-        </Reanimated.View>
+        </View>
         <Reanimated.View
           style={[StyleSheet.absoluteFill, styles.headerVeil, headerVeilStyle]}
           pointerEvents="none"
         />
-      </Reanimated.View>
+      </View>
 
       {/* My Trips only. That is where the "Create a trip" card it gates lives,
           and on Explore its ~105px would push the card stack under the nav
@@ -1910,7 +1938,8 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
                   operatorSetup.complete ||
                   (operatorSetup.isOperator &&
                     !!currentUserId &&
-                    KEEP_CREATE_CARD_DURING_SETUP.has(currentUserId))
+                    (KEEP_CREATE_CARD_DURING_SETUP.has(currentUserId) ||
+                      bypassesOperatorSetup(currentUserId)))
                 }
                 onCreateTrip={() => void onPickStyle('C')}
                 onExplore={() => goToTab('explore')}
@@ -1934,6 +1963,11 @@ export default function TripsScreen({ navControl: navControlProp }: TripsScreenP
           </TabPane>
 
         </Reanimated.View>
+      </View>
+      {/* The extra header-tall strip under the page: it only comes into view
+          while the page is slid up, and matches Explore's white. */}
+      <View style={[styles.pageTail, { height: headerPx }]} pointerEvents="none" />
+      </Reanimated.View>
       </View>
 
       {/* Trip detail + edit are CARDS on the root stack now (Phase 2) —
@@ -1972,6 +2006,10 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#212121' },
   // Same white as Explore's page (exRoot) and the status-bar area in search.
   headerVeil: { backgroundColor: '#FAFAFA' },
+  pageClip: { flex: 1, overflow: 'hidden' },
+  pageShift: { flex: 1 },
+  headerWrap: { overflow: 'hidden' },
+  pageTail: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#FAFAFA' },
 
   // White header reused only by the "Edit trip" sub-screen.
   header: {
@@ -2328,20 +2366,36 @@ const styles = StyleSheet.create({
   statusDate: { ...textStyles.B3, color: '#4A5565', flexShrink: 1 },
 
   // Explore card (Figma 17779:51085): white frame, photo, host + price row.
-  exFrame: {
-    flex: 1,
+  // See ExploreTripCard: the card is clipped by transforms, never resized.
+  exCard: { flex: 1 },
+  exCardShadow: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#FFFFFF',
     borderRadius: 32,
-    padding: EX_FRAME_PAD,
-    gap: EX_FRAME_PAD,
     shadowColor: '#3E3E3E',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.1,
     shadowRadius: 16,
     elevation: 6,
   },
-  exPhotoLayer: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  exImage: { flex: 1, borderRadius: 24, overflow: 'hidden', backgroundColor: '#F2F2F2' },
+  exCardWindow: { flex: 1, borderRadius: 32, overflow: 'hidden' },
+  exFrame: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    overflow: 'hidden',
+    padding: EX_FRAME_PAD,
+    gap: EX_FRAME_PAD,
+  },
+  exImage: { flex: 1, borderRadius: 24, overflow: 'hidden' },
+  exPhotoContent: {
+    ...StyleSheet.absoluteFillObject,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#F2F2F2',
+  },
   exPills: { position: 'absolute', top: 20, left: 8, right: 8, flexDirection: 'row', gap: 8 },
   // Figma 17779:51090 — 33 tall: 8 + the 17 line + 8.
   exPill: {
@@ -2360,8 +2414,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    // Figma 18675:22534: 170 of the 408 image, so the logo row fits.
-    height: '42%',
+    // Figma 18675:22534: 170 of the 408 image, so the logo row fits. A floor,
+    // not a fixed height: on a short photo the text needs more than 42%, and a
+    // fixed height clipped the title's top.
+    minHeight: '42%',
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },

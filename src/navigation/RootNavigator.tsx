@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, Image, Alert, Keyboard } from 'react-native';
+import { isExpoGo } from '../utils/keyboardAvoidingView';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Reanimated, { useAnimatedStyle } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -1033,15 +1034,33 @@ const PROFILE_TAB_LISTENERS = {
   tabPress: () => { hideSwellyFabNow(); setPendingTab('profile'); },
 };
 
+// Android: the Material tab bar rides up on top of the keyboard (iOS keeps it
+// behind). Hide it while the keyboard is up, like React Navigation's
+// tabBarHideOnKeyboard. keyboard-controller reports the keyboard as it STARTS
+// to move, so the bar is gone before it could be seen rising; Expo Go has no
+// keyboard-controller and falls back to RN's (late) did-show/did-hide.
+function useAndroidKeyboardUp(): boolean {
+  const [up, setUp] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const events = isExpoGo ? Keyboard : require('react-native-keyboard-controller').KeyboardEvents;
+    const show = events.addListener(isExpoGo ? 'keyboardDidShow' : 'keyboardWillShow', () => setUp(true));
+    const hide = events.addListener(isExpoGo ? 'keyboardDidHide' : 'keyboardWillHide', () => setUp(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  return up;
+}
+
 function HomeTabs() {
   // barSuppressed hides the entire native bar while a full-screen JS overlay
   // (match-loading, Swelly shaper, own-profile, profile editor) is up — those
   // overlays are NOT nav cards, so they don't cover the OS-level bar on their
   // own.
   const { barSuppressed } = useMainNav();
+  const keyboardUp = useAndroidKeyboardUp();
   return (
     <>
-      <TabsNavigator barSuppressed={barSuppressed} />
+      <TabsNavigator barSuppressed={barSuppressed || keyboardUp} />
       <NavIconWarmer />
       <HomeTabsExtras />
     </>

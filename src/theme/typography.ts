@@ -102,6 +102,20 @@ const build = ({ family, weight, size, lineHeight, letterSpacing }: StyleSpec): 
 export const textStyle = (name: TextStyleName, weight?: FontWeight): TextStyle =>
   build(weight ? { ...SPECS[name], weight } : SPECS[name]);
 
+/**
+ * A Figma text style drawn `delta` px larger (size and line height both), for
+ * places the product asked to read bigger than the design.
+ */
+export const textStyleUp = (name: TextStyleName, delta: number, weight?: FontWeight): TextStyle => {
+  const spec: StyleSpec = SPECS[name];
+  return build({
+    ...spec,
+    ...(weight ? { weight } : null),
+    size: spec.size + delta,
+    lineHeight: spec.lineHeight != null ? spec.lineHeight + delta : undefined,
+  });
+};
+
 /** Every Figma text style at its own weight. Spread into a StyleSheet entry. */
 export const textStyles = Object.fromEntries(
   (Object.keys(SPECS) as TextStyleName[]).map((name) => [name, build(SPECS[name])]),

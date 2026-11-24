@@ -67,6 +67,15 @@ export const CURRENCY_ORDER: CurrencyCode[] = [
   'CHF', 'BRL', 'JPY', 'SEK', 'NOK', 'DKK', 'ZAR',
 ];
 
+/**
+ * Off for now (product call, 24 Nov 2026): the app is USD-only. Every currency
+ * picker is hidden — trip pricing, the viewer's display currency, the operator
+ * setup step and both Settings rows — and everything defaults to USD. Trips
+ * already priced in another currency keep it (their frozen rate still applies).
+ * Flip to true to bring all of it back.
+ */
+export const CURRENCY_SELECTION_ENABLED = false;
+
 /** The short list an operator can TYPE a price in. Display list is far longer. */
 export const OPERATOR_CURRENCIES: CurrencyCode[] = ['USD', 'ILS', 'EUR', 'GBP'];
 

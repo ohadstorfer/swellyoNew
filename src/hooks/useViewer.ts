@@ -10,7 +10,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useUserProfile } from '../context/UserProfileContext';
 import { ratesService } from '../services/currency/ratesService';
-import { resolveViewerCurrency, type Rates, type Viewer } from '../utils/currency';
+import {
+  CURRENCY_SELECTION_ENABLED,
+  resolveViewerCurrency,
+  type Rates,
+  type Viewer,
+} from '../utils/currency';
 
 /**
  * Today's rates, shared by every caller. Hydration and fetching are
@@ -47,6 +52,9 @@ export function useRates(): Rates | null {
 export function useViewer(): Viewer {
   const { profile } = useUserProfile();
   const rates = useRates();
-  const currency = resolveViewerCurrency(profile?.country_from, profile?.display_currency);
+  // USD-only while currency selection is off — no country guess, no saved pick.
+  const currency = CURRENCY_SELECTION_ENABLED
+    ? resolveViewerCurrency(profile?.country_from, profile?.display_currency)
+    : 'USD';
   return useMemo(() => ({ currency, rates }), [currency, rates]);
 }

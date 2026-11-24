@@ -1370,18 +1370,7 @@ export const TripPlanningChatScreen: React.FC<TripPlanningChatScreenProps> = ({
           timestamp: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
         };
         setMessages(prev => [...prev, limitMessage]);
-        // A tester hit the per-chat cap and could not find a way on. Offer
-        // the way out right here. (The daily cap has none — it resets.)
-        if (response.limit_reached === 'conversation') {
-          Alert.alert(
-            'This chat is full',
-            'Start a new chat with Swelly to keep planning.',
-            [
-              { text: 'Not now', style: 'cancel' },
-              { text: 'Start new chat', onPress: () => { void handleStartNewChat(); } },
-            ],
-          );
-        }
+        // Either cap means Swelly is done for today — no "start a new chat" offer.
         return;
       }
 

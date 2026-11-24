@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { friendlyError } from '../lib/errors';
 import { Spinner } from '../components/StateBits';
+import { Logo } from '../components/Logo';
 
 export function LoginPage() {
   const { signIn } = useAuth();
@@ -29,20 +30,13 @@ export function LoginPage() {
       }}
     >
       <div className="card enter" style={{ maxWidth: 380, width: '100%' }}>
-        <div className="card-body" style={{ padding: '32px 32px', textAlign: 'center' }}>
-          <div
-            aria-hidden
-            style={{
-              width: 12,
-              height: 12,
-              borderRadius: 999,
-              background: 'var(--cyan)',
-              margin: '0 auto 16px',
-            }}
-          />
+        <div className="card-body" style={{ padding: '32px 24px', textAlign: 'center' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+            <Logo size={56} />
+          </div>
           <h1 style={{ fontSize: 'var(--fs-2xl)', lineHeight: '32px', marginBottom: 8 }}>Swellyo Operator</h1>
           <p className="muted small" style={{ marginBottom: 24 }}>
-            Review documents and export files for your trips.
+            Create and run your trips: travelers, documents and payments.
           </p>
 
           <button

@@ -40,7 +40,6 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Reanimated, {
   Easing,
   useAnimatedStyle,
@@ -62,7 +61,7 @@ import { TripItinerarySection } from './overview/TripItinerarySection';
 import { guestDays } from '../../services/trips/itinerary';
 import { Images } from '../../assets/images';
 import { TripIcon, type TripIconName } from './tripIcons';
-import { textStyle, textStyles } from '../../theme/typography';
+import { textStyle, textStyles, textStyleUp } from '../../theme/typography';
 import { getStorageThumbUrl } from '../../services/media/imageService';
 import { Thumb } from '../Thumb';
 
@@ -270,7 +269,12 @@ const MAX_COVER_PHOTOS = 10;
 
 /** The cover. One photo is just the photo; two or more swipe sideways with
  *  dots and an "n / N" count (Figma 17488:27976). */
-const HeroCover: React.FC<{ uris: string[]; height: number }> = ({ uris, height }) => {
+const HeroCover: React.FC<{ uris: string[]; height: number; ci?: boolean; stoke?: boolean }> = ({
+  uris,
+  height,
+  ci = false,
+  stoke = false,
+}) => {
   const [width, setWidth] = useState(0);
   const [index, setIndex] = useState(0);
   const many = uris.length > 1;
@@ -308,14 +312,9 @@ const HeroCover: React.FC<{ uris: string[]; height: number }> = ({ uris, height 
       ) : (
         photo(uris[0], 0)
       )}
-      {uris.length > 0 ? (
-        <LinearGradient
-          pointerEvents="none"
-          colors={['rgba(0,0,0,0)', 'rgba(0,0,0,1)']}
-          locations={[0.14, 0.75]}
-          style={styles.heroShade}
-        />
-      ) : null}
+      {/* No dark shade over the photo (product ask, 24 Nov 2026): the cover
+          shows as shot. The dots carry their own soft shadow instead, so they
+          still read on a bright photo. */}
       {many ? (
         <>
           <View style={styles.heroDots} pointerEvents="none">
@@ -327,6 +326,14 @@ const HeroCover: React.FC<{ uris: string[]; height: number }> = ({ uris, height 
             <Text style={styles.heroCountText}>{`${index + 1} / ${uris.length}`}</Text>
           </View>
         </>
+      ) : null}
+      {/* CI / STOKE logos sit on the photo, centred just above the card — and
+          above the dots when there are several photos, so neither covers the
+          other. */}
+      {ci || stoke ? (
+        <View style={[styles.heroCerts, many && styles.heroCertsAboveDots]} pointerEvents="none">
+          <CertBadges ci={ci} stoke={stoke} />
+        </View>
       ) : null}
     </View>
   );
@@ -659,6 +666,8 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   : []
             }
             height={HERO_H + heroTopInset}
+            ci={vm.ciSurfConservation === true}
+            stoke={vm.stokeCertified === true}
           />
           {heroControls ? (
             <View style={[styles.heroControls, { top: heroTopInset + 8 }]}>{heroControls}</View>
@@ -684,13 +693,6 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
           ) : null}
           <View style={styles.heroCard}>
             <View style={styles.heroCardTop}>
-              {/* CI / STOKE logos, as on the Explore card (tester request:
-                  "bring CI and Stoke Cert to the top of the trip page"). */}
-              <CertBadges
-                ci={vm.ciSurfConservation === true}
-                stoke={vm.stokeCertified === true}
-                style={styles.heroCerts}
-              />
               <View style={styles.heroDateRow}>
                 {/* formatDateRange already ends with " · N days". */}
                 <Text style={styles.heroDate}>{dateRange}</Text>
@@ -987,14 +989,10 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                   the host, so the header keeps just the title (Figma 13518-9184). */}
               <SectionTitle title="Accommodation" />
               {vm.specificStaySelected && vm.accommodationName ? (
-                <TouchableOpacity
-                  style={styles.stayCard}
-                  activeOpacity={stayUrl ? 0.85 : 1}
-                  disabled={!stayUrl}
-                  onPress={stayUrl ? () => openStayUrl(stayUrl) : undefined}
-                  accessibilityRole={stayUrl ? 'link' : undefined}
-                  accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
-                >
+                // The card is NOT one big link: the photos swipe, and a swipe
+                // that ended on a link opened the hotel instead. Only the name
+                // row opens the stay; the cert rows open their own sites.
+                <View style={styles.stayCard}>
                   {vm.accommodationImageUri ? (
                     <StayPhotoGallery
                       uris={[vm.accommodationImageUri, ...(vm.accommodationGalleryUris ?? [])]}
@@ -1005,7 +1003,14 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                       <Ionicons name="image-outline" size={32} color="#B0B0B0" />
                     </View>
                   )}
-                  <View style={styles.stayPill}>
+                  <TouchableOpacity
+                    style={styles.stayPill}
+                    activeOpacity={stayUrl ? 0.7 : 1}
+                    disabled={!stayUrl}
+                    onPress={stayUrl ? () => openStayUrl(stayUrl) : undefined}
+                    accessibilityRole={stayUrl ? 'link' : undefined}
+                    accessibilityLabel={stayUrl ? `Open ${vm.accommodationName}` : undefined}
+                  >
                     {/* The stay's own logo when there is one (Figma
                         17488:28129), the house icon otherwise. */}
                     {vm.accommodationLogoUri ? (
@@ -1037,12 +1042,12 @@ export const TripDetailViewRedesigned: React.FC<TripDetailViewProps> = ({
                         </Text>
                       )}
                     </View>
-                  </View>
+                  </TouchableOpacity>
                   <StayCertRows
                     ciSurfConservation={vm.ciSurfConservation}
                     stokeCertified={vm.stokeCertified}
                   />
-                </TouchableOpacity>
+                </View>
               ) : (
                 // Empty state (no specific stay yet). Host (loose flow) → a big
                 // tap-to-add card; members/viewers → the same card reading
@@ -1409,7 +1414,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   // Figma 17488:27977 — black rising from the bottom, 252 tall.
-  heroShade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 252 },
   // Figma 17488:28286 — 26 above the card (which starts 61 from the bottom).
   heroDots: {
     position: 'absolute',
@@ -1420,7 +1424,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
   },
-  heroDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#EEEEEE' },
+  heroDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EEEEEE',
+    shadowColor: '#000000',
+    shadowOpacity: 0.35,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 2,
+  },
   heroDotActive: { width: 24, backgroundColor: '#FFFFFF' },
   // Figma 17488:28287 — "1 / 14".
   heroCount: {
@@ -1457,7 +1471,10 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   heroCardTop: { paddingHorizontal: 20, paddingVertical: 10, alignItems: 'center' },
-  heroCerts: { marginTop: 4, marginBottom: 6 },
+  // CI / STOKE logos on the cover, centred 12 above the card (which overlaps
+  // the cover's last 61). With dots, they sit 12 above the dots instead.
+  heroCerts: { position: 'absolute', left: 0, right: 0, bottom: 61 + 12, alignItems: 'center' },
+  heroCertsAboveDots: { bottom: 87 + 8 + 12 },
   // Figma 17480:27518 — the host and the stats 81 apart, centred as a group.
   // On the 358 frame that leaves 48 each side; on a wider phone the extra
   // width goes to the sides, not between them (space-between pushed the
@@ -1487,7 +1504,7 @@ const styles = StyleSheet.create({
   },
   // "By <name>" — B-4 bold (get_variable_defs 17488:28003).
   // Body/B-3 12/18, bold override (get_variable_defs 18437:21701).
-  heroHostName: { ...textStyle('B3', '700'), color: C.ink, textAlign: 'center' },
+  heroHostName: { ...textStyleUp('B3', 2, '700'), color: C.ink, textAlign: 'center' },
   // Figma 17488:28004 — 8 between the rows, icon centred on its two lines.
   heroStats: { gap: 8, flexShrink: 1 },
   heroStat: { flexDirection: 'row', alignItems: 'center', gap: 16 },
@@ -1499,8 +1516,8 @@ const styles = StyleSheet.create({
   // flexShrink, not flex: 1 — with no host beside it (planned-together trips)
   // the stats column has no set width, and flex: 1 collapses the text to 0.
   heroStatText: { flexShrink: 1 },
-  heroStatLabel: { ...textStyles.B4, color: C.textFaint, marginBottom: -3 },
-  heroStatValue: { ...textStyle('B3', '700'), color: C.ink },
+  heroStatLabel: { ...textStyleUp('B4', 2), color: C.textFaint, marginBottom: -3 },
+  heroStatValue: { ...textStyleUp('B3', 2, '700'), color: C.ink },
   heroDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1508,15 +1525,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   heroDate: {
-    // Body/B-3 12/18 (get_variable_defs 17488:27993).
-    ...textStyles.B3,
+    // Body/B-3 12/18 (get_variable_defs 17488:27993), +2px by request.
+    ...textStyleUp('B3', 2),
     color: C.textMuted,
     textAlign: 'center',
   },
   heroTitle: {
     marginTop: 2,
-    // Body/M B-1 16/24, bold override (get_variable_defs 17020:29668).
-    ...textStyle('MB1', '700'),
+    // Body/M B-1 16/24, bold override (get_variable_defs 17020:29668), +2px by request.
+    ...textStyleUp('MB1', 2, '700'),
     color: C.ink,
     textAlign: 'center',
   },

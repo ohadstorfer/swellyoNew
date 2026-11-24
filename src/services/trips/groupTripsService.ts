@@ -117,6 +117,9 @@ export interface GroupTrip {
   title: string | null;
   description: string;
   hero_image_url: string;
+  /** Extra cover photos after the main one (max 9). Absent on old databases/rows
+   *  and on feed RPCs, which return only hero_image_url. */
+  hero_gallery_urls?: string[] | null;
 
   start_date: string | null;
   end_date: string | null;

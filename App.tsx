@@ -21,6 +21,7 @@ import { resyncStatusBar } from './src/utils/statusBarResync';
 import { requestTrackingPermissionWhenActive } from './src/utils/trackingPermission';
 import Constants from 'expo-constants';
 import * as Sentry from '@sentry/react-native';
+import { startOtaGate, useOtaGatePhase } from './src/ota/otaGate';
 
 // Sentry's native modules (mobile replay, native crash) aren't available in Expo Go.
 const isExpoGo = Constants.appOwnership === 'expo';
@@ -61,6 +62,10 @@ Sentry.init({
   // spotlight: __DEV__,
 });
 
+// OTA gate (src/ota/otaGate.ts). Started at module load so it starts
+// following the native updater (and reading ota_critical) as early as possible.
+startOtaGate();
+
 // KeyboardProvider requires native code — skip in Expo Go (isExpoGo defined above)
 const MaybeKeyboardProvider = isExpoGo
   ? ({ children }: { children: React.ReactNode }) => <>{children}</>
@@ -100,7 +105,16 @@ export default Sentry.wrap(function App() {
   }, []);
 
   // ATT prompt (iOS). See src/utils/trackingPermission.ts for why it exists.
-  useEffect(() => requestTrackingPermissionWhenActive(), []);
+  // Held until the OTA gate is idle: no system prompt over the loading video
+  // of a bundle that is about to be replaced. Requested once, cleaned up on
+  // unmount only (the gate can leave 'idle' again for a critical update).
+  const otaPhase = useOtaGatePhase();
+  const attCleanup = React.useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (otaPhase !== 'idle' || attCleanup.current) return;
+    attCleanup.current = requestTrackingPermissionWhenActive();
+  }, [otaPhase]);
+  useEffect(() => () => attCleanup.current?.(), []);
 
   // react-query has no "window focus" in RN, so wire its focusManager to
   // AppState — queries can revalidate when the app returns from background.

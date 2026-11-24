@@ -31,6 +31,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Thumb } from '../../components/Thumb';
 
 import {
   HostingStyle,
@@ -69,6 +70,7 @@ import { useFieldErrors } from '../../hooks/useFieldErrors';
 import { useDiscardConfirm } from '../../hooks/useDiscardConfirm';
 import { showErrorAlert } from '../../utils/friendlyError';
 import {
+  CURRENCY_SELECTION_ENABLED,
   currencyForCountry,
   formatAmount,
   fromTripCurrency,
@@ -121,6 +123,7 @@ import { SpecificStaySheetContent } from '../../components/trips/sheets/Specific
 import { ConnectStripeCard } from '../../components/trips/ConnectStripeCard';
 import { useConnectStatus } from '../../hooks/trips/useConnectStatus';
 import { useOperatorSetup } from '../../hooks/trips/useOperatorSetup';
+import { bypassesOperatorSetup } from '../../services/trips/operatorSetup';
 import { CancellationPolicySheet } from '../../components/settings/CancellationPolicySheet';
 import {
   PRESET_LABEL,
@@ -234,6 +237,7 @@ type StepKey =
   | 'aboutYou'
   | 'requirements'
   | 'itinerary'
+  | 'crew'
   | 'preview';
 // Flow A/C step order. Flow B inserts 'aboutYou' before 'preview' (see `steps`
 // memo in the component) so the destination + stay names exist by the time the
@@ -262,6 +266,7 @@ const STEP_META: Record<StepKey, { title: string; subtitle: string }> = {
     subtitle: 'So you can book flights and organise the trip.',
   },
   itinerary: { title: 'Trip itinerary', subtitle: 'What each day looks like.' },
+  crew: { title: 'Your crew', subtitle: 'The people running the trip with you.' },
   preview: { title: 'Preview', subtitle: 'How your trip will look.' },
 };
 
@@ -1554,11 +1559,18 @@ export default function CreateTripFlowA({
   // waiver every trip starts from. Cached, so this costs nothing here.
   const operatorSetup = useOperatorSetup();
   const defaultWaiver = operatorSetup.settings.defaultWaiver;
+  // Allowlisted operators may publish before setup is done — see
+  // bypassesOperatorSetup. Skips the Stripe check and the waiver PDF below.
+  const skipSetup = bypassesOperatorSetup(hostId);
 
   const defaultOperatorCurrency: CurrencyCode = useMemo(() => {
     // Their own setting wins over the country guess — a Brazilian operator who
     // chose to price in EUR meant it, and re-deriving from the passport every
     // time would quietly hand them BRL on every new trip.
+    // USD-only for now: new trips are priced in USD, whatever the operator's
+    // saved default or country says. Edit mode still keeps a trip's own
+    // currency through lockedEditCurrency.
+    if (!CURRENCY_SELECTION_ENABLED) return 'USD';
     const saved = operatorSetup.settings.defaultCurrency;
     if (isCurrencyCode(saved) && OPERATOR_CURRENCIES.includes(saved)) return saved;
     const fromCountry = currencyForCountry(profile?.country_from);
@@ -1613,6 +1625,10 @@ export default function CreateTripFlowA({
     // (OperatorEditItinerary) after publish. Last before Preview, so the dates
     // and the stay are known and the operator sees it straight away.
     if (isFixedFlow && !editMode) middle.push('requirements', 'itinerary');
+    // Crew: same gate as ensureOperatorOnCrew. Crew can only be invited once
+    // the trip exists (search + invites are keyed on its id), so this step
+    // explains that and opens the crew sheet straight after publish.
+    if (isFixedFlow && !editMode) middle.push('crew');
     return [...head, ...middle, ...tail];
   }, [hasAboutYou, isFixedFlow, editMode]);
 
@@ -1718,6 +1734,9 @@ export default function CreateTripFlowA({
   const [submitting, setSubmitting] = useState(false);
   // Set after a successful publish (create only) → shows the Published / invite
   // screen instead of closing immediately.
+  // Crew step choice. Not in the saved draft on purpose: it only decides what
+  // the share screen does right after publish, and defaults to yes.
+  const [addCrewAfterPublish, setAddCrewAfterPublish] = useState(true);
   const [published, setPublished] = useState<{
     id: string;
     title: string | null;
@@ -2079,7 +2098,7 @@ export default function CreateTripFlowA({
               setError('deposit', 'Checking your Stripe account…');
               return false;
             }
-            if (!connect.canCollect) {
+            if (!connect.canCollect && !skipSetup) {
               setError(
                 'deposit',
                 connect.state === 'blocked'
@@ -2158,12 +2177,13 @@ export default function CreateTripFlowA({
         //
         // `waiverFile` null with a default stored means "use my default" — the
         // skip. Only an operator with NEITHER is blocked.
-        if (!state.waiverFile && !defaultWaiver) {
+        if (!state.waiverFile && !defaultWaiver && !skipSetup) {
           fail('waiverText', 'Upload your waiver PDF — travelers cannot join the trip until they can agree to it');
         }
         return ok;
       }
       case 'itinerary':
+      case 'crew':
       case 'preview':
         return true;
     }
@@ -2184,6 +2204,7 @@ export default function CreateTripFlowA({
     connect.loading,
     connect.canCollect,
     connect.state,
+    skipSetup,
   ]);
 
   // -----------------------------------------------------------------------
@@ -2633,6 +2654,10 @@ export default function CreateTripFlowA({
         // the card SHOWED is the only honest outcome.
         const allKinds = Array.from(
           new Set([...payKinds, ...state.requirementKinds, ...LOCKED_ON_KINDS]),
+        ).filter(
+          // A bypass operator with no waiver PDF: leave the waiver off rather
+          // than publish a requirement nobody can ever satisfy.
+          k => !(k === 'waiver' && skipSetup && !state.waiverFile && !defaultWaiver),
         );
         if (isFixedFlow && allKinds.length > 0) {
           try {
@@ -2820,10 +2845,91 @@ export default function CreateTripFlowA({
         return renderRequirementsStep();
       case 'itinerary':
         return renderItineraryStep();
+      case 'crew':
+        return renderCrewStep();
       case 'preview':
         return renderPreviewStep();
     }
   };
+
+  // -----------------------------------------------------------------------
+  // STEP — CREW (Flow C create only)
+  //
+  // Crew can't be invited before the trip exists: the search and the invites
+  // are keyed on the trip id. So this step says who crew are, shows the
+  // operator already on it, and asks whether to open the crew sheet right
+  // after publish (TripPublishedScreen's "Add your crew").
+  // -----------------------------------------------------------------------
+  const renderCrewStep = () => (
+    <View>
+      <Text style={localStyles.helper}>
+        Surf guides, coaches, photographers, drivers. Crew show on your trip page, and you
+        choose what each of them can see and do.
+      </Text>
+
+      <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>On the crew</Text>
+      <View style={[localStyles.summaryGroup, localStyles.crewYouRow]}>
+        {hostSurfer?.profile_image_url ? (
+          <Thumb
+            uri={hostSurfer.profile_image_url}
+            size={120}
+            style={localStyles.crewAvatar}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        ) : (
+          <View style={[localStyles.crewAvatar, localStyles.crewAvatarEmpty]}>
+            <Ionicons name="person" size={20} color={COLORS.textMuted} />
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          <Text style={localStyles.payModeTitle} numberOfLines={1}>
+            {hostSurfer?.name ? `${hostSurfer.name} (you)` : 'You'}
+          </Text>
+          <Text style={localStyles.payModeSub}>Operator</Text>
+        </View>
+      </View>
+
+      <Text style={[localStyles.priceSectionTitle, localStyles.groupTopGap]}>
+        Add the rest of your crew
+      </Text>
+      <View style={localStyles.summaryGroup}>
+        <Pressable
+          onPress={() => setAddCrewAfterPublish(true)}
+          style={({ pressed }) => [
+            localStyles.payModeRow,
+            addCrewAfterPublish && localStyles.payModeRowOn,
+            pressed && { transform: [{ scale: 0.97 }] },
+          ]}
+          accessibilityRole="radio"
+          accessibilityState={{ checked: addCrewAfterPublish }}
+        >
+          <Text style={localStyles.payModeTitle}>Right after I publish</Text>
+          <Text style={localStyles.payModeSub}>
+            We'll open your crew list as soon as the trip is live, so you can invite them.
+          </Text>
+        </Pressable>
+
+        <View style={localStyles.payModeDivider} />
+
+        <Pressable
+          onPress={() => setAddCrewAfterPublish(false)}
+          style={({ pressed }) => [
+            localStyles.payModeRow,
+            !addCrewAfterPublish && localStyles.payModeRowOn,
+            pressed && { transform: [{ scale: 0.97 }] },
+          ]}
+          accessibilityRole="radio"
+          accessibilityState={{ checked: !addCrewAfterPublish }}
+        >
+          <Text style={localStyles.payModeTitle}>Later</Text>
+          <Text style={localStyles.payModeSub}>
+            Add crew any time from the trip's Crew page.
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 
   // -----------------------------------------------------------------------
   // STEP — TRIP ITINERARY (Flow C only, optional)
@@ -4007,7 +4113,7 @@ export default function CreateTripFlowA({
    * nothing to convert it to USD with, and USD is what actually gets charged.
    */
   const renderCurrencyPicker = () => {
-    if (lockedEditCurrency) return null;
+    if (lockedEditCurrency || !CURRENCY_SELECTION_ENABLED) return null;
     return (
       <View style={localStyles.currencyRow}>
         {OPERATOR_CURRENCIES.map(code => {
@@ -4802,6 +4908,10 @@ export default function CreateTripFlowA({
       accommodationGalleryUris:
         staySelected && state.accommodationImageUri ? state.accommodationGalleryUris ?? [] : [],
       accommodationUrl: staySelected ? state.accommodationUrl || null : null,
+      // Same flags the published trip carries — the hero badges and the
+      // Accommodation card's cert rows read these.
+      stokeCertified: state.stokeCertified,
+      ciSurfConservation: state.ciSurfConservation,
       costPerPerson:
         isFixedFlow && state.costPerPerson
           ? toPreviewUsd(parseInt(state.costPerPerson, 10))
@@ -4992,6 +5102,8 @@ export default function CreateTripFlowA({
         onDone={onCreated}
         // Crew is an operator-trip thing (Flow C), same gate as ensureOperatorOnCrew.
         operatorId={isFixedFlow ? hostId : null}
+        // The operator said yes on the Crew step: open the crew sheet for them.
+        openCrewOnMount={isFixedFlow && !editMode && addCrewAfterPublish}
       />
     );
   }
@@ -6097,6 +6209,19 @@ const localStyles = StyleSheet.create({
   },
   payModeRowOn: { backgroundColor: COLORS.brandTealTint },
   // Hairline between the two rows — same convention as SummaryRow's divider.
+  crewYouRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  crewAvatar: { width: 40, height: 40, borderRadius: 20 },
+  crewAvatarEmpty: {
+    backgroundColor: COLORS.borderHairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   payModeDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: COLORS.borderHairline,

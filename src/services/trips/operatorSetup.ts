@@ -18,6 +18,7 @@
 import type { ConnectState } from './connectStatus';
 import { canCollectPayments } from './connectStatus';
 import type { OperatorSettings } from './operatorSettingsService';
+import { CURRENCY_SELECTION_ENABLED } from '../../utils/currency';
 
 export type SetupStepKey =
   | 'stripe'
@@ -35,14 +36,17 @@ export type SetupStepKey =
  * account, their prices, their refund rules, their paperwork. Asking first, on
  * a blank account, is a click nobody reads.
  */
-export const SETUP_STEP_ORDER: SetupStepKey[] = [
-  'stripe',
-  'currency',
-  'policy',
-  'waiver',
-  'insurance',
-  'terms',
-];
+export const SETUP_STEP_ORDER: SetupStepKey[] = (
+  [
+    'stripe',
+    'currency',
+    'policy',
+    'waiver',
+    'insurance',
+    'terms',
+  ] as SetupStepKey[]
+  // USD-only for now: no currency step to show, and none to finish.
+).filter(k => k !== 'currency' || CURRENCY_SELECTION_ENABLED);
 
 /**
  * Which version of the operator terms is current.
@@ -142,7 +146,7 @@ export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
   const { connect, settings } = input;
   const insurance = insuranceBlock(settings, input.today);
 
-  return [
+  const steps: SetupStep[] = [
     {
       key: 'stripe',
       title: 'Get paid',
@@ -185,6 +189,26 @@ export function operatorSetupSteps(input: OperatorSetupInput): SetupStep[] {
       done: settings.termsAcceptedAt != null && settings.termsVersion === OPERATOR_TERMS_VERSION,
     },
   ];
+  return steps.filter(s => SETUP_STEP_ORDER.includes(s.key));
+}
+
+/**
+ * Operators allowed to create a trip before setup is finished (Jake's ask,
+ * 23 Nov 2026). They skip the setup gate, the Stripe check on managed
+ * payment, and the waiver PDF. Insurance has no check in the wizard at all —
+ * only the gate — so skipping the gate skips it too.
+ *
+ * Client-only, on purpose: there is no server gate on any of these. A managed
+ * trip still cannot take money until Stripe can (payments-checkout refuses),
+ * and with no waiver PDF the waiver requirement is left off the trip rather
+ * than published unsatisfiable.
+ *
+ * - 288a5ddf-… — Ryan (ryan.helson@)
+ */
+const SETUP_BYPASS_USER_IDS = new Set<string>(['288a5ddf-3199-4527-92af-330bc195660f']);
+
+export function bypassesOperatorSetup(userId: string | null | undefined): boolean {
+  return !!userId && SETUP_BYPASS_USER_IDS.has(userId);
 }
 
 export function isOperatorSetupComplete(input: OperatorSetupInput): boolean {
